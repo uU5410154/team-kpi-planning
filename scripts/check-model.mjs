@@ -1,0 +1,88 @@
+/**
+ * Sanity check for the calculation engine. Run with: node scripts/check-model.mjs
+ * Catches the failure modes that matter: weights that do not total 100%,
+ * contribution shares that exceed a project's hours, and per-person hours that
+ * do not re-add to the team total.
+ */
+import { readFileSync } from 'node:fs'
+import { computePlan, projectShares, DEFAULT_SETTINGS, scorecardWeights } from '../src/lib/model.js'
+
+const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
+const state = { people: seed.people, projects: seed.projects, settings: DEFAULT_SETTINGS }
+const plan = computePlan(state)
+
+let failures = 0
+const check = (name, ok, detail = '') => {
+  if (!ok) failures++
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
+}
+
+// 1. every project's contribution shares sum to 1.0 (or 0 when nobody is credited)
+let badShares = []
+for (const p of seed.projects) {
+  const s = projectShares(p, DEFAULT_SETTINGS.roleWeights)
+  const sum = Object.values(s).reduce((a, b) => a + b, 0)
+  if (Object.keys(s).length && Math.abs(sum - 1) > 1e-9) badShares.push(`${p.key}=${sum.toFixed(4)}`)
+}
+check('contribution shares sum to 100% on every project', badShares.length === 0, badShares.slice(0, 5).join(', '))
+
+// 2. no project credits a person who is not on it
+const ids = new Set(seed.people.map((p) => p.id))
+const strays = []
+for (const p of seed.projects) {
+  for (const k of Object.keys(projectShares(p, DEFAULT_SETTINGS.roleWeights))) {
+    if (!ids.has(k)) strays.push(`${p.key}:${k}`)
+  }
+}
+check('no credit assigned to a non-roster person', strays.length === 0, strays.slice(0, 5).join(', '))
+
+// 3. every scorecard totals exactly 100%
+const badWeights = plan.people
+  .map((p) => [p.nick, p.kpiLines.reduce((a, l) => a + l.weight, 0)])
+  .filter(([, s]) => Math.abs(s - 1) > 1e-9)
+check('every scorecard totals 100%', badWeights.length === 0,
+  badWeights.map(([n, s]) => `${n}=${(s * 100).toFixed(2)}%`).join(', '))
+
+// 4. per-person credited hours re-add to the team pool (no double banking)
+const personSum = plan.people.reduce((a, p) => a + p.hours, 0)
+const poolSum = plan.projects
+  .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch'))
+  .filter((p) => Object.keys(p.shares).length > 0)
+  .reduce((a, p) => {
+    const o = plan.settings
+    return a + (p.poolHours || 0)
+  }, 0)
+check('per-person hours re-add to the pool', Math.abs(personSum - poolSum) < 1,
+  `people=${personSum.toFixed(1)} pool=${poolSum.toFixed(1)} (difference is unassigned projects)`)
+
+// 5. headline maths
+const t = plan.totals
+check('headline = committed when stretch excluded', Math.abs(t.headlineHours - t.committedHours) < 1e-9)
+check('coverage matches headline / target', Math.abs(t.coverage - t.headlineHours / t.target) < 1e-9)
+
+// 6. gate classification is consistent
+const badGate = plan.projects.filter(
+  (p) => p.ratio != null && ((p.ratio >= DEFAULT_SETTINGS.ratioGate) !== (p.gate === 'pass')),
+)
+check('gate flag matches the ratio', badGate.length === 0, badGate.map((p) => p.key).join(', '))
+
+console.log('\n--- summary ---')
+console.log(`projects            ${plan.quality.total}`)
+console.log(`committed hours     ${Math.round(t.committedHours).toLocaleString()}`)
+console.log(`stretch hours       ${Math.round(t.stretchHours).toLocaleString()}`)
+console.log(`coverage            ${(t.coverage * 100).toFixed(1)}%`)
+console.log(`team ratio          ${t.teamRatio?.toFixed(2)} hrs/manday`)
+console.log(`top-2 concentration ${(t.top2Share * 100).toFixed(1)}%`)
+console.log(`failing the gate    ${t.failingGate}`)
+console.log('\nper person:')
+for (const p of [...plan.people].sort((a, b) => b.hours - a.hours)) {
+  console.log(
+    `  ${p.nick.padEnd(10)} ${String(Math.round(p.hours)).padStart(6)} hrs  ` +
+    `${String(p.countedCount).padStart(3)} proj  ratio ${(p.ratio ?? 0).toFixed(1).padStart(6)}  ` +
+    `weights ${(p.kpiLines.reduce((a, l) => a + l.weight, 0) * 100).toFixed(0)}%  ` +
+    `obj[${p.objectives.length}]`,
+  )
+}
+
+console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
+process.exit(failures === 0 ? 0 : 1)

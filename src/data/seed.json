@@ -1,0 +1,3015 @@
+{
+ "meta": {
+  "source": "JIRA-F&A-Tech-team.xlsx / sheet JIRA-F&A-Tech-team",
+  "generated": "2026-08-07",
+  "note": "manday values are duration-anchored SEED estimates - Jira holds no effort data. Override them in the app."
+ },
+ "people": [
+  {
+   "id": "gun",
+   "name": "Wisarut Gunjarueg",
+   "nick": "Gun",
+   "role": "Team Lead",
+   "band": "lead"
+  },
+  {
+   "id": "james",
+   "name": "Pipat Singhasiri",
+   "nick": "James",
+   "role": "Senior",
+   "band": "senior"
+  },
+  {
+   "id": "pphen",
+   "name": "Chanphen Manu",
+   "nick": "P'Phen",
+   "role": "Senior",
+   "band": "senior"
+  },
+  {
+   "id": "kade",
+   "name": "Jarinya Phosri",
+   "nick": "Kade",
+   "role": "Senior",
+   "band": "senior"
+  },
+  {
+   "id": "tha",
+   "name": "Thapanee",
+   "nick": "Thapanee",
+   "role": "Analyst",
+   "band": "analyst"
+  },
+  {
+   "id": "pol",
+   "name": "Pol",
+   "nick": "Pol",
+   "role": "Analyst",
+   "band": "analyst"
+  }
+ ],
+ "projects": [
+  {
+   "key": "FNP-1151",
+   "summary": "Fixed Asset Retirement",
+   "objective": "process_automation",
+   "savingHours": 1262.0,
+   "manday": 52.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-01-01",
+   "due": "2026-10-31",
+   "team": null,
+   "department": null,
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-315",
+   "summary": "Fixed Asset Transfer",
+   "objective": "process_automation",
+   "savingHours": 48.0,
+   "manday": 15.6,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "confirm-saving",
+   "start": "2026-01-01",
+   "due": "2026-03-31",
+   "team": "gl",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1137",
+   "summary": "Fixed Asset Addition",
+   "objective": "process_automation",
+   "savingHours": 95.0,
+   "manday": 51.7,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-01-03",
+   "due": "2026-10-31",
+   "team": null,
+   "department": null,
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-855",
+   "summary": "Fresh Loss (Known) + RTC",
+   "objective": "financial",
+   "savingHours": 0.0,
+   "manday": 22.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "developing",
+   "start": "2026-01-05",
+   "due": "2026-06-20",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "buzz"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-957",
+   "summary": "ERP Migration",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 25.0,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "In Progress",
+   "srcStatus": "in-progress",
+   "start": "2026-01-06",
+   "due": "2026-05-30",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": true,
+   "commitLevel": "excluded",
+   "notes": ""
+  },
+  {
+   "key": "FNP-247",
+   "summary": "SCB Auto Export",
+   "objective": "process_automation",
+   "savingHours": 1.0,
+   "manday": 5.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "completed",
+   "start": "2026-01-20",
+   "due": "2026-02-20",
+   "team": "ar-cash-tendor-o2o",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-368",
+   "summary": "With Holdding  TAX  Agent",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 32.0,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "go-live",
+   "start": "2026-01-20",
+   "due": "2026-06-20",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-108",
+   "summary": "1 Page Summary",
+   "objective": "efficiency",
+   "savingHours": null,
+   "manday": 18.7,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "go-live",
+   "start": "2026-01-21",
+   "due": "2026-06-27",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-88",
+   "summary": "AP Non-trade invoice matching",
+   "objective": "process_automation",
+   "savingHours": 716.0,
+   "manday": 42.3,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-01-26",
+   "due": "2026-09-30",
+   "team": "ap-non-trade",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "kade",
+     "roles": [
+      "support"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-212",
+   "summary": "LOI Relaunch",
+   "objective": "process_automation",
+   "savingHours": 160.0,
+   "manday": 25.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "confirm-saving",
+   "start": "2026-01-26",
+   "due": "2026-06-20",
+   "team": "ar-mall",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "pphen",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-173",
+   "summary": "CSIR Cross Platform Reconcile",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 17.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-01-28",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    },
+    {
+     "person": "james",
+     "roles": [
+      "support"
+     ]
+    }
+   ],
+   "partners": [
+    "finance-it",
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-260",
+   "summary": "Digital Skill Evaluation",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 3.1,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "completed",
+   "start": "2026-01-29",
+   "due": "2026-02-17",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "lead"
+     ]
+    },
+    {
+     "person": "james",
+     "roles": [
+      "qa"
+     ]
+    },
+    {
+     "person": "kade",
+     "roles": [
+      "qa"
+     ]
+    },
+    {
+     "person": "pphen",
+     "roles": [
+      "qa"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-341",
+   "summary": "Initiative Requirement Gathering",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 10.1,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "completed",
+   "start": "2026-01-29",
+   "due": "2026-03-27",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-963",
+   "summary": "Dashboard Redesign",
+   "objective": "efficiency",
+   "savingHours": null,
+   "manday": 14.3,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-02-01",
+   "due": "2026-05-30",
+   "team": null,
+   "department": "finance",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": true,
+   "commitLevel": "excluded",
+   "notes": ""
+  },
+  {
+   "key": "FNP-379",
+   "summary": "PL Forecast",
+   "objective": "financial",
+   "savingHours": 32.0,
+   "manday": 27.6,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-02-04",
+   "due": "2026-08-31",
+   "team": "central-finance",
+   "department": "finance",
+   "assignee": "pipat.singhasiri",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "james",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "pol",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "tha",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [
+    "buzz",
+    "finance-it",
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-250",
+   "summary": "AD Group for PBI",
+   "objective": "datawarehouse",
+   "savingHours": null,
+   "manday": 27.0,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "developing",
+   "start": "2026-02-05",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-328",
+   "summary": "Datacube",
+   "objective": "datawarehouse",
+   "savingHours": 175.0,
+   "manday": 37.8,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-02-08",
+   "due": "2026-08-17",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "support"
+     ]
+    }
+   ],
+   "partners": [
+    "central-it",
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-440",
+   "summary": "PL Chatbot (SmartFin x Genie)",
+   "objective": "ai_automation",
+   "savingHours": 32.0,
+   "manday": 36.9,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-02-08",
+   "due": "2026-07-31",
+   "team": "central-finance",
+   "department": "finance",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "pol",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-494",
+   "summary": "Outsource -> Permanent Digital Skill Test",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 2.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "completed",
+   "start": "2026-02-10",
+   "due": "2026-02-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "lead"
+     ]
+    },
+    {
+     "person": "pphen",
+     "roles": [
+      "lead"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-119",
+   "summary": "Transaction Audit (Expense) Dashboard",
+   "objective": "efficiency",
+   "savingHours": 12.0,
+   "manday": 15.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "go-live",
+   "start": "2026-02-11",
+   "due": "2026-06-20",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-789",
+   "summary": "F&A Team Onboarding",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 5.5,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "completed",
+   "start": "2026-02-18",
+   "due": "2026-03-20",
+   "team": "central-accounting",
+   "department": "other",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-877",
+   "summary": "Budget Data For New P&L Structure",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 14.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "developing",
+   "start": "2026-02-20",
+   "due": "2026-06-20",
+   "team": "central-finance",
+   "department": "finance",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "buzz"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-489",
+   "summary": "Boonterm",
+   "objective": "process_automation",
+   "savingHours": 10.0,
+   "manday": 20.3,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "uat",
+   "start": "2026-02-23",
+   "due": "2026-06-20",
+   "team": "ar-cash-tendor-o2o",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-566",
+   "summary": "Automail Cash/Tendor/O2O",
+   "objective": "ai_automation",
+   "savingHours": 60.0,
+   "manday": 25.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "not-started",
+   "start": "2026-02-23",
+   "due": "2026-06-20",
+   "team": "ar-cash-tendor-o2o",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "finance-it",
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-836",
+   "summary": "Magento Coupon",
+   "objective": "process_automation",
+   "savingHours": 0.0,
+   "manday": 19.9,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "requirement-gathering",
+   "start": "2026-02-25",
+   "due": "2026-06-20",
+   "team": "central-finance",
+   "department": "finance",
+   "assignee": "THAPANEE",
+   "pic": "tha",
+   "contributors": [
+    {
+     "person": "tha",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-795",
+   "summary": "Import Project",
+   "objective": "process_automation",
+   "savingHours": 170.0,
+   "manday": 25.8,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-03-02",
+   "due": "2026-07-31",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-513",
+   "summary": "Fixed Asset Addition/Retirement",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 36.1,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-03-02",
+   "due": "2026-09-30",
+   "team": "gl",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [
+    "finance-it",
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-632",
+   "summary": "Service Hub : OCR Module",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 27.3,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "on-hold",
+   "start": "2026-03-02",
+   "due": "2026-07-10",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [
+    "finance-it"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-292",
+   "summary": "HR Chatbot",
+   "objective": "ai_automation",
+   "savingHours": 0.0,
+   "manday": 23.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-03-02",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": null,
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-853",
+   "summary": "FINANCE Project",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 18.5,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-03-03",
+   "due": "2026-06-20",
+   "team": null,
+   "department": null,
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-848",
+   "summary": "AR consolidate tender short -over",
+   "objective": "process_automation",
+   "savingHours": 85.0,
+   "manday": 18.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-03-05",
+   "due": "2026-06-20",
+   "team": "ar-cash-tendor-o2o",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-744",
+   "summary": "AP Trade Invoice Matching",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 13.9,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-03-07",
+   "due": "2026-05-27",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-896",
+   "summary": "DC",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 17.2,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-03-11",
+   "due": "2026-06-20",
+   "team": "dc",
+   "department": "finance",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-899",
+   "summary": "B2B",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 17.2,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-03-11",
+   "due": "2026-06-20",
+   "team": null,
+   "department": "finance",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-902",
+   "summary": "Training session Accounting SQL, PBI",
+   "objective": "efficiency",
+   "savingHours": null,
+   "manday": 11.8,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "not-started",
+   "start": "2026-03-12",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "other",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-892",
+   "summary": "MarginMap cost by item LOTUS -> MAKRO",
+   "objective": "process_automation",
+   "savingHours": 0.0,
+   "manday": 16.1,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-03-17",
+   "due": "2026-06-20",
+   "team": "margin",
+   "department": "finance",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "tha",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-906",
+   "summary": "Billing Note for Local customer",
+   "objective": "process_automation",
+   "savingHours": 17.0,
+   "manday": 13.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "planning",
+   "start": "2026-03-18",
+   "due": "2026-06-03",
+   "team": "ar-debt",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [
+    "central-it"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-787",
+   "summary": "RPA Monitoring Dashbaord",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 18.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "uat",
+   "start": "2026-03-23",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "other",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-914",
+   "summary": "AR MALL Bank Statement Receipt recheck",
+   "objective": "process_automation",
+   "savingHours": 102.4,
+   "manday": 15.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "planning",
+   "start": "2026-04-01",
+   "due": "2026-06-30",
+   "team": "ar-mall",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-875",
+   "summary": "Sale and Knownloss Weekly Dashboard - Add Weekly Sale and Knownloss Budget",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 9.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "not-started",
+   "start": "2026-04-01",
+   "due": "2026-06-20",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "buzz"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-879",
+   "summary": "Import Interim",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 15.1,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-04-04",
+   "due": "2026-07-01",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-939",
+   "summary": "AP New Report",
+   "objective": "efficiency",
+   "savingHours": 5.0,
+   "manday": 10.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-04-05",
+   "due": "2026-06-30",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-927",
+   "summary": "AP Debit Balance report",
+   "objective": "efficiency",
+   "savingHours": 2.0,
+   "manday": 9.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "go-live",
+   "start": "2026-04-05",
+   "due": "2026-06-20",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-932",
+   "summary": "AD Group & Publish PBI Training",
+   "objective": "datawarehouse",
+   "savingHours": null,
+   "manday": 14.4,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "go-live",
+   "start": "2026-04-08",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-904",
+   "summary": "Training session Accounting AD Group, PBI publishing",
+   "objective": "datawarehouse",
+   "savingHours": null,
+   "manday": 14.2,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "developing",
+   "start": "2026-04-09",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "other",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-168",
+   "summary": "PBI MALL profit bu Unit",
+   "objective": "efficiency",
+   "savingHours": 16.0,
+   "manday": 5.6,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-04-17",
+   "due": "2026-06-04",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "Panadda",
+   "pic": "pol",
+   "contributors": [
+    {
+     "person": "pol",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-923",
+   "summary": "AR Aging (AR MALL )",
+   "objective": "efficiency",
+   "savingHours": null,
+   "manday": 6.8,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-04-23",
+   "due": "2026-06-20",
+   "team": "ar-mall",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-935",
+   "summary": "Dashboard Portal Configuration",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 4.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-04-23",
+   "due": "2026-05-30",
+   "team": "channel",
+   "department": "finance",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-873",
+   "summary": "New Structure P&L Dashboard",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 6.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-04-30",
+   "due": "2026-06-20",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-571",
+   "summary": "AR Debt Customer Self-Service Platform",
+   "objective": "efficiency",
+   "savingHours": null,
+   "manday": 18.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "on-hold",
+   "start": "2026-05-17",
+   "due": "2026-10-22",
+   "team": "ar-debt",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-573",
+   "summary": "AR Tendor QR Code Payment",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 38.3,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "on-hold",
+   "start": "2026-05-17",
+   "due": "2026-12-28",
+   "team": "ar-cash-tendor-o2o",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-575",
+   "summary": "AR MALL QR code payment",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 29.8,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "on-hold",
+   "start": "2026-05-17",
+   "due": "2026-11-09",
+   "team": "ar-mall",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-577",
+   "summary": "Service Hub : Automail",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 49.7,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-05-17",
+   "due": "2027-01-10",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-586",
+   "summary": "Service Hub : Oracle API",
+   "objective": "process_automation",
+   "savingHours": 40.0,
+   "manday": 22.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-05-17",
+   "due": "2026-09-26",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-709",
+   "summary": "Service Hub : Chatbot",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 7.0,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "on-hold",
+   "start": "2026-05-17",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-926",
+   "summary": "ERP Module Supplier Portal, OCR",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 9.2,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-05-17",
+   "due": "2026-06-30",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "pm"
+     ]
+    },
+    {
+     "person": "kade",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [
+    "finance-it"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-841",
+   "summary": "Finance Project stragtegy",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 5.7,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-05-17",
+   "due": "2026-06-20",
+   "team": "central-finance",
+   "department": "finance",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-890",
+   "summary": "P'Bee MARGIN AI",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 7.0,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-05-17",
+   "due": "2026-06-20",
+   "team": "ar-ci",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-922",
+   "summary": "Supplier Inquiry Automation",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 7.0,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-05-17",
+   "due": "2026-06-20",
+   "team": "ar-ci",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-925",
+   "summary": "Data Library",
+   "objective": "datawarehouse",
+   "savingHours": null,
+   "manday": 6.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "Done",
+   "srcStatus": "not-started",
+   "start": "2026-05-17",
+   "due": "2026-06-20",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "dev"
+     ]
+    },
+    {
+     "person": "tha",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-124",
+   "summary": "LFL Dashboard",
+   "objective": "efficiency",
+   "savingHours": 4.0,
+   "manday": 7.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-06-01",
+   "due": "2026-07-31",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-127",
+   "summary": "Weekly Dashboard",
+   "objective": "efficiency",
+   "savingHours": 8.0,
+   "manday": 3.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "defect-fixing",
+   "start": "2026-06-01",
+   "due": "2026-06-30",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-146",
+   "summary": "Weekly Dashboard",
+   "objective": "efficiency",
+   "savingHours": 16.0,
+   "manday": 3.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "on-hold",
+   "start": "2026-06-01",
+   "due": "2026-06-30",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-169",
+   "summary": "CTFN Dasboard Restructure (P'Wich)",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 5.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-06-01",
+   "due": "2026-07-16",
+   "team": "cfo",
+   "department": "finance",
+   "assignee": "THAPANEE",
+   "pic": "tha",
+   "contributors": [
+    {
+     "person": "tha",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-871",
+   "summary": "Store Expense Dashboard - Aligned P&L Costline to New P&L Structure",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 5.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-06-01",
+   "due": "2026-07-16",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1093",
+   "summary": "Weekly Sales/Know Loss (KNIME)",
+   "objective": "financial",
+   "savingHours": 10.0,
+   "manday": 2.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "not-started",
+   "start": "2026-06-02",
+   "due": "2026-06-07",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": "Nakittapon Imjaijaroenying",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "buzz"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1107",
+   "summary": "Store Expense for Store/finance revamp (Monday operation)",
+   "objective": "financial",
+   "savingHours": 0.0,
+   "manday": 3.7,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "developing",
+   "start": "2026-06-02",
+   "due": "2026-06-30",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "buzz"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1064",
+   "summary": "P&L for Finance view",
+   "objective": "efficiency",
+   "savingHours": 9.0,
+   "manday": 14.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-06-03",
+   "due": "2026-09-30",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": null,
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1072",
+   "summary": "OPEX Detail (K.SC Pack)",
+   "objective": "financial",
+   "savingHours": 1.0,
+   "manday": 7.7,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-06-03",
+   "due": "2026-08-01",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1266",
+   "summary": "(Buzz) Store Profile",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 2.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-06-10",
+   "due": "2026-06-23",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": true,
+   "commitLevel": "excluded",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1267",
+   "summary": "(Buzz) Dummy Store for stocloss manual file",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 2.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-06-10",
+   "due": "2026-06-23",
+   "team": "store-expense",
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": true,
+   "commitLevel": "excluded",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1104",
+   "summary": "Item comparison Makro and Lotuss",
+   "objective": "process_automation",
+   "savingHours": 0.0,
+   "manday": 8.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-06-15",
+   "due": "2026-07-31",
+   "team": "margin",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1265",
+   "summary": "AP Book Bank OCR",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 8.5,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-06-21",
+   "due": "2026-07-31",
+   "team": "ap-trade",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-157",
+   "summary": "Mall PnL - Excel to Databricks Automation",
+   "objective": "datawarehouse",
+   "savingHours": 2.0,
+   "manday": 3.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "developing",
+   "start": "2026-06-21",
+   "due": "2026-07-06",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1286",
+   "summary": "O2O PBI",
+   "objective": "efficiency",
+   "savingHours": null,
+   "manday": 4.7,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-06-21",
+   "due": "2026-07-30",
+   "team": null,
+   "department": null,
+   "assignee": "Nakittapon Imjaijaroenying",
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-167",
+   "summary": "Fill in move out Dashboard for all bu",
+   "objective": "efficiency",
+   "savingHours": 8.0,
+   "manday": 3.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": "not-started",
+   "start": "2026-07-01",
+   "due": "2026-07-30",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1063",
+   "summary": "OCR WHT Bill Placement Process",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 9.8,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-07-01",
+   "due": "2026-08-17",
+   "team": "ap-non-trade",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1065",
+   "summary": "Net margin / Gross margin / RTC / Stock Provision by division",
+   "objective": "financial",
+   "savingHours": 10.0,
+   "manday": 17.6,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-07-01",
+   "due": "2026-11-13",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1073",
+   "summary": "Automation transaction audit — payroll & store expenses to 3rd parties",
+   "objective": "ai_automation",
+   "savingHours": 3.0,
+   "manday": 9.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-07-01",
+   "due": "2026-08-15",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1105",
+   "summary": "Automated Margin Database",
+   "objective": "datawarehouse",
+   "savingHours": 0.0,
+   "manday": 9.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-07-13",
+   "due": "2026-08-29",
+   "team": "margin",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-267",
+   "summary": "Supplier Portal",
+   "objective": "efficiency",
+   "savingHours": 57.0,
+   "manday": 12.1,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-07-17",
+   "due": "2026-10-28",
+   "team": "ap-non-trade",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [
+    "finance-it",
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1092",
+   "summary": "O2O monthend automation",
+   "objective": "ai_automation",
+   "savingHours": 9.0,
+   "manday": 9.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-07-18",
+   "due": "2026-08-31",
+   "team": "fin-o2o",
+   "department": "finance",
+   "assignee": "Nakittapon Imjaijaroenying",
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-710",
+   "summary": "LOI Phase 2",
+   "objective": "process_automation",
+   "savingHours": 93.0,
+   "manday": 20.6,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-07-31",
+   "due": "2026-11-30",
+   "team": "ar-mall",
+   "department": "accounting",
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1424",
+   "summary": "CFO Platform data",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 2.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-07-31",
+   "due": "2026-08-03",
+   "team": null,
+   "department": null,
+   "assignee": "THAPANEE",
+   "pic": "tha",
+   "contributors": [
+    {
+     "person": "tha",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1536",
+   "summary": "CN Automation",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 10.7,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-07-31",
+   "due": "2026-09-21",
+   "team": null,
+   "department": null,
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-147",
+   "summary": "Tenent Performance Dashboard",
+   "objective": "efficiency",
+   "savingHours": 4.0,
+   "manday": 3.6,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "on-hold",
+   "start": "2026-08-01",
+   "due": "2026-09-01",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-228",
+   "summary": "Memo Approval Flow",
+   "objective": "process_automation",
+   "savingHours": 9.0,
+   "manday": 5.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-08-01",
+   "due": "2026-08-31",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Wisarut Gunjarueg",
+   "pic": "gun",
+   "contributors": [
+    {
+     "person": "gun",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "luem",
+    "tao"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-968",
+   "summary": "B2B OCR Slip extraction",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 12.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "In Progress",
+   "srcStatus": "not-started",
+   "start": "2026-08-01",
+   "due": "2026-09-30",
+   "team": "central-accounting",
+   "department": "accounting",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "dev"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1066",
+   "summary": "Fresh loss (Unknown)",
+   "objective": "financial",
+   "savingHours": 14.0,
+   "manday": 10.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-08-01",
+   "due": "2026-10-16",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1074",
+   "summary": "Automate stock loss adjustment",
+   "objective": "financial",
+   "savingHours": 1.0,
+   "manday": 4.0,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-08-01",
+   "due": "2026-08-31",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1538",
+   "summary": "Ayuttaya Invoice Generation",
+   "objective": "process_automation",
+   "savingHours": null,
+   "manday": 6.6,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-08-01",
+   "due": "2026-09-09",
+   "team": null,
+   "department": null,
+   "assignee": "chanphen",
+   "pic": "pphen",
+   "contributors": [
+    {
+     "person": "pphen",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1559",
+   "summary": "Margin Automation",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 6.4,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-08-01",
+   "due": "2026-08-31",
+   "team": null,
+   "department": null,
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-842",
+   "summary": "Utility income by unit by store dashboard",
+   "objective": "efficiency",
+   "savingHours": 8.0,
+   "manday": 3.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "planning",
+   "start": "2026-08-02",
+   "due": "2026-09-01",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "panadda.sangklaew",
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-865",
+   "summary": "Shrinkage Automation (Dashboard) — Actual & Forecast",
+   "objective": "ai_automation",
+   "savingHours": 20.0,
+   "manday": 14.7,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-08-02",
+   "due": "2026-10-11",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-844",
+   "summary": "Comparing leasing Mini Super Dashboard",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 3.7,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "Done",
+   "srcStatus": "uat",
+   "start": "2026-09-01",
+   "due": "2026-10-02",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "Jarinya Phosri",
+   "pic": "kade",
+   "contributors": [
+    {
+     "person": "kade",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [
+    "fia"
+   ],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-860",
+   "summary": "Payroll Dashboard",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 3.4,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-09-01",
+   "due": "2026-09-29",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "commit",
+   "notes": ""
+  },
+  {
+   "key": "FNP-171",
+   "summary": "Underperforming store dashboard",
+   "objective": "efficiency",
+   "savingHours": 0.0,
+   "manday": 3.7,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": "not-started",
+   "start": "2026-09-30",
+   "due": "2026-10-31",
+   "team": "mall",
+   "department": "finance",
+   "assignee": "THAPANEE",
+   "pic": "tha",
+   "contributors": [
+    {
+     "person": "tha",
+     "roles": [
+      "pm"
+     ]
+    }
+   ],
+   "partners": [
+    "fah"
+   ],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1070",
+   "summary": "Fresh Stock Loss",
+   "objective": "financial",
+   "savingHours": 0.5,
+   "manday": 7.9,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-10-01",
+   "due": "2026-11-30",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1067",
+   "summary": "Loss making store",
+   "objective": "financial",
+   "savingHours": 20.0,
+   "manday": 9.2,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-10-11",
+   "due": "2026-12-20",
+   "team": null,
+   "department": null,
+   "assignee": "pipat.singhasiri",
+   "pic": "james",
+   "contributors": [
+    {
+     "person": "james",
+     "roles": [
+      "assignee"
+     ]
+    }
+   ],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1201",
+   "summary": "Asset Tag Number Automation Web App",
+   "objective": "ai_automation",
+   "savingHours": null,
+   "manday": 12.8,
+   "mandayEstimated": true,
+   "savingEstimated": true,
+   "status": "In Progress",
+   "srcStatus": null,
+   "start": "2026-10-31",
+   "due": "2026-12-31",
+   "team": null,
+   "department": null,
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "watch",
+   "notes": ""
+  },
+  {
+   "key": "FNP-1071",
+   "summary": "Tao Kae P&L",
+   "objective": "efficiency",
+   "savingHours": 0.5,
+   "manday": 3.5,
+   "mandayEstimated": true,
+   "savingEstimated": false,
+   "status": "To Do",
+   "srcStatus": null,
+   "start": "2026-11-01",
+   "due": "2026-11-30",
+   "team": "store-expense",
+   "department": "finance",
+   "assignee": null,
+   "pic": null,
+   "contributors": [],
+   "partners": [],
+   "deleted": false,
+   "commitLevel": "stretch",
+   "notes": ""
+  }
+ ]
+}

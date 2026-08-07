@@ -1,0 +1,17 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# One web service: Express serves the built React app.
+# autoDeploy: true means every push to the connected branch redeploys.
+services:
+  - type: web
+    name: team-kpi-planning
+    runtime: node
+    plan: free
+    # --include=dev: Render sets NODE_ENV=production at build time, which would
+    # otherwise make npm skip devDependencies (vite) and break the build.
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
