@@ -1,14 +1,15 @@
 /**
- * Exercises the real export path end to end and reads the result back.
+ * Exercises the real export path end to end and reads the workbook back.
  * Run with: node scripts/check-export.mjs
  */
 import { readFileSync, existsSync, unlinkSync } from 'node:fs'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { computePlan, DEFAULT_SETTINGS } from '../src/lib/model.js'
-import { exportWorkbook } from '../src/lib/exportXlsx.js'
+import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
 const state = {
+  meta: seed.meta,
   people: seed.people,
   projects: seed.projects,
   settings: DEFAULT_SETTINGS,
@@ -16,11 +17,11 @@ const state = {
 }
 const plan = computePlan(state)
 
-const stamp = new Date().toISOString().slice(0, 10)
-const file = `F&A Tech Team Objective 2026 — ${stamp}.xlsx`
+const file = 'export-selftest.xlsx'
 if (existsSync(file)) unlinkSync(file)
 
-exportWorkbook(plan, state)
+const wb = await buildWorkbook(plan, state)
+await wb.xlsx.writeFile(file)
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -28,40 +29,53 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
-check('workbook file written', existsSync(file), file)
-if (!existsSync(file)) process.exit(1)
+check('workbook written', existsSync(file))
 
-// XLSX.readFile needs fs wired up in ESM; reading the buffer avoids that.
-const wb = XLSX.read(readFileSync(file), { type: 'buffer' })
-const expected = ['Summary', 'Overall_Objectives', 'Breakdown Objectives', ...seed.people.map((p) => `Obj-${p.nick}`)]
-check('all sheets present', expected.every((s) => wb.SheetNames.includes(s)), wb.SheetNames.join(' | '))
+const back = new ExcelJS.Workbook()
+await back.xlsx.readFile(file)
+const names = back.worksheets.map((w) => w.name)
+const expected = ['Summary', 'Overall_Objectives', 'Projects', ...seed.people.map((p) => `Obj-${p.nick}`)]
+check('all sheets present', expected.every((n) => names.includes(n)), names.join(' | '))
 
-const bd = XLSX.utils.sheet_to_json(wb.Sheets['Breakdown Objectives'])
-check('breakdown has every project', bd.length === seed.projects.length, `${bd.length} rows vs ${seed.projects.length} projects`)
-check('breakdown carries PICs', bd.filter((r) => r['Main PIC (Tech team)'] && r['Main PIC (Tech team)'] !== 'TBC').length > 50)
+const projSheet = back.getWorksheet('Projects')
+// header banner rows 1-3, column header row 4, data from row 5, then a totals row
+const dataRows = projSheet.rowCount - 5
+check('every project exported', dataRows === seed.projects.length,
+  `${dataRows} data rows vs ${seed.projects.length} projects`)
 
-const sum = XLSX.utils.sheet_to_json(wb.Sheets.Summary, { header: 1 })
-const flat = sum.map((r) => (r || []).join('|')).join('\n')
-check('summary carries the target bridge', flat.includes('HEADLINE POSITION'))
-check('summary flags the basis assumption', flat.includes('ASSUMPTION'))
-check('summary lists data-quality gaps', flat.includes('Missing saving hours'))
+// styling actually applied
+const bannerCell = projSheet.getCell(1, 1)
+check('banner is styled', bannerCell.fill?.fgColor?.argb === 'FF051C2C' && bannerCell.font?.bold === true)
+const headCell = projSheet.getCell(4, 1)
+check('header strip is styled', headCell.fill?.fgColor?.argb === 'FF134A6E')
+check('autofilter set', !!projSheet.autoFilter)
+check('panes frozen', projSheet.views?.[0]?.state === 'frozen')
+check('column widths set', projSheet.getColumn(2).width > 20)
 
-const ov = XLSX.utils.sheet_to_json(wb.Sheets.Overall_Objectives, { header: 1 })
-const checkRow = ov.find((r) => (r || []).some((c) => String(c).includes('WEIGHT TOTAL')))
-check('overall sheet has the weight-total check row', !!checkRow)
-if (checkRow) {
-  const weights = checkRow.filter((c) => typeof c === 'number')
-  check('every person totals 100% in the export', weights.every((w) => Math.abs(w - 1) < 1e-9),
-    weights.map((w) => `${(w * 100).toFixed(0)}%`).join(', '))
+// totals formula
+const totalRow = projSheet.getRow(projSheet.rowCount)
+check('totals row carries a SUM formula', typeof totalRow.getCell(8).value === 'object' && !!totalRow.getCell(8).value?.formula)
+
+// weights
+const ov = back.getWorksheet('Overall_Objectives')
+let weightRow = null
+ov.eachRow((row) => { if (String(row.getCell(3).value || '').startsWith('WEIGHT TOTAL')) weightRow = row })
+check('weight-total row present', !!weightRow)
+if (weightRow) {
+  const sums = []
+  for (let i = 0; i < seed.people.length; i++) sums.push(weightRow.getCell(4 + i * 3 + 1).value)
+  check('every person totals 100%', sums.every((s) => Math.abs(s - 1) < 1e-9),
+    sums.map((s) => `${Math.round(s * 100)}%`).join(', '))
 }
 
 for (const p of seed.people) {
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[`Obj-${p.nick}`], { header: 1 })
-  const hasHeader = rows.some((r) => (r || [])[0] === 'Jira key')
-  check(`Obj-${p.nick} has a portfolio table`, hasHeader)
+  const ws = back.getWorksheet(`Obj-${p.nick}`)
+  let hasPortfolio = false
+  ws.eachRow((row) => { if (row.getCell(1).value === 'Jira') hasPortfolio = true })
+  check(`Obj-${p.nick} has a portfolio table`, hasPortfolio)
 }
 
-console.log(`\nsheets: ${wb.SheetNames.length} — ${wb.SheetNames.join(', ')}`)
+console.log(`\nsheets (${names.length}): ${names.join(', ')}`)
 console.log(`file size: ${(readFileSync(file).length / 1024).toFixed(1)} KB`)
 unlinkSync(file)
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)

@@ -11,7 +11,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           mui: ['@mui/material', '@mui/icons-material'],
-          xlsx: ['xlsx'],
+          excel: ['exceljs'],
         },
       },
     },

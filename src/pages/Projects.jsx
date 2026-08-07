@@ -2,12 +2,14 @@ import { useState, useMemo } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Chip, Checkbox, Button, Stack, Tooltip,
-  FormControl, InputLabel, TableContainer, Menu, Alert,
+  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART } from '../lib/palette.js'
 import { fmtHours, fmtRatio } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
@@ -17,6 +19,28 @@ const COMMIT_COLOR = {
   stretch: '#2a78d6',
   watch: STATUS.warning,
   excluded: '#898781',
+}
+
+/** Free-text cell that only commits on blur. */
+function TextCell({ value, onChange, placeholder, width, bold }) {
+  const [draft, setDraft] = useState(value ?? '')
+  const [focused, setFocused] = useState(false)
+  if (!focused && draft !== (value ?? '')) setDraft(value ?? '')
+  return (
+    <TextField
+      size="small"
+      variant="standard"
+      fullWidth={!width}
+      value={draft}
+      placeholder={placeholder}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { setFocused(false); onChange(draft.trim() || null) }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      inputProps={{ style: { fontSize: '0.8125rem', fontWeight: bold ? 500 : 400 } }}
+      sx={{ width }}
+    />
+  )
 }
 
 /** Number cell that only commits on blur, so typing never fights React state. */
@@ -56,7 +80,7 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
   )
 }
 
-export default function Projects({ plan, onUpdate, onBulk }) {
+export default function Projects({ plan, onUpdate, onBulk, onAdd, onDelete }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { projects, people, settings } = plan
@@ -73,7 +97,8 @@ export default function Projects({ plan, onUpdate, onBulk }) {
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
     let out = projects.filter((p) => {
-      if (needle && !`${p.key} ${p.summary} ${p.team ?? ''} ${p.assignee ?? ''}`.toLowerCase().includes(needle)) return false
+      const hay = `${p.key} ${p.jiraKey ?? ''} ${p.summary} ${p.program ?? ''} ${p.team ?? ''} ${p.subTeam ?? ''} ${p.assignee ?? ''}`
+      if (needle && !hay.toLowerCase().includes(needle)) return false
       if (fObj !== 'all' && p.objective !== fObj) return false
       if (fPic !== 'all' && (fPic === 'none' ? !!p.pic : p.pic !== fPic)) return false
       if (fCommit !== 'all' && p.commitLevel !== fCommit) return false
@@ -96,8 +121,8 @@ export default function Projects({ plan, onUpdate, onBulk }) {
     return out
   }, [projects, q, fObj, fPic, fCommit, fGap, sort])
 
-  const head = (id, label, align = 'left') => (
-    <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false}>
+  const head = (id, label, align = 'left', minWidth) => (
+    <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined}>
       <TableSortLabel
         active={sort.by === id}
         direction={sort.by === id ? sort.dir : 'asc'}
@@ -123,10 +148,11 @@ export default function Projects({ plan, onUpdate, onBulk }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Alert severity="info" variant="outlined">
-        Edit any cell below — <strong>PIC</strong>, <strong>saving hours</strong>, <strong>mandays</strong>,{' '}
-        <strong>objective</strong> and <strong>commit level</strong> all recalculate the dashboard and the export live.
-        Italic figures are seed estimates that have not been confirmed. Everything is saved in this browser; use{' '}
-        <em>Save scenario</em> in the ⋮ menu to keep a copy or share it.
+        Every cell is editable — name, team, programme, <strong>PIC</strong>, <strong>saving hrs/month</strong>,{' '}
+        <strong>HC</strong>, <strong>mandays</strong>, <strong>objective</strong> and <strong>commit level</strong> —
+        and each edit recalculates the dashboard, the scorecards and the export live. Use <strong>Add project</strong>{' '}
+        for anything not yet in the source file, and the bin icon to remove a row. Saving hours are{' '}
+        <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -176,12 +202,28 @@ export default function Projects({ plan, onUpdate, onBulk }) {
 
         <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 1.5 }}>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            {rows.length} of {projects.length} projects · {fmtHours(shown)} committed hrs in view
+            {rows.length} of {projects.length} projects · {fmtHours(shown)} committed hrs/month in view
           </Typography>
           <Box sx={{ flex: 1 }} />
+          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={onAdd}>
+            Add project
+          </Button>
           {sel.size > 0 && (
             <>
               <Typography variant="caption" sx={{ fontWeight: 600 }}>{sel.size} selected</Typography>
+              <Button
+                size="small"
+                color="error"
+                variant="outlined"
+                startIcon={<DeleteOutlineIcon />}
+                onClick={() => {
+                  if (confirm(`Delete ${sel.size} project${sel.size === 1 ? '' : 's'}? This cannot be undone (reload the baseline from the ⋮ menu to restore).`)) {
+                    onDelete([...sel]); setSel(new Set())
+                  }
+                }}
+              >
+                Delete
+              </Button>
               <Button size="small" variant="outlined" onClick={(e) => setBulkEl(e.currentTarget)}>
                 Bulk edit
               </Button>
@@ -212,15 +254,17 @@ export default function Projects({ plan, onUpdate, onBulk }) {
               <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }}>
                 <Checkbox size="small" checked={allSelected} indeterminate={sel.size > 0 && !allSelected} onChange={toggleAll} />
               </TableCell>
-              {head('key', 'Jira')}
+              {head('jiraKey', 'Jira', 'left', 104)}
               {head('summary', 'Project')}
               <TableCell sx={{ minWidth: 150 }}>Objective</TableCell>
               <TableCell sx={{ minWidth: 118 }}>PIC</TableCell>
-              {head('savingHours', 'Saving hrs', 'right')}
+              {head('savingHours', 'Saving hrs/mth', 'right')}
+              {head('hc', 'HC', 'right')}
               {head('manday', 'Mandays', 'right')}
               {head('ratio', 'Ratio', 'right')}
               <TableCell sx={{ minWidth: 122 }}>Commit</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell padding="checkbox" />
             </TableRow>
           </TableHead>
           <TableBody>
@@ -239,16 +283,42 @@ export default function Projects({ plan, onUpdate, onBulk }) {
                       })}
                     />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap', fontSize: '0.75rem' }}>{p.key}</TableCell>
-                  <TableCell sx={{ maxWidth: 300 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500, lineHeight: 1.3 }}>
-                      {p.summary}
-                      {p.deleted && <Chip size="small" label="deleted in Jira" sx={{ ml: 1, height: 18 }} />}
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      {[p.team, p.department].filter(Boolean).join(' · ') || '—'}
-                      {p.partners?.length ? ` · partners: ${p.partners.join(', ')}` : ''}
-                    </Typography>
+                  <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
+                    <TextCell
+                      value={p.jiraKey}
+                      placeholder="no key"
+                      width={92}
+                      onChange={(v) => onUpdate(p.key, { jiraKey: v })}
+                      bold
+                    />
+                  </TableCell>
+                  <TableCell sx={{ maxWidth: 320, minWidth: 240 }}>
+                    <TextCell
+                      value={p.summary}
+                      placeholder="Project name"
+                      onChange={(v) => onUpdate(p.key, { summary: v || 'Untitled' })}
+                      bold
+                    />
+                    <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', mt: 0.25 }}>
+                      <TextCell
+                        value={p.team}
+                        placeholder="Team"
+                        width={92}
+                        onChange={(v) => onUpdate(p.key, { team: v })}
+                      />
+                      <TextCell
+                        value={p.subTeam}
+                        placeholder="Sub team"
+                        width={112}
+                        onChange={(v) => onUpdate(p.key, { subTeam: v })}
+                      />
+                      <TextCell
+                        value={p.program}
+                        placeholder="Programme"
+                        width={132}
+                        onChange={(v) => onUpdate(p.key, { program: v })}
+                      />
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Select
@@ -289,6 +359,13 @@ export default function Projects({ plan, onUpdate, onBulk }) {
                       value={p.savingHours}
                       estimated={false}
                       onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
+                    />
+                  </TableCell>
+                  <TableCell align="right">
+                    <NumCell
+                      value={p.hc}
+                      width={56}
+                      onChange={(v) => onUpdate(p.key, { hc: v })}
                     />
                   </TableCell>
                   <TableCell align="right">
@@ -354,17 +431,29 @@ export default function Projects({ plan, onUpdate, onBulk }) {
                       </Tooltip>
                     )}
                     {p.savingHours == null && (
-                      <Tooltip title="No saving hours recorded in Jira — this project cannot be committed until it is quantified">
+                      <Tooltip title="Saving hours are TBC in the source — this project cannot be committed until it is quantified">
                         <WarningAmberIcon sx={{ fontSize: 14, color: STATUS.warning, ml: 0.5, verticalAlign: 'middle' }} />
                       </Tooltip>
                     )}
+                  </TableCell>
+                  <TableCell padding="checkbox">
+                    <Tooltip title="Delete this project">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          if (confirm(`Delete "${p.summary}"? This cannot be undone.`)) onDelete([p.key])
+                        }}
+                      >
+                        <DeleteOutlineIcon sx={{ fontSize: 17 }} />
+                      </IconButton>
+                    </Tooltip>
                   </TableCell>
                 </TableRow>
               )
             })}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={12} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   No projects match these filters.
                 </TableCell>
               </TableRow>

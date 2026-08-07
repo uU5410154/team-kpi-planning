@@ -70,7 +70,9 @@ export function paybackMonths(ratio, basis = 'annual') {
 
 export const DEFAULT_SETTINGS = {
   targetHours: 3000,
-  savingBasis: 'annual',
+  // The source workbook's column is "Saving hrs/mth", and the 2025 plan was
+  // also stated per month (1,823 hrs/month), so monthly is the right basis.
+  savingBasis: 'monthly',
   // Objective 1 gate: minimum saving hours returned per manday invested.
   // 4.0 on an annual basis is a 24-month payback — a deliberately permissive
   // provisional floor. It cannot be set responsibly until real effort data
@@ -134,6 +136,35 @@ export function scorecardWeights(person, settings) {
 }
 
 export const ROLE_ORDER = ['pm', 'lead', 'dev', 'support', 'qa', 'assignee']
+
+/** Blank row for the "add project" action. */
+export function newProject(seq) {
+  return {
+    key: `NEW-${seq}`,
+    jiraKey: null,
+    summary: 'New project',
+    program: '',
+    team: 'Accounting',
+    subTeam: '',
+    objective: 'process_automation',
+    savingHours: null,
+    hc: null,
+    savingEstimated: true,
+    manday: 0,
+    mandayEstimated: true,
+    status: 'Not Start',
+    srcStatus: null,
+    start: null,
+    due: null,
+    assignee: null,
+    pic: null,
+    contributors: [],
+    partners: [],
+    deleted: false,
+    commitLevel: 'watch',
+    notes: '',
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* contribution                                                        */
@@ -250,6 +281,22 @@ export function computePlan(state) {
   const watchHours = sumHours(watch)
   const headlineHours = committedHours + (s.includeStretchInHeadline ? stretchHours : 0)
 
+  const sumHC = (arr) => arr.reduce((a, p) => a + (p.hc || 0), 0)
+  const committedHC = sumHC(commit)
+  const totalHC = sumHC(perProject.filter((p) => p.commitLevel !== 'excluded'))
+
+  // The book total — every project's saving hours, with no objective or
+  // commit-level filtering applied. This must always reconcile to the source
+  // workbook's own column sum, so it is what the dashboard leads with.
+  const active = perProject.filter((p) => p.commitLevel !== 'excluded')
+  const totalHours = active.reduce((a, p) => a + (p.savingHours ?? 0), 0)
+  const byStatus = {}
+  for (const p of active) {
+    const k = p.status || 'Unknown'
+    byStatus[k] = (byStatus[k] || 0) + (p.savingHours ?? 0)
+  }
+  const doneHours = byStatus.Done || 0
+
   const totalManday = perProject
     .filter(isCounted)
     .reduce((a, p) => a + (p.manday || 0), 0)
@@ -357,6 +404,13 @@ export function computePlan(state) {
       orphanHours,
       bankableHours,
       bankableCoverage: s.targetHours > 0 ? bankableHours / s.targetHours : 0,
+      committedHC,
+      totalHC,
+      totalHours,
+      totalCoverage: s.targetHours > 0 ? totalHours / s.targetHours : 0,
+      byStatus,
+      doneHours,
+      doneCoverage: s.targetHours > 0 ? doneHours / s.targetHours : 0,
     },
     byObjective,
     quality,

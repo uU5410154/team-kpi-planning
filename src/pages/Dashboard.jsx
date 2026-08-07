@@ -56,21 +56,25 @@ export default function Dashboard({ plan, onGoTo }) {
         <Grid item xs={12} sm={6} md={3}>
           <StatTile
             hero
-            label="Committed saving hours"
-            value={fmtHours(totals.headlineHours)}
-            unit="hrs"
-            tone={covTone}
-            context={`${fmtPct(totals.coverage)} of the ${totals.target.toLocaleString()} hr management target`}
-            help="Sum of saving hours on pool-eligible projects at commit level. Objective 3 (Data warehouse) is date-gated and contributes no hours."
+            label="Total saving hours"
+            value={fmtHours(totals.totalHours)}
+            unit={settings.savingBasis === 'monthly' ? 'hrs / month' : 'hrs / year'}
+            tone={totals.totalCoverage >= 1 ? 'good' : totals.totalCoverage >= 0.9 ? 'warning' : 'critical'}
+            context={`${fmtPct(totals.totalCoverage)} of the ${totals.target.toLocaleString()} hr target · ${fmtHours(totals.doneHours)} already delivered`}
+            help="Every project in the register, summed straight from the Saving hrs/mth column. No filtering — this always reconciles to the source workbook."
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatTile
-            label="Efficiency ratio"
-            value={fmtRatio(totals.teamRatio)}
-            unit="hrs / manday"
-            tone={totals.teamRatio >= settings.ratioGate ? 'good' : 'critical'}
-            context={`Gate is ${settings.ratioGate.toFixed(1)} · ${totals.failingGate} project${totals.failingGate === 1 ? '' : 's'} below it`}
+            label={totals.teamRatio == null ? 'Headcount released' : 'Efficiency ratio'}
+            value={totals.teamRatio == null ? fmtHours(totals.committedHC) : fmtRatio(totals.teamRatio)}
+            unit={totals.teamRatio == null ? 'HC' : 'hrs / manday'}
+            tone={totals.teamRatio == null ? undefined : totals.teamRatio >= settings.ratioGate ? 'good' : 'critical'}
+            context={
+              totals.teamRatio == null
+                ? `Objective 1 needs mandays — none entered yet on ${quality.estimatedManday} projects`
+                : `Gate is ${settings.ratioGate.toFixed(1)} · ${totals.failingGate} project${totals.failingGate === 1 ? '' : 's'} below it`
+            }
             help={`Objective 1. Saving hours returned per manday invested. This is a gate, not a maximiser — it stops low-value work being booked for its hour count. On the ${SAVING_BASIS[settings.savingBasis].label.toLowerCase()} basis the gate implies a ${(() => { const m = paybackMonths(settings.ratioGate, settings.savingBasis); return m == null ? '—' : m < 24 ? `${m.toFixed(0)}-month` : `${(m / 12).toFixed(1)}-year` })()} payback on build effort.`}
           />
         </Grid>
@@ -98,30 +102,13 @@ export default function Dashboard({ plan, onGoTo }) {
 
       {quality.estimatedManday > 0 && (
         <Alert severity="warning" variant="outlined">
-          <AlertTitle sx={{ fontWeight: 600 }}>Objective 1 cannot be signed off yet — two unknowns</AlertTitle>
-          <Box component="ol" sx={{ m: 0, pl: 2.5 }}>
-            <li>
-              <strong>No effort data anywhere.</strong> Jira's Original Estimate and Estimated MD fields are empty on all{' '}
-              {quality.total} epics, so all {quality.estimatedManday} manday values are duration-anchored seed estimates.{' '}
-              <Link component="button" onClick={() => onGoTo('projects')} sx={{ fontWeight: 600 }}>
-                Enter real mandays →
-              </Link>
-            </li>
-            <li>
-              <strong>The hours basis is unconfirmed.</strong> Jira does not say whether <em>Saving Hours</em> is per year
-              or per month — the 2025 workbook counted per month. Currently assuming{' '}
-              <strong>{SAVING_BASIS[settings.savingBasis].label.toLowerCase()}</strong>, which makes the{' '}
-              {settings.ratioGate.toFixed(1)} gate a{' '}
-              {(() => {
-                const m = paybackMonths(settings.ratioGate, settings.savingBasis)
-                return m == null ? '—' : m < 24 ? `${m.toFixed(0)}-month` : `${(m / 12).toFixed(1)}-year`
-              })()}{' '}
-              payback. Getting this wrong moves the economics by 12×.{' '}
-              <Link component="button" onClick={() => onGoTo('settings')} sx={{ fontWeight: 600 }}>
-                Change the assumption →
-              </Link>
-            </li>
-          </Box>
+          <AlertTitle sx={{ fontWeight: 600 }}>Objective 1 has no denominator yet</AlertTitle>
+          The source workbook records saving hours and headcount but no build effort, so mandays are blank on{' '}
+          {quality.estimatedManday} of {quality.total} projects and the efficiency ratio cannot be computed. Enter
+          mandays on the Projects tab and the gate, the scatter and every per-person ratio come alive.{' '}
+          <Link component="button" onClick={() => onGoTo('projects')} sx={{ fontWeight: 600 }}>
+            Enter mandays →
+          </Link>
         </Alert>
       )}
 
@@ -131,22 +118,22 @@ export default function Dashboard({ plan, onGoTo }) {
           <Section title="Target bridge" subtitle="How the book converts into a commitment">
             <Box sx={{ mb: 2.5 }}>
               <Meter
-                value={totals.headlineHours}
+                value={totals.totalHours}
                 target={totals.target}
-                label="Committed vs management target"
+                label="Total book vs management target"
                 sublabel={
-                  totals.gap >= 0
-                    ? `${fmtHours(totals.gap)} hrs of headroom above target`
-                    : `${fmtHours(Math.abs(totals.gap))} hrs short of target`
+                  totals.totalHours - totals.target >= 0
+                    ? `${fmtHours(totals.totalHours - totals.target)} hrs of headroom above target`
+                    : `${fmtHours(totals.target - totals.totalHours)} hrs short of target`
                 }
               />
             </Box>
             <Table size="small">
               <TableBody>
                 {[
-                  ['Commit — bankable', totals.committedHours, 'good'],
-                  ['Stretch — upside', totals.stretchHours, null],
-                  ['Watch — at risk, excluded', totals.watchHours, 'warning'],
+                  ['Done — delivered', totals.byStatus.Done || 0, 'good'],
+                  ['In Progress', totals.byStatus['In Progress'] || 0, null],
+                  ['Not Start', totals.byStatus['Not Start'] || 0, 'warning'],
                 ].map(([label, v, tone]) => (
                   <TableRow key={label}>
                     <TableCell sx={{ borderBottom: 'none', pl: 0, color: 'text.secondary' }}>{label}</TableCell>
@@ -157,10 +144,10 @@ export default function Dashboard({ plan, onGoTo }) {
                 ))}
                 <TableRow>
                   <TableCell sx={{ pl: 0, fontWeight: 700, borderTop: 1, borderColor: 'divider' }}>
-                    Headline position
+                    TOTAL — all {plan.projects.length} projects
                   </TableCell>
                   <TableCell align="right" sx={{ pr: 0, fontWeight: 700, borderTop: 1, borderColor: 'divider' }}>
-                    {fmtHours(totals.headlineHours)}
+                    {fmtHours(totals.totalHours)}
                   </TableCell>
                 </TableRow>
                 <TableRow>
@@ -171,6 +158,10 @@ export default function Dashboard({ plan, onGoTo }) {
                 </TableRow>
               </TableBody>
             </Table>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
+              Sums the <em>Saving hrs/mth</em> column across every project, with no objective or risk filtering — it
+              always reconciles to the source workbook.
+            </Typography>
 
             {/* The gross-to-bankable bridge: what the team is targeted on vs
                 what the six scorecards can actually add up to. */}
@@ -289,7 +280,11 @@ export default function Dashboard({ plan, onGoTo }) {
             title="Objective 1 — the efficiency gate"
             subtitle={`Each dot is a project. Anything below the dashed line returns less than ${settings.ratioGate.toFixed(1)} saving hours per manday invested.`}
           >
-            <GateScatter points={gatePoints} gate={settings.ratioGate} />
+            <GateScatter
+              points={gatePoints}
+              gate={settings.ratioGate}
+              emptyMessage="No mandays have been entered yet, so there is nothing to plot. Add mandays on the Projects tab and every project appears here against the gate."
+            />
           </Section>
         </Grid>
 

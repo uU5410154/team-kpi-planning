@@ -70,6 +70,18 @@ const poolSum = plan.projects
 check('per-person hours re-add to the pool', Math.abs(personSum - poolSum) < 1,
   `people=${personSum.toFixed(1)} pool=${poolSum.toFixed(1)} (difference is unassigned projects)`)
 
+// 4b. THE headline number must equal the raw source column sum.
+// This is the check that matters most: the dashboard total has to reconcile to
+// the "Saving hrs/mth" column in the source workbook, with no filtering.
+const rawSum = seed.projects.reduce((a, p) => a + (p.savingHours ?? 0), 0)
+check('dashboard total equals the source column sum', Math.abs(plan.totals.totalHours - rawSum) < 0.01,
+  `dashboard=${plan.totals.totalHours.toFixed(1)} source=${rawSum.toFixed(1)}`)
+
+// and the status split must re-add to it
+const statusSum = Object.values(plan.totals.byStatus).reduce((a, b) => a + b, 0)
+check('status breakdown re-adds to the total', Math.abs(statusSum - plan.totals.totalHours) < 0.01,
+  Object.entries(plan.totals.byStatus).map(([k, v]) => `${k}=${Math.round(v)}`).join(' '))
+
 // 5. headline maths
 const t = plan.totals
 check('headline = committed when stretch excluded', Math.abs(t.headlineHours - t.committedHours) < 1e-9)
@@ -83,9 +95,9 @@ check('gate flag matches the ratio', badGate.length === 0, badGate.map((p) => p.
 
 console.log('\n--- summary ---')
 console.log(`projects            ${plan.quality.total}`)
-console.log(`committed hours     ${Math.round(t.committedHours).toLocaleString()}`)
-console.log(`stretch hours       ${Math.round(t.stretchHours).toLocaleString()}`)
-console.log(`coverage            ${(t.coverage * 100).toFixed(1)}%`)
+console.log(`TOTAL saving hours  ${t.totalHours.toFixed(1)}  (${(t.totalCoverage * 100).toFixed(1)}% of ${t.target})`)
+Object.entries(t.byStatus).forEach(([k, v]) => console.log(`  ${k.padEnd(16)} ${Math.round(v).toLocaleString()}`))
+console.log(`headcount released  ${t.totalHC.toFixed(1)} HC`)
 console.log(`team ratio          ${t.teamRatio?.toFixed(2)} hrs/manday`)
 console.log(`top-2 concentration ${(t.top2Share * 100).toFixed(1)}%`)
 console.log(`failing the gate    ${t.failingGate}`)

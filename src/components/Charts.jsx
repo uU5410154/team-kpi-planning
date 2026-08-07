@@ -254,10 +254,31 @@ export function StackedHBar({ rows, series, valueFormat = (n) => Math.round(n).t
 /* Scatter — the efficiency gate (manday vs saving hours)              */
 /* ------------------------------------------------------------------ */
 
-export function GateScatter({ points, gate, height = 320 }) {
+export function GateScatter({ points, gate, height = 320, emptyMessage }) {
   const tokens = useChartTokens()
   const ref = useRef(null)
   const { tip, show, hide } = useTooltip(ref)
+
+  if (!points.length) {
+    return (
+      <Box
+        sx={{
+          height,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          px: 4,
+          border: `1px dashed ${tokens.gridline}`,
+          borderRadius: 1,
+        }}
+      >
+        <Typography variant="body2" sx={{ color: tokens.textSecondary, maxWidth: 420 }}>
+          {emptyMessage || 'Nothing to plot yet.'}
+        </Typography>
+      </Box>
+    )
+  }
 
   const padL = 54
   const padB = 38

@@ -2,21 +2,82 @@ import express from 'express'
 import compression from 'compression'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+import * as store from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
+
+// Local dev convenience: load server/.env if present. On Render the values
+// come from the dashboard, so this is a no-op there.
+try {
+  for (const line of readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
+    const t = line.trim()
+    if (!t || t.startsWith('#') || !t.includes('=')) continue
+    const i = t.indexOf('=')
+    const k = t.slice(0, i).trim()
+    if (!process.env[k]) process.env[k] = t.slice(i + 1).trim()
+  }
+} catch { /* no .env — fine */ }
+
 const app = express()
-
 app.use(compression())
-app.use(express.json({ limit: '5mb' }))
+app.use(express.json({ limit: '8mb' }))
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'team-kpi-planning' }))
+/* ---------------------------- api ---------------------------- */
 
-// The client owns all mutable state (localStorage) so the app survives Render's
-// ephemeral filesystem. The server only ships the immutable Jira-derived seed.
+app.get('/api/health', async (_req, res) => {
+  res.json({ ok: true, service: 'team-kpi-planning', store: await store.status() })
+})
+
+const unavailable = (res) =>
+  res.status(503).json({ error: 'Scenario store unavailable — your work is still saved in this browser.' })
+
+const cleanName = (n) => String(n || '').trim().slice(0, 80)
+
+app.get('/api/scenarios', async (_req, res) => {
+  const rows = await store.listScenarios()
+  if (rows === null) return unavailable(res)
+  res.json(rows)
+})
+
+app.get('/api/scenarios/:name', async (req, res) => {
+  const doc = await store.getScenario(cleanName(req.params.name))
+  if (doc === null) return unavailable(res)
+  if (!doc) return res.status(404).json({ error: 'No scenario by that name.' })
+  res.json(doc)
+})
+
+app.put('/api/scenarios/:name', async (req, res) => {
+  const name = cleanName(req.params.name)
+  if (!name) return res.status(400).json({ error: 'A scenario name is required.' })
+  const { payload, updatedBy } = req.body || {}
+  if (!payload || !Array.isArray(payload.projects) || !Array.isArray(payload.people)) {
+    return res.status(400).json({ error: 'Payload must contain projects and people arrays.' })
+  }
+  const saved = await store.saveScenario(name, payload, updatedBy)
+  if (saved === null) return unavailable(res)
+  res.json(saved)
+})
+
+app.delete('/api/scenarios/:name', async (req, res) => {
+  const r = await store.deleteScenario(cleanName(req.params.name))
+  if (r === null) return unavailable(res)
+  res.json(r)
+})
+
+/* --------------------------- client -------------------------- */
+
 app.use(express.static(path.join(root, 'dist'), { maxAge: '1h', index: false }))
-
 app.get('*', (_req, res) => res.sendFile(path.join(root, 'dist', 'index.html')))
 
 const port = process.env.PORT || 5000
-app.listen(port, () => console.log(`team-kpi-planning listening on :${port}`))
+app.listen(port, async () => {
+  console.log(`team-kpi-planning listening on :${port}`)
+  const s = await store.status()
+  console.log(
+    s.connected
+      ? `scenario store: ${s.db}.${s.collection}`
+      : `scenario store: unavailable (${s.reason}) — clients fall back to browser storage`,
+  )
+})
