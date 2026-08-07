@@ -2,27 +2,56 @@ import seed from '../data/seed.json'
 import { DEFAULT_SETTINGS } from './model.js'
 
 const KEY = 'fa-tech-kpi-2026'
-const VERSION = 1
+const VERSION = 2
+
+/**
+ * Fingerprint of the bundled seed. Cached state built from a different source
+ * workbook is stale and must be discarded — otherwise a browser that used an
+ * earlier build keeps showing the old totals forever, which is exactly what
+ * happened when the register moved off the Jira export.
+ */
+const seedStamp = () => `${seed.meta?.source || '?'}|${seed.projects.length}`
 
 export const freshState = () => ({
   version: VERSION,
+  seedStamp: seedStamp(),
   meta: seed.meta,
   people: seed.people.map((p) => ({ ...p })),
   projects: seed.projects.map((p) => ({ ...p })),
   settings: { ...DEFAULT_SETTINGS },
-  scenarioName: 'Baseline (from Jira)',
+  scenarioName: 'Baseline',
 })
+
+/** True when cached state predates the current seed and has to be dropped. */
+export function isStale(parsed) {
+  return (
+    !parsed ||
+    parsed.version !== VERSION ||
+    !Array.isArray(parsed.projects) ||
+    parsed.seedStamp !== seedStamp()
+  )
+}
 
 export function loadState() {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return freshState()
     const parsed = JSON.parse(raw)
-    if (parsed.version !== VERSION || !Array.isArray(parsed.projects)) return freshState()
+    if (isStale(parsed)) return freshState()
     // Merge forward so a settings key added in a later build is never undefined.
     return { ...freshState(), ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } }
   } catch {
     return freshState()
+  }
+}
+
+/** Did this session start by discarding stale cached state? */
+export function loadWasReset() {
+  try {
+    const raw = localStorage.getItem(KEY)
+    return !!raw && isStale(JSON.parse(raw))
+  } catch {
+    return false
   }
 }
 

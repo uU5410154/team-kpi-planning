@@ -17,7 +17,7 @@ import ScenarioDialog from './components/ScenarioDialog.jsx'
 import { buildTheme } from './theme.js'
 import { computePlan, newProject } from './lib/model.js'
 import * as api from './lib/api.js'
-import { loadState, saveState, freshState, downloadScenario, readScenarioFile } from './lib/storage.js'
+import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
 import Dashboard from './pages/Dashboard.jsx'
@@ -40,6 +40,8 @@ const tabFromHash = () => {
 export default function App() {
   const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode') || 'light')
   const [tab, setTab] = useState(tabFromHash)
+  // Evaluate before the first save effect overwrites the cached copy.
+  const [wasReset] = useState(loadWasReset)
   const [state, setState] = useState(loadState)
   const [toast, setToast] = useState(null)
   const [menuEl, setMenuEl] = useState(null)
@@ -55,6 +57,15 @@ export default function App() {
 
   useEffect(() => { saveState(state) }, [state])
   useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
+
+  useEffect(() => {
+    if (wasReset) {
+      setToast({
+        severity: 'info',
+        msg: 'Loaded the latest source data — your browser was holding an older version of the project register.',
+      })
+    }
+  }, [wasReset])
 
   // Anything that changes the plan marks it unsaved. Skip the first render so
   // simply opening the app does not look like a pending edit.
@@ -161,9 +172,9 @@ export default function App() {
   }
 
   const handleReset = () => {
-    if (!confirm('Discard all your edits and reload the original Jira baseline?')) return
+    if (!confirm('Discard all your edits and reload the original source workbook?')) return
     setState(freshState())
-    setToast({ severity: 'info', msg: 'Reset to the Jira baseline.' })
+    setToast({ severity: 'info', msg: 'Reset to the source workbook.' })
   }
 
   const handleImport = async (e) => {
@@ -241,7 +252,7 @@ export default function App() {
               </MenuItem>
               <Divider />
               <MenuItem onClick={() => { handleReset(); setMenuEl(null) }}>
-                <RestartAltIcon fontSize="small" sx={{ mr: 1.5 }} /> Reset to Jira baseline
+                <RestartAltIcon fontSize="small" sx={{ mr: 1.5 }} /> Reset to source workbook
               </MenuItem>
             </Menu>
             <input ref={fileRef} type="file" accept="application/json" hidden onChange={handleImport} />
