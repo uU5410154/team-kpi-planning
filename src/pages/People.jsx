@@ -45,6 +45,42 @@ function PctCell({ value, onChange, invalid }) {
   )
 }
 
+/** Numeric target with a fixed unit suffix. */
+function HoursTargetCell({ value, onChange, unit }) {
+  const asStr = (v) => (v == null ? '' : String(v))
+  const [draft, setDraft] = useState(asStr(value))
+  const [focused, setFocused] = useState(false)
+  if (!focused && draft !== asStr(value)) setDraft(asStr(value))
+  return (
+    <TextField
+      size="small"
+      variant="outlined"
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        setFocused(false)
+        const n = Number(String(draft).replace(/[,\s]/g, ''))
+        if (Number.isFinite(n) && n >= 0) onChange(n)
+        else setDraft(asStr(value))
+      }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      InputProps={{
+        endAdornment: (
+          <InputAdornment position="end" sx={{ ml: 0.25 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>{unit}</Typography>
+          </InputAdornment>
+        ),
+      }}
+      inputProps={{
+        style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.8125rem', padding: '6px 2px 6px 8px' },
+      }}
+      sx={{ width: 158 }}
+    />
+  )
+}
+
+/** Free-text target, for milestones and qualitative lines. */
 function TargetCell({ value, onChange, placeholder }) {
   const [draft, setDraft] = useState(value ?? '')
   const [focused, setFocused] = useState(false)
@@ -246,33 +282,29 @@ export default function People({
                           {idx >= 0 && (
                             <Box sx={{ width: 8, height: 8, borderRadius: '2px', mt: 0.7, bgcolor: CHART[mode].series[idx], flexShrink: 0 }} />
                           )}
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.35 }}>
-                              {o ? `Obj ${o.no} — ${o.name}` : l.label}
-                            </Typography>
-                            {o && (
-                              <Typography
-                                variant="caption"
-                                sx={{ color: l.drifted ? STATUS.warning : 'text.secondary', fontWeight: l.drifted ? 600 : 400 }}
-                              >
-                                {fmtHours(l.creditedHours)} {unit} credited from {p.rows.filter((r) => r.p.objective === o.id).length} assigned project
-                                {p.rows.filter((r) => r.p.objective === o.id).length === 1 ? '' : 's'}
-                                {l.drifted && ' — target differs'}
-                              </Typography>
-                            )}
-                          </Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.35 }}>
+                            {o ? `Obj ${o.no} — ${o.name}` : l.label}
+                          </Typography>
                         </Box>
                       </TableCell>
                       <TableCell sx={{ verticalAlign: 'top', pt: 1.25 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <TargetCell
-                            value={l.target}
-                            placeholder={l.defaultTarget}
-                            onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
-                          />
+                          {l.targetKind === 'hours' ? (
+                            <HoursTargetCell
+                              value={l.target}
+                              unit={unit}
+                              onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
+                            />
+                          ) : (
+                            <TargetCell
+                              value={l.target}
+                              placeholder={l.defaultTarget}
+                              onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
+                            />
+                          )}
                           {l.drifted && (
-                            <Tooltip title={`Snap back to ${l.defaultTarget} — the live figure from ${p.nick}'s current project assignments`}>
-                              <IconButton size="small" onClick={() => onPersonKpi(p.id, l.id, { target: '' })}>
+                            <Tooltip title={`Currently carrying ${fmtHours(l.creditedHours)} ${unit} — click to snap the target back to it`}>
+                              <IconButton size="small" onClick={() => onPersonKpi(p.id, l.id, { target: null })}>
                                 <SyncIcon sx={{ fontSize: 16, color: STATUS.warning }} />
                               </IconButton>
                             </Tooltip>

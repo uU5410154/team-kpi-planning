@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Locks the scorecard contract:
  *   - weights and targets are editable per person and survive a round trip
  *   - each member carries their OWN target, never the team's 3,000
@@ -7,7 +7,7 @@
  */
 import { readFileSync, unlinkSync, existsSync } from 'node:fs'
 import ExcelJS from 'exceljs'
-import { computePlan, DEFAULT_SETTINGS, weightSum, weightsValid, rebalanceWeights } from '../src/lib/model.js'
+import { computePlan, DEFAULT_SETTINGS, weightSum, weightsValid, rebalanceWeights, fmtTarget } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
@@ -16,7 +16,7 @@ const base = { meta: seed.meta, people: seed.people, projects: seed.projects, se
 let failures = 0
 const check = (name, ok, detail = '') => {
   if (!ok) failures++
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` โ€” ${detail}` : ''}`)
 }
 
 // --- defaults ---
@@ -34,9 +34,19 @@ check('no member inherits the team target', carriesTeamTarget.length === 0,
 
 console.log('\ndefault per-member delivery targets:')
 for (const p of plan0.people) {
-  const t = p.kpiLines.filter((l) => l.objective).map((l) => l.target).join(' | ')
+  const t = p.kpiLines.filter((l) => l.objective).map((l) => fmtTarget(l)).join(' | ')
   console.log(`  ${p.nick.padEnd(10)} ${t || '(none)'}`)
 }
+
+// hour targets must be plain numbers; the unit is fixed by the UI, not typed
+const hourLines = plan0.people.flatMap((p) => p.kpiLines.filter((l) => l.targetKind === 'hours'))
+check('hour targets are stored as numbers', hourLines.every((l) => typeof l.target === 'number'),
+  `${hourLines.length} lines`)
+check('hour targets render with a fixed unit', fmtTarget(hourLines[0]).endsWith(' hrs/month'),
+  fmtTarget(hourLines[0]))
+check('date-gated objective 3 stays free text',
+  plan0.people.flatMap((p) => p.kpiLines).filter((l) => l.objective === 'datawarehouse')
+    .every((l) => l.targetKind === 'text'))
 
 // --- editing ---
 const edited = {
@@ -88,16 +98,16 @@ const polAfter = planM.people.find((p) => p.id === 'pol')
 const kadeObj2After = kadeAfter.kpiLines.find((l) => l.objective === 'process_automation')
 const polObj2After = polAfter.kpiLines.find((l) => l.objective === 'process_automation')
 
-console.log(`  Kade obj2 target: ${kadeObj2Before.target} -> ${kadeObj2After?.target ?? '(line gone)'}`)
-console.log(`  Pol  obj2 target: (none) -> ${polObj2After?.target ?? '(none)'}`)
+console.log(`  Kade obj2 target: ${fmtTarget(kadeObj2Before)} -> ${kadeObj2After ? fmtTarget(kadeObj2After) : '(line gone)'}`)
+console.log(`  Pol  obj2 target: (none) -> ${polObj2After ? fmtTarget(polObj2After) : '(none)'}`)
 
 check('reassigning a project moves the hours off the old owner',
   (kadeObj2After?.creditedHours ?? 0) === (kadeObj2Before.creditedHours - 1238),
   `${kadeObj2Before.creditedHours} -> ${kadeObj2After?.creditedHours ?? 0}`)
 check('reassigning a project moves the hours onto the new owner',
   polObj2After?.creditedHours === 1238, String(polObj2After?.creditedHours))
-check('the target string follows the credited figure',
-  polObj2After?.target?.includes('1,238'), polObj2After?.target)
+check('the target number follows the credited figure',
+  polObj2After?.target === 1238, String(polObj2After?.target))
 check('un-overridden targets never drift', planM.people.every((x) => x.kpiLines.every((l) => !l.drifted)))
 check('both scorecards still total 100% after the move',
   weightsValid(kadeAfter.kpiLines) && weightsValid(polAfter.kpiLines))
@@ -105,14 +115,15 @@ check('both scorecards still total 100% after the move',
 // a pinned target is reported as drifted once assignments move under it
 const pinned = {
   ...moved,
-  people: moved.people.map((p) => (p.id === 'pol' ? { ...p, kpi: { 'obj-process_automation': { target: '999 hrs/month' } } } : p)),
+  people: moved.people.map((p) => (p.id === 'pol' ? { ...p, kpi: { 'obj-process_automation': { target: 999 } } } : p)),
 }
 const polPinned = computePlan(pinned).people.find((p) => p.id === 'pol')
 const pinnedLine = polPinned.kpiLines.find((l) => l.objective === 'process_automation')
 check('a manually pinned target is flagged as drifted', pinnedLine.drifted === true)
+check('the pinned number is what is shown', pinnedLine.target === 999, String(pinnedLine.target))
 check('the live figure is still exposed for syncing', pinnedLine.creditedHours === 1238)
 check('clearing the override restores the live target',
-  pinnedLine.defaultTarget.includes('1,238'), pinnedLine.defaultTarget)
+  pinnedLine.defaultTarget === 1238, String(pinnedLine.defaultTarget))
 
 // --- deleting lines ---
 console.log('\nline removal:')
@@ -170,3 +181,4 @@ check('per-person sheet has a Target column', hasTargetCol)
 unlinkSync(file)
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
+

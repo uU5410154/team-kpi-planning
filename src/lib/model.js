@@ -108,28 +108,31 @@ export function scorecardWeights(person, settings, credited = {}) {
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
   const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
 
+  // targetKind 'hours' -> a plain number the UI renders with a fixed unit.
+  // 'text' -> a milestone or qualitative target a number cannot express.
   const lines = [
-    { id: 'corp-sales', block: 'Corporate', label: 'CP AXTRA Sales', weight: band.corporate / 2, target: 'Per corporate scorecard' },
-    { id: 'corp-eat', block: 'Corporate', label: 'CP AXTRA EAT', weight: band.corporate / 2, target: 'Per corporate scorecard' },
+    { id: 'corp-sales', block: 'Corporate', label: 'CP AXTRA Sales', weight: band.corporate / 2, targetKind: 'text', target: 'Per corporate scorecard' },
+    { id: 'corp-eat', block: 'Corporate', label: 'CP AXTRA EAT', weight: band.corporate / 2, targetKind: 'text', target: 'Per corporate scorecard' },
   ]
 
   if (totalPrio > 0) {
     held.forEach((id) => {
-      // Default target = what this person is actually carrying on that
-      // objective, so the number starts realistic rather than at the team's.
-      const hrs = Math.round(credited[id] || 0)
+      const hours = OBJ_BY_ID[id]?.countsToPool
       lines.push({
         id: `obj-${id}`,
         block: 'Delivery',
         objective: id,
         weight: (band.delivery * (prio[id] ?? 1)) / totalPrio,
-        target: OBJ_BY_ID[id]?.countsToPool ? `${hrs.toLocaleString()} ${unit}` : (OBJ_BY_ID[id]?.target || '—'),
+        targetKind: hours ? 'hours' : 'text',
+        // Default = what this person actually carries, so the number starts
+        // realistic rather than at the team's 3,000.
+        target: hours ? Math.round(credited[id] || 0) : (OBJ_BY_ID[id]?.target || '—'),
       })
     })
   } else {
     // Nobody should hold zero objectives; if it happens, park the delivery
     // block on the pool objective rather than silently losing the weight.
-    lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: band.delivery, target: '—' })
+    lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: band.delivery, targetKind: 'hours', target: 0 })
   }
 
   lines.push({
@@ -142,6 +145,7 @@ export function scorecardWeights(person, settings, credited = {}) {
           ? 'Own capability — new tech skill certified, GuRu contribution'
           : 'Capability — 1 new tech skill, GuRu coaching',
     weight: band.people,
+    targetKind: 'text',
     target: person.band === 'lead' ? '2 GuRus · 60% at medium+' : '1 new tech skill',
   })
 
@@ -152,7 +156,11 @@ export function scorecardWeights(person, settings, credited = {}) {
     .filter((l) => !hidden.has(l.id))
     .map((l) => {
       const o = ov[l.id] || {}
-      const target = o.target != null && o.target !== '' ? o.target : l.target
+      const hasTargetOverride =
+        l.targetKind === 'hours'
+          ? typeof o.target === 'number'
+          : o.target != null && o.target !== ''
+      const target = hasTargetOverride ? o.target : l.target
       return {
         ...l,
         weight: typeof o.weight === 'number' ? o.weight : l.weight,
@@ -165,10 +173,16 @@ export function scorecardWeights(person, settings, credited = {}) {
         // A manual target that no longer matches what the person actually
         // carries — surfaced so it can be re-synced rather than silently drift.
         drifted: !!l.objective && target !== l.target,
-        overridden: typeof o.weight === 'number' || (o.target != null && o.target !== ''),
+        overridden: typeof o.weight === 'number' || hasTargetOverride,
       }
     })
 }
+
+/** Render a KPI target for display or export. */
+export const fmtTarget = (line, basis = 'monthly') =>
+  line.targetKind === 'hours'
+    ? `${Number(line.target || 0).toLocaleString()} ${basis === 'monthly' ? 'hrs/month' : 'hrs/year'}`
+    : String(line.target ?? '—')
 
 /** Lines removed from a scorecard, so they can be listed and restored. */
 export function hiddenLines(person, settings, credited = {}) {

@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { OBJECTIVES, OBJ_BY_ID } from './palette.js'
-import { paybackMonths, SAVING_BASIS } from './model.js'
+import { paybackMonths, SAVING_BASIS, fmtTarget } from './model.js'
 
 /* ------------------------------------------------------------------ */
 /* house style                                                         */
@@ -245,7 +245,7 @@ export async function buildWorkbook(plan, state) {
           row.getCell(c0 + 1).value = 0
           tone(row.getCell(c0), MUTED, false)
         } else {
-          row.getCell(c0).value = line.target || '—'
+          row.getCell(c0).value = fmtTarget(line, settings.savingBasis)
           row.getCell(c0 + 1).value = line.weight
           if (spec.objective) row.getCell(c0 + 2).value = Math.round(p.byObjective[spec.objective] || 0)
           if (line.overridden) tone(row.getCell(c0), NAVY_MID, false)
@@ -398,7 +398,7 @@ export async function buildWorkbook(plan, state) {
       const row = ws.getRow(r++)
       row.getCell(1).value = l.block
       row.getCell(2).value = o ? `Obj ${o.no} — ${o.name}` : l.label
-      row.getCell(3).value = l.target || '—'
+      row.getCell(3).value = fmtTarget(l, settings.savingBasis)
       row.getCell(4).value = l.weight
       row.getCell(4).numFmt = PCT
       row.getCell(4).alignment = { horizontal: 'center' }
