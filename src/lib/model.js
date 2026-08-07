@@ -146,17 +146,59 @@ export function scorecardWeights(person, settings, credited = {}) {
   })
 
   const ov = person.kpi || {}
-  return lines.map((l) => {
-    const o = ov[l.id] || {}
-    return {
-      ...l,
-      weight: typeof o.weight === 'number' ? o.weight : l.weight,
-      target: o.target != null && o.target !== '' ? o.target : l.target,
-      defaultWeight: l.weight,
-      defaultTarget: l.target,
-      overridden: typeof o.weight === 'number' || (o.target != null && o.target !== ''),
+  const hidden = new Set(person.kpiHidden || [])
+
+  return lines
+    .filter((l) => !hidden.has(l.id))
+    .map((l) => {
+      const o = ov[l.id] || {}
+      const target = o.target != null && o.target !== '' ? o.target : l.target
+      return {
+        ...l,
+        weight: typeof o.weight === 'number' ? o.weight : l.weight,
+        target,
+        defaultWeight: l.weight,
+        // The live figure straight from current project assignments. Reassign a
+        // project on the Projects tab and this moves immediately.
+        defaultTarget: l.target,
+        creditedHours: l.objective ? (credited[l.objective] || 0) : null,
+        // A manual target that no longer matches what the person actually
+        // carries — surfaced so it can be re-synced rather than silently drift.
+        drifted: !!l.objective && target !== l.target,
+        overridden: typeof o.weight === 'number' || (o.target != null && o.target !== ''),
+      }
+    })
+}
+
+/** Lines removed from a scorecard, so they can be listed and restored. */
+export function hiddenLines(person, settings, credited = {}) {
+  const hidden = new Set(person.kpiHidden || [])
+  if (!hidden.size) return []
+  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited)
+  return all.filter((l) => hidden.has(l.id))
+}
+
+/**
+ * Scale weights proportionally so they total exactly 1.0 — what you want after
+ * deleting a line, rather than hand-patching the remainder.
+ */
+export function rebalanceWeights(lines) {
+  const total = weightSum(lines)
+  if (total <= 0) {
+    const even = 1 / (lines.length || 1)
+    return Object.fromEntries(lines.map((l) => [l.id, even]))
+  }
+  const out = {}
+  let acc = 0
+  lines.forEach((l, i) => {
+    if (i === lines.length - 1) out[l.id] = Math.round((1 - acc) * 10000) / 10000
+    else {
+      const w = Math.round((l.weight / total) * 10000) / 10000
+      out[l.id] = w
+      acc += w
     }
   })
+  return out
 }
 
 export const weightSum = (lines) => lines.reduce((a, l) => a + (l.weight || 0), 0)
@@ -377,6 +419,7 @@ export function computePlan(state) {
       byObjective,
       rows,
       kpiLines: scorecardWeights(withObjectives, s, byObjective),
+      kpiHiddenLines: hiddenLines(withObjectives, s, byObjective),
     }
   })
 

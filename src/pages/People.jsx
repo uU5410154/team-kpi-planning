@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Grid, Chip, Tabs, Tab, Alert, Divider, Tooltip, TextField, InputAdornment, Button,
+  Grid, Chip, Tabs, Tab, Alert, Divider, Tooltip, TextField, InputAdornment, Button, IconButton,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import SyncIcon from '@mui/icons-material/Sync'
+import SyncProblemIcon from '@mui/icons-material/SyncProblem'
+import UndoIcon from '@mui/icons-material/Undo'
 import StatTile from '../components/StatTile.jsx'
 import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
 import { fmtHours, fmtPct, fmtRatio, weightSum, weightsValid } from '../lib/model.js'
@@ -61,7 +65,9 @@ function TargetCell({ value, onChange, placeholder }) {
   )
 }
 
-export default function People({ plan, onPersonKpi, onResetKpi }) {
+export default function People({
+  plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets,
+}) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { people, settings, totals } = plan
@@ -72,7 +78,10 @@ export default function People({ plan, onPersonKpi, onResetKpi }) {
   const sum = weightSum(p.kpiLines)
   const weightOk = weightsValid(p.kpiLines)
   const shareOfTeam = totals.totalHours > 0 ? p.hours / totals.totalHours : 0
-  const edited = p.kpiLines.some((l) => l.overridden)
+  const edited = p.kpiLines.some((l) => l.overridden) || (p.kpiHiddenLines || []).length > 0
+  const drifted = p.kpiLines.filter((l) => l.drifted)
+  const removed = p.kpiHiddenLines || []
+  const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -179,9 +188,35 @@ export default function People({ plan, onPersonKpi, onResetKpi }) {
             </Box>
 
             {!weightOk && (
-              <Alert severity="error" square sx={{ borderRadius: 0 }}>
+              <Alert
+                severity="error"
+                square
+                sx={{ borderRadius: 0 }}
+                action={
+                  <Button color="inherit" size="small" onClick={() => onRebalance(p.id)}>
+                    Rebalance to 100%
+                  </Button>
+                }
+              >
                 Weights total <strong>{fmtPct(sum)}</strong>, not 100%. Saving is blocked until this is exactly 100% —
                 adjust by <strong>{sum > 1 ? '−' : '+'}{fmtPct(Math.abs(1 - sum))}</strong>.
+              </Alert>
+            )}
+
+            {drifted.length > 0 && (
+              <Alert
+                severity="warning"
+                square
+                sx={{ borderRadius: 0 }}
+                icon={<SyncProblemIcon fontSize="inherit" />}
+                action={
+                  <Button color="inherit" size="small" startIcon={<SyncIcon />} onClick={() => onSyncTargets(p.id)}>
+                    Sync all
+                  </Button>
+                }
+              >
+                {drifted.length} target{drifted.length === 1 ? '' : 's'} no longer match what {p.nick} actually carries
+                — project assignments have changed since these were typed.
               </Alert>
             )}
 
@@ -192,6 +227,7 @@ export default function People({ plan, onPersonKpi, onResetKpi }) {
                   <TableCell>KPI line</TableCell>
                   <TableCell sx={{ minWidth: 190 }}>Target</TableCell>
                   <TableCell align="right" sx={{ width: 110 }}>Weight</TableCell>
+                  <TableCell padding="checkbox" />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -215,20 +251,33 @@ export default function People({ plan, onPersonKpi, onResetKpi }) {
                               {o ? `Obj ${o.no} — ${o.name}` : l.label}
                             </Typography>
                             {o && (
-                              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                {fmtHours(p.byObjective[o.id] || 0)} {settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'} currently credited
-                                {l.overridden && ' · edited'}
+                              <Typography
+                                variant="caption"
+                                sx={{ color: l.drifted ? STATUS.warning : 'text.secondary', fontWeight: l.drifted ? 600 : 400 }}
+                              >
+                                {fmtHours(l.creditedHours)} {unit} credited from {p.rows.filter((r) => r.p.objective === o.id).length} assigned project
+                                {p.rows.filter((r) => r.p.objective === o.id).length === 1 ? '' : 's'}
+                                {l.drifted && ' — target differs'}
                               </Typography>
                             )}
                           </Box>
                         </Box>
                       </TableCell>
                       <TableCell sx={{ verticalAlign: 'top', pt: 1.25 }}>
-                        <TargetCell
-                          value={l.target}
-                          placeholder={l.defaultTarget}
-                          onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
-                        />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <TargetCell
+                            value={l.target}
+                            placeholder={l.defaultTarget}
+                            onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
+                          />
+                          {l.drifted && (
+                            <Tooltip title={`Snap back to ${l.defaultTarget} — the live figure from ${p.nick}'s current project assignments`}>
+                              <IconButton size="small" onClick={() => onPersonKpi(p.id, l.id, { target: '' })}>
+                                <SyncIcon sx={{ fontSize: 16, color: STATUS.warning }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
                       </TableCell>
                       <TableCell align="right" sx={{ verticalAlign: 'top', pt: 1.25 }}>
                         <PctCell
@@ -237,9 +286,23 @@ export default function People({ plan, onPersonKpi, onResetKpi }) {
                           onChange={(v) => onPersonKpi(p.id, l.id, { weight: v })}
                         />
                       </TableCell>
+                      <TableCell padding="checkbox" sx={{ verticalAlign: 'top', pt: 1.75 }}>
+                        <Tooltip title="Remove this line from the scorecard">
+                          <IconButton size="small" onClick={() => onRemoveLine(p.id, l.id)}>
+                            <DeleteOutlineIcon sx={{ fontSize: 17 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
                     </TableRow>
                   )
                 })}
+                {p.kpiLines.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                      Every line has been removed. Restore one below, or reset to the band defaults.
+                    </TableCell>
+                  </TableRow>
+                )}
                 <TableRow>
                   <TableCell colSpan={2} sx={{ borderTop: 2, borderColor: 'divider' }} />
                   <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
@@ -250,17 +313,51 @@ export default function People({ plan, onPersonKpi, onResetKpi }) {
                       {fmtPct(sum)}
                     </Typography>
                   </TableCell>
+                  <TableCell sx={{ borderTop: 2, borderColor: 'divider' }} />
                 </TableRow>
               </TableBody>
             </Table>
 
-            <Box sx={{ px: 2.5, py: 2, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', flex: 1 }}>
-                Defaults come from the <strong>{BAND_LABEL[p.band]}</strong> band
-                ({fmtPct(settings.bands[p.band].corporate)} corporate / {fmtPct(settings.bands[p.band].delivery)} delivery /{' '}
-                {fmtPct(settings.bands[p.band].people)} capability). Your edits override them and are saved with the
-                scenario.
+            {removed.length > 0 && (
+              <Box sx={{ px: 2.5, py: 1.75, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, display: 'block', mb: 1 }}>
+                  REMOVED FROM THIS SCORECARD
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {removed.map((l) => {
+                    const o = l.objective ? OBJ_BY_ID[l.objective] : null
+                    return (
+                      <Chip
+                        key={l.id}
+                        size="small"
+                        variant="outlined"
+                        icon={<UndoIcon />}
+                        label={o ? `Obj ${o.no} — ${o.short}` : l.label?.split('—')[0].trim()}
+                        onClick={() => onRestoreLine(p.id, l.id)}
+                        sx={{ cursor: 'pointer' }}
+                      />
+                    )
+                  })}
+                </Box>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
+                  Click to restore. Removing a line does not delete the underlying projects — {p.nick}'s hours still
+                  count toward the team total.
+                </Typography>
+              </Box>
+            )}
+
+            <Box sx={{ px: 2.5, py: 2, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 320px' }}>
+                Targets track project assignments live — reassign a project on the Projects tab and the credited figure
+                here follows. Typing over a target pins it until you sync it back. Defaults come from the{' '}
+                <strong>{BAND_LABEL[p.band]}</strong> band ({fmtPct(settings.bands[p.band].corporate)} corporate /{' '}
+                {fmtPct(settings.bands[p.band].delivery)} delivery / {fmtPct(settings.bands[p.band].people)} capability).
               </Typography>
+              {!weightOk && (
+                <Button size="small" variant="outlined" onClick={() => onRebalance(p.id)}>
+                  Rebalance to 100%
+                </Button>
+              )}
               {edited && (
                 <Button size="small" startIcon={<RestartAltIcon />} onClick={() => onResetKpi(p.id)}>
                   Reset to default

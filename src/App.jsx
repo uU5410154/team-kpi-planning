@@ -15,7 +15,7 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import ScenarioDialog from './components/ScenarioDialog.jsx'
 
 import { buildTheme } from './theme.js'
-import { computePlan, newProject } from './lib/model.js'
+import { computePlan, newProject, rebalanceWeights } from './lib/model.js'
 import * as api from './lib/api.js'
 import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
@@ -151,9 +151,68 @@ export default function App() {
   }, [])
 
   const resetPersonKpi = useCallback((id) => {
-    setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, kpi: {} } : p)) }))
-    setToast({ severity: 'info', msg: 'Weights and targets reset to the band defaults.' })
+    setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, kpi: {}, kpiHidden: [] } : p)) }))
+    setToast({ severity: 'info', msg: 'Weights, targets and removed lines all reset to the band defaults.' })
   }, [])
+
+  /** Remove a KPI line from someone's scorecard (restorable). */
+  const removePersonKpiLine = useCallback((id, lineId) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) =>
+        p.id === id ? { ...p, kpiHidden: [...new Set([...(p.kpiHidden || []), lineId])] } : p,
+      ),
+    }))
+    setToast({ severity: 'info', msg: 'Line removed. Weights no longer total 100% — rebalance before saving.' })
+  }, [])
+
+  const restorePersonKpiLine = useCallback((id, lineId) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) =>
+        p.id === id ? { ...p, kpiHidden: (p.kpiHidden || []).filter((x) => x !== lineId) } : p,
+      ),
+    }))
+  }, [])
+
+  /** Scale the remaining weights proportionally back to exactly 100%. */
+  const rebalancePersonKpi = useCallback((id) => {
+    const person = plan.people.find((p) => p.id === id)
+    if (!person) return
+    const next = rebalanceWeights(person.kpiLines)
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) => {
+        if (p.id !== id) return p
+        const kpi = { ...(p.kpi || {}) }
+        for (const [lineId, w] of Object.entries(next)) kpi[lineId] = { ...(kpi[lineId] || {}), weight: w }
+        return { ...p, kpi }
+      }),
+    }))
+    setToast({ severity: 'success', msg: 'Weights rebalanced to 100%.' })
+  }, [plan.people])
+
+  /** Snap targets back to what the person actually carries right now. */
+  const syncPersonTargets = useCallback((id) => {
+    const person = plan.people.find((p) => p.id === id)
+    if (!person) return
+    const drifted = person.kpiLines.filter((l) => l.drifted)
+    if (!drifted.length) return
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) => {
+        if (p.id !== id) return p
+        const kpi = { ...(p.kpi || {}) }
+        for (const l of drifted) {
+          const { target, ...rest } = kpi[l.id] || {}
+          if (Object.keys(rest).length) kpi[l.id] = rest
+          else delete kpi[l.id]
+        }
+        return { ...p, kpi }
+      }),
+    }))
+    setToast({ severity: 'success', msg: `${drifted.length} target${drifted.length === 1 ? '' : 's'} synced to current assignments.` })
+  }, [plan.people])
 
   const addProject = useCallback(() => {
     let created
@@ -324,7 +383,15 @@ export default function App() {
             />
           )}
           {tab === 'people' && (
-            <People plan={plan} onPersonKpi={updatePersonKpi} onResetKpi={resetPersonKpi} />
+            <People
+              plan={plan}
+              onPersonKpi={updatePersonKpi}
+              onResetKpi={resetPersonKpi}
+              onRemoveLine={removePersonKpiLine}
+              onRestoreLine={restorePersonKpiLine}
+              onRebalance={rebalancePersonKpi}
+              onSyncTargets={syncPersonTargets}
+            />
           )}
           {tab === 'settings' && (
             <Settings

@@ -7,7 +7,7 @@
  */
 import { readFileSync, unlinkSync, existsSync } from 'node:fs'
 import ExcelJS from 'exceljs'
-import { computePlan, DEFAULT_SETTINGS, weightSum, weightsValid } from '../src/lib/model.js'
+import { computePlan, DEFAULT_SETTINGS, weightSum, weightsValid, rebalanceWeights } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
@@ -68,6 +68,82 @@ check('unbalanced edit is reported invalid', plan2.invalid.length === 1 && plan2
 check('the invalid sum is reported accurately', Math.abs(plan2.invalid[0].sum - 1.35) < 1e-9,
   `${plan2.invalid[0].sum}`)
 check('others stay valid', plan2.people.filter((p) => p.id !== 'kade').every((p) => weightsValid(p.kpiLines)))
+
+// --- targets follow project assignments ---
+console.log('\nreassignment sync:')
+const kadeBefore = plan0.people.find((p) => p.id === 'kade')
+const kadeObj2Before = kadeBefore.kpiLines.find((l) => l.objective === 'process_automation')
+
+// move Kade's 1,238-hour epic to Pol and both scorecards must move with it
+const moved = {
+  ...base,
+  projects: base.projects.map((p) =>
+    p.key === 'FNP-1151#3'
+      ? { ...p, pic: 'pol', contributors: [{ person: 'pol', roles: ['dev'] }] }
+      : p),
+}
+const planM = computePlan(moved)
+const kadeAfter = planM.people.find((p) => p.id === 'kade')
+const polAfter = planM.people.find((p) => p.id === 'pol')
+const kadeObj2After = kadeAfter.kpiLines.find((l) => l.objective === 'process_automation')
+const polObj2After = polAfter.kpiLines.find((l) => l.objective === 'process_automation')
+
+console.log(`  Kade obj2 target: ${kadeObj2Before.target} -> ${kadeObj2After?.target ?? '(line gone)'}`)
+console.log(`  Pol  obj2 target: (none) -> ${polObj2After?.target ?? '(none)'}`)
+
+check('reassigning a project moves the hours off the old owner',
+  (kadeObj2After?.creditedHours ?? 0) === (kadeObj2Before.creditedHours - 1238),
+  `${kadeObj2Before.creditedHours} -> ${kadeObj2After?.creditedHours ?? 0}`)
+check('reassigning a project moves the hours onto the new owner',
+  polObj2After?.creditedHours === 1238, String(polObj2After?.creditedHours))
+check('the target string follows the credited figure',
+  polObj2After?.target?.includes('1,238'), polObj2After?.target)
+check('un-overridden targets never drift', planM.people.every((x) => x.kpiLines.every((l) => !l.drifted)))
+check('both scorecards still total 100% after the move',
+  weightsValid(kadeAfter.kpiLines) && weightsValid(polAfter.kpiLines))
+
+// a pinned target is reported as drifted once assignments move under it
+const pinned = {
+  ...moved,
+  people: moved.people.map((p) => (p.id === 'pol' ? { ...p, kpi: { 'obj-process_automation': { target: '999 hrs/month' } } } : p)),
+}
+const polPinned = computePlan(pinned).people.find((p) => p.id === 'pol')
+const pinnedLine = polPinned.kpiLines.find((l) => l.objective === 'process_automation')
+check('a manually pinned target is flagged as drifted', pinnedLine.drifted === true)
+check('the live figure is still exposed for syncing', pinnedLine.creditedHours === 1238)
+check('clearing the override restores the live target',
+  pinnedLine.defaultTarget.includes('1,238'), pinnedLine.defaultTarget)
+
+// --- deleting lines ---
+console.log('\nline removal:')
+const trimmed = {
+  ...base,
+  people: base.people.map((p) => (p.id === 'james' ? { ...p, kpiHidden: ['corp-eat'] } : p)),
+}
+const planT = computePlan(trimmed)
+const james = planT.people.find((p) => p.id === 'james')
+check('removed line is gone from the scorecard', !james.kpiLines.some((l) => l.id === 'corp-eat'))
+check('removed line is listed for restore',
+  james.kpiHiddenLines.some((l) => l.id === 'corp-eat'), String(james.kpiHiddenLines.length))
+check('removal drops the total below 100% and blocks saving',
+  !weightsValid(james.kpiLines) && planT.invalid.some((x) => x.id === 'james'),
+  `${(weightSum(james.kpiLines) * 100).toFixed(1)}%`)
+
+const rebalanced = rebalanceWeights(james.kpiLines)
+const rebSum = Object.values(rebalanced).reduce((a, b) => a + b, 0)
+check('rebalance restores exactly 100%', Math.abs(rebSum - 1) < 1e-9, `${(rebSum * 100).toFixed(4)}%`)
+
+const afterReb = computePlan({
+  ...trimmed,
+  people: trimmed.people.map((p) =>
+    p.id === 'james'
+      ? { ...p, kpi: Object.fromEntries(Object.entries(rebalanced).map(([k, w]) => [k, { weight: w }])) }
+      : p),
+}).people.find((p) => p.id === 'james')
+check('rebalanced scorecard passes the save gate', weightsValid(afterReb.kpiLines),
+  `${(weightSum(afterReb.kpiLines) * 100).toFixed(2)}%`)
+check('restoring the line brings it back',
+  computePlan(base).people.find((p) => p.id === 'james').kpiLines.some((l) => l.id === 'corp-eat'))
 
 // --- export consistency ---
 const file = 'scorecard-selftest.xlsx'
