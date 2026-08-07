@@ -69,50 +69,51 @@ export function exportWorkbook(plan, state) {
   XLSX.utils.book_append_sheet(wb, wsSum, 'Summary')
 
   /* ---------------- Overall_Objectives ---------------- */
-  // Person column blocks, mirroring the 2025 layout.
+  // Person column blocks, mirroring the 2025 layout. Weights come straight
+  // from each person's computed kpiLines so the sheet can never disagree with
+  // the app.
   const head1 = ['', '', '']
   const head2 = ['Obj. Part', 'No.', 'KPI']
   people.forEach((p) => {
-    head1.push(p.nick, '', '', '')
+    head1.push(`${p.nick} — ${p.band}`, '', '', '')
     head2.push('Target', '%Weight', 'Actual', 'Note')
   })
 
-  const corp = settings.corporateWeight
-  const indiv = 1 - corp
-  const lines = [
-    { part: 'Corporate', no: 1, kpi: 'CP AXTRA Sales', weight: corp / 2, target: 'Per corporate scorecard' },
-    { part: 'Corporate', no: 2, kpi: 'CP AXTRA EAT', weight: corp / 2, target: 'Per corporate scorecard' },
-  ]
-  OBJECTIVES.forEach((o, i) => {
-    lines.push({
+  // Stable row skeleton: 2 corporate lines, the 5 objectives, then capability.
+  const rowSpec = [
+    { id: 'corp-sales', part: 'Corporate', no: 1, kpi: 'CP AXTRA Sales', target: 'Per corporate scorecard' },
+    { id: 'corp-eat', part: 'Corporate', no: 2, kpi: 'CP AXTRA EAT', target: 'Per corporate scorecard' },
+    ...OBJECTIVES.map((o, i) => ({
+      id: `obj-${o.id}`,
       part: 'Individual',
       no: 3 + i,
       kpi: `[Obj ${o.no}] ${o.name}`,
-      weight: indiv / OBJECTIVES.length,
+      target: o.target,
       objective: o.id,
-    })
-  })
+    })),
+    { id: 'people', part: 'Capability', no: 8, kpi: 'Capability / people development', target: 'See scorecard' },
+  ]
 
   const overall = [head1, head2]
-  lines.forEach((l) => {
-    const row = [l.part, l.no, l.kpi]
+  rowSpec.forEach((spec) => {
+    const row = [spec.part, spec.no, spec.kpi]
     people.forEach((p) => {
-      if (l.objective) {
-        const h = p.byObjective[l.objective] || 0
-        const holds = p.objectives.includes(l.objective)
-        row.push(holds ? Math.round(h) : '—', holds ? l.weight : 0, '', holds ? '' : 'not held')
-      } else {
-        row.push(l.target, l.weight, '', '')
+      const line = p.kpiLines.find((l) => l.id === spec.id)
+      if (!line) {
+        row.push('—', 0, '', 'not held')
+        return
       }
+      const actual = spec.objective ? Math.round(p.byObjective[spec.objective] || 0) : ''
+      row.push(spec.objective ? `${spec.target}` : spec.target, line.weight, actual, '')
     })
     overall.push(row)
   })
-  // weight check row — the 2025 file failed to total 100% for two people
+
+  // Weight check row — the 2025 file totalled 80% for Gun and 75% for James.
   const checkRow = ['', '', 'WEIGHT TOTAL (must be 100%)']
   people.forEach((p) => {
-    const held = OBJECTIVES.filter((o) => p.objectives.includes(o.id)).length
-    const w = corp + (held / OBJECTIVES.length) * indiv
-    checkRow.push('', w, '', held === 0 ? 'NO OBJECTIVES HELD' : '')
+    const w = p.kpiLines.reduce((a, l) => a + l.weight, 0)
+    checkRow.push('', w, '', Math.abs(w - 1) < 1e-9 ? 'OK' : 'DOES NOT TOTAL 100%')
   })
   overall.push([], checkRow)
 
