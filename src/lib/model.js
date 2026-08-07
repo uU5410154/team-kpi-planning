@@ -91,33 +91,45 @@ export const DEFAULT_SETTINGS = {
 }
 
 /**
- * Build the KPI weight lines for one person. Always totals exactly 1.0.
- * Held objectives share the delivery block in proportion to their priority.
+ * Build the KPI lines for one person: a computed default weight and target,
+ * with any manual override applied on top.
+ *
+ * Overrides live on `person.kpi = { [lineId]: { weight, target } }` so they
+ * travel with the scenario into Mongo and out to Excel — the dashboard, the
+ * scorecard and the export all read these same lines, so they cannot disagree.
+ *
+ * The DEFAULTS always total 1.0. Overrides can break that on purpose while
+ * someone is mid-edit; `weightsValid` is what gates saving.
  */
-export function scorecardWeights(person, settings) {
+export function scorecardWeights(person, settings, credited = {}) {
   const band = settings.bands[person.band] || settings.bands.senior
   const held = person.objectives || []
   const prio = settings.objectivePriority
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
+  const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
 
   const lines = [
-    { id: 'corp-sales', block: 'Corporate', label: 'CP AXTRA Sales', weight: band.corporate / 2 },
-    { id: 'corp-eat', block: 'Corporate', label: 'CP AXTRA EAT', weight: band.corporate / 2 },
+    { id: 'corp-sales', block: 'Corporate', label: 'CP AXTRA Sales', weight: band.corporate / 2, target: 'Per corporate scorecard' },
+    { id: 'corp-eat', block: 'Corporate', label: 'CP AXTRA EAT', weight: band.corporate / 2, target: 'Per corporate scorecard' },
   ]
 
   if (totalPrio > 0) {
     held.forEach((id) => {
+      // Default target = what this person is actually carrying on that
+      // objective, so the number starts realistic rather than at the team's.
+      const hrs = Math.round(credited[id] || 0)
       lines.push({
         id: `obj-${id}`,
         block: 'Delivery',
         objective: id,
         weight: (band.delivery * (prio[id] ?? 1)) / totalPrio,
+        target: OBJ_BY_ID[id]?.countsToPool ? `${hrs.toLocaleString()} ${unit}` : (OBJ_BY_ID[id]?.target || '—'),
       })
     })
   } else {
     // Nobody should hold zero objectives; if it happens, park the delivery
     // block on the pool objective rather than silently losing the weight.
-    lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: band.delivery })
+    lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: band.delivery, target: '—' })
   }
 
   lines.push({
@@ -130,10 +142,35 @@ export function scorecardWeights(person, settings) {
           ? 'Own capability — new tech skill certified, GuRu contribution'
           : 'Capability — 1 new tech skill, GuRu coaching',
     weight: band.people,
+    target: person.band === 'lead' ? '2 GuRus · 60% at medium+' : '1 new tech skill',
   })
 
-  return lines
+  const ov = person.kpi || {}
+  return lines.map((l) => {
+    const o = ov[l.id] || {}
+    return {
+      ...l,
+      weight: typeof o.weight === 'number' ? o.weight : l.weight,
+      target: o.target != null && o.target !== '' ? o.target : l.target,
+      defaultWeight: l.weight,
+      defaultTarget: l.target,
+      overridden: typeof o.weight === 'number' || (o.target != null && o.target !== ''),
+    }
+  })
 }
+
+export const weightSum = (lines) => lines.reduce((a, l) => a + (l.weight || 0), 0)
+
+/** A scorecard is only saveable when its weights total exactly 100%. */
+export const weightsValid = (lines) => Math.abs(weightSum(lines) - 1) < 0.0005
+
+/** Everyone whose weights do not total 100% — the save gate reads this. */
+export const invalidScorecards = (people) =>
+  people.filter((p) => !weightsValid(p.kpiLines)).map((p) => ({
+    id: p.id,
+    nick: p.nick,
+    sum: weightSum(p.kpiLines),
+  }))
 
 export const ROLE_ORDER = ['pm', 'lead', 'dev', 'support', 'qa', 'assignee']
 
@@ -339,7 +376,7 @@ export function computePlan(state) {
       ratio: manday > 0 ? hours / manday : null,
       byObjective,
       rows,
-      kpiLines: scorecardWeights(withObjectives, s),
+      kpiLines: scorecardWeights(withObjectives, s, byObjective),
     }
   })
 
@@ -414,6 +451,8 @@ export function computePlan(state) {
     },
     byObjective,
     quality,
+    // Blocks saving while any scorecard is off 100%.
+    invalid: invalidScorecards(byPerson),
   }
 }
 

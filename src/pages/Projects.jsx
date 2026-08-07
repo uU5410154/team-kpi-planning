@@ -84,7 +84,7 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
 
 export default function Projects({
   plan, onUpdate, onBulk, onAdd, onDelete,
-  onSave, dirty, saving, lastSaved, scenarioName,
+  onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -273,22 +273,36 @@ export default function Projects({
               <Button size="small" onClick={() => setSel(new Set())}>Clear</Button>
             </>
           )}
-          <Tooltip title={dirty ? 'You have unsaved changes' : 'Everything is saved'}>
+          <Tooltip
+            title={
+              blocked.length
+                ? `Blocked: ${blocked.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')}`
+                : dirty ? 'You have unsaved changes' : 'Everything is saved'
+            }
+          >
             <span>
               <Button
                 size="small"
                 variant="contained"
-                color={dirty ? 'primary' : 'inherit'}
+                color={blocked.length ? 'error' : dirty ? 'primary' : 'inherit'}
                 startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
                 onClick={onSave}
-                disabled={saving || !dirty}
+                disabled={saving || (!dirty && !blocked.length)}
               >
-                {saving ? 'Saving…' : dirty ? 'Save to database' : 'Saved'}
+                {saving ? 'Saving…' : blocked.length ? 'Fix weights to save' : dirty ? 'Save to database' : 'Saved'}
               </Button>
             </span>
           </Tooltip>
         </Stack>
-        {(dirty || lastSaved) && (
+        {blocked.length > 0 ? (
+          <Alert severity="error" variant="outlined" sx={{ mt: 1.5, py: 0.25 }}>
+            Saving is blocked — {blocked.map((x) => `${x.nick} is at ${Math.round(x.sum * 100)}%`).join(', ')}. Every
+            scorecard must total exactly 100%.{' '}
+            <Link component="button" onClick={() => onGoTo?.('people')} sx={{ fontWeight: 600 }}>
+              Fix on the Scorecards tab →
+            </Link>
+          </Alert>
+        ) : (dirty || lastSaved) && (
           <Typography variant="caption" sx={{ color: dirty ? STATUS.warning : 'text.secondary', display: 'block', mt: 1 }}>
             {dirty
               ? `Unsaved changes to "${scenarioName || 'this scenario'}" — they are held in this browser until you save.`

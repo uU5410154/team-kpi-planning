@@ -217,14 +217,16 @@ export async function buildWorkbook(plan, state) {
     people.forEach(() => widths.push(20, 10, 11))
     headerRow(ws, 5, labels, widths)
 
+    // Targets come from each person's own KPI line, not from the guideline —
+    // the team target is 3,000; individuals each carry their own number.
     const rowSpec = [
-      { id: 'corp-sales', part: 'Corporate', no: 1, kpi: 'CP AXTRA Sales', target: 'Corporate scorecard' },
-      { id: 'corp-eat', part: 'Corporate', no: 2, kpi: 'CP AXTRA EAT', target: 'Corporate scorecard' },
+      { id: 'corp-sales', part: 'Corporate', no: 1, kpi: 'CP AXTRA Sales' },
+      { id: 'corp-eat', part: 'Corporate', no: 2, kpi: 'CP AXTRA EAT' },
       ...OBJECTIVES.map((o, i) => ({
         id: `obj-${o.id}`, part: 'Individual', no: 3 + i,
-        kpi: `[Obj ${o.no}] ${o.name}`, target: o.target, objective: o.id,
+        kpi: `[Obj ${o.no}] ${o.name}`, objective: o.id,
       })),
-      { id: 'people', part: 'Capability', no: 8, kpi: 'Capability / people development', target: 'See scorecard' },
+      { id: 'people', part: 'Capability', no: 8, kpi: 'Capability / people development' },
     ]
 
     let r = 6
@@ -243,9 +245,10 @@ export async function buildWorkbook(plan, state) {
           row.getCell(c0 + 1).value = 0
           tone(row.getCell(c0), MUTED, false)
         } else {
-          row.getCell(c0).value = spec.target
+          row.getCell(c0).value = line.target || '—'
           row.getCell(c0 + 1).value = line.weight
           if (spec.objective) row.getCell(c0 + 2).value = Math.round(p.byObjective[spec.objective] || 0)
+          if (line.overridden) tone(row.getCell(c0), NAVY_MID, false)
         }
         row.getCell(c0).alignment = { horizontal: 'center' }
         row.getCell(c0 + 1).numFmt = PCT
@@ -387,27 +390,29 @@ export async function buildWorkbook(plan, state) {
     styleBody(ws, sStart, r - 1, 3, { zebra: false })
 
     r++
-    sectionRow(ws, r++, 'KPI WEIGHTS', cols.length)
-    headerRow(ws, r++, ['Block', 'KPI line', 'Weight', '', '', '', '', '', '', '', ''])
+    sectionRow(ws, r++, 'KPI SCORECARD', cols.length)
+    headerRow(ws, r++, ['Block', 'KPI line', `${p.nick}'s target`, 'Weight', '', '', '', '', '', '', ''])
     const wStart = r
     p.kpiLines.forEach((l) => {
       const o = l.objective ? OBJ_BY_ID[l.objective] : null
       const row = ws.getRow(r++)
       row.getCell(1).value = l.block
-      row.getCell(2).value = o ? `Obj ${o.no} — ${o.name}  (target ${o.target})` : l.label
-      row.getCell(3).value = l.weight
-      row.getCell(3).numFmt = PCT
-      row.getCell(3).alignment = { horizontal: 'center' }
+      row.getCell(2).value = o ? `Obj ${o.no} — ${o.name}` : l.label
+      row.getCell(3).value = l.target || '—'
+      row.getCell(4).value = l.weight
+      row.getCell(4).numFmt = PCT
+      row.getCell(4).alignment = { horizontal: 'center' }
+      if (l.overridden) tone(row.getCell(3), NAVY_MID, false)
     })
     const sum = p.kpiLines.reduce((a, l) => a + l.weight, 0)
     const sr = ws.getRow(r++)
-    sr.getCell(2).value = 'TOTAL'
-    sr.getCell(3).value = sum
-    sr.getCell(3).numFmt = PCT
-    sr.getCell(3).alignment = { horizontal: 'center' }
-    tone(sr.getCell(2), NAVY)
-    tone(sr.getCell(3), Math.abs(sum - 1) < 1e-9 ? GOOD : BAD)
-    styleBody(ws, wStart, r - 1, 3)
+    sr.getCell(3).value = 'TOTAL'
+    sr.getCell(4).value = sum
+    sr.getCell(4).numFmt = PCT
+    sr.getCell(4).alignment = { horizontal: 'center' }
+    tone(sr.getCell(3), NAVY)
+    tone(sr.getCell(4), Math.abs(sum - 1) < 0.0005 ? GOOD : BAD)
+    styleBody(ws, wStart, r - 1, 4)
 
     r++
     sectionRow(ws, r++, 'PROJECT PORTFOLIO', cols.length)

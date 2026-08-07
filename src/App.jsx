@@ -83,6 +83,16 @@ export default function App() {
 
   /** Save the plan to the shared database under the current scenario name. */
   const saveToDb = useCallback(async () => {
+    // Hard gate: a scorecard that does not total 100% must never reach the
+    // database, or the export and the appraisal built from it are wrong.
+    if (plan.invalid.length) {
+      setTab('people')
+      setToast({
+        severity: 'error',
+        msg: `Cannot save — ${plan.invalid.map((x) => `${x.nick} is at ${Math.round(x.sum * 100)}%`).join(', ')}. Every scorecard must total exactly 100%.`,
+      })
+      return
+    }
     const name = (state.scenarioName || '').trim()
     if (!name) { setScenario('save'); return }
     setSaving(true)
@@ -100,7 +110,7 @@ export default function App() {
     } finally {
       setSaving(false)
     }
-  }, [state])
+  }, [state, plan.invalid])
 
   // Keep the tab in the URL hash so a view can be linked or bookmarked.
   useEffect(() => {
@@ -126,6 +136,23 @@ export default function App() {
 
   const updatePerson = useCallback((id, patch) => {
     setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
+  }, [])
+
+  /** Override one KPI line's weight and/or target for one person. */
+  const updatePersonKpi = useCallback((id, lineId, patch) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) =>
+        p.id === id
+          ? { ...p, kpi: { ...(p.kpi || {}), [lineId]: { ...((p.kpi || {})[lineId] || {}), ...patch } } }
+          : p,
+      ),
+    }))
+  }, [])
+
+  const resetPersonKpi = useCallback((id) => {
+    setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, kpi: {} } : p)) }))
+    setToast({ severity: 'info', msg: 'Weights and targets reset to the band defaults.' })
   }, [])
 
   const addProject = useCallback(() => {
@@ -214,6 +241,17 @@ export default function App() {
               label={`${Math.round(plan.totals.totalHours).toLocaleString()} / ${plan.totals.target.toLocaleString()} hrs`}
               sx={{ fontVariantNumeric: 'tabular-nums' }}
             />
+            {plan.invalid.length > 0 && (
+              <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')} — saving is blocked until every scorecard totals 100%`}>
+                <Chip
+                  size="small"
+                  color="error"
+                  label={`${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} ≠ 100%`}
+                  onClick={() => setTab('people')}
+                  sx={{ cursor: 'pointer' }}
+                />
+              </Tooltip>
+            )}
 
             <Box sx={{ flex: 1 }} />
 
@@ -281,9 +319,13 @@ export default function App() {
               saving={saving}
               lastSaved={lastSaved}
               scenarioName={state.scenarioName}
+              blocked={plan.invalid}
+              onGoTo={setTab}
             />
           )}
-          {tab === 'people' && <People plan={plan} />}
+          {tab === 'people' && (
+            <People plan={plan} onPersonKpi={updatePersonKpi} onResetKpi={resetPersonKpi} />
+          )}
           {tab === 'settings' && (
             <Settings
               plan={plan}
