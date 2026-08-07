@@ -112,6 +112,7 @@ export default function Projects({
       if (fGap === 'manday' && !p.mandayEstimated) return false
       if (fGap === 'gate' && p.gate !== 'fail') return false
       if (fGap === 'pastdue' && !p.pastDue) return false
+      if (fGap === 'nokey' && p.jiraKey) return false
       return true
     })
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -219,6 +220,7 @@ export default function Projects({
             <Select label="Data gap" value={fGap} onChange={(e) => setFGap(e.target.value)}>
               <MenuItem value="all">Everything</MenuItem>
               <MenuItem value="saving">Missing saving hrs</MenuItem>
+              <MenuItem value="nokey">Missing Jira key</MenuItem>
               <MenuItem value="pic">Missing PIC</MenuItem>
               <MenuItem value="manday">Manday still a guess</MenuItem>
               <MenuItem value="gate">Below the gate</MenuItem>
