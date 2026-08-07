@@ -33,8 +33,9 @@ function PctCell({ value, onChange, invalid }) {
       onBlur={() => {
         setFocused(false)
         const n = Number(draft.replace(/[%\s,]/g, ''))
-        if (Number.isFinite(n) && n >= 0 && n <= 100) onChange(n / 100)
-        else setDraft(asPct(value))
+        if (Number.isFinite(n) && n >= 0 && n <= 100) {
+          if (Math.abs(n / 100 - value) > 1e-9) onChange(n / 100)
+        } else setDraft(asPct(value))
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
       InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0 }}>%</InputAdornment> }}
@@ -61,7 +62,9 @@ function HoursTargetCell({ value, onChange, unit }) {
       onBlur={() => {
         setFocused(false)
         const n = Number(String(draft).replace(/[,\s]/g, ''))
-        if (Number.isFinite(n) && n >= 0) onChange(n)
+        // Only report a genuine change. Blurring a field you merely tabbed
+        // through must not pin the target and stop it tracking the projects.
+        if (Number.isFinite(n) && n >= 0) { if (n !== value) onChange(n) }
         else setDraft(asStr(value))
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -94,7 +97,10 @@ function TargetCell({ value, onChange, placeholder }) {
       placeholder={placeholder}
       onFocus={() => setFocused(true)}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => { setFocused(false); onChange(draft.trim()) }}
+      onBlur={() => {
+        setFocused(false)
+        if (draft.trim() !== (value ?? '')) onChange(draft.trim())
+      }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
       inputProps={{ style: { fontSize: '0.8125rem', padding: '6px 8px' } }}
     />

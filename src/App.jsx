@@ -138,17 +138,37 @@ export default function App() {
     setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
   }, [])
 
-  /** Override one KPI line's weight and/or target for one person. */
+  /**
+   * Override one KPI line's weight and/or target for one person.
+   *
+   * An override that equals the live computed value is discarded rather than
+   * stored, so the line keeps tracking project assignments. Without this,
+   * setting a target to the number it already shows would pin it, and later
+   * edits to the project's saving hours would never reach the scorecard.
+   */
   const updatePersonKpi = useCallback((id, lineId, patch) => {
+    const line = plan.people.find((x) => x.id === id)?.kpiLines.find((l) => l.id === lineId)
     setState((s) => ({
       ...s,
-      people: s.people.map((p) =>
-        p.id === id
-          ? { ...p, kpi: { ...(p.kpi || {}), [lineId]: { ...((p.kpi || {})[lineId] || {}), ...patch } } }
-          : p,
-      ),
+      people: s.people.map((p) => {
+        if (p.id !== id) return p
+        const kpi = { ...(p.kpi || {}) }
+        const entry = { ...(kpi[lineId] || {}), ...patch }
+
+        if ('target' in patch) {
+          const cleared = patch.target == null || patch.target === ''
+          if (cleared || (line && patch.target === line.defaultTarget)) delete entry.target
+        }
+        if ('weight' in patch && line && Math.abs(patch.weight - line.defaultWeight) < 1e-9) {
+          delete entry.weight
+        }
+
+        if (Object.keys(entry).length) kpi[lineId] = entry
+        else delete kpi[lineId]
+        return { ...p, kpi }
+      }),
     }))
-  }, [])
+  }, [plan.people])
 
   const resetPersonKpi = useCallback((id) => {
     setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, kpi: {}, kpiHidden: [] } : p)) }))

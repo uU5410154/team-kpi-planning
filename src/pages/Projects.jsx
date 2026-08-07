@@ -37,7 +37,11 @@ function TextCell({ value, onChange, placeholder, width, bold }) {
       placeholder={placeholder}
       onFocus={() => setFocused(true)}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => { setFocused(false); onChange(draft.trim() || null) }}
+      onBlur={() => {
+        setFocused(false)
+        const next = draft.trim() || null
+        if (next !== (value ?? null)) onChange(next)
+      }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
       inputProps={{ style: { fontSize: '0.8125rem', fontWeight: bold ? 500 : 400 } }}
       sx={{ width }}
@@ -63,9 +67,9 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
       onBlur={() => {
         setFocused(false)
         const t = draft.trim()
-        if (t === '') { onChange(null); return }
+        if (t === '') { if (value != null) onChange(null); return }
         const n = Number(t.replace(/,/g, ''))
-        if (Number.isFinite(n) && n >= 0) onChange(n)
+        if (Number.isFinite(n) && n >= 0) { if (n !== value) onChange(n) }
         else setDraft(value == null ? '' : String(value))
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
