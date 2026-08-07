@@ -2,8 +2,10 @@ import { useState, useMemo } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Chip, Checkbox, Button, Stack, Tooltip,
-  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton,
+  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress,
 } from '@mui/material'
+import SaveIcon from '@mui/icons-material/Save'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SearchIcon from '@mui/icons-material/Search'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
@@ -11,7 +13,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART } from '../lib/palette.js'
-import { fmtHours, fmtRatio } from '../lib/model.js'
+import { fmtHours, fmtRatio, fmtPct } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_COLOR = {
@@ -80,7 +82,10 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
   )
 }
 
-export default function Projects({ plan, onUpdate, onBulk, onAdd, onDelete }) {
+export default function Projects({
+  plan, onUpdate, onBulk, onAdd, onDelete,
+  onSave, dirty, saving, lastSaved, scenarioName,
+}) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { projects, people, settings } = plan
@@ -143,7 +148,29 @@ export default function Projects({ plan, onUpdate, onBulk, onAdd, onDelete }) {
     setBulkEl(null)
   }
 
-  const shown = rows.reduce((a, p) => a + (p.commitLevel === 'commit' && OBJ_BY_ID[p.objective]?.countsToPool ? (p.savingHours ?? 0) : 0), 0)
+  /** Totals for whatever the filters currently show — recomputed on every change. */
+  const agg = useMemo(() => {
+    const savingRows = rows.filter((p) => p.savingHours != null)
+    const hours = savingRows.reduce((a, p) => a + p.savingHours, 0)
+    const hc = rows.reduce((a, p) => a + (p.hc || 0), 0)
+    const manday = rows.reduce((a, p) => a + (p.manday || 0), 0)
+    const withRatio = rows.filter((p) => p.ratio != null)
+    return {
+      count: rows.length,
+      hours,
+      hc,
+      manday,
+      // Portfolio ratio: total hours over total mandays. A plain mean of the
+      // per-project ratios would let a tiny project outweigh a large one.
+      ratio: manday > 0 ? hours / manday : null,
+      meanRatio: withRatio.length
+        ? withRatio.reduce((a, p) => a + p.ratio, 0) / withRatio.length
+        : null,
+      done: rows.filter((p) => p.status === 'Done').reduce((a, p) => a + (p.savingHours ?? 0), 0),
+      tbc: rows.filter((p) => p.savingHours == null).length,
+      pctOfBook: plan.totals.totalHours > 0 ? hours / plan.totals.totalHours : 0,
+    }
+  }, [rows, plan.totals.totalHours])
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -202,10 +229,10 @@ export default function Projects({ plan, onUpdate, onBulk, onAdd, onDelete }) {
 
         <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 1.5 }}>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            {rows.length} of {projects.length} projects · {fmtHours(shown)} committed hrs/month in view
+            Showing {rows.length} of {projects.length} projects
           </Typography>
           <Box sx={{ flex: 1 }} />
-          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={onAdd}>
+          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={onAdd}>
             Add project
           </Button>
           {sel.size > 0 && (
@@ -244,7 +271,84 @@ export default function Projects({ plan, onUpdate, onBulk, onAdd, onDelete }) {
               <Button size="small" onClick={() => setSel(new Set())}>Clear</Button>
             </>
           )}
+          <Tooltip title={dirty ? 'You have unsaved changes' : 'Everything is saved'}>
+            <span>
+              <Button
+                size="small"
+                variant="contained"
+                color={dirty ? 'primary' : 'inherit'}
+                startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
+                onClick={onSave}
+                disabled={saving || !dirty}
+              >
+                {saving ? 'Saving…' : dirty ? 'Save to database' : 'Saved'}
+              </Button>
+            </span>
+          </Tooltip>
         </Stack>
+        {(dirty || lastSaved) && (
+          <Typography variant="caption" sx={{ color: dirty ? STATUS.warning : 'text.secondary', display: 'block', mt: 1 }}>
+            {dirty
+              ? `Unsaved changes to "${scenarioName || 'this scenario'}" — they are held in this browser until you save.`
+              : `Saved to the database${lastSaved ? ` at ${new Date(lastSaved).toLocaleTimeString()}` : ''} as "${scenarioName}".`}
+          </Typography>
+        )}
+      </Paper>
+
+      {/* Filter-aware totals — always reflects exactly what the table shows */}
+      <Paper variant="outlined" sx={{ p: 0, overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', bgcolor: 'action.hover' }}>
+          {[
+            { label: 'Projects in view', value: agg.count.toLocaleString(), sub: agg.tbc ? `${agg.tbc} still TBC` : 'all quantified' },
+            { label: 'Saving hrs / month', value: fmtHours(agg.hours), sub: `${fmtPct(agg.pctOfBook)} of the whole book`, strong: true },
+            { label: 'Of which delivered', value: fmtHours(agg.done), sub: 'status Done' },
+            { label: 'Headcount', value: agg.hc ? agg.hc.toFixed(1) : '—', sub: 'HC released' },
+            { label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
+            {
+              label: 'Ratio (avg)',
+              value: agg.ratio == null ? '—' : fmtRatio(agg.ratio),
+              sub: agg.ratio == null ? 'needs mandays' : `gate ${settings.ratioGate.toFixed(1)}`,
+              tone: agg.ratio == null ? undefined : agg.ratio >= settings.ratioGate ? STATUS.good : STATUS.critical,
+              help: 'Total saving hours ÷ total mandays across the filtered rows. A weighted average — a plain mean of per-project ratios would let a tiny project outweigh a large one.',
+            },
+          ].map((t, i) => (
+            <Box
+              key={t.label}
+              sx={{
+                flex: '1 1 150px',
+                px: 2,
+                py: 1.5,
+                borderLeft: i === 0 ? 'none' : 1,
+                borderColor: 'divider',
+                minWidth: 130,
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.6875rem' }}>
+                  {t.label}
+                </Typography>
+                {t.help && (
+                  <Tooltip title={t.help} arrow>
+                    <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', cursor: 'help' }} />
+                  </Tooltip>
+                )}
+              </Box>
+              <Typography
+                sx={{
+                  fontSize: t.strong ? '1.35rem' : '1.15rem',
+                  fontWeight: t.strong ? 700 : 600,
+                  lineHeight: 1.2,
+                  mt: 0.25,
+                  fontVariantNumeric: 'tabular-nums',
+                  color: t.tone || 'text.primary',
+                }}
+              >
+                {t.value}
+              </Typography>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>{t.sub}</Typography>
+            </Box>
+          ))}
+        </Box>
       </Paper>
 
       <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '72vh' }}>

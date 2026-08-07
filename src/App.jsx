@@ -16,6 +16,7 @@ import ScenarioDialog from './components/ScenarioDialog.jsx'
 
 import { buildTheme } from './theme.js'
 import { computePlan, newProject } from './lib/model.js'
+import * as api from './lib/api.js'
 import { loadState, saveState, freshState, downloadScenario, readScenarioFile } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
@@ -43,13 +44,52 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [menuEl, setMenuEl] = useState(null)
   const [scenario, setScenario] = useState(null) // 'save' | 'open' | null
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [lastSaved, setLastSaved] = useState(null)
   const fileRef = useRef(null)
+  const firstRender = useRef(true)
 
   const theme = useMemo(() => buildTheme(mode), [mode])
   const plan = useMemo(() => computePlan(state), [state])
 
   useEffect(() => { saveState(state) }, [state])
   useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
+
+  // Anything that changes the plan marks it unsaved. Skip the first render so
+  // simply opening the app does not look like a pending edit.
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return }
+    setDirty(true)
+  }, [state.projects, state.people, state.settings, state.scenarioName])
+
+  // Don't let a closing tab silently drop unsaved edits.
+  useEffect(() => {
+    const warn = (e) => { if (dirty) { e.preventDefault(); e.returnValue = '' } }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
+  /** Save the plan to the shared database under the current scenario name. */
+  const saveToDb = useCallback(async () => {
+    const name = (state.scenarioName || '').trim()
+    if (!name) { setScenario('save'); return }
+    setSaving(true)
+    try {
+      const r = await api.saveScenario(
+        name,
+        { people: state.people, projects: state.projects, settings: state.settings },
+        localStorage.getItem('fa-kpi-author') || '',
+      )
+      setDirty(false)
+      setLastSaved(r.updatedAt)
+      setToast({ severity: 'success', msg: `Saved "${name}" to the database.` })
+    } catch (e) {
+      setToast({ severity: 'error', msg: `${e.message} Your work is still safe in this browser.` })
+    } finally {
+      setSaving(false)
+    }
+  }, [state])
 
   // Keep the tab in the URL hash so a view can be linked or bookmarked.
   useEffect(() => {
@@ -225,6 +265,11 @@ export default function App() {
               onBulk={bulkUpdate}
               onAdd={addProject}
               onDelete={deleteProjects}
+              onSave={saveToDb}
+              dirty={dirty}
+              saving={saving}
+              lastSaved={lastSaved}
+              scenarioName={state.scenarioName}
             />
           )}
           {tab === 'people' && <People plan={plan} />}
@@ -246,7 +291,7 @@ export default function App() {
           onClose={() => setScenario(null)}
           state={state}
           onToast={setToast}
-          onLoad={(payload, name) =>
+          onLoad={(payload, name) => {
             setState((s) => ({
               ...s,
               people: payload.people,
@@ -254,7 +299,9 @@ export default function App() {
               settings: { ...s.settings, ...payload.settings },
               scenarioName: name,
             }))
-          }
+            // a freshly loaded scenario matches the database
+            setTimeout(() => setDirty(false), 0)
+          }}
         />
 
         <Snackbar
