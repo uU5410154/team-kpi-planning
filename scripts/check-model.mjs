@@ -17,24 +17,39 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
-// 1. every project's contribution shares sum to 1.0 (or 0 when nobody is credited)
-let badShares = []
-for (const p of seed.projects) {
-  const s = projectShares(p, DEFAULT_SETTINGS.roleWeights)
-  const sum = Object.values(s).reduce((a, b) => a + b, 0)
-  if (Object.keys(s).length && Math.abs(sum - 1) > 1e-9) badShares.push(`${p.key}=${sum.toFixed(4)}`)
+// 1. shares + partner share always account for exactly 100% of a project
+const badShares = []
+for (const cp of [false, true]) {
+  for (const p of seed.projects) {
+    const { shares, partnerShare } = projectShares(p, DEFAULT_SETTINGS.roleWeights, cp)
+    const sum = Object.values(shares).reduce((a, b) => a + b, 0) + partnerShare
+    if ((Object.keys(shares).length || partnerShare) && Math.abs(sum - 1) > 1e-9) {
+      badShares.push(`${cp ? 'net' : 'gross'} ${p.key}=${sum.toFixed(4)}`)
+    }
+  }
 }
-check('contribution shares sum to 100% on every project', badShares.length === 0, badShares.slice(0, 5).join(', '))
+check('core + partner shares account for 100% of every project', badShares.length === 0, badShares.slice(0, 5).join(', '))
 
-// 2. no project credits a person who is not on it
+// 2. no project credits a person who is not on the roster
 const ids = new Set(seed.people.map((p) => p.id))
 const strays = []
-for (const p of seed.projects) {
-  for (const k of Object.keys(projectShares(p, DEFAULT_SETTINGS.roleWeights))) {
-    if (!ids.has(k)) strays.push(`${p.key}:${k}`)
+for (const cp of [false, true]) {
+  for (const p of seed.projects) {
+    for (const k of Object.keys(projectShares(p, DEFAULT_SETTINGS.roleWeights, cp).shares)) {
+      if (!ids.has(k)) strays.push(`${p.key}:${k}`)
+    }
   }
 }
 check('no credit assigned to a non-roster person', strays.length === 0, strays.slice(0, 5).join(', '))
+
+// 3. crediting partners can only ever reduce a person's hours, never raise them
+const gross = computePlan({ ...state, settings: { ...DEFAULT_SETTINGS, creditPartners: false } })
+const net = computePlan({ ...state, settings: { ...DEFAULT_SETTINGS, creditPartners: true } })
+const rose = gross.people.filter((g) => {
+  const n = net.people.find((x) => x.id === g.id)
+  return n.hours > g.hours + 1e-9
+})
+check('net crediting never increases anyone\'s hours', rose.length === 0, rose.map((p) => p.nick).join(', '))
 
 // 3. every scorecard totals exactly 100%
 const badWeights = plan.people

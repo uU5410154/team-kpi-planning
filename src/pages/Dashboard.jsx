@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Box, Grid, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Chip,
+  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Chip, Divider,
 } from '@mui/material'
 import StatTile from '../components/StatTile.jsx'
 import { HBar, StackedHBar, GateScatter, Meter, useChartTokens } from '../components/Charts.jsx'
@@ -86,12 +86,12 @@ export default function Dashboard({ plan, onGoTo }) {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatTile
-            label="Open data gaps"
-            value={quality.missingSaving + quality.missingPic}
-            unit="items"
-            tone={quality.missingSaving + quality.missingPic > 20 ? 'critical' : 'warning'}
-            context={`${quality.missingSaving} missing saving hrs · ${quality.missingPic} missing PIC`}
-            help="Jira holds no effort data at all, so every manday figure starts as a seed estimate. Fix these in the Projects tab."
+            label="Past due, not done"
+            value={quality.pastDue}
+            unit={`of ${quality.total}`}
+            tone={quality.pastDue > 20 ? 'critical' : quality.pastDue > 5 ? 'warning' : 'good'}
+            context={`Carrying ${fmtHours(quality.pastDueHours)} committed hrs · ${quality.missingSaving} epics still unquantified`}
+            help={`Epics whose Jira due date is before ${settings.asOfDate} and whose status is not Done. Seven of twelve months are gone — anything still open here needs re-dating or dropping.`}
           />
         </Grid>
       </Grid>
@@ -171,6 +171,50 @@ export default function Dashboard({ plan, onGoTo }) {
                 </TableRow>
               </TableBody>
             </Table>
+
+            {/* The gross-to-bankable bridge: what the team is targeted on vs
+                what the six scorecards can actually add up to. */}
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 1 }}>
+              Gross vs bankable
+            </Typography>
+            <Table size="small">
+              <TableBody>
+                <TableRow>
+                  <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
+                    Bankable across the six scorecards
+                  </TableCell>
+                  <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', fontWeight: 700 }}>
+                    {fmtHours(totals.bankableHours)}
+                  </TableCell>
+                </TableRow>
+                {totals.partnerHours > 0 && (
+                  <TableRow>
+                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
+                      Built by partner / outsource devs
+                    </TableCell>
+                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.warning, fontWeight: 600 }}>
+                      −{fmtHours(totals.partnerHours)}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {totals.orphanHours > 0 && (
+                  <TableRow>
+                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
+                      On projects with no owner at all
+                    </TableCell>
+                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.critical, fontWeight: 600 }}>
+                      {fmtHours(totals.orphanHours)}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
+              {settings.creditPartners
+                ? 'Net view — partner devs dilute each person\'s share, so the six cannot personally bank the whole pool. Never add the six individual targets together and compare them to 3,000.'
+                : 'Gross view — the six are credited whole projects even where a partner dev builds them. Switch to the net view on the Model tab to see what they can personally bank.'}
+            </Typography>
           </Section>
         </Grid>
 

@@ -81,6 +81,7 @@ export default function Projects({ plan, onUpdate, onBulk }) {
       if (fGap === 'pic' && !!p.pic) return false
       if (fGap === 'manday' && !p.mandayEstimated) return false
       if (fGap === 'gate' && p.gate !== 'fail') return false
+      if (fGap === 'pastdue' && !p.pastDue) return false
       return true
     })
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -168,6 +169,7 @@ export default function Projects({ plan, onUpdate, onBulk }) {
               <MenuItem value="pic">Missing PIC</MenuItem>
               <MenuItem value="manday">Manday still a guess</MenuItem>
               <MenuItem value="gate">Below the gate</MenuItem>
+              <MenuItem value="pastdue">Past due, not done</MenuItem>
             </Select>
           </FormControl>
         </Stack>
@@ -341,6 +343,16 @@ export default function Projects({ plan, onUpdate, onBulk }) {
                     <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
                       {p.srcStatus || p.status || '—'}
                     </Typography>
+                    {p.pastDue && (
+                      <Tooltip title={`Due ${p.due} and not Done — already past due`}>
+                        <Typography
+                          variant="caption"
+                          sx={{ display: 'block', color: STATUS.critical, fontWeight: 600, whiteSpace: 'nowrap' }}
+                        >
+                          past due {p.due}
+                        </Typography>
+                      </Tooltip>
+                    )}
                     {p.savingHours == null && (
                       <Tooltip title="No saving hours recorded in Jira — this project cannot be committed until it is quantified">
                         <WarningAmberIcon sx={{ fontSize: 14, color: STATUS.warning, ml: 0.5, verticalAlign: 'middle' }} />

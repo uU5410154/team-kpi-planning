@@ -177,6 +177,45 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
               A person holding two roles on one project counts once, at their strongest role — holding both{' '}
               <code>pm</code> and <code>dev</code> does not double the claim.
             </Typography>
+
+            <Divider sx={{ my: 2.5 }} />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.creditPartners}
+                  onChange={(e) => onSettings({ creditPartners: e.target.checked })}
+                />
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Let partner devs dilute the team's share (net view)
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    35 projects are built partly or wholly by partner and outsource devs
+                    (tao, buzz, fah, luem, fia, central-it, finance-it).
+                  </Typography>
+                </Box>
+              }
+            />
+            <Box sx={{ mt: 2, p: 1.75, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                <strong>Off (gross)</strong> — the six owners are credited the whole project. Right if the 3,000 hr
+                target holds the team accountable for hours delivered, whoever writes the code.
+                <br />
+                <strong>On (net)</strong> — partner devs enter the denominator, so the six can only bank their own
+                share. Right if each person is scored on personal contribution.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 1.25, fontWeight: 600 }}>
+                Currently bankable by the six: {fmtHours(totals.bankableHours)} hrs ={' '}
+                {fmtPct(totals.bankableCoverage)} of target
+                {totals.partnerHours > 0 && ` · ${fmtHours(totals.partnerHours)} hrs sit with partners`}
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: 'text.secondary' }}>
+                The two readings differ by roughly 1,050 hrs. Settle which one management intends before any
+                individual target is signed.
+              </Typography>
+            </Box>
           </Card>
         </Grid>
 

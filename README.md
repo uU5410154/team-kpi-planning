@@ -17,6 +17,10 @@ The 2026 project base comes from a Jira export of 101 epics. It has real gaps:
 - **21 epics have no resolvable PIC.**
 - **The saving-hours basis is unlabelled.** The 2025 workbook counted hours *per month*; the 2026
   target of 3,000 is unlabelled. That is a 12× swing in the economics, so it is an explicit setting.
+- **35 epics carrying 1,919 gross hours are built by partner or outsource devs** (`tao`, `buzz`,
+  `fah`, `luem`, `fia`, `central-it`, `finance-it`). Whether those hours belong to the six
+  scorecard owners is the single largest open question in the plan — see *gross vs net* below.
+- **65 of 101 epics are already past their Jira due date**, 40 of them not Done.
 
 Rather than freezing one interpretation into a spreadsheet, this app makes every one of those a
 dial you can move in front of your manager and re-export.
@@ -38,6 +42,19 @@ corporate, delivery, capability — that always sum to 1.0. The delivery block i
 whichever objectives the person actually holds, in proportion to a configurable priority. A
 scorecard therefore totals 100% by construction, regardless of how many objectives someone holds.
 (The 2025 sheet totalled 80% for Gun and 75% for James.)
+
+**Gross vs net.** The most consequential dial in the app (Model tab → *Let partner devs dilute the
+team's share*).
+
+- **Gross (default)** — the six owners are credited whole projects. Right if the 3,000 hr target
+  holds the team accountable for hours delivered, whoever writes the code. The six bank ~3,079 hrs.
+- **Net** — partner devs enter the contribution denominator, so the six bank only their own share:
+  ~2,028 hrs, with ~1,085 hrs sitting with partners. Kade drops from 1,605 to 685 because
+  FNP-1151 (1,262 hrs, 42% of the target) is built entirely by outsource dev `tao`.
+
+The two readings differ by roughly 1,050 hrs and cannot both be true. Settle which one management
+intends before any individual target is signed, and never add the six individual targets together
+and compare the sum to 3,000 — they are in different units.
 
 **Commit levels.** `commit` is bankable and counts toward the headline; `stretch` is upside shown
 separately; `watch` is at-risk and excluded; `excluded` is out of scope. Nothing without a saving-hours

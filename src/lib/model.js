@@ -75,6 +75,11 @@ export const DEFAULT_SETTINGS = {
   includeStretchInHeadline: false,
   bands: JSON.parse(JSON.stringify(DEFAULT_BANDS)),
   objectivePriority: { ...DEFAULT_OBJECTIVE_PRIORITY },
+  // false = GROSS: the six owners are credited the whole project.
+  // true  = NET: partner/outsource devs dilute the core shares.
+  creditPartners: false,
+  // Anything due before this and not Done is flagged past due.
+  asOfDate: '2026-08-07',
 }
 
 /**
@@ -129,11 +134,24 @@ export const ROLE_ORDER = ['pm', 'lead', 'dev', 'support', 'qa', 'assignee']
 /* ------------------------------------------------------------------ */
 
 /**
- * Resolve each contributor's normalised share of one project.
- * Returns { [personId]: share } where the shares sum to 1.0 (or {} if nobody
- * is credited).
+ * Resolve each contributor's share of one project.
+ *
+ * GROSS (creditPartners = false, the default): only the six scorecard owners
+ * enter the denominator, so their shares sum to 1.0 and the team is credited
+ * with the whole project. This is the right reading if the 3,000 hr target
+ * holds the team accountable for delivered hours regardless of who writes the
+ * code — partner devs are then a resource, not a claimant.
+ *
+ * NET (creditPartners = true): partner-team and outsource devs
+ * (tao, buzz, fah, luem, fia, central-it, finance-it) enter the denominator
+ * too, diluting the core shares. Core shares then sum to LESS than 1.0 and the
+ * difference is hours the team cannot personally bank.
+ *
+ * The two readings differ by roughly 1,900 gross hours across 35 projects, so
+ * which one management intends has to be settled explicitly rather than
+ * assumed. Returns { shares, partnerShare }.
  */
-export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS) {
+export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, creditPartners = false) {
   const raw = {}
   for (const c of project.contributors || []) {
     if (!c.person) continue
@@ -146,9 +164,22 @@ export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS) {
   if (project.pic && raw[project.pic] === undefined) {
     raw[project.pic] = roleWeights.assignee ?? 0.6
   }
-  const total = Object.values(raw).reduce((a, b) => a + b, 0)
-  if (total <= 0) return {}
-  return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, v / total]))
+
+  let partnerRaw = 0
+  if (creditPartners) {
+    for (const p of project.partners || []) {
+      const roles = Array.isArray(p) ? [] : p.roles || []
+      partnerRaw += Math.max(...roles.map((r) => roleWeights[r] ?? 0), 0)
+    }
+  }
+
+  const coreTotal = Object.values(raw).reduce((a, b) => a + b, 0)
+  const total = coreTotal + partnerRaw
+  if (total <= 0) return { shares: {}, partnerShare: 0 }
+  return {
+    shares: Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, v / total])),
+    partnerShare: partnerRaw / total,
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -188,13 +219,15 @@ export function computePlan(state) {
   const people = state.people || []
 
   const perProject = projects.map((p) => {
-    const shares = projectShares(p, s.roleWeights)
+    const { shares, partnerShare } = projectShares(p, s.roleWeights, s.creditPartners)
     return {
       ...p,
       shares,
+      partnerShare,
       ratio: projectRatio(p),
       gate: gateStatus(p, s.ratioGate),
       poolHours: countsToPool(p) && isCounted(p) ? (p.savingHours ?? 0) : 0,
+      pastDue: !!p.due && p.due < s.asOfDate && p.status !== 'Done',
     }
   })
 
@@ -257,6 +290,18 @@ export function computePlan(state) {
     }
   })
 
+  // ---- partner leakage ---------------------------------------------
+  // Hours inside the committed pool that the six owners cannot personally
+  // bank because a partner/outsource dev builds them.
+  const partnerHours = perProject
+    .filter((p) => isCounted(p) && countsToPool(p))
+    .reduce((a, p) => a + (p.savingHours ?? 0) * (p.partnerShare || 0), 0)
+  const bankableHours = byPerson.reduce((a, p) => a + p.hours, 0)
+  // Hours on counted, pool-eligible projects with nobody credited at all.
+  const orphanHours = perProject
+    .filter((p) => isCounted(p) && countsToPool(p) && Object.keys(p.shares).length === 0)
+    .reduce((a, p) => a + (p.savingHours ?? 0), 0)
+
   // ---- data-quality ------------------------------------------------
   const quality = {
     total: projects.length,
@@ -264,6 +309,10 @@ export function computePlan(state) {
     missingPic: projects.filter((p) => !p.pic).length,
     estimatedManday: projects.filter((p) => p.mandayEstimated).length,
     deleted: projects.filter((p) => p.deleted).length,
+    pastDue: perProject.filter((p) => p.pastDue).length,
+    pastDueHours: perProject
+      .filter((p) => p.pastDue && isCounted(p) && countsToPool(p))
+      .reduce((a, p) => a + (p.savingHours ?? 0), 0),
   }
 
   // ---- objective mix ------------------------------------------------
@@ -296,6 +345,12 @@ export function computePlan(state) {
       top2Share: headlineHours > 0 ? top2 / headlineHours : 0,
       top2,
       topProjects: ranked.slice(0, 5),
+      // The gross-to-bankable bridge — the gap between what the team is
+      // targeted on and what its six scorecards can actually add up to.
+      partnerHours,
+      orphanHours,
+      bankableHours,
+      bankableCoverage: s.targetHours > 0 ? bankableHours / s.targetHours : 0,
     },
     byObjective,
     quality,
