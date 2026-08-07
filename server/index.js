@@ -37,13 +37,14 @@ const cleanName = (n) => String(n || '').trim().slice(0, 80)
 
 app.get('/api/scenarios', async (_req, res) => {
   const rows = await store.listScenarios()
-  if (rows === null) return unavailable(res)
+  if (rows === store.UNAVAILABLE) return unavailable(res)
   res.json(rows)
 })
 
 app.get('/api/scenarios/:name', async (req, res) => {
   const doc = await store.getScenario(cleanName(req.params.name))
-  if (doc === null) return unavailable(res)
+  if (doc === store.UNAVAILABLE) return unavailable(res)
+  // null here genuinely means "no scenario by that name", not an outage
   if (!doc) return res.status(404).json({ error: 'No scenario by that name.' })
   res.json(doc)
 })
@@ -56,13 +57,13 @@ app.put('/api/scenarios/:name', async (req, res) => {
     return res.status(400).json({ error: 'Payload must contain projects and people arrays.' })
   }
   const saved = await store.saveScenario(name, payload, updatedBy)
-  if (saved === null) return unavailable(res)
+  if (saved === store.UNAVAILABLE) return unavailable(res)
   res.json(saved)
 })
 
 app.delete('/api/scenarios/:name', async (req, res) => {
   const r = await store.deleteScenario(cleanName(req.params.name))
-  if (r === null) return unavailable(res)
+  if (r === store.UNAVAILABLE) return unavailable(res)
   res.json(r)
 })
 

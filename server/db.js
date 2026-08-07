@@ -56,9 +56,16 @@ export async function status() {
     : { configured: true, connected: false, reason: lastError }
 }
 
+/**
+ * Returned when the store cannot be reached. Distinct from null, because
+ * findOne() returns null for "no such document" — conflating the two made a
+ * missing scenario report as a 503 outage.
+ */
+export const UNAVAILABLE = Symbol('store-unavailable')
+
 export async function listScenarios() {
   const c = await connect()
-  if (!c) return null
+  if (!c) return UNAVAILABLE
   return c
     .find({}, { projection: { name: 1, updatedAt: 1, updatedBy: 1, _id: 0 } })
     .sort({ updatedAt: -1 })
@@ -66,15 +73,16 @@ export async function listScenarios() {
     .toArray()
 }
 
+/** null means no scenario by that name; UNAVAILABLE means the store is down. */
 export async function getScenario(name) {
   const c = await connect()
-  if (!c) return null
+  if (!c) return UNAVAILABLE
   return c.findOne({ name }, { projection: { _id: 0 } })
 }
 
 export async function saveScenario(name, payload, updatedBy) {
   const c = await connect()
-  if (!c) return null
+  if (!c) return UNAVAILABLE
   const doc = {
     name,
     updatedAt: new Date().toISOString(),
@@ -87,7 +95,7 @@ export async function saveScenario(name, payload, updatedBy) {
 
 export async function deleteScenario(name) {
   const c = await connect()
-  if (!c) return null
+  if (!c) return UNAVAILABLE
   const r = await c.deleteOne({ name })
   return { deleted: r.deletedCount }
 }
