@@ -95,6 +95,8 @@ export default function Projects({
   const [fPic, setFPic] = useState('all')
   const [fCommit, setFCommit] = useState('all')
   const [fGap, setFGap] = useState('all')
+  const [fTeam, setFTeam] = useState('all')
+  const [fHc, setFHc] = useState('all')
   const [sort, setSort] = useState({ by: 'savingHours', dir: 'desc' })
   const [sel, setSel] = useState(() => new Set())
   const [bulkEl, setBulkEl] = useState(null)
@@ -113,6 +115,13 @@ export default function Projects({
       if (fGap === 'gate' && p.gate !== 'fail') return false
       if (fGap === 'pastdue' && !p.pastDue) return false
       if (fGap === 'nokey' && p.jiraKey) return false
+      if (fTeam !== 'all' && (p.team || '') !== fTeam) return false
+      if (fHc !== 'all') {
+        const hc = p.hc || 0
+        if (fHc === 'some' && hc <= 0) return false
+        if (fHc === 'none' && hc > 0) return false
+        if (fHc.startsWith('gte') && hc < Number(fHc.slice(3))) return false
+      }
       return true
     })
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -125,7 +134,14 @@ export default function Projects({
       return String(va).localeCompare(String(vb)) * dir
     })
     return out
-  }, [projects, q, fObj, fPic, fCommit, fGap, sort])
+  }, [projects, q, fObj, fPic, fCommit, fGap, fTeam, fHc, sort])
+
+  const teams = useMemo(
+    () => [...new Set(projects.map((p) => p.team).filter(Boolean))].sort(),
+    [projects],
+  )
+  const filtersOn =
+    q.trim() !== '' || [fObj, fPic, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
 
   const head = (id, label, align = 'left', minWidth) => (
     <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined}>
@@ -208,6 +224,24 @@ export default function Projects({
               {people.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
             </Select>
           </FormControl>
+          <FormControl size="small" sx={{ minWidth: 128 }}>
+            <InputLabel>Team</InputLabel>
+            <Select label="Team" value={fTeam} onChange={(e) => setFTeam(e.target.value)}>
+              <MenuItem value="all">All teams</MenuItem>
+              {teams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 158 }}>
+            <InputLabel>Headcount</InputLabel>
+            <Select label="Headcount" value={fHc} onChange={(e) => setFHc(e.target.value)}>
+              <MenuItem value="all">Any headcount</MenuItem>
+              <MenuItem value="some">Has headcount (&gt; 0)</MenuItem>
+              <MenuItem value="none">No headcount</MenuItem>
+              <MenuItem value="gte0.5">0.5 HC or more</MenuItem>
+              <MenuItem value="gte1">1 HC or more</MenuItem>
+              <MenuItem value="gte3">3 HC or more</MenuItem>
+            </Select>
+          </FormControl>
           <FormControl size="small" sx={{ minWidth: 130 }}>
             <InputLabel>Commit</InputLabel>
             <Select label="Commit" value={fCommit} onChange={(e) => setFCommit(e.target.value)}>
@@ -233,6 +267,17 @@ export default function Projects({
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             Showing {rows.length} of {projects.length} projects
           </Typography>
+          {filtersOn && (
+            <Button
+              size="small"
+              onClick={() => {
+                setQ(''); setFObj('all'); setFPic('all'); setFCommit('all')
+                setFGap('all'); setFTeam('all'); setFHc('all')
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
           <Box sx={{ flex: 1 }} />
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={onAdd}>
             Add project

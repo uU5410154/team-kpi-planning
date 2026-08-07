@@ -31,6 +31,7 @@ check('unfiltered total matches the dashboard', Math.abs(all.hours - plan.totals
   `${all.hours.toFixed(1)} vs ${plan.totals.totalHours.toFixed(1)}`)
 
 console.log('\nfilter slices:')
+const hcAtLeast = (n) => plan.projects.filter((p) => (p.hc || 0) >= n)
 const slices = [
   ['PIC = Kade', plan.projects.filter((p) => p.pic === 'kade')],
   ['PIC = Gun', plan.projects.filter((p) => p.pic === 'gun')],
@@ -39,6 +40,11 @@ const slices = [
   ['Team = Finance', plan.projects.filter((p) => p.team === 'Finance')],
   ['Status = Done', plan.projects.filter((p) => p.status === 'Done')],
   ['Objective 2', plan.projects.filter((p) => p.objective === 'process_automation')],
+  ['HC > 0', plan.projects.filter((p) => (p.hc || 0) > 0)],
+  ['HC = 0 / blank', plan.projects.filter((p) => !(p.hc > 0))],
+  ['HC >= 0.5', hcAtLeast(0.5)],
+  ['HC >= 1', hcAtLeast(1)],
+  ['HC >= 3', hcAtLeast(3)],
 ]
 for (const [label, rows] of slices) {
   const a = agg(rows)
@@ -50,6 +56,23 @@ const acc = agg(plan.projects.filter((p) => p.team === 'Accounting'))
 const fin = agg(plan.projects.filter((p) => p.team === 'Finance'))
 check('team slices re-add to the book', Math.abs(acc.hours + fin.hours - all.hours) < 0.01,
   `${acc.hours.toFixed(1)} + ${fin.hours.toFixed(1)} = ${(acc.hours + fin.hours).toFixed(1)} vs ${all.hours.toFixed(1)}`)
+
+// the headcount split is exhaustive and its HC re-adds
+const some = agg(plan.projects.filter((p) => (p.hc || 0) > 0))
+const none = agg(plan.projects.filter((p) => !(p.hc > 0)))
+check('headcount split covers every project', some.count + none.count === all.count,
+  `${some.count} + ${none.count} = ${some.count + none.count} vs ${all.count}`)
+check('headcount split re-adds to total HC', Math.abs(some.hc + none.hc - all.hc) < 0.01,
+  `${some.hc.toFixed(1)} + ${none.hc.toFixed(1)} vs ${all.hc.toFixed(1)}`)
+check('rows with no headcount contribute no HC', none.hc === 0, `${none.hc}`)
+
+// HC thresholds must nest: >=3 is a subset of >=1 is a subset of >=0.5
+const k3 = hcAtLeast(3).map((p) => p.key)
+const k1 = new Set(hcAtLeast(1).map((p) => p.key))
+const k05 = new Set(hcAtLeast(0.5).map((p) => p.key))
+check('HC thresholds nest correctly',
+  k3.every((k) => k1.has(k)) && [...k1].every((k) => k05.has(k)),
+  `>=3:${k3.length} >=1:${k1.size} >=0.5:${k05.size}`)
 
 // every slice must be a strict subset of the book
 check('no slice exceeds the book', slices.every(([, r]) => agg(r).hours <= all.hours + 0.01))
