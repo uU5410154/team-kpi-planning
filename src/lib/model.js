@@ -11,13 +11,19 @@ const OBJECTIVE_ORDER = OBJECTIVES.map((o) => o.id)
  * across two people's scorecards (the flaw that made the 2025 sheet's totals
  * un-addable).
  */
+/**
+ * The role-point model recommended in the 2026 KPI plan (decision 9),
+ * expressed on a 0-1 scale: dev 10 / lead 6 / pm 3 / assignee 3 / qa 2 /
+ * support 2. Keep these in step with the plan document — the app and the
+ * paper have to produce the same numbers or neither is trusted.
+ */
 export const DEFAULT_ROLE_WEIGHTS = {
   dev: 1.0,
-  pm: 0.5,
-  lead: 0.5,
-  support: 0.25,
-  qa: 0.15,
-  assignee: 0.6, // a bare assignee with no explicit role label
+  lead: 0.6,
+  pm: 0.3,
+  assignee: 0.3, // a bare assignee with no explicit role label
+  qa: 0.2,
+  support: 0.2,
 }
 
 /**

@@ -49,12 +49,16 @@ team's share*).
 - **Gross (default)** — the six owners are credited whole projects. Right if the 3,000 hr target
   holds the team accountable for hours delivered, whoever writes the code. The six bank ~3,079 hrs.
 - **Net** — partner devs enter the contribution denominator, so the six bank only their own share:
-  ~2,028 hrs, with ~1,085 hrs sitting with partners. Kade drops from 1,605 to 685 because
+  ~1,804 hrs, with ~1,309 hrs sitting with partners. Kade drops from 1,581 to 455 because
   FNP-1151 (1,262 hrs, 42% of the target) is built entirely by outsource dev `tao`.
 
-The two readings differ by roughly 1,050 hrs and cannot both be true. Settle which one management
+The two readings differ by roughly 1,300 hrs and cannot both be true. Settle which one management
 intends before any individual target is signed, and never add the six individual targets together
 and compare the sum to 3,000 — they are in different units.
+
+Role weights default to the model recommended in the KPI plan (dev 10 / lead 6 / pm 3 /
+assignee 3 / qa 2 / support 2, on a 0–1 scale). Under it the app reproduces the plan's
+independently-computed per-person figures: P'Phen 472, Kade 455, James 71, Pol 37, Thapanee 5.
 
 **Commit levels.** `commit` is bankable and counts toward the headline; `stretch` is upside shown
 separately; `watch` is at-risk and excluded; `excluded` is out of scope. Nothing without a saving-hours
