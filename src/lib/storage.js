@@ -2,16 +2,29 @@ import seed from '../data/seed.json'
 import { DEFAULT_SETTINGS } from './model.js'
 
 const KEY = 'fa-tech-kpi-2026'
-const VERSION = 3
+const VERSION = 4
+
+/** FNV-1a. Cheap, stable, and enough to tell two seed files apart. */
+function hash(str) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(36)
+}
 
 /**
- * Fingerprint of the bundled seed. Cached state built from a different source
- * workbook is stale and must be discarded — otherwise a browser that used an
- * earlier build keeps showing the old totals forever, which is exactly what
- * happened when the register moved off the Jira export.
+ * Fingerprint of the bundled seed, over its CONTENT rather than its shape.
+ *
+ * Counting rows was not enough: adding aggregatesTeam to the team lead changed
+ * no count, so every existing browser kept its old roster and the lead's card
+ * silently stayed personal. Any change to the bundled baseline — a new
+ * workbook, a repriced project, a new person flag — now invalidates the cache.
  */
 const seedStamp = () =>
-  `${seed.meta?.source || '?'}|${seed.projects.length}|${seed.people.length}`
+  `${seed.meta?.source || '?'}|${seed.projects.length}|${seed.people.length}|` +
+  `${hash(JSON.stringify(seed.people))}|${hash(JSON.stringify(seed.projects))}`
 
 export const freshState = () => ({
   version: VERSION,

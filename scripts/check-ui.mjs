@@ -72,9 +72,36 @@ try {
   const headline = () => page.evaluate(() => document.body.innerText.match(/([\d,]+)\s*\/\s*3,000 hrs/)?.[1] ?? null)
   check('app loads with the source total', (await headline()) === '4,227', String(await headline()))
 
-  /* ---------- read the scorecard BEFORE ---------- */
+  /* ---------- the lead's card must show the TEAM ---------- */
   await page.goto(`${base}/#people`, { waitUntil: 'networkidle0' })
-  await new Promise((r) => setTimeout(r, 600))
+  await new Promise((r) => setTimeout(r, 700))
+
+  const leadCard = await page.evaluate(() => ({
+    label: document.body.innerText.includes('TEAM SAVING HOURS'),
+    personalLabel: document.body.innerText.includes('CREDITED SAVING HOURS'),
+    teamWording: document.body.innerText.includes("carries the team's overall KPI"),
+    value: document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? null,
+  }))
+  check('the lead card is labelled as the team, not personal',
+    leadCard.label && !leadCard.personalLabel, JSON.stringify(leadCard))
+  check('it says it carries the team KPI', leadCard.teamWording)
+  // The lead's own tab also shows the team figure, so it cannot supply his
+  // personal slice; check-lead.mjs proves the exact sum at model level. Here,
+  // assert the card and its tab agree and that the figure genuinely spans the
+  // team rather than one person.
+  const tabTotals = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')]
+      .map((t) => t.innerText.match(/([\d,.]+)\s*hrs/)?.[1])
+      .filter(Boolean)
+      .map((s) => Number(s.replace(/,/g, ''))))
+  const leadValue = Number((leadCard.value || '0').replace(/,/g, ''))
+  check('the lead card and the lead tab agree', Math.abs(leadValue - tabTotals[0]) <= 1,
+    `card ${leadValue} vs tab ${tabTotals[0]}`)
+  check('the lead figure spans the whole team',
+    leadValue > tabTotals.slice(1).reduce((a, b) => a + b, 0),
+    `lead ${leadValue} > others ${tabTotals.slice(1).reduce((a, b) => a + b, 0)}`)
+  check('and exceeds every individual member',
+    tabTotals.slice(1).every((v) => leadValue > v), tabTotals.join(', '))
   // Gun is the team lead, so this line carries the TEAM's objective-1 total.
   // Assert the delta rather than a constant.
   const before = Number(await scorecardTarget('Obj 1 — Financial'))

@@ -1,7 +1,10 @@
 /**
- * Guards the cache-invalidation rule: a browser holding state from an older
- * seed must discard it. Without this, changing the source workbook leaves
- * returning users looking at the previous totals indefinitely.
+ * Guards cache invalidation: a browser holding state from an older seed must
+ * discard it. Counting rows is not enough — adding a flag to a person changes
+ * no count, and every existing browser then kept its old roster while the app
+ * quietly behaved as if the flag were absent.
+ *
+ * Run with: node scripts/check-storage.mjs
  */
 import { readFileSync } from 'node:fs'
 
@@ -14,35 +17,60 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
-// Recreate the module's stamp rule against the current seed.
-const stamp = `${seed.meta?.source || '?'}|${seed.projects.length}|${seed.people.length}`
+// mirror of the module's hash + stamp
+const hash = (str) => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(36)
+}
+const stampFor = (s) =>
+  `${s.meta?.source || '?'}|${s.projects.length}|${s.people.length}|` +
+  `${hash(JSON.stringify(s.people))}|${hash(JSON.stringify(s.projects))}`
+
+const stamp = stampFor(seed)
 const version = Number(src.match(/const VERSION = (\d+)/)?.[1])
 
+console.log('--- the mechanism ---')
 check('storage declares a VERSION', Number.isFinite(version), `v${version}`)
 check('storage fingerprints the seed', src.includes('seedStamp'))
+check('the fingerprint covers content, not just counts', src.includes('hash(JSON.stringify(seed.people))'))
 check('loadState drops stale state', src.includes('isStale(parsed)'))
-check('seed carries a source in meta', !!seed.meta?.source, seed.meta?.source)
 
-// Simulate: state saved by an older build must be rejected.
+const isStale = (parsed) =>
+  !parsed || parsed.version !== version || !Array.isArray(parsed.projects) || parsed.seedStamp !== stamp
+
+console.log('\n--- what must be rejected ---')
 const cases = [
   ['older version', { version: version - 1, seedStamp: stamp, projects: [] }],
-  ['older seed (Jira export)', { version, seedStamp: 'JIRA-F&A-Tech-team.xlsx / sheet JIRA-F&A-Tech-team|101|6', projects: [] }],
-  ['different project count', { version, seedStamp: `${seed.meta.source}|999|${seed.people.length}`, projects: [] }],
-  ['different roster size', { version, seedStamp: `${seed.meta.source}|${seed.projects.length}|6`, projects: [] }],
+  ['the Jira-era seed', { version, seedStamp: 'JIRA-F&A-Tech-team.xlsx / sheet JIRA-F&A-Tech-team|101|6|a|b', projects: [] }],
+  ['a count-only stamp from an older build', { version, seedStamp: `${seed.meta.source}|86|7`, projects: [] }],
   ['missing stamp', { version, projects: [] }],
 ]
-for (const [label, parsed] of cases) {
-  const stale =
-    !parsed || parsed.version !== version || !Array.isArray(parsed.projects) || parsed.seedStamp !== stamp
-  check(`rejects cached state: ${label}`, stale)
+for (const [label, parsed] of cases) check(`rejects: ${label}`, isStale(parsed))
+
+// THE case that slipped through: same counts, different person content.
+const withoutFlag = {
+  ...seed,
+  people: seed.people.map(({ aggregatesTeam, ...rest }) => rest),
 }
+check('rejects a roster whose counts match but content differs',
+  isStale({ version, seedStamp: stampFor(withoutFlag), projects: [] }),
+  'same source, same 86 projects, same 7 people — only a flag changed')
 
-// Current state must be accepted.
-const good = { version, seedStamp: stamp, projects: seed.projects }
-const staleGood =
-  good.version !== version || !Array.isArray(good.projects) || good.seedStamp !== stamp
-check('accepts state from the current seed', !staleGood)
+const repriced = {
+  ...seed,
+  projects: seed.projects.map((p, i) => (i === 0 ? { ...p, savingHours: (p.savingHours ?? 0) + 1 } : p)),
+}
+check('rejects a repriced project with the same counts',
+  isStale({ version, seedStamp: stampFor(repriced), projects: [] }))
 
-console.log(`\nseed stamp: ${stamp}`)
+console.log('\n--- what must be accepted ---')
+check('accepts state from the current seed',
+  !isStale({ version, seedStamp: stamp, projects: seed.projects }))
+
+console.log(`\nstamp: ${stamp}`)
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
