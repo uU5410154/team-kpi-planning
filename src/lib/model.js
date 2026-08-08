@@ -1,4 +1,4 @@
-import { OBJ_BY_ID, OBJECTIVES } from './palette.js'
+import { OBJ_BY_ID, OBJECTIVES, OUT_OF_PLAN } from './palette.js'
 
 const OBJECTIVE_ORDER = OBJECTIVES.map((o) => o.id)
 
@@ -335,6 +335,13 @@ export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, credi
 
 export const isCounted = (p) => p.commitLevel === 'commit' || p.commitLevel === 'stretch'
 
+/**
+ * Is this project part of THIS year's plan at all? "Next year" and "Excluded"
+ * stay in the register but contribute nothing to the team total, the objective
+ * mix, headcount or any scorecard.
+ */
+export const isInPlan = (p) => !OUT_OF_PLAN.has(p.commitLevel)
+
 /** Does this project's objective contribute hours to the 3,000 pool? */
 export const countsToPool = (p) => {
   const o = OBJ_BY_ID[p.objective]
@@ -402,12 +409,12 @@ export function computePlan(state) {
 
   const sumHC = (arr) => arr.reduce((a, p) => a + (p.hc || 0), 0)
   const committedHC = sumHC(commit)
-  const totalHC = sumHC(perProject.filter((p) => p.commitLevel !== 'excluded'))
+  const totalHC = sumHC(perProject.filter(isInPlan))
 
   // The book total — every project's saving hours, with no objective or
   // commit-level filtering applied. This must always reconcile to the source
   // workbook's own column sum, so it is what the dashboard leads with.
-  const active = perProject.filter((p) => p.commitLevel !== 'excluded')
+  const active = perProject.filter(isInPlan)
   const totalHours = active.reduce((a, p) => a + (p.savingHours ?? 0), 0)
   const byStatus = {}
   for (const p of active) {
@@ -415,6 +422,10 @@ export function computePlan(state) {
     byStatus[k] = (byStatus[k] || 0) + (p.savingHours ?? 0)
   }
   const doneHours = byStatus.Done || 0
+
+  // Deferred to next year: kept on the record, deliberately outside the total.
+  const nextYear = perProject.filter((p) => p.commitLevel === 'nextyear')
+  const nextYearHours = nextYear.reduce((a, p) => a + (p.savingHours ?? 0), 0)
 
   const totalManday = perProject
     .filter(isCounted)
@@ -537,6 +548,8 @@ export function computePlan(state) {
       totalHours,
       totalCoverage: s.targetHours > 0 ? totalHours / s.targetHours : 0,
       byStatus,
+      nextYearHours,
+      nextYearCount: nextYear.length,
       doneHours,
       doneCoverage: s.targetHours > 0 ? doneHours / s.targetHours : 0,
     },

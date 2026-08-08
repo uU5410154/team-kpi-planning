@@ -156,6 +156,19 @@ export default function Dashboard({ plan, onGoTo }) {
                     {totals.target.toLocaleString()}
                   </TableCell>
                 </TableRow>
+                {totals.nextYearHours > 0 && (
+                  <TableRow>
+                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
+                      Deferred to next year
+                      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
+                        {totals.nextYearCount} project{totals.nextYearCount === 1 ? '' : 's'} · not in the total above
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: 'text.disabled', fontWeight: 600 }}>
+                      ({fmtHours(totals.nextYearHours)})
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>

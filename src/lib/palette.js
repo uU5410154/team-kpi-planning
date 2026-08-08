@@ -118,5 +118,13 @@ export const COMMIT_LEVELS = [
   { id: 'commit', label: 'Commit', help: 'Bankable — counts toward the committed target' },
   { id: 'stretch', label: 'Stretch', help: 'Upside — counted separately above the commitment' },
   { id: 'watch', label: 'Watch', help: 'At risk — excluded from the commitment' },
+  { id: 'nextyear', label: 'Next year', help: 'Deferred to 2027 — kept in the register but out of this year\'s total' },
   { id: 'excluded', label: 'Excluded', help: 'Out of scope / deleted — never counted' },
 ]
+
+/**
+ * Commit levels that sit outside this year's plan entirely: their saving hours
+ * are kept on the record but contribute nothing to the team total, the
+ * objective mix or anyone's scorecard.
+ */
+export const OUT_OF_PLAN = new Set(['excluded', 'nextyear'])

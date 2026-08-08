@@ -12,7 +12,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
-import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART } from '../lib/palette.js'
+import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
 import { fmtHours, fmtRatio, fmtPct } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -20,6 +20,9 @@ const COMMIT_COLOR = {
   commit: STATUS.good,
   stretch: '#2a78d6',
   watch: STATUS.warning,
+  // Deferred — a distinct hue from commit/stretch/watch so the dot reads at a
+  // glance, though the label beside it always carries the meaning too.
+  nextyear: '#7c5cd6',
   excluded: '#898781',
 }
 
@@ -172,6 +175,11 @@ export default function Projects({
     setBulkEl(null)
   }
 
+  const registerHours = useMemo(
+    () => projects.reduce((a, p) => a + (p.savingHours ?? 0), 0),
+    [projects],
+  )
+
   /** Totals for whatever the filters currently show — recomputed on every change. */
   const agg = useMemo(() => {
     const savingRows = rows.filter((p) => p.savingHours != null)
@@ -192,9 +200,14 @@ export default function Projects({
         : null,
       done: rows.filter((p) => p.status === 'Done').reduce((a, p) => a + (p.savingHours ?? 0), 0),
       tbc: rows.filter((p) => p.savingHours == null).length,
-      pctOfBook: plan.totals.totalHours > 0 ? hours / plan.totals.totalHours : 0,
+      // Denominator is the whole register, so a view filtered to deferred or
+      // excluded rows can never read over 100%.
+      pctOfBook: registerHours > 0 ? hours / registerHours : 0,
+      deferred: rows
+        .filter((p) => OUT_OF_PLAN.has(p.commitLevel))
+        .reduce((a, p) => a + (p.savingHours ?? 0), 0),
     }
-  }, [rows, plan.totals.totalHours])
+  }, [rows, registerHours])
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -368,7 +381,15 @@ export default function Projects({
         <Box sx={{ display: 'flex', flexWrap: 'wrap', bgcolor: 'action.hover' }}>
           {[
             { label: 'Projects in view', value: agg.count.toLocaleString(), sub: agg.tbc ? `${agg.tbc} still TBC` : 'all quantified' },
-            { label: 'Saving hrs / month', value: fmtHours(agg.hours), sub: `${fmtPct(agg.pctOfBook)} of the whole book`, strong: true },
+            {
+              label: 'Saving hrs / month',
+              value: fmtHours(agg.hours),
+              sub: agg.deferred > 0
+                ? `${fmtHours(agg.deferred)} of it out of plan`
+                : `${fmtPct(agg.pctOfBook)} of the register`,
+              strong: true,
+              tone: agg.deferred > 0 ? STATUS.warning : undefined,
+            },
             { label: 'Of which delivered', value: fmtHours(agg.done), sub: 'status Done' },
             { label: 'Headcount', value: agg.hc ? agg.hc.toFixed(1) : '—', sub: 'HC released' },
             { label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
@@ -443,7 +464,12 @@ export default function Projects({
             {rows.map((p) => {
               const objIdx = OBJECTIVES.findIndex((o) => o.id === p.objective)
               return (
-                <TableRow key={p.key} hover selected={sel.has(p.key)} sx={{ opacity: p.commitLevel === 'excluded' ? 0.55 : 1 }}>
+                <TableRow
+                  key={p.key}
+                  hover
+                  selected={sel.has(p.key)}
+                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) ? 0.55 : 1 }}
+                >
                   <TableCell padding="checkbox">
                     <Checkbox
                       size="small"

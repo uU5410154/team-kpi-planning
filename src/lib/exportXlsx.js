@@ -131,6 +131,7 @@ export async function buildWorkbook(plan, state) {
     sectionRow(ws, r++, 'TARGET BRIDGE', 3)
     const bridgeStart = r
     kv(`Management target (${unit})`, settings.targetHours, N0)
+    kv('Total book (this year)', Math.round(totals.totalHours), N0, NAVY)
     kv('Committed — bankable', Math.round(totals.committedHours), N0, GOOD)
     kv('Stretch — upside, not committed', Math.round(totals.stretchHours), N0)
     kv('Watch — at risk, excluded', Math.round(totals.watchHours), N0, WARN)
@@ -139,6 +140,10 @@ export async function buildWorkbook(plan, state) {
     hl.getCell(2).font = { name: FONT, size: 11, bold: true, color: { argb: NAVY } }
     kv('Coverage vs target', totals.coverage, PCT, totals.coverage >= 1 ? GOOD : BAD)
     kv('Gap (+ surplus / − shortfall)', Math.round(totals.gap), N0, totals.gap >= 0 ? GOOD : BAD)
+    if (totals.nextYearHours > 0) {
+      kv(`Deferred to next year (${totals.nextYearCount} projects, excluded above)`,
+        Math.round(totals.nextYearHours), N0, MUTED)
+    }
     kv('Already delivered (status Done)', Math.round(totals.doneHours), N0)
     kv('Headcount equivalent committed', totals.committedHC, N1)
     styleBody(ws, bridgeStart, r - 1, 3)
@@ -331,7 +336,7 @@ export async function buildWorkbook(plan, state) {
       if (p.savingHours == null) tone(row.getCell(8), WARN)
       if (p.gate === 'fail') tone(row.getCell(12), BAD)
       if (p.gate === 'pass') tone(row.getCell(12), GOOD)
-      const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, excluded: MUTED }[p.commitLevel]
+      const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[p.commitLevel]
       tone(row.getCell(13), lvl)
       if (p.pastDue) tone(row.getCell(16), BAD)
     })
@@ -441,7 +446,7 @@ export async function buildWorkbook(plan, state) {
       row.getCell(9).numFmt = N1
       ;[5, 6, 7, 8, 9].forEach((c) => { row.getCell(c).alignment = { horizontal: 'right' } })
       ;[4, 10, 11].forEach((c) => { row.getCell(c).alignment = { horizontal: 'center' } })
-      tone(row.getCell(10), { commit: GOOD, stretch: NAVY_MID, watch: WARN, excluded: MUTED }[pr.commitLevel])
+      tone(row.getCell(10), { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[pr.commitLevel])
     })
     if (r > pStart) styleBody(ws, pStart, r - 1, cols.length)
 
