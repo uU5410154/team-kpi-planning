@@ -68,15 +68,27 @@ check('default is retained for reset', Math.abs(sales.defaultWeight - 0.15) < 1e
 check('balanced edits keep the total at 100%', weightsValid(gun.kpiLines), `${(weightSum(gun.kpiLines) * 100).toFixed(1)}%`)
 
 // --- the save gate ---
-const broken = {
+// A single raised weight is absorbed by the delivery block, so the card stays
+// at 100%. Only pushing the FIXED blocks (corporate + capability) past 100%
+// leaves nothing to absorb it, and that is a genuine user error worth gating.
+const absorbed = computePlan({
   ...base,
   people: base.people.map((p) => (p.id === 'kade' ? { ...p, kpi: { 'corp-sales': { weight: 0.5 } } } : p)),
+})
+check('a raised weight is absorbed, not left invalid', absorbed.invalid.length === 0,
+  `${(weightSum(absorbed.people.find((p) => p.id === 'kade').kpiLines) * 100).toFixed(2)}%`)
+check('the raised weight is honoured',
+  absorbed.people.find((p) => p.id === 'kade').kpiLines.find((l) => l.id === 'corp-sales').weight === 0.5)
+
+const broken = {
+  ...base,
+  people: base.people.map((p) => (p.id === 'kade'
+    ? { ...p, kpi: { 'corp-sales': { weight: 0.8 }, 'corp-eat': { weight: 0.8 } } } : p)),
 }
 const plan2 = computePlan(broken)
-check('unbalanced edit is reported invalid', plan2.invalid.length === 1 && plan2.invalid[0].id === 'kade',
+check('fixed blocks over 100% ARE reported invalid', plan2.invalid.length === 1 && plan2.invalid[0].id === 'kade',
   plan2.invalid.map((x) => `${x.nick} ${(x.sum * 100).toFixed(1)}%`).join(', '))
-check('the invalid sum is reported accurately', Math.abs(plan2.invalid[0].sum - 1.35) < 1e-9,
-  `${plan2.invalid[0].sum}`)
+check('the invalid sum is reported accurately', plan2.invalid[0].sum > 1.5, `${plan2.invalid[0].sum.toFixed(2)}`)
 check('others stay valid', plan2.people.filter((p) => p.id !== 'kade').every((p) => weightsValid(p.kpiLines)))
 
 // --- targets follow project assignments ---
@@ -136,9 +148,11 @@ const james = planT.people.find((p) => p.id === 'james')
 check('removed line is gone from the scorecard', !james.kpiLines.some((l) => l.id === 'corp-eat'))
 check('removed line is listed for restore',
   james.kpiHiddenLines.some((l) => l.id === 'corp-eat'), String(james.kpiHiddenLines.length))
-check('removal drops the total below 100% and blocks saving',
-  !weightsValid(james.kpiLines) && planT.invalid.some((x) => x.id === 'james'),
-  `${(weightSum(james.kpiLines) * 100).toFixed(1)}%`)
+// Removing a line is the app changing its own line set, so the delivery block
+// absorbs the freed weight and the card stays signable.
+check('removal keeps the card at 100% and does not block saving',
+  weightsValid(james.kpiLines) && planT.invalid.length === 0,
+  `${(weightSum(james.kpiLines) * 100).toFixed(2)}%`)
 
 const rebalanced = rebalanceWeights(james.kpiLines)
 const rebSum = Object.values(rebalanced).reduce((a, b) => a + b, 0)

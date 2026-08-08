@@ -166,13 +166,19 @@ try {
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
 
+  // Reassignment can no longer break a card — the delivery block absorbs it —
+  // so force the blocked state the only way that still can: push the fixed
+  // corporate weights past 100%.
   await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
     const rows = [...document.querySelectorAll('tbody tr')]
-    const row = rows.find((r) => r.innerText.includes('Obj 1 — Financial'))
-    const bin = [...row.querySelectorAll('button')].pop()
-    bin.click()
+    for (const label of ['CP AXTRA Sales', 'CP AXTRA EAT']) {
+      const row = rows.find((r) => r.innerText.includes(label))
+      const inp = [...row.querySelectorAll('input')].find((i) => i.style.textAlign === 'right')
+      inp.focus(); setter.call(inp, '80'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+    }
   })
-  await new Promise((r) => setTimeout(r, 500))
+  await new Promise((r) => setTimeout(r, 600))
 
   await page.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 600))

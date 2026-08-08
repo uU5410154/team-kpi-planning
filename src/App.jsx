@@ -165,6 +165,24 @@ export default function App() {
 
         if (Object.keys(entry).length) kpi[lineId] = entry
         else delete kpi[lineId]
+
+        // Delivery weights are rescaled to fill whatever the fixed blocks
+        // leave, so writing one alone would come back changed. Write the
+        // siblings too — absorbing the difference proportionally — and the
+        // number the user typed is the number they get.
+        const all = plan.people.find((x) => x.id === id)?.kpiLines || []
+        const edited = all.find((l) => l.id === lineId)
+        if ('weight' in patch && edited?.block === 'Delivery') {
+          const fixed = all.filter((l) => l.block !== 'Delivery').reduce((a, l) => a + l.weight, 0)
+          const pool = Math.max(0, 1 - fixed)
+          const others = all.filter((l) => l.block === 'Delivery' && l.id !== lineId)
+          const rest = Math.max(0, pool - patch.weight)
+          const restNow = others.reduce((a, l) => a + l.weight, 0)
+          for (const o of others) {
+            const w = restNow > 0 ? (o.weight / restNow) * rest : rest / (others.length || 1)
+            kpi[o.id] = { ...(kpi[o.id] || {}), weight: w }
+          }
+        }
         return { ...p, kpi }
       }),
     }))

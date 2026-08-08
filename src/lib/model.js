@@ -154,7 +154,7 @@ export function scorecardWeights(person, settings, credited = {}) {
   const ov = person.kpi || {}
   const hidden = new Set(person.kpiHidden || [])
 
-  return lines
+  const resolved = lines
     .filter((l) => !hidden.has(l.id))
     .map((l) => {
       const o = ov[l.id] || {}
@@ -178,6 +178,27 @@ export function scorecardWeights(person, settings, credited = {}) {
         overridden: typeof o.weight === 'number' || hasTargetOverride,
       }
     })
+
+  /*
+   * Reassigning a project changes which objectives someone holds, which adds or
+   * removes delivery lines. Left alone that lands new weight on top of the
+   * existing ones and knocks the card off 100% — the app breaking its own
+   * scorecard and then blocking the save for it.
+   *
+   * So the delivery block always absorbs the slack: it is rescaled to fill
+   * whatever the corporate and capability lines leave. Setting a PIC therefore
+   * moves the target and nothing else. Only weights the user typed on the fixed
+   * blocks can push a card off 100%, which is a real error worth gating.
+   */
+  const delivery = resolved.filter((l) => l.block === 'Delivery')
+  const fixed = resolved.filter((l) => l.block !== 'Delivery').reduce((a, l) => a + l.weight, 0)
+  const pool = Math.max(0, 1 - fixed)
+  const rel = delivery.reduce((a, l) => a + l.weight, 0)
+  for (const l of delivery) {
+    l.weight = rel > 0 ? (l.weight / rel) * pool : pool / delivery.length
+  }
+
+  return resolved
 }
 
 /** Render a KPI target for display or export. */
