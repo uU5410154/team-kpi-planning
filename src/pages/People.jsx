@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Grid, Chip, Tabs, Tab, Alert, Divider, Tooltip, TextField, InputAdornment, Button, IconButton,
+  Grid, Chip, Tabs, Tab, Alert, Tooltip, TextField, InputAdornment, Button, IconButton,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
@@ -12,11 +12,10 @@ import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
 import StatTile from '../components/StatTile.jsx'
 import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS } from '../lib/palette.js'
-
-const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
 import { fmtHours, fmtPct, fmtRatio, weightSum, weightsValid } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
+const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
 const BAND_LABEL = { lead: 'Team Lead', senior: 'Senior', analyst: 'Analyst' }
 
 /** Percent input that commits on blur. Stored as a 0–1 fraction. */

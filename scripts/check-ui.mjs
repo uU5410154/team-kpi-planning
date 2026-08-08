@@ -158,6 +158,49 @@ try {
     String(await scorecardTarget('Obj 1 — Financial')))
   check('and is flagged as drifted',
     await page.evaluate(() => document.body.innerText.includes('no longer match')))
+
+  /* ---------- reported crash: filter, then change a PIC ---------- */
+  // Removing a KPI line puts a scorecard off 100%, which is what makes the
+  // Projects tab render its blocked-save alert. That alert referenced a <Link>
+  // that was never imported, so the whole page threw on the next render.
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+
+  await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('tbody tr')]
+    const row = rows.find((r) => r.innerText.includes('Obj 1 — Financial'))
+    const bin = [...row.querySelectorAll('button')].pop()
+    bin.click()
+  })
+  await new Promise((r) => setTimeout(r, 500))
+
+  await page.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+  await new Promise((r) => setTimeout(r, 600))
+  await page.type('input[placeholder="Search key, project, team, assignee…"]', 'FNP-1431')
+  await new Promise((r) => setTimeout(r, 600))
+
+  const alertShown = await page.evaluate(() => document.body.innerText.includes('Saving is blocked'))
+  check('the blocked-save alert renders on a filtered list', alertShown)
+
+  // change the PIC on the filtered row
+  await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('tbody tr')]
+    const row = rows.find((r) => [...r.querySelectorAll('input')].some((i) => i.value === 'FNP-1431'))
+    const combos = [...row.querySelectorAll('[role="combobox"]')]
+    combos[1].dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  await page.evaluate(() => {
+    const opts = [...document.querySelectorAll('[role="option"]')]
+    const kade = opts.find((o) => o.textContent.includes('Kade'))
+    if (kade) kade.click()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+
+  check('changing PIC on a filtered list throws nothing', errors.length === 0, errors.join(' | '))
+  const stillRendered = await page.evaluate(() =>
+    document.body.innerText.includes('Add project') && document.querySelectorAll('tbody tr').length > 0)
+  check('the projects table is still rendered afterwards', stillRendered)
 } catch (e) {
   failures++
   console.log(`FAIL  unexpected error — ${e.message}`)

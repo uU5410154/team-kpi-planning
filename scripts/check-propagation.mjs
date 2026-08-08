@@ -132,7 +132,6 @@ let p2 = computePlan(s2)
 // simulate blurring the field with the value it already displayed
 const shown = lineFor(p2, 'gun', 'financial').target
 s2 = applyKpiEdit(s2, p2, 'gun', 'obj-financial', { target: shown })
-p2 = computePlan(s2)
 check('no override was stored', !(s2.people.find((p) => p.id === 'gun').kpi || {})['obj-financial'],
   JSON.stringify((s2.people.find((p) => p.id === 'gun').kpi || {})['obj-financial']))
 s2 = setSaving(s2, KEY, 33)

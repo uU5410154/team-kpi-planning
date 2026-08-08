@@ -4,7 +4,7 @@ import {
   Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Chip, Divider,
 } from '@mui/material'
 import StatTile from '../components/StatTile.jsx'
-import { HBar, StackedHBar, GateScatter, Meter, useChartTokens } from '../components/Charts.jsx'
+import { HBar, StackedHBar, GateScatter, Meter } from '../components/Charts.jsx'
 import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
 import { fmtHours, fmtPct, fmtRatio, paybackMonths, SAVING_BASIS } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
@@ -31,7 +31,6 @@ function Section({ title, subtitle, children, action }) {
 export default function Dashboard({ plan, onGoTo }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
-  const tokens = useChartTokens()
   const { totals, people, projects, quality, byObjective, settings } = plan
   const [byPersonView, setByPersonView] = useState('chart')
 
@@ -49,8 +48,6 @@ export default function Dashboard({ plan, onGoTo }) {
     label: `${o.no}. ${o.short}`,
     color: CHART[mode].series[i],
   }))
-
-  const covTone = totals.coverage >= 1 ? 'good' : totals.coverage >= 0.9 ? 'warning' : 'critical'
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>

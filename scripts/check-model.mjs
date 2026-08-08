@@ -5,7 +5,7 @@
  * do not re-add to the team total.
  */
 import { readFileSync } from 'node:fs'
-import { computePlan, projectShares, DEFAULT_SETTINGS, scorecardWeights } from '../src/lib/model.js'
+import { computePlan, projectShares, DEFAULT_SETTINGS } from '../src/lib/model.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
 const state = { people: seed.people, projects: seed.projects, settings: DEFAULT_SETTINGS }
@@ -65,10 +65,7 @@ const personSum = plan.people.reduce((a, p) => a + p.ownHours, 0)
 const poolSum = plan.projects
   .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch'))
   .filter((p) => Object.keys(p.shares).length > 0)
-  .reduce((a, p) => {
-    const o = plan.settings
-    return a + (p.poolHours || 0)
-  }, 0)
+  .reduce((a, p) => a + (p.poolHours || 0), 0)
 check('per-person hours re-add to the pool', Math.abs(personSum - poolSum) < 1,
   `people=${personSum.toFixed(1)} pool=${poolSum.toFixed(1)} (difference is unassigned projects)`)
 
