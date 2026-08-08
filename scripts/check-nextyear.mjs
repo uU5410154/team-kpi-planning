@@ -5,8 +5,10 @@
  *
  * Run with: node scripts/check-nextyear.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, unlinkSync, existsSync } from 'node:fs'
+import ExcelJS from 'exceljs'
 import { computePlan, DEFAULT_SETTINGS, isInPlan, isCounted } from '../src/lib/model.js'
+import { buildWorkbook } from '../src/lib/exportXlsx.js'
 import { COMMIT_LEVELS, OUT_OF_PLAN } from '../src/lib/palette.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
@@ -71,6 +73,22 @@ check('nobody else changes',
 check('every scorecard still totals 100%',
   after.people.every((p) => Math.abs(p.kpiLines.reduce((a, l) => a + l.weight, 0) - 1) < 0.0005))
 check('the project stays in the register', after.projects.some((p) => p.key === biggest.key))
+check('it drops out of the counted project count', af.countedCount === b4.countedCount - 1,
+  `${b4.countedCount} -> ${af.countedCount}`)
+
+// It still appears in the portfolio list — deliberately, so the owner can see
+// what is parked — but it must credit nothing there.
+const parked = af.rows.find((r) => r.p.key === biggest.key)
+check('it is still listed in the portfolio', !!parked)
+check('the portfolio row credits nothing',
+  parked && !isCounted(parked.p),
+  parked && `level ${parked.p.commitLevel}`)
+// the sum of counted rows must equal the person's headline hours
+const rowSum = af.rows
+  .filter((r) => isCounted(r.p))
+  .reduce((a, r) => a + (OUT_OF_PLAN.has(r.p.commitLevel) ? 0 : (r.p.savingHours ?? 0) * r.share), 0)
+check('the counted rows re-add to the headline hours',
+  Math.abs(rowSum - af.hours) < 0.01, `${rowSum.toFixed(1)} vs ${af.hours.toFixed(1)}`)
 
 /* ---------------- it behaves like excluded, and is reversible ---------------- */
 console.log('\n--- consistency with excluded, and reversibility ---')
@@ -104,6 +122,45 @@ check('and all the hours are reported as deferred',
   `${allDeferred.totals.nextYearHours.toFixed(1)}`)
 check('scorecards survive an empty year',
   allDeferred.people.every((p) => Math.abs(p.kpiLines.reduce((a, l) => a + l.weight, 0) - 1) < 0.0005))
+
+/* ---------------- the Excel export agrees ---------------- */
+console.log('\n--- the export credits nothing for it either ---')
+{
+  const state = {
+    meta: seed.meta,
+    people: seed.people,
+    projects: base.projects.map((p) => (p.key === biggest.key ? { ...p, commitLevel: 'nextyear' } : p)),
+    settings: DEFAULT_SETTINGS,
+    scenarioName: 'nextyear',
+  }
+  const file = 'nextyear-selftest.xlsx'
+  if (existsSync(file)) unlinkSync(file)
+  const wb = await buildWorkbook(after, state)
+  await wb.xlsx.writeFile(file)
+  const back = new ExcelJS.Workbook()
+  await back.xlsx.readFile(file)
+
+  const ws = back.getWorksheet(`Obj-${b4.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31))
+  let projectHrs = null
+  let creditedHrs = 'unset'
+  let level = null
+  let totalCredited = null
+  ws.eachRow((row) => {
+    if (String(row.getCell(2).value || '') === biggest.summary) {
+      projectHrs = row.getCell(6).value
+      creditedHrs = row.getCell(7).value
+      level = row.getCell(10).value
+    }
+    if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(7).value
+  })
+  check('the deferred project is still listed in the export', projectHrs === biggest.savingHours,
+    String(projectHrs))
+  check('its level is printed as nextyear', level === 'nextyear', String(level))
+  check('but it credits nothing in the export', creditedHrs === null, String(creditedHrs))
+  check('the export TOTAL CREDITED matches the app', Math.abs(totalCredited - Math.round(af.hours)) < 1,
+    `${totalCredited} vs ${Math.round(af.hours)}`)
+  unlinkSync(file)
+}
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

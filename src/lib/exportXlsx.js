@@ -426,6 +426,9 @@ export async function buildWorkbook(plan, state) {
     const rowsSorted = [...p.rows].sort((a, b) => (b.p.savingHours ?? 0) * b.share - (a.p.savingHours ?? 0) * a.share)
     rowsSorted.forEach(({ p: pr, share }) => {
       const roles = pr.contributors?.find((c) => c.person === p.id)?.roles.join('/') || (pr.pic === p.id ? 'pic' : '—')
+      // Deferred and excluded projects credit nothing — printing their share
+      // would contradict the TOTAL CREDITED row below.
+      const counted = pr.commitLevel === 'commit' || pr.commitLevel === 'stretch'
       const row = ws.getRow(r++)
       row.values = [
         pr.jiraKey || '',
@@ -434,7 +437,7 @@ export async function buildWorkbook(plan, state) {
         roles,
         share,
         pr.savingHours ?? null,
-        pr.savingHours == null ? null : Number(((pr.savingHours ?? 0) * share).toFixed(1)),
+        !counted || pr.savingHours == null ? null : Number(((pr.savingHours ?? 0) * share).toFixed(1)),
         pr.manday || null,
         pr.ratio == null ? null : Number(pr.ratio.toFixed(2)),
         pr.commitLevel,

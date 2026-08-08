@@ -11,7 +11,9 @@ import SyncIcon from '@mui/icons-material/Sync'
 import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
 import StatTile from '../components/StatTile.jsx'
-import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
+import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS } from '../lib/palette.js'
+
+const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
 import { fmtHours, fmtPct, fmtRatio, weightSum, weightsValid } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -432,8 +434,10 @@ export default function People({
                     const roles =
                       pr.contributors?.find((c) => c.person === p.id)?.roles.join('/') ||
                       (pr.pic === p.id ? 'pic' : '—')
-                    const credited = (pr.savingHours ?? 0) * share
                     const counted = pr.commitLevel === 'commit' || pr.commitLevel === 'stretch'
+                    // A deferred or excluded project credits nothing. Printing
+                    // its share here would contradict the totals above it.
+                    const credited = counted ? (pr.savingHours ?? 0) * share : 0
                     return (
                       <TableRow key={pr.key} hover sx={{ opacity: counted ? 1 : 0.5 }}>
                         <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{pr.key}</TableCell>
@@ -455,11 +459,18 @@ export default function People({
                           ) : fmtHours(pr.savingHours)}
                         </TableCell>
                         <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          {pr.savingHours == null ? '—' : fmtHours(credited)}
+                          {!counted ? (
+                            <Tooltip title={`${COMMIT_LABEL[pr.commitLevel] || pr.commitLevel} — credits nothing this year`}>
+                              <Typography variant="body2" sx={{ color: 'text.disabled' }}>—</Typography>
+                            </Tooltip>
+                          ) : pr.savingHours == null ? '—' : fmtHours(credited)}
                         </TableCell>
                         <TableCell>
-                          <Typography variant="caption" sx={{ textTransform: 'capitalize', color: 'text.secondary' }}>
-                            {pr.commitLevel}
+                          <Typography
+                            variant="caption"
+                            sx={{ color: counted ? 'text.secondary' : STATUS.warning, fontWeight: counted ? 400 : 600 }}
+                          >
+                            {COMMIT_LABEL[pr.commitLevel] || pr.commitLevel}
                           </Typography>
                         </TableCell>
                       </TableRow>
