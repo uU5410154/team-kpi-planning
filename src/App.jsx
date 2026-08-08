@@ -429,6 +429,7 @@ export default function App() {
               onRestoreLine={restorePersonKpiLine}
               onRebalance={rebalancePersonKpi}
               onSyncTargets={syncPersonTargets}
+              onUpdate={updateProject}
             />
           )}
           {tab === 'settings' && (

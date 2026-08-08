@@ -212,31 +212,59 @@ export function scorecardWeights(person, settings, credited = {}) {
   return resolved
 }
 
+/** Weights are quantised to this many percentage points. */
+export const WEIGHT_STEP = 5
+
 /**
- * Largest-remainder apportionment: turn fractional shares into whole
- * percentages that still total exactly 100%. Rounding each one independently
- * would land on 99% or 101% and trip the save gate.
+ * Largest-remainder apportionment onto a fixed grid: turn fractional shares
+ * into percentages that are multiples of WEIGHT_STEP and still total exactly
+ * 100%. Rounding each one independently would land on 95% or 105% and trip the
+ * save gate.
  *
- * Returns decimals (0.26 for 26%).
+ * Every line that carries any weight is given at least one step, so a KPI
+ * someone actually holds never shows as 0% and counts for nothing.
+ *
+ * Returns decimals (0.25 for 25%).
  */
-export function toWholePercents(weights) {
+export function toWholePercents(weights, step = WEIGHT_STEP) {
   const n = weights.length
   if (!n) return []
+  const units = Math.round(100 / step) // 20 slots of 5 points
   const total = weights.reduce((a, b) => a + b, 0)
-  const exact = total > 0 ? weights.map((w) => (w / total) * 100) : weights.map(() => 100 / n)
+  const exact = total > 0
+    ? weights.map((w) => (w / total) * units)
+    : weights.map(() => units / n)
 
-  const pct = exact.map((v) => Math.floor(v))
-  const leftover = 100 - pct.reduce((a, b) => a + b, 0)
+  const slots = exact.map((v) => Math.floor(v))
+  let leftover = units - slots.reduce((a, b) => a + b, 0)
 
   // Biggest fractional part first; ties to the earlier line so the result is
   // deterministic rather than dependent on sort stability.
   const byRemainder = exact
     .map((v, i) => ({ i, frac: v - Math.floor(v) }))
     .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  for (let k = 0; k < leftover; k++) slots[byRemainder[k % n].i] += 1
 
-  for (let k = 0; k < leftover; k++) pct[byRemainder[k % n].i] += 1
-  return pct.map((p) => p / 100)
+  // Lift any held line off zero, taking from the largest. Only possible while
+  // there are at least as many slots as lines.
+  if (n <= units) {
+    for (let guard = 0; guard < n * 2; guard++) {
+      const zero = slots.findIndex((s, i) => s === 0 && weights[i] > 0)
+      if (zero < 0) break
+      let biggest = 0
+      for (let i = 1; i < n; i++) if (slots[i] > slots[biggest]) biggest = i
+      if (slots[biggest] < 2) break
+      slots[biggest] -= 1
+      slots[zero] += 1
+    }
+  }
+
+  return slots.map((s) => (s * step) / 100)
 }
+
+/** Snap a hand-typed percentage onto the same grid. */
+export const snapWeight = (pct, step = WEIGHT_STEP) =>
+  Math.min(100, Math.max(0, Math.round(pct / step) * step))
 
 /** Render a KPI target for display or export. */
 export const fmtTarget = (line, basis = 'monthly') =>

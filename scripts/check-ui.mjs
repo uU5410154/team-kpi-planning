@@ -41,6 +41,9 @@ for (let i = 0; i < 40; i++) {
 const browser = await puppeteer.launch({ executablePath: exe, headless: 'new', args: ['--no-sandbox'] })
 const page = await browser.newPage()
 await page.setViewport({ width: 1700, height: 1000 })
+// The app warns before unloading with unsaved changes. That guard is working
+// as intended; here it would block the test's navigations, so accept it.
+page.on('dialog', (d) => d.accept().catch(() => {}))
 
 /** Find the Projects-tab row for a Jira key and return its saving-hours input. */
 const savingInput = async (jiraKey) =>
@@ -234,6 +237,98 @@ try {
   const stillRendered = await page.evaluate(() =>
     document.body.innerText.includes('Add project') && document.querySelectorAll('tbody tr').length > 0)
   check('the projects table is still rendered afterwards', stillRendered)
+
+  /* ---------- weights on the 5-point grid ---------- */
+  await page.evaluate(() => localStorage.clear())
+  // A hash-only change is not a navigation, so goto would hang waiting for one.
+  await page.goto(`${base}/?fresh=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+
+  // The weight input is the LAST right-aligned input in a KPI row; the target
+  // input sits before it and is also right-aligned when it holds hours.
+  const weightsOf = () => page.evaluate(() =>
+    [...document.querySelectorAll('tbody tr')]
+      .filter((r) => /^(Corporate|Delivery|Capability)/i.test(r.innerText))
+      .map((r) => {
+        const i = [...r.querySelectorAll('input')].filter((x) => x.style.textAlign === 'right').pop()
+        return i ? Number(i.value) : null
+      })
+      .filter((v) => v !== null))
+
+  const w = await weightsOf()
+  check('every weight on screen is a multiple of 5', w.length > 0 && w.every((v) => v % 5 === 0), w.join(' / '))
+  check('they total 100%', w.reduce((a, b) => a + b, 0) === 100, String(w.reduce((a, b) => a + b, 0)))
+
+  /* ---------- clicking a KPI line filters the portfolio ---------- */
+  // Headers are uppercased by the theme, so match case-insensitively.
+  const portfolioCount = () => page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    if (!heads.length) return 0
+    return heads[heads.length - 1].closest('table').querySelectorAll('tbody tr').length
+  })
+
+  const allRows = await portfolioCount()
+  check('the portfolio lists the whole book to start', allRows > 20, String(allRows))
+
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+    row.querySelector('td:nth-child(2)').click()
+  })
+  await new Promise((r) => setTimeout(r, 600))
+
+  const filtered = await portfolioCount()
+  check('clicking a KPI line filters the portfolio', filtered > 0 && filtered < allRows,
+    `${allRows} -> ${filtered}`)
+  check('the filter chip appears',
+    await page.evaluate(() => document.body.innerText.includes('Process automation')))
+  check('every remaining row belongs to that objective',
+    await page.evaluate(() => {
+      const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+      const table = heads[heads.length - 1].closest('table')
+      return [...table.querySelectorAll('tbody tr')].every((r) => r.innerText.includes('Obj 2'))
+    }))
+
+  // clicking again clears it
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+    row.querySelector('td:nth-child(2)').click()
+  })
+  await new Promise((r) => setTimeout(r, 600))
+  check('clicking again clears the filter', (await portfolioCount()) === allRows)
+
+  // editing a weight must not toggle the filter
+  await page.evaluate(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+    const inp = [...row.querySelectorAll('input')].find((x) => x.style.textAlign === 'right' && x.value.length <= 3)
+    inp.focus(); inp.blur()
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  check('touching the weight input does not toggle the filter', (await portfolioCount()) === allRows)
+
+  /* ---------- editing the portfolio ---------- */
+  const teamHeadline = () => page.evaluate(() =>
+    Number((document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? '0').replace(/,/g, '')))
+  const before2 = await teamHeadline()
+
+  const bumped = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    const table = heads[heads.length - 1].closest('table')
+    const row = [...table.querySelectorAll('tbody tr')][0]
+    const inp = [...row.querySelectorAll('input')].find((x) => x.style.textAlign === 'right')
+    const was = Number(inp.value)
+    inp.focus(); setter.call(inp, String(was + 100)); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+    return was
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  check('the portfolio saving-hours cell is editable', Number.isFinite(bumped), String(bumped))
+  check('editing it moves the team headline', (await teamHeadline()) === before2 + 100,
+    `${before2} -> ${await teamHeadline()}`)
+  check('and the header total moves with it',
+    (await page.evaluate(() => document.body.innerText.match(/([\d,]+)\s*\/\s*3,000 hrs/)?.[1])) ===
+      (before2 + 100).toLocaleString('en-US'))
+  check('weights are still on the grid after the edit',
+    (await weightsOf()).every((v) => v % 5 === 0))
 } catch (e) {
   failures++
   console.log(`FAIL  unexpected error — ${e.message}`)

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
   Grid, Chip, Tabs, Tab, Alert, Tooltip, TextField, InputAdornment, Button, IconButton,
+  Select, MenuItem,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
@@ -11,8 +12,8 @@ import SyncIcon from '@mui/icons-material/Sync'
 import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
 import StatTile from '../components/StatTile.jsx'
-import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS } from '../lib/palette.js'
-import { fmtHours, fmtPct, fmtRatio, weightSum, weightsValid } from '../lib/model.js'
+import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS, OUT_OF_PLAN } from '../lib/palette.js'
+import { fmtHours, fmtPct, fmtRatio, weightSum, weightsValid, snapWeight, WEIGHT_STEP } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
@@ -33,9 +34,10 @@ function PctCell({ value, onChange, invalid }) {
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         setFocused(false)
-        // Whole percentages only — decimals here are what produced 26.5%.
-        const n = Math.round(Number(draft.replace(/[%\s,]/g, '')))
-        if (Number.isFinite(n) && n >= 0 && n <= 100) {
+        // Snapped to the 5-point grid, so a card never reads 8% or 26.5%.
+        const raw = Number(draft.replace(/[%\s,]/g, ''))
+        const n = Number.isFinite(raw) ? snapWeight(raw) : NaN
+        if (Number.isFinite(n)) {
           if (Math.abs(n / 100 - value) > 1e-9) onChange(n / 100)
           else setDraft(asPct(value))
         } else setDraft(asPct(value))
@@ -110,15 +112,49 @@ function TargetCell({ value, onChange, placeholder }) {
   )
 }
 
+/** Editable saving-hours cell inside the portfolio. */
+function PortfolioNum({ value, onChange }) {
+  const asStr = (v) => (v == null ? '' : String(v))
+  const [draft, setDraft] = useState(asStr(value))
+  const [focused, setFocused] = useState(false)
+  if (!focused && draft !== asStr(value)) setDraft(asStr(value))
+  return (
+    <TextField
+      size="small"
+      variant="standard"
+      value={draft}
+      placeholder="TBC"
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        setFocused(false)
+        const t = draft.trim()
+        if (t === '') { if (value != null) onChange(null); return }
+        const n = Number(t.replace(/,/g, ''))
+        if (Number.isFinite(n) && n >= 0) { if (n !== value) onChange(n) }
+        else setDraft(asStr(value))
+      }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem' } }}
+      sx={{ width: 68 }}
+    />
+  )
+}
+
 export default function People({
-  plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets,
+  plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets, onUpdate,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { people, settings, totals } = plan
   const [who, setWho] = useState(people[0]?.id)
+  // Which KPI line is currently filtering the portfolio, by objective id.
+  const [focus, setFocus] = useState(null)
   const p = people.find((x) => x.id === who) || people[0]
   if (!p) return null
+
+  const focusObj = focus ? OBJ_BY_ID[focus] : null
+  const visibleRows = focus ? p.scorecardRows.filter((r) => r.p.objective === focus) : p.scorecardRows
 
   const sum = weightSum(p.kpiLines)
   const weightOk = weightsValid(p.kpiLines)
@@ -295,8 +331,16 @@ export default function People({
                 {p.kpiLines.map((l) => {
                   const o = l.objective ? OBJ_BY_ID[l.objective] : null
                   const idx = o ? OBJECTIVES.findIndex((x) => x.id === o.id) : -1
+                  const selectable = !!l.objective
+                  const active = selectable && focus === l.objective
                   return (
-                    <TableRow key={l.id} hover>
+                    <TableRow
+                      key={l.id}
+                      hover
+                      selected={active}
+                      onClick={selectable ? () => setFocus(active ? null : l.objective) : undefined}
+                      sx={{ cursor: selectable ? 'pointer' : 'default' }}
+                    >
                       <TableCell sx={{ verticalAlign: 'top', pt: 1.75 }}>
                         <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: '0.03em' }}>
                           {l.block}
@@ -307,12 +351,24 @@ export default function People({
                           {idx >= 0 && (
                             <Box sx={{ width: 8, height: 8, borderRadius: '2px', mt: 0.7, bgcolor: CHART[mode].series[idx], flexShrink: 0 }} />
                           )}
-                          <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.35 }}>
-                            {o ? `Obj ${o.no} — ${o.name}` : l.label}
-                          </Typography>
+                          <Box>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontWeight: 600, lineHeight: 1.35, textDecoration: active ? 'underline' : 'none' }}
+                            >
+                              {o ? `Obj ${o.no} — ${o.name}` : l.label}
+                            </Typography>
+                            {selectable && (
+                              <Typography variant="caption" sx={{ color: active ? 'primary.main' : 'text.disabled' }}>
+                                {active ? 'filtering the portfolio — click to clear' : 'click to filter the portfolio'}
+                              </Typography>
+                            )}
+                          </Box>
                         </Box>
                       </TableCell>
-                      <TableCell sx={{ verticalAlign: 'top', pt: 1.25 }}>
+                      {/* the row toggles the portfolio filter, so the editable
+                          cells must not pass their clicks up to it */}
+                      <TableCell sx={{ verticalAlign: 'top', pt: 1.25 }} onClick={(e) => e.stopPropagation()}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                           {l.targetKind === 'hours' ? (
                             <HoursTargetCell
@@ -336,14 +392,14 @@ export default function People({
                           )}
                         </Box>
                       </TableCell>
-                      <TableCell align="right" sx={{ verticalAlign: 'top', pt: 1.25 }}>
+                      <TableCell align="right" sx={{ verticalAlign: 'top', pt: 1.25 }} onClick={(e) => e.stopPropagation()}>
                         <PctCell
                           value={l.weight}
                           invalid={!weightOk}
                           onChange={(v) => onPersonKpi(p.id, l.id, { weight: v })}
                         />
                       </TableCell>
-                      <TableCell padding="checkbox" sx={{ verticalAlign: 'top', pt: 1.75 }}>
+                      <TableCell padding="checkbox" sx={{ verticalAlign: 'top', pt: 1.75 }} onClick={(e) => e.stopPropagation()}>
                         <Tooltip title="Remove this line from the scorecard">
                           <IconButton size="small" onClick={() => onRemoveLine(p.id, l.id)}>
                             <DeleteOutlineIcon sx={{ fontSize: 17 }} />
@@ -405,8 +461,9 @@ export default function People({
 
             <Box sx={{ px: 2.5, py: 2, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 320px' }}>
-                Targets track project assignments live — reassign a project on the Projects tab and the credited figure
-                here follows. Typing over a target pins it until you sync it back. Defaults come from the{' '}
+                Weights are always multiples of {WEIGHT_STEP}% and total exactly 100%. Targets track project
+                assignments live — reassign a project and the credited figure here follows; typing over a target pins
+                it until you sync it back. Defaults come from the{' '}
                 <strong>{BAND_LABEL[p.band]}</strong> band ({fmtPct(settings.bands[p.band].corporate)} corporate /{' '}
                 {fmtPct(settings.bands[p.band].delivery)} delivery / {fmtPct(settings.bands[p.band].people)} capability).
               </Typography>
@@ -427,28 +484,41 @@ export default function People({
         {/* ---------- portfolio ---------- */}
         <Grid item xs={12} md={5}>
           <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Typography variant="h4" sx={{ mb: 0.5 }}>
-              {p.aggregatesTeam ? 'Team project portfolio' : 'Project portfolio'}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 0.5 }}>
+              <Typography variant="h4">
+                {p.aggregatesTeam ? 'Team project portfolio' : 'Project portfolio'}
+              </Typography>
+              {focusObj && (
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label={`Obj ${focusObj.no} — ${focusObj.short}`}
+                  onDelete={() => setFocus(null)}
+                />
+              )}
+            </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 2 }}>
-              {p.aggregatesTeam
-                ? "Every in-plan project across the team, at full value — this is what the team figure above adds up to. Next-year and excluded projects are not listed."
-                : "Contribution % is this person's normalised share of the project. Credited hours = project hours × share."}
+              {focusObj
+                ? `Showing ${visibleRows.length} of ${p.scorecardRows.length} projects. Click the KPI line again to clear.`
+                : p.aggregatesTeam
+                  ? 'Every in-plan project across the team, at full value — this is what the team figure above adds up to. Edit any of it here; the numbers everywhere follow.'
+                  : "Contribution % is this person's normalised share. Credited hours = project hours × share. Edit any of it here."}
             </Typography>
             <Table size="small">
               <TableHead>
                 <TableRow>
                   <TableCell>Jira</TableCell>
                   <TableCell>Project</TableCell>
-                  <TableCell>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
+                  <TableCell sx={{ minWidth: 96 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
                   <TableCell align="right">Share</TableCell>
-                  <TableCell align="right">Project hrs</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 84 }}>Project hrs</TableCell>
                   <TableCell align="right">Credited</TableCell>
-                  <TableCell>Level</TableCell>
+                  <TableCell sx={{ minWidth: 110 }}>Level</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {p.scorecardRows
+                {visibleRows
                   .slice()
                   .sort((a, b) => (b.p.savingHours ?? 0) * b.share - (a.p.savingHours ?? 0) * a.share)
                   .map(({ p: pr, share }) => {
@@ -474,15 +544,31 @@ export default function People({
                           </Typography>
                         </TableCell>
                         <TableCell>
-                          <Typography variant="caption" sx={{ fontWeight: 600 }}>{roles}</Typography>
+                          {p.aggregatesTeam ? (
+                            <Select
+                              size="small"
+                              variant="standard"
+                              displayEmpty
+                              value={pr.pic ?? ''}
+                              onChange={(e) => onUpdate(pr.key, { pic: e.target.value || null })}
+                              sx={{ fontSize: '0.75rem', width: '100%' }}
+                              renderValue={(v) => (v ? (plan.assignees || people).find((x) => x.id === v)?.nick : 'TBC')}
+                            >
+                              <MenuItem value=""><em>TBC</em></MenuItem>
+                              {(plan.assignees || people).map((x) => (
+                                <MenuItem key={x.id} value={x.id}>{x.nick}</MenuItem>
+                              ))}
+                            </Select>
+                          ) : (
+                            <Typography variant="caption" sx={{ fontWeight: 600 }}>{roles}</Typography>
+                          )}
                         </TableCell>
                         <TableCell align="right">{fmtPct(share)}</TableCell>
                         <TableCell align="right">
-                          {pr.savingHours == null ? (
-                            <Tooltip title="Not quantified in Jira">
-                              <WarningAmberIcon sx={{ fontSize: 15, color: STATUS.warning }} />
-                            </Tooltip>
-                          ) : fmtHours(pr.savingHours)}
+                          <PortfolioNum
+                            value={pr.savingHours}
+                            onChange={(v) => onUpdate(pr.key, { savingHours: v, savingEstimated: v == null })}
+                          />
                         </TableCell>
                         <TableCell align="right" sx={{ fontWeight: 600 }}>
                           {!counted ? (
@@ -492,12 +578,25 @@ export default function People({
                           ) : pr.savingHours == null ? '—' : fmtHours(credited)}
                         </TableCell>
                         <TableCell>
-                          <Typography
-                            variant="caption"
-                            sx={{ color: counted ? 'text.secondary' : STATUS.warning, fontWeight: counted ? 400 : 600 }}
+                          <Select
+                            size="small"
+                            variant="standard"
+                            value={pr.commitLevel}
+                            onChange={(e) => onUpdate(pr.key, { commitLevel: e.target.value })}
+                            sx={{ fontSize: '0.75rem', width: '100%' }}
+                            renderValue={(v) => (
+                              <Typography
+                                variant="caption"
+                                sx={{ color: OUT_OF_PLAN.has(v) ? STATUS.warning : 'text.secondary', fontWeight: OUT_OF_PLAN.has(v) ? 600 : 400 }}
+                              >
+                                {COMMIT_LABEL[v] || v}
+                              </Typography>
+                            )}
                           >
-                            {COMMIT_LABEL[pr.commitLevel] || pr.commitLevel}
-                          </Typography>
+                            {COMMIT_LEVELS.map((c) => (
+                              <MenuItem key={c.id} value={c.id}>{c.label}</MenuItem>
+                            ))}
+                          </Select>
                         </TableCell>
                       </TableRow>
                     )
