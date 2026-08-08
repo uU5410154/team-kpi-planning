@@ -52,7 +52,16 @@ export const STATUS = {
   critical: '#d03b3b',
 }
 
-/** The five management guideline objectives, in fixed slot order. */
+/**
+ * The five management guideline objectives, in fixed slot order.
+ *
+ * `guideline*` fields are the management document reproduced verbatim, including
+ * its Thai text and the asterisk on Data warehouse. They are for labelling and
+ * must not be paraphrased — the app is read alongside that document, and any
+ * drift between the two invites an argument about which one is authoritative.
+ * `guidelineName` is empty on objective 5 because the source groups it under
+ * "Efficiency and integration".
+ */
 export const OBJECTIVES = [
   {
     id: 'financial',
@@ -63,6 +72,10 @@ export const OBJECTIVES = [
     target: 'Manday : saving-hours ratio',
     measure: 'ratio',
     countsToPool: true,
+    guidelineName: 'Financial',
+    guidelineDetail: 'Activities which improve PL, BS, Cash flow',
+    guidelineTarget:
+      'FTEs management เช่น การนำเสนอ project sprint vs. man-hour ที่ทีม invest vs. benefits ที่ได้ ว่าคุ้มค่าหรือไม่',
   },
   {
     id: 'process_automation',
@@ -73,6 +86,9 @@ export const OBJECTIVES = [
     target: '3,000 hrs',
     measure: 'hours',
     countsToPool: true,
+    guidelineName: 'F&A process automation',
+    guidelineDetail: 'to transform all manual work to automation',
+    guidelineTarget: '3,000 hrs.',
   },
   {
     id: 'datawarehouse',
@@ -83,6 +99,10 @@ export const OBJECTIVES = [
     target: 'by Nov 2026',
     measure: 'milestone',
     countsToPool: false,
+    guidelineName: 'F&A Data warehouse*',
+    guidelineDetail:
+      'To create reporting for own division operation by link F&A datawarehouse (Acct data cube)',
+    guidelineTarget: 'by Nov 2026',
   },
   {
     id: 'efficiency',
@@ -93,6 +113,9 @@ export const OBJECTIVES = [
     target: 'propose',
     measure: 'hours_part',
     countsToPool: true,
+    guidelineName: 'Efficiency and integration',
+    guidelineDetail: 'Developing reporting to enhance efficiency and productivity',
+    guidelineTarget: 'propose',
   },
   {
     id: 'ai_automation',
@@ -103,6 +126,10 @@ export const OBJECTIVES = [
     target: 'propose',
     measure: 'hours',
     countsToPool: true,
+    // blank in the source — grouped under "Efficiency and integration"
+    guidelineName: '',
+    guidelineDetail: 'Automation E2E, AI development',
+    guidelineTarget: 'propose',
   },
 ]
 

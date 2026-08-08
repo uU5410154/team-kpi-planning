@@ -303,7 +303,7 @@ export default function Dashboard({ plan, onGoTo }) {
         </Grid>
 
         {/* ---------- efficiency gate ---------- */}
-        <Grid item xs={12} md={7}>
+        <Grid item xs={12}>
           <Section
             title="Objective 1 — the efficiency gate"
             subtitle={`Each dot is a project. Anything below the dashed line returns less than ${settings.ratioGate.toFixed(1)} saving hours per manday invested.`}
@@ -316,55 +316,75 @@ export default function Dashboard({ plan, onGoTo }) {
           </Section>
         </Grid>
 
-        {/* ---------- objective mix ---------- */}
-        <Grid item xs={12} md={5}>
+        {/* ---------- the management guideline, verbatim ---------- */}
+        <Grid item xs={12}>
           <Section
-            title="Where the hours come from"
-            subtitle="Objectives 2, 4 and 5 all feed the one 3,000 hr pool. Objective 3 is date-gated to Nov 2026 and carries no hours."
+            title="2026 management KPI guideline"
+            subtitle="The objectives as issued, with what the team is currently carrying against each. Objectives 2, 4 and 5 all feed the one hour pool; objective 3 is date-gated and carries no hours."
           >
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Objective</TableCell>
-                  <TableCell align="right">Projects</TableCell>
-                  <TableCell align="right">Hours</TableCell>
-                  <TableCell align="right">Pool</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {OBJECTIVES.map((o, i) => {
-                  const n = projects.filter((p) => p.objective === o.id).length
-                  const h = byObjective[o.id] || 0
-                  return (
-                    <TableRow key={o.id} hover>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: CHART[mode].series[i], flexShrink: 0 }} />
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
-                              {o.no}. {o.short}
-                            </Typography>
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                              Target: {o.target}
-                            </Typography>
+            <Box sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ minWidth: 880 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell sx={{ minWidth: 190 }}>Objective</TableCell>
+                    <TableCell sx={{ minWidth: 280 }}>Objective detail</TableCell>
+                    <TableCell sx={{ minWidth: 260 }}>F&amp;A Tech</TableCell>
+                    <TableCell align="right">Projects</TableCell>
+                    <TableCell align="right">Hours</TableCell>
+                    <TableCell align="right">Pool</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {OBJECTIVES.map((o, i) => {
+                    const n = projects.filter((p) => p.objective === o.id).length
+                    const h = byObjective[o.id] || 0
+                    return (
+                      <TableRow key={o.id} hover>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                            <Box sx={{ width: 10, height: 10, borderRadius: '2px', mt: 0.6, bgcolor: CHART[mode].series[i], flexShrink: 0 }} />
+                            <Box>
+                              {o.guidelineName ? (
+                                <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.35 }}>
+                                  {o.guidelineName}
+                                </Typography>
+                              ) : (
+                                <Typography variant="body2" sx={{ color: 'text.disabled', fontStyle: 'italic', lineHeight: 1.35 }}>
+                                  (continues {OBJECTIVES[i - 1]?.guidelineName})
+                                </Typography>
+                              )}
+                              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                Objective {o.no} in this app
+                              </Typography>
+                            </Box>
                           </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right">{n}</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(h)}</TableCell>
-                      <TableCell align="right">
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          label={o.countsToPool ? 'Yes' : 'Gated'}
-                          color={o.countsToPool ? 'default' : 'warning'}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Typography variant="body2" sx={{ lineHeight: 1.4 }}>
+                            {o.guidelineDetail}
+                          </Typography>
+                        </TableCell>
+                        <TableCell sx={{ verticalAlign: 'top' }}>
+                          <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 500 }}>
+                            {o.guidelineTarget}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>{n}</TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top', fontWeight: 600 }}>{fmtHours(h)}</TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>
+                          <Chip
+                            size="small"
+                            variant="outlined"
+                            label={o.countsToPool ? 'Yes' : 'Gated'}
+                            color={o.countsToPool ? 'default' : 'warning'}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </Box>
           </Section>
         </Grid>
 

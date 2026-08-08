@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "start": "node server/index.js",
     "test": "npm run test:unit && npm run test:db && npm run test:ui",
-    "test:unit": "node scripts/check-model.mjs && node scripts/check-filters.mjs && node scripts/check-storage.mjs && node scripts/check-scorecards.mjs && node scripts/check-propagation.mjs && node scripts/check-fallback.mjs && node scripts/check-nextyear.mjs && node scripts/check-export.mjs",
+    "test:unit": "node scripts/check-model.mjs && node scripts/check-filters.mjs && node scripts/check-storage.mjs && node scripts/check-scorecards.mjs && node scripts/check-propagation.mjs && node scripts/check-fallback.mjs && node scripts/check-nextyear.mjs && node scripts/check-guideline.mjs && node scripts/check-export.mjs",
     "test:db": "node scripts/check-db.mjs && node scripts/check-api.mjs",
     "test:ui": "npm run build && node scripts/check-ui.mjs"
   },

@@ -195,26 +195,36 @@ export function hiddenLines(person, settings, credited = {}) {
 }
 
 /**
- * Scale weights proportionally so they total exactly 1.0 — what you want after
- * deleting a line, rather than hand-patching the remainder.
+ * Rescale weights to total exactly 100%, keeping their existing ratios and
+ * landing on whole percentages — a scorecard shown to someone should read
+ * 16%, not 15.88%.
+ *
+ * Uses largest-remainder apportionment: floor everything, then hand the leftover
+ * points to the lines that lost the most in rounding. Naively rounding each line
+ * would miss 100% by a point or two, which the save gate would then block.
  */
 export function rebalanceWeights(lines) {
+  const n = lines.length
+  if (!n) return {}
   const total = weightSum(lines)
-  if (total <= 0) {
-    const even = 1 / (lines.length || 1)
-    return Object.fromEntries(lines.map((l) => [l.id, even]))
-  }
-  const out = {}
-  let acc = 0
-  lines.forEach((l, i) => {
-    if (i === lines.length - 1) out[l.id] = Math.round((1 - acc) * 10000) / 10000
-    else {
-      const w = Math.round((l.weight / total) * 10000) / 10000
-      out[l.id] = w
-      acc += w
-    }
-  })
-  return out
+
+  // With nothing to go on, split evenly rather than leaving it at zero.
+  const exact = total > 0
+    ? lines.map((l) => ((l.weight || 0) / total) * 100)
+    : lines.map(() => 100 / n)
+
+  const pct = exact.map((v) => Math.floor(v))
+  const leftover = 100 - pct.reduce((a, b) => a + b, 0)
+
+  // Biggest fractional part first; ties go to the earlier line so the result is
+  // deterministic rather than dependent on sort stability.
+  const byRemainder = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+
+  for (let k = 0; k < leftover; k++) pct[byRemainder[k % n].i] += 1
+
+  return Object.fromEntries(lines.map((l, i) => [l.id, pct[i] / 100]))
 }
 
 export const weightSum = (lines) => lines.reduce((a, l) => a + (l.weight || 0), 0)

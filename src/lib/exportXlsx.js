@@ -178,13 +178,30 @@ export async function buildWorkbook(plan, state) {
     styleBody(ws, qStart, r - 1, 3)
 
     r++
-    sectionRow(ws, r++, 'GUIDELINE OBJECTIVES', 3)
+    sectionRow(ws, r++, 'MANAGEMENT KPI GUIDELINE (as issued)', 3)
     const oHead = r
-    headerRow(ws, r++, ['Objective', `Hours (${unit})`, 'Feeds pool'])
+    headerRow(ws, r++, ['Objective', 'Objective detail', 'F&A Tech'])
     const oStart = r
+    OBJECTIVES.forEach((o, i) => {
+      const row = ws.getRow(r++)
+      row.getCell(1).value = o.guidelineName || `(under ${OBJECTIVES[i - 1]?.guidelineName})`
+      row.getCell(2).value = o.guidelineDetail
+      row.getCell(3).value = o.guidelineTarget
+      row.getCell(2).alignment = { vertical: 'top', wrapText: true }
+      row.getCell(3).alignment = { vertical: 'top', wrapText: true }
+      row.height = 30
+      if (!o.guidelineName) tone(row.getCell(1), MUTED, false)
+    })
+    styleBody(ws, oStart, r - 1, 3)
+    ws.getRow(oHead).height = 22
+
+    r++
+    sectionRow(ws, r++, 'WHAT THE TEAM IS CARRYING AGAINST EACH', 3)
+    headerRow(ws, r++, ['Objective', `Hours (${unit})`, 'Feeds pool'])
+    const cStart2 = r
     OBJECTIVES.forEach((o) => {
       const row = ws.getRow(r++)
-      row.getCell(1).value = `${o.no}.  ${o.name}  —  target: ${o.target}`
+      row.getCell(1).value = `${o.no}.  ${o.name}`
       row.getCell(2).value = Math.round(byObjective[o.id] || 0)
       row.getCell(2).numFmt = N0
       row.getCell(2).alignment = { horizontal: 'right' }
@@ -192,8 +209,7 @@ export async function buildWorkbook(plan, state) {
       row.getCell(3).alignment = { horizontal: 'center' }
       if (!o.countsToPool) tone(row.getCell(3), WARN, false)
     })
-    styleBody(ws, oStart, r - 1, 3)
-    ws.getRow(oHead).height = 22
+    styleBody(ws, cStart2, r - 1, 3)
   }
 
   /* ============ 2. Overall_Objectives ============ */

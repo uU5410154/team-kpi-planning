@@ -143,6 +143,20 @@ check('removal drops the total below 100% and blocks saving',
 const rebalanced = rebalanceWeights(james.kpiLines)
 const rebSum = Object.values(rebalanced).reduce((a, b) => a + b, 0)
 check('rebalance restores exactly 100%', Math.abs(rebSum - 1) < 1e-9, `${(rebSum * 100).toFixed(4)}%`)
+check('rebalance lands on whole percentages',
+  Object.values(rebalanced).every((w) => Math.abs(w * 100 - Math.round(w * 100)) < 1e-9),
+  Object.values(rebalanced).map((w) => `${(w * 100).toFixed(2)}%`).join(' '))
+check('rebalance keeps the original ordering of weights', (() => {
+  const before = james.kpiLines.map((l) => l.weight)
+  const after = james.kpiLines.map((l) => rebalanced[l.id])
+  for (let i = 0; i < before.length; i++) {
+    for (let j = 0; j < before.length; j++) {
+      // a line that was strictly larger must not end up smaller
+      if (before[i] - before[j] > 1e-9 && after[i] < after[j] - 1e-9) return false
+    }
+  }
+  return true
+})())
 
 const afterReb = computePlan({
   ...trimmed,
