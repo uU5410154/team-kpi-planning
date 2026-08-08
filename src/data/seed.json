@@ -12,7 +12,8 @@
    "nick": "Gun",
    "role": "Team Lead",
    "band": "lead",
-   "scorecard": true
+   "scorecard": true,
+   "aggregatesTeam": true
   },
   {
    "id": "james",

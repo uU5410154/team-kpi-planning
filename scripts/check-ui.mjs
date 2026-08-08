@@ -75,8 +75,10 @@ try {
   /* ---------- read the scorecard BEFORE ---------- */
   await page.goto(`${base}/#people`, { waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 600))
-  const before = await scorecardTarget('Obj 1 — Financial')
-  check('scorecard shows 32 before the edit', before === '32', String(before))
+  // Gun is the team lead, so this line carries the TEAM's objective-1 total.
+  // Assert the delta rather than a constant.
+  const before = Number(await scorecardTarget('Obj 1 — Financial'))
+  check('scorecard shows a live figure before the edit', Number.isFinite(before), String(before))
 
   /* ---------- edit the project ---------- */
   await page.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
@@ -107,8 +109,8 @@ try {
   /* ---------- THE BUG: scorecard must follow ---------- */
   await page.goto(`${base}/#people`, { waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 700))
-  const after = await scorecardTarget('Obj 1 — Financial')
-  check('SCORECARD NOW SHOWS 33', after === '33', String(after))
+  const after = Number(await scorecardTarget('Obj 1 — Financial'))
+  check('SCORECARD FOLLOWED THE +1 EDIT', after === before + 1, `${before} -> ${after}`)
 
   const driftWarning = await page.evaluate(() => document.body.innerText.includes('no longer match'))
   check('no spurious drift warning', driftWarning === false)
@@ -140,7 +142,7 @@ try {
   await new Promise((r) => setTimeout(r, 600))
   await page.goto(`${base}/#people`, { waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 700))
-  check('a second edit still reaches the scorecard', (await scorecardTarget('Obj 1 — Financial')) === '41',
+  check('a second edit still reaches the scorecard', Number(await scorecardTarget('Obj 1 — Financial')) === before + 9,
     String(await scorecardTarget('Obj 1 — Financial')))
 
   /* ---------- deliberate override still pins ---------- */

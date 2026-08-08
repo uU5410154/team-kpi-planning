@@ -59,7 +59,9 @@ check('every scorecard totals 100%', badWeights.length === 0,
   badWeights.map(([n, s]) => `${n}=${(s * 100).toFixed(2)}%`).join(', '))
 
 // 4. per-person credited hours re-add to the team pool (no double banking)
-const personSum = plan.people.reduce((a, p) => a + p.hours, 0)
+// ownHours, not scorecardHours: the lead's card carries the team aggregate,
+// which would double-count everyone else here.
+const personSum = plan.people.reduce((a, p) => a + p.ownHours, 0)
 const poolSum = plan.projects
   .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch'))
   .filter((p) => Object.keys(p.shares).length > 0)
@@ -102,9 +104,9 @@ console.log(`team ratio          ${t.teamRatio?.toFixed(2)} hrs/manday`)
 console.log(`top-2 concentration ${(t.top2Share * 100).toFixed(1)}%`)
 console.log(`failing the gate    ${t.failingGate}`)
 console.log('\nper person:')
-for (const p of [...plan.people].sort((a, b) => b.hours - a.hours)) {
+for (const p of [...plan.people].sort((a, b) => b.ownHours - a.ownHours)) {
   console.log(
-    `  ${p.nick.padEnd(10)} ${String(Math.round(p.hours)).padStart(6)} hrs  ` +
+    `  ${p.nick.padEnd(10)} ${String(Math.round(p.ownHours)).padStart(6)} hrs  ` +
     `${String(p.countedCount).padStart(3)} proj  ratio ${(p.ratio ?? 0).toFixed(1).padStart(6)}  ` +
     `weights ${(p.kpiLines.reduce((a, l) => a + l.weight, 0) * 100).toFixed(0)}%  ` +
     `obj[${p.objectives.length}]`,

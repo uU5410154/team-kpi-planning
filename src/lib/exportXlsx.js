@@ -401,12 +401,12 @@ export async function buildWorkbook(plan, state) {
       v.alignment = { horizontal: 'left' }
       if (colour) tone(v, colour)
     }
-    kv(`Credited saving hours (${unit})`, Math.round(p.hours), N0, NAVY)
+    kv(p.aggregatesTeam ? `Team saving hours (${unit}) — whole team` : `Credited saving hours (${unit})`, Math.round(p.scorecardHours), N0, NAVY)
     kv('Committed only', Math.round(p.commitHours), N0)
-    kv('Mandays credited', Math.round(p.manday), N0)
+    kv('Mandays credited', Math.round(p.scorecardManday), N0)
     kv('Efficiency ratio', p.ratio == null ? 'not yet measurable' : Number(p.ratio.toFixed(2)), p.ratio == null ? undefined : N1,
       p.ratio == null ? MUTED : p.ratio >= settings.ratioGate ? GOOD : BAD)
-    kv('Projects credited / touched', `${p.countedCount} / ${p.projectCount}`)
+    kv('Projects credited / touched', p.aggregatesTeam ? `[TEAM] ${p.scorecardCount} in plan · ${p.ownCount} their own` : `[PERSONAL] ${p.countedCount} / ${p.projectCount}`)
     kv('Saving hours still TBC', p.missingSaving, N0, p.missingSaving ? WARN : GOOD)
     styleBody(ws, sStart, r - 1, 3, { zebra: false })
 
@@ -439,7 +439,7 @@ export async function buildWorkbook(plan, state) {
     sectionRow(ws, r++, 'PROJECT PORTFOLIO', cols.length)
     headerRow(ws, r++, cols.map((c) => c[0]), cols.map((c) => c[1]))
     const pStart = r
-    const rowsSorted = [...p.rows].sort((a, b) => (b.p.savingHours ?? 0) * b.share - (a.p.savingHours ?? 0) * a.share)
+    const rowsSorted = [...p.scorecardRows].sort((a, b) => (b.p.savingHours ?? 0) * b.share - (a.p.savingHours ?? 0) * a.share)
     rowsSorted.forEach(({ p: pr, share }) => {
       const roles = pr.contributors?.find((c) => c.person === p.id)?.roles.join('/') || (pr.pic === p.id ? 'pic' : '—')
       // Deferred and excluded projects credit nothing — printing their share
@@ -471,7 +471,7 @@ export async function buildWorkbook(plan, state) {
 
     const tr = ws.getRow(r)
     tr.getCell(2).value = 'TOTAL CREDITED'
-    tr.getCell(7).value = Math.round(p.hours)
+    tr.getCell(7).value = Math.round(p.scorecardHours)
     tr.getCell(7).numFmt = N0
     for (let c = 1; c <= cols.length; c++) {
       const cell = tr.getCell(c)

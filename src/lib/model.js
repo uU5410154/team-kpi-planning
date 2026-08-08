@@ -465,22 +465,59 @@ export function computePlan(state) {
     }
 
     // keep objective order stable (by guideline number), not by discovery order
-    const objectives = OBJECTIVE_ORDER.filter((id) => counted.some((r) => r.p.objective === id))
-    const withObjectives = { ...person, objectives }
-
     return {
-      ...withObjectives,
+      ...person,
       projectCount: rows.length,
       countedCount: counted.length,
       missingSaving: rows.filter((r) => r.p.savingHours == null).length,
+      // Personal credit — this person's own share of their own projects.
       hours,
       commitHours,
       manday,
-      ratio: manday > 0 ? hours / manday : null,
       byObjective,
       rows,
-      kpiLines: scorecardWeights(withObjectives, s, byObjective),
-      kpiHiddenLines: hiddenLines(withObjectives, s, byObjective),
+    }
+  })
+
+  /* ---- the team lead's scorecard is the TEAM's scorecard ------------- */
+  // A lead flagged aggregatesTeam is measured on everything the team delivers,
+  // not just their own slice. Their figures are built by summing the others'
+  // rather than re-deriving from projects, so the lead's number is provably
+  // the sum of the team's and the two can never disagree.
+  const teamHours = byPerson.reduce((a, p) => a + p.hours, 0)
+  const teamManday = byPerson.reduce((a, p) => a + p.manday, 0)
+  const teamByObjective = {}
+  for (const p of byPerson) {
+    for (const [k, v] of Object.entries(p.byObjective)) teamByObjective[k] = (teamByObjective[k] || 0) + v
+  }
+  const teamCounted = perProject.filter((p) => isCounted(p) && Object.keys(p.shares).length > 0)
+
+  const withScorecards = byPerson.map((p) => {
+    const aggregates = p.aggregatesTeam === true
+    const scHours = aggregates ? teamHours : p.hours
+    const scManday = aggregates ? teamManday : p.manday
+    const scByObjective = aggregates ? teamByObjective : p.byObjective
+    // The lead's portfolio is the whole in-plan book, so it re-adds to the
+    // headline above it.
+    const scRows = aggregates ? teamCounted.map((pr) => ({ p: pr, share: 1, owner: pr.pic })) : p.rows
+
+    const objectives = OBJECTIVE_ORDER.filter((id) => (scByObjective[id] || 0) > 0
+      || scRows.some((r) => r.p.objective === id))
+    const withObjectives = { ...p, objectives, aggregatesTeam: aggregates }
+
+    return {
+      ...withObjectives,
+      scorecardHours: scHours,
+      scorecardManday: scManday,
+      scorecardRows: scRows,
+      scorecardCount: scRows.length,
+      byObjective: scByObjective,
+      // Kept so the tile can show "your own projects" beside the team figure.
+      ownHours: p.hours,
+      ownCount: p.countedCount,
+      ratio: scManday > 0 ? scHours / scManday : null,
+      kpiLines: scorecardWeights(withObjectives, s, scByObjective),
+      kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective),
     }
   })
 
@@ -529,7 +566,7 @@ export function computePlan(state) {
   return {
     settings: s,
     projects: perProject,
-    people: byPerson,
+    people: withScorecards,
     totals: {
       committedHours,
       stretchHours,
@@ -555,6 +592,7 @@ export function computePlan(state) {
       bankableCoverage: s.targetHours > 0 ? bankableHours / s.targetHours : 0,
       committedHC,
       totalHC,
+      teamHours,
       totalHours,
       totalCoverage: s.targetHours > 0 ? totalHours / s.targetHours : 0,
       byStatus,
@@ -569,7 +607,7 @@ export function computePlan(state) {
     // scorecard. Dropdowns read this; scorecards read `people`.
     assignees: allPeople,
     // Blocks saving while any scorecard is off 100%.
-    invalid: invalidScorecards(byPerson),
+    invalid: invalidScorecards(withScorecards),
   }
 }
 

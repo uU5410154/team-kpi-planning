@@ -143,9 +143,11 @@ export default function People({
               value={x.id}
               label={
                 <Box sx={{ textAlign: 'left' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>{x.nick}</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {x.nick}{x.aggregatesTeam && ' · team'}
+                  </Typography>
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    {fmtHours(x.hours)} hrs · {x.countedCount} proj
+                    {fmtHours(x.scorecardHours)} hrs · {x.aggregatesTeam ? x.scorecardCount : x.countedCount} proj
                   </Typography>
                 </Box>
               }
@@ -167,11 +169,19 @@ export default function People({
       <Grid container spacing={2}>
         <Grid item xs={6} md={3}>
           <StatTile
-            label="Credited saving hours"
-            value={fmtHours(p.hours)}
+            label={p.aggregatesTeam ? 'Team saving hours' : 'Credited saving hours'}
+            value={fmtHours(p.scorecardHours)}
             unit="hrs"
-            context={`${fmtPct(shareOfTeam)} of the team commitment`}
-            help="Project hours multiplied by this person's contribution share. Shares on a project always sum to 100%, so no hour is credited twice."
+            context={
+              p.aggregatesTeam
+                ? `Whole team · ${fmtHours(p.ownHours)} hrs from ${p.nick}'s own projects, IT and unassigned`
+                : `${fmtPct(shareOfTeam)} of the team commitment`
+            }
+            help={
+              p.aggregatesTeam
+                ? "As team lead, this scorecard carries the team's overall KPI: every member's credited hours added together, including the projects assigned to them, the ones owned by IT, and the unassigned ones. It is the sum of the other scorecards, so the two can never disagree. Projects set to Next year are excluded."
+                : "Project hours multiplied by this person's contribution share. Shares on a project always sum to 100%, so no hour is credited twice."
+            }
           />
         </Grid>
         <Grid item xs={6} md={3}>
@@ -180,15 +190,19 @@ export default function People({
             value={fmtRatio(p.ratio)}
             unit="hrs / manday"
             tone={p.ratio == null ? undefined : p.ratio >= settings.ratioGate ? 'good' : 'critical'}
-            context={`Gate ${settings.ratioGate.toFixed(1)} · ${fmtHours(p.manday)} mandays credited`}
+            context={`Gate ${settings.ratioGate.toFixed(1)} · ${fmtHours(p.scorecardManday)} mandays credited`}
           />
         </Grid>
         <Grid item xs={6} md={3}>
           <StatTile
             label="Projects"
-            value={p.countedCount}
-            unit={`of ${p.projectCount}`}
-            context="Counted (commit + stretch) of all projects they touch"
+            value={p.aggregatesTeam ? p.scorecardCount : p.countedCount}
+            unit={p.aggregatesTeam ? 'team-wide' : `of ${p.projectCount}`}
+            context={
+              p.aggregatesTeam
+                ? `Every in-plan project · ${p.ownCount} of them ${p.nick}'s own`
+                : 'Counted (commit + stretch) of all projects they touch'
+            }
           />
         </Grid>
         <Grid item xs={6} md={3}>
@@ -218,7 +232,9 @@ export default function People({
                 <Box>
                   <Typography variant="h4">2026 KPI scorecard</Typography>
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    {p.nick}'s own targets — not the team's. Edit any weight or target directly.
+                    {p.aggregatesTeam
+                      ? "Team-wide targets — as lead, this card carries the team's overall KPI. Edit any weight or target directly."
+                      : `${p.nick}'s own targets — not the team's. Edit any weight or target directly.`}
                   </Typography>
                 </Box>
                 <Chip
@@ -410,16 +426,20 @@ export default function People({
         {/* ---------- portfolio ---------- */}
         <Grid item xs={12} md={5}>
           <Paper variant="outlined" sx={{ p: 2.5 }}>
-            <Typography variant="h4" sx={{ mb: 0.5 }}>Project portfolio</Typography>
+            <Typography variant="h4" sx={{ mb: 0.5 }}>
+              {p.aggregatesTeam ? 'Team project portfolio' : 'Project portfolio'}
+            </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 2 }}>
-              Contribution % is this person's normalised share of the project. Credited hours = project hours × share.
+              {p.aggregatesTeam
+                ? "Every in-plan project across the team, at full value — this is what the team figure above adds up to. Next-year and excluded projects are not listed."
+                : "Contribution % is this person's normalised share of the project. Credited hours = project hours × share."}
             </Typography>
             <Table size="small">
               <TableHead>
                 <TableRow>
                   <TableCell>Jira</TableCell>
                   <TableCell>Project</TableCell>
-                  <TableCell>Role</TableCell>
+                  <TableCell>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
                   <TableCell align="right">Share</TableCell>
                   <TableCell align="right">Project hrs</TableCell>
                   <TableCell align="right">Credited</TableCell>
@@ -427,13 +447,18 @@ export default function People({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {p.rows
+                {p.scorecardRows
                   .slice()
                   .sort((a, b) => (b.p.savingHours ?? 0) * b.share - (a.p.savingHours ?? 0) * a.share)
                   .map(({ p: pr, share }) => {
-                    const roles =
-                      pr.contributors?.find((c) => c.person === p.id)?.roles.join('/') ||
-                      (pr.pic === p.id ? 'pic' : '—')
+                    // On the team card the Role column names the owner instead,
+                    // since every row belongs to someone.
+                    const roles = p.aggregatesTeam
+                      ? (people.find((x) => x.id === pr.pic)?.nick
+                        || (pr.pic === 'it' ? 'IT' : plan.assignees?.find((x) => x.id === pr.pic)?.nick)
+                        || '—')
+                      : (pr.contributors?.find((c) => c.person === p.id)?.roles.join('/')
+                        || (pr.pic === p.id ? 'pic' : '—'))
                     const counted = pr.commitLevel === 'commit' || pr.commitLevel === 'stretch'
                     // A deferred or excluded project credits nothing. Printing
                     // its share here would contradict the totals above it.

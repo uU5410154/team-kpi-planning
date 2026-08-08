@@ -35,7 +35,10 @@ export default function Dashboard({ plan, onGoTo }) {
   const { totals, people, projects, quality, byObjective, settings } = plan
   const [byPersonView, setByPersonView] = useState('chart')
 
-  const ranked = [...people].sort((a, b) => b.hours - a.hours)
+  // Personal contribution, so the bars add up to the team figure. The lead's
+  // scorecard shows the team aggregate, which would swamp this chart and
+  // double-count everyone else.
+  const ranked = [...people].sort((a, b) => b.ownHours - a.ownHours)
 
   const gatePoints = projects
     .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch') && p.savingHours != null && p.manday > 0)
@@ -241,7 +244,7 @@ export default function Dashboard({ plan, onGoTo }) {
         <Grid item xs={12} md={7}>
           <Section
             title="Credited saving hours by person"
-            subtitle="After contribution shares — each project's hours are split once across its contributors, never double-banked"
+            subtitle="Personal contribution after shares — each project's hours are split once, never double-banked. The lead's scorecard shows the team aggregate; this chart shows their own projects so the bars still add up."
             action={
               <ToggleButtonGroup
                 size="small"
@@ -259,8 +262,8 @@ export default function Dashboard({ plan, onGoTo }) {
               <HBar
                 data={ranked.map((p) => ({
                   label: p.nick,
-                  value: p.hours,
-                  note: `${p.countedCount} projects · ${fmtRatio(p.ratio)} hrs/manday`,
+                  value: p.ownHours,
+                  note: `${p.ownCount} projects · ${fmtRatio(p.ratio)} hrs/manday`,
                 }))}
                 unit=" hrs"
               />
@@ -287,8 +290,8 @@ export default function Dashboard({ plan, onGoTo }) {
                   {ranked.map((p) => (
                     <TableRow key={p.id} hover>
                       <TableCell sx={{ fontWeight: 600 }}>{p.nick}</TableCell>
-                      <TableCell align="right">{p.countedCount}</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(p.hours)}</TableCell>
+                      <TableCell align="right">{p.ownCount}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(p.ownHours)}</TableCell>
                       <TableCell align="right">{fmtHours(p.manday)}</TableCell>
                       <TableCell align="right" sx={{ color: p.ratio != null && p.ratio < settings.ratioGate ? STATUS.critical : 'text.primary' }}>
                         {fmtRatio(p.ratio)}
@@ -296,6 +299,16 @@ export default function Dashboard({ plan, onGoTo }) {
                       <TableCell align="right">{p.missingSaving || '—'}</TableCell>
                     </TableRow>
                   ))}
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
+                      Team total
+                    </TableCell>
+                    <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider' }} />
+                    <TableCell align="right" sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
+                      {fmtHours(totals.teamHours)}
+                    </TableCell>
+                    <TableCell colSpan={3} sx={{ borderTop: 2, borderColor: 'divider' }} />
+                  </TableRow>
                 </TableBody>
               </Table>
             )}

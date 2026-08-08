@@ -18,7 +18,10 @@ ws = wb["Project"]
 # no scorecard of its own - it is a partner team - so its hours fall to the
 # team lead, who is accountable for the team's overall KPI.
 CORE = {
-    "gun":   {"id": "gun",   "name": "Wisarut Gunjarueg", "nick": "Gun",      "role": "Team Lead", "band": "lead",    "scorecard": True},
+    # aggregatesTeam: the lead is measured on everything the team delivers -
+    # their own projects, IT-owned and unassigned work, and every other member's
+    # credited hours - because they carry the team's overall KPI.
+    "gun":   {"id": "gun",   "name": "Wisarut Gunjarueg", "nick": "Gun",      "role": "Team Lead", "band": "lead",    "scorecard": True, "aggregatesTeam": True},
     "james": {"id": "james", "name": "Pipat Singhasiri",  "nick": "James",    "role": "Senior",    "band": "senior",  "scorecard": True},
     "pphen": {"id": "pphen", "name": "Chanphen Manu",     "nick": "P'Phen",   "role": "Senior",    "band": "senior",  "scorecard": True},
     "kade":  {"id": "kade",  "name": "Jarinya Phosri",    "nick": "Kade",     "role": "Senior",    "band": "senior",  "scorecard": True},
