@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Reproduces the reported bug and guards against it returning:
  *   change a project's saving hours on the Projects tab -> the Scorecard tab
  *   and the Excel export must both show the new number.

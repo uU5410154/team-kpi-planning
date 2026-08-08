@@ -2,7 +2,7 @@ import seed from '../data/seed.json'
 import { DEFAULT_SETTINGS } from './model.js'
 
 const KEY = 'fa-tech-kpi-2026'
-const VERSION = 2
+const VERSION = 3
 
 /**
  * Fingerprint of the bundled seed. Cached state built from a different source
@@ -10,7 +10,8 @@ const VERSION = 2
  * earlier build keeps showing the old totals forever, which is exactly what
  * happened when the register moved off the Jira export.
  */
-const seedStamp = () => `${seed.meta?.source || '?'}|${seed.projects.length}`
+const seedStamp = () =>
+  `${seed.meta?.source || '?'}|${seed.projects.length}|${seed.people.length}`
 
 export const freshState = () => ({
   version: VERSION,

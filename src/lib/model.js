@@ -83,6 +83,9 @@ export const DEFAULT_SETTINGS = {
   includeStretchInHeadline: false,
   bands: JSON.parse(JSON.stringify(DEFAULT_BANDS)),
   objectivePriority: { ...DEFAULT_OBJECTIVE_PRIORITY },
+  // Whoever absorbs saving hours that land on no scorecard owner — projects
+  // owned by IT, or with no PIC at all. The team lead carries the team KPI.
+  fallbackPic: 'gun',
   // false = GROSS: the six owners are credited the whole project.
   // true  = NET: partner/outsource devs dilute the core shares.
   creditPartners: false,
@@ -106,7 +109,6 @@ export function scorecardWeights(person, settings, credited = {}) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
-  const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
 
   // targetKind 'hours' -> a plain number the UI renders with a fixed unit.
   // 'text' -> a milestone or qualitative target a number cannot express.
@@ -281,18 +283,32 @@ export function newProject(seq) {
  * which one management intends has to be settled explicitly rather than
  * assumed. Returns { shares, partnerShare }.
  */
-export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, creditPartners = false) {
+export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, creditPartners = false, opts = {}) {
+  // Only people who hold a scorecard can be credited. IT and other partner
+  // teams can own delivery of a project without carrying its KPI.
+  const owners = opts.owners
+  const isOwner = (id) => !owners || owners.has(id)
+
   const raw = {}
   for (const c of project.contributors || []) {
-    if (!c.person) continue
+    if (!c.person || !isOwner(c.person)) continue
     // A person's raw weight is their single strongest role on the project,
     // not the sum — holding both pm and dev does not double the claim.
     const best = Math.max(...c.roles.map((r) => roleWeights[r] ?? 0), 0)
     if (best > 0) raw[c.person] = Math.max(raw[c.person] ?? 0, best)
   }
   // A PIC with no contributor record still owns the project outright.
-  if (project.pic && raw[project.pic] === undefined) {
+  if (project.pic && isOwner(project.pic) && raw[project.pic] === undefined) {
     raw[project.pic] = roleWeights.assignee ?? 0.6
+  }
+
+  // Nothing landed on a scorecard owner — the project is unassigned, or owned
+  // by IT or another partner team. The team lead absorbs it, because they are
+  // accountable for the team's overall KPI and these hours must not vanish.
+  let fellBack = false
+  if (Object.keys(raw).length === 0 && opts.fallbackPic && isOwner(opts.fallbackPic)) {
+    raw[opts.fallbackPic] = roleWeights.assignee ?? 0.6
+    fellBack = true
   }
 
   let partnerRaw = 0
@@ -305,10 +321,11 @@ export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, credi
 
   const coreTotal = Object.values(raw).reduce((a, b) => a + b, 0)
   const total = coreTotal + partnerRaw
-  if (total <= 0) return { shares: {}, partnerShare: 0 }
+  if (total <= 0) return { shares: {}, partnerShare: 0, fellBack: false }
   return {
     shares: Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, v / total])),
     partnerShare: partnerRaw / total,
+    fellBack,
   }
 }
 
@@ -346,14 +363,23 @@ export function gateStatus(p, gate) {
 export function computePlan(state) {
   const s = { ...DEFAULT_SETTINGS, ...(state.settings || {}) }
   const projects = state.projects || []
-  const people = state.people || []
+  const allPeople = state.people || []
+  // Only scorecard holders can be credited; IT and other partner teams are
+  // assignable as PIC but carry no KPI of their own.
+  const people = allPeople.filter((p) => p.scorecard !== false)
+  const ownerIds = new Set(people.map((p) => p.id))
+  const shareOpts = {
+    owners: ownerIds,
+    fallbackPic: ownerIds.has(s.fallbackPic) ? s.fallbackPic : null,
+  }
 
   const perProject = projects.map((p) => {
-    const { shares, partnerShare } = projectShares(p, s.roleWeights, s.creditPartners)
+    const { shares, partnerShare, fellBack } = projectShares(p, s.roleWeights, s.creditPartners, shareOpts)
     return {
       ...p,
       shares,
       partnerShare,
+      fellBack,
       ratio: projectRatio(p),
       gate: gateStatus(p, s.ratioGate),
       poolHours: countsToPool(p) && isCounted(p) ? (p.savingHours ?? 0) : 0,
@@ -448,6 +474,11 @@ export function computePlan(state) {
   const orphanHours = perProject
     .filter((p) => isCounted(p) && countsToPool(p) && Object.keys(p.shares).length === 0)
     .reduce((a, p) => a + (p.savingHours ?? 0), 0)
+  // Hours that reached the team lead only because no scorecard owner held them.
+  const fallbackHours = perProject
+    .filter((p) => isCounted(p) && countsToPool(p) && p.fellBack)
+    .reduce((a, p) => a + (p.savingHours ?? 0), 0)
+  const fallbackCount = perProject.filter((p) => p.fellBack).length
 
   // ---- data-quality ------------------------------------------------
   const quality = {
@@ -496,6 +527,9 @@ export function computePlan(state) {
       // targeted on and what its six scorecards can actually add up to.
       partnerHours,
       orphanHours,
+      fallbackHours,
+      fallbackCount,
+      fallbackPic: shareOpts.fallbackPic,
       bankableHours,
       bankableCoverage: s.targetHours > 0 ? bankableHours / s.targetHours : 0,
       committedHC,
@@ -508,6 +542,9 @@ export function computePlan(state) {
     },
     byObjective,
     quality,
+    // Everyone assignable as PIC, including partner teams like IT that hold no
+    // scorecard. Dropdowns read this; scorecards read `people`.
+    assignees: allPeople,
     // Blocks saving while any scorecard is off 100%.
     invalid: invalidScorecards(byPerson),
   }

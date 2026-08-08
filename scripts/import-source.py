@@ -14,23 +14,28 @@ OUT = r"c:\Users\th40184213\Downloads\FA-tech-team-objective-2026\team-kpi-plann
 wb = openpyxl.load_workbook(SRC, data_only=True)
 ws = wb["Project"]
 
+# The six scorecard owners, plus IT as an assignable delivery owner. IT carries
+# no scorecard of its own - it is a partner team - so its hours fall to the
+# team lead, who is accountable for the team's overall KPI.
 CORE = {
-    "gun":   {"id": "gun",   "name": "Wisarut Gunjarueg", "nick": "Gun",      "role": "Team Lead", "band": "lead"},
-    "james": {"id": "james", "name": "Pipat Singhasiri",  "nick": "James",    "role": "Senior",    "band": "senior"},
-    "pphen": {"id": "pphen", "name": "Chanphen Manu",     "nick": "P'Phen",   "role": "Senior",    "band": "senior"},
-    "kade":  {"id": "kade",  "name": "Jarinya Phosri",    "nick": "Kade",     "role": "Senior",    "band": "senior"},
-    "tha":   {"id": "tha",   "name": "Thapanee",          "nick": "Thapanee", "role": "Analyst",   "band": "analyst"},
-    "pol":   {"id": "pol",   "name": "Pol",               "nick": "Pol",      "role": "Analyst",   "band": "analyst"},
+    "gun":   {"id": "gun",   "name": "Wisarut Gunjarueg", "nick": "Gun",      "role": "Team Lead", "band": "lead",    "scorecard": True},
+    "james": {"id": "james", "name": "Pipat Singhasiri",  "nick": "James",    "role": "Senior",    "band": "senior",  "scorecard": True},
+    "pphen": {"id": "pphen", "name": "Chanphen Manu",     "nick": "P'Phen",   "role": "Senior",    "band": "senior",  "scorecard": True},
+    "kade":  {"id": "kade",  "name": "Jarinya Phosri",    "nick": "Kade",     "role": "Senior",    "band": "senior",  "scorecard": True},
+    "tha":   {"id": "tha",   "name": "Thapanee",          "nick": "Thapanee", "role": "Analyst",   "band": "analyst", "scorecard": True},
+    "pol":   {"id": "pol",   "name": "Pol",               "nick": "Pol",      "role": "Analyst",   "band": "analyst", "scorecard": True},
+    "it":    {"id": "it",    "name": "IT",                "nick": "IT",       "role": "Partner team", "band": "senior", "scorecard": False},
 }
 
-# Assignee string (lowercased) -> core member id. Anything unmatched is treated
-# as a partner/other-team resource and left without a PIC.
+# Assignee string (lowercased) -> owner id. Anything unmatched is left without a
+# PIC; those hours fall to the team lead via the fallback rule in the app.
 ASSIGNEE = {
     "wisarut gunjarueg": "gun", "wisarut": "gun",
     "pipat.singhasiri": "james",
     "chanphen": "pphen",
     "jarinya phosri": "kade",
     "thapanee": "tha", "thanpanee": "tha",
+    "it": "it",
 }
 
 

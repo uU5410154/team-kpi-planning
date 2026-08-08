@@ -93,6 +93,9 @@ export default function Projects({
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { projects, people, settings } = plan
+  // Includes partner teams like IT, which can own delivery without holding a
+  // scorecard. Their hours fall to the team lead.
+  const assignees = plan.assignees || people
 
   const [q, setQ] = useState('')
   const [fObj, setFObj] = useState('all')
@@ -517,10 +520,15 @@ export default function Projects({
                       value={p.pic ?? ''}
                       onChange={(e) => onUpdate(p.key, { pic: e.target.value || null })}
                       sx={{ fontSize: '0.8125rem', width: '100%', color: p.pic ? 'text.primary' : STATUS.critical }}
-                      renderValue={(v) => (v ? people.find((x) => x.id === v)?.nick : 'TBC')}
+                      renderValue={(v) => (v ? assignees.find((x) => x.id === v)?.nick : 'TBC')}
                     >
                       <MenuItem value=""><em>TBC — unassigned</em></MenuItem>
-                      {people.map((x) => <MenuItem key={x.id} value={x.id}>{x.nick} — {x.name}</MenuItem>)}
+                      {assignees.map((x) => (
+                        <MenuItem key={x.id} value={x.id}>
+                          {x.nick} — {x.name}
+                          {x.scorecard === false && ' (no scorecard)'}
+                        </MenuItem>
+                      ))}
                     </Select>
                   </TableCell>
                   <TableCell align="right">

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Locks the scorecard contract:
  *   - weights and targets are editable per person and survive a round trip
  *   - each member carries their OWN target, never the team's 3,000

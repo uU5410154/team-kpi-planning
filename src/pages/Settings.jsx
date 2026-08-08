@@ -179,6 +179,33 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
             </Typography>
 
             <Divider sx={{ my: 2.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Who absorbs unowned saving hours
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+              Projects owned by a partner team such as <strong>IT</strong>, or left unassigned, still deliver saving
+              hours. They are credited to the person accountable for the team's overall KPI rather than being lost.
+            </Typography>
+            <Select
+              fullWidth
+              size="small"
+              value={settings.fallbackPic || ''}
+              onChange={(e) => onSettings({ fallbackPic: e.target.value || null })}
+              displayEmpty
+            >
+              <MenuItem value=""><em>Nobody — leave them uncredited</em></MenuItem>
+              {people.map((p) => (
+                <MenuItem key={p.id} value={p.id}>{p.nick} — {p.name} ({p.role})</MenuItem>
+              ))}
+            </Select>
+            {totals.fallbackHours > 0 && (
+              <Typography variant="caption" sx={{ display: 'block', mt: 1, fontWeight: 600 }}>
+                Currently absorbing {fmtHours(totals.fallbackHours)} hrs across {totals.fallbackCount} project
+                {totals.fallbackCount === 1 ? '' : 's'}.
+              </Typography>
+            )}
+
+            <Divider sx={{ my: 2.5 }} />
             <FormControlLabel
               control={
                 <Switch

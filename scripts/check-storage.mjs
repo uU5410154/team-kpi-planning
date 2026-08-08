@@ -15,7 +15,7 @@ const check = (name, ok, detail = '') => {
 }
 
 // Recreate the module's stamp rule against the current seed.
-const stamp = `${seed.meta?.source || '?'}|${seed.projects.length}`
+const stamp = `${seed.meta?.source || '?'}|${seed.projects.length}|${seed.people.length}`
 const version = Number(src.match(/const VERSION = (\d+)/)?.[1])
 
 check('storage declares a VERSION', Number.isFinite(version), `v${version}`)
@@ -26,8 +26,9 @@ check('seed carries a source in meta', !!seed.meta?.source, seed.meta?.source)
 // Simulate: state saved by an older build must be rejected.
 const cases = [
   ['older version', { version: version - 1, seedStamp: stamp, projects: [] }],
-  ['older seed (Jira export)', { version, seedStamp: 'JIRA-F&A-Tech-team.xlsx / sheet JIRA-F&A-Tech-team|101', projects: [] }],
-  ['different project count', { version, seedStamp: `${seed.meta.source}|999`, projects: [] }],
+  ['older seed (Jira export)', { version, seedStamp: 'JIRA-F&A-Tech-team.xlsx / sheet JIRA-F&A-Tech-team|101|6', projects: [] }],
+  ['different project count', { version, seedStamp: `${seed.meta.source}|999|${seed.people.length}`, projects: [] }],
+  ['different roster size', { version, seedStamp: `${seed.meta.source}|${seed.projects.length}|6`, projects: [] }],
   ['missing stamp', { version, projects: [] }],
 ]
 for (const [label, parsed] of cases) {

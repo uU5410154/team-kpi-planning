@@ -11,42 +11,56 @@
    "name": "Wisarut Gunjarueg",
    "nick": "Gun",
    "role": "Team Lead",
-   "band": "lead"
+   "band": "lead",
+   "scorecard": true
   },
   {
    "id": "james",
    "name": "Pipat Singhasiri",
    "nick": "James",
    "role": "Senior",
-   "band": "senior"
+   "band": "senior",
+   "scorecard": true
   },
   {
    "id": "pphen",
    "name": "Chanphen Manu",
    "nick": "P'Phen",
    "role": "Senior",
-   "band": "senior"
+   "band": "senior",
+   "scorecard": true
   },
   {
    "id": "kade",
    "name": "Jarinya Phosri",
    "nick": "Kade",
    "role": "Senior",
-   "band": "senior"
+   "band": "senior",
+   "scorecard": true
   },
   {
    "id": "tha",
    "name": "Thapanee",
    "nick": "Thapanee",
    "role": "Analyst",
-   "band": "analyst"
+   "band": "analyst",
+   "scorecard": true
   },
   {
    "id": "pol",
    "name": "Pol",
    "nick": "Pol",
    "role": "Analyst",
-   "band": "analyst"
+   "band": "analyst",
+   "scorecard": true
+  },
+  {
+   "id": "it",
+   "name": "IT",
+   "nick": "IT",
+   "role": "Partner team",
+   "band": "senior",
+   "scorecard": false
   }
  ],
  "projects": [
@@ -196,16 +210,16 @@
    "start": "2026-06-01",
    "due": "2026-09-30",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "watch",
    "notes": ""
@@ -228,16 +242,16 @@
    "start": "2026-01-01",
    "due": "2026-08-15",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": "Audit point to verify Petty cash at HO Accounting"
@@ -356,16 +370,16 @@
    "start": "2026-01-20",
    "due": "2026-06-20",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": ""
@@ -388,16 +402,16 @@
    "start": "2026-03-01",
    "due": "2026-05-31",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": ""
@@ -484,16 +498,16 @@
    "start": "2026-06-01",
    "due": "2026-09-30",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": "Mitigate risk, Internal control"
@@ -1469,16 +1483,16 @@
    "start": "2026-01-01",
    "due": "2026-08-31",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": "ปัจจุบันยังไม่ save เพราะยังไม่ stable"
@@ -2095,16 +2109,16 @@
    "start": "2026-07-01",
    "due": "2026-07-31",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": "Enchancement เพื่อให้ทุกทีมใช้ master data ตัวเดียวกัน"
@@ -2127,16 +2141,16 @@
    "start": null,
    "due": null,
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "stretch",
    "notes": ""
@@ -2735,16 +2749,16 @@
    "start": null,
    "due": null,
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "stretch",
    "notes": ""
@@ -2767,16 +2781,16 @@
    "start": "2026-06-01",
    "due": "2026-09-30",
    "assignee": "IT",
-   "pic": null,
-   "contributors": [],
-   "partners": [
+   "pic": "it",
+   "contributors": [
     {
-     "person": "IT",
+     "person": "it",
      "roles": [
       "dev"
      ]
     }
    ],
+   "partners": [],
    "deleted": false,
    "commitLevel": "commit",
    "notes": ""

@@ -189,10 +189,23 @@ export default function Dashboard({ plan, onGoTo }) {
                     </TableCell>
                   </TableRow>
                 )}
+                {totals.fallbackHours > 0 && (
+                  <TableRow>
+                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
+                      Of which absorbed by {people.find((x) => x.id === totals.fallbackPic)?.nick || 'the lead'}
+                      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
+                        {totals.fallbackCount} project{totals.fallbackCount === 1 ? '' : 's'} owned by IT or unassigned
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', fontWeight: 600 }}>
+                      {fmtHours(totals.fallbackHours)}
+                    </TableCell>
+                  </TableRow>
+                )}
                 {totals.orphanHours > 0 && (
                   <TableRow>
                     <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                      On projects with no owner at all
+                      Credited to nobody
                     </TableCell>
                     <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.critical, fontWeight: 600 }}>
                       {fmtHours(totals.orphanHours)}
@@ -203,8 +216,10 @@ export default function Dashboard({ plan, onGoTo }) {
             </Table>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
               {settings.creditPartners
-                ? 'Net view — partner devs dilute each person\'s share, so the six cannot personally bank the whole pool. Never add the six individual targets together and compare them to 3,000.'
-                : 'Gross view — the six are credited whole projects even where a partner dev builds them. Switch to the net view on the Model tab to see what they can personally bank.'}
+                ? 'Net view — partner devs dilute each person\'s share, so the team cannot personally bank the whole pool. Never add the individual targets together and compare them to the team target.'
+                : 'Gross view — each owner is credited whole projects even where a partner dev builds them. Switch to the net view on the Model tab to see what they can personally bank.'}
+              {totals.fallbackHours > 0 &&
+                ` Projects owned by IT or left unassigned are credited to ${people.find((x) => x.id === totals.fallbackPic)?.nick || 'the team lead'}, who carries the team's overall KPI.`}
             </Typography>
           </Section>
         </Grid>

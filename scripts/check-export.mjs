@@ -16,6 +16,9 @@ const state = {
   scenarioName: 'Export self-test',
 }
 const plan = computePlan(state)
+// Partner teams such as IT are assignable as PIC but hold no scorecard, so
+// they get no per-person sheet.
+const scorecardPeople = seed.people.filter((p) => p.scorecard !== false)
 
 const file = 'export-selftest.xlsx'
 if (existsSync(file)) unlinkSync(file)
@@ -34,7 +37,7 @@ check('workbook written', existsSync(file))
 const back = new ExcelJS.Workbook()
 await back.xlsx.readFile(file)
 const names = back.worksheets.map((w) => w.name)
-const expected = ['Summary', 'Overall_Objectives', 'Projects', ...seed.people.map((p) => `Obj-${p.nick}`)]
+const expected = ['Summary', 'Overall_Objectives', 'Projects', ...scorecardPeople.map((p) => `Obj-${p.nick}`)]
 check('all sheets present', expected.every((n) => names.includes(n)), names.join(' | '))
 
 const projSheet = back.getWorksheet('Projects')
@@ -63,12 +66,12 @@ ov.eachRow((row) => { if (String(row.getCell(3).value || '').startsWith('WEIGHT 
 check('weight-total row present', !!weightRow)
 if (weightRow) {
   const sums = []
-  for (let i = 0; i < seed.people.length; i++) sums.push(weightRow.getCell(4 + i * 3 + 1).value)
+  for (let i = 0; i < scorecardPeople.length; i++) sums.push(weightRow.getCell(4 + i * 3 + 1).value)
   check('every person totals 100%', sums.every((s) => Math.abs(s - 1) < 1e-9),
     sums.map((s) => `${Math.round(s * 100)}%`).join(', '))
 }
 
-for (const p of seed.people) {
+for (const p of scorecardPeople) {
   const ws = back.getWorksheet(`Obj-${p.nick}`)
   let hasPortfolio = false
   ws.eachRow((row) => { if (row.getCell(1).value === 'Jira') hasPortfolio = true })
