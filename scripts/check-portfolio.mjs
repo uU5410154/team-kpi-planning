@@ -9,7 +9,7 @@
 import { readFileSync, unlinkSync, existsSync } from 'node:fs'
 import ExcelJS from 'exceljs'
 import {
-  computePlan, DEFAULT_SETTINGS, weightSum, weightsValid,
+  computePlan, DEFAULT_SETTINGS, weightsValid,
   toWholePercents, snapWeight, WEIGHT_STEP, rebalanceWeights,
 } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
@@ -102,9 +102,8 @@ check('the filtered subsets partition the portfolio',
   lead.kpiLines.filter((l) => l.objective)
     .reduce((a, l) => a + lead.scorecardRows.filter((r) => r.p.objective === l.objective).length, 0)
   === lead.scorecardRows.length)
-check('non-objective lines are not filterable',
-  lead.kpiLines.filter((l) => !l.objective).length > 0 &&
-  lead.kpiLines.filter((l) => !l.objective).every((l) => !l.objective))
+check('every line on the 2026 card is filterable',
+  lead.kpiLines.length > 0 && lead.kpiLines.every((l) => l.objective))
 
 /* ================= 3. portfolio edits propagate ================= */
 console.log('\n--- editing the portfolio moves everything ---')
@@ -176,7 +175,7 @@ console.log('\n--- the exported workbook matches the app ---')
       const a = String(row.getCell(1).value || '')
       if (a.startsWith('Credited saving hours') || a.startsWith('Team saving hours')) headline = row.getCell(3).value
       if (String(row.getCell(3).value || '') === 'TOTAL') total = row.getCell(4).value
-      if (['Corporate', 'Delivery', 'Capability'].includes(a)) weights.push(row.getCell(4).value)
+      if (a === 'Delivery') weights.push(row.getCell(4).value)
     })
     check(`${p.nick}: exported headline matches the app`,
       Math.abs(headline - Math.round(p.scorecardHours)) < 1, `${headline} vs ${Math.round(p.scorecardHours)}`)

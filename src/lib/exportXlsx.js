@@ -217,7 +217,7 @@ export async function buildWorkbook(plan, state) {
     const width = 3 + people.length * 3
     const ws = wb.addWorksheet('Overall_Objectives', { properties: { tabColor: { argb: NAVY_MID } }, views: [{ state: 'frozen', xSplit: 3, ySplit: 5 }] })
     banner(ws, 'INDIVIDUAL SCORECARD — WEIGHTS AND TARGETS',
-      'Every person totals 100% by construction. Weights derive from the role band and the objectives actually held.', width)
+      'Every person totals 100% by construction, split across the objectives that person actually holds.', width)
 
     // person group headers
     const gRow = ws.getRow(4)
@@ -240,15 +240,10 @@ export async function buildWorkbook(plan, state) {
 
     // Targets come from each person's own KPI line, not from the guideline —
     // the team target is 3,000; individuals each carry their own number.
-    const rowSpec = [
-      { id: 'corp-sales', part: 'Corporate', no: 1, kpi: 'CP AXTRA Sales' },
-      { id: 'corp-eat', part: 'Corporate', no: 2, kpi: 'CP AXTRA EAT' },
-      ...OBJECTIVES.map((o, i) => ({
-        id: `obj-${o.id}`, part: 'Individual', no: 3 + i,
-        kpi: `[Obj ${o.no}] ${o.name}`, objective: o.id,
-      })),
-      { id: 'people', part: 'Capability', no: 8, kpi: 'Capability / people development' },
-    ]
+    const rowSpec = OBJECTIVES.map((o, i) => ({
+      id: `obj-${o.id}`, part: 'Individual', no: 1 + i,
+      kpi: `[Obj ${o.no}] ${o.name}`, objective: o.id,
+    }))
 
     let r = 6
     const first = r
@@ -285,7 +280,8 @@ export async function buildWorkbook(plan, state) {
     chk.getCell(3).value = 'WEIGHT TOTAL — must be 100%'
     chk.getCell(3).font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } }
     people.forEach((p, i) => {
-      const sum = p.kpiLines.reduce((a, l) => a + l.weight, 0)
+      // Rounded so a card that adds to 100% writes 1, not 0.9999999999999999.
+    const sum = Math.round(p.kpiLines.reduce((a, l) => a + l.weight, 0) * 1e6) / 1e6
       const c = chk.getCell(4 + i * 3 + 1)
       c.value = sum
       c.numFmt = PCT
@@ -425,7 +421,8 @@ export async function buildWorkbook(plan, state) {
       row.getCell(4).alignment = { horizontal: 'center' }
       if (l.overridden) tone(row.getCell(3), NAVY_MID, false)
     })
-    const sum = p.kpiLines.reduce((a, l) => a + l.weight, 0)
+    // Rounded so a card that adds to 100% writes 1, not 0.9999999999999999.
+    const sum = Math.round(p.kpiLines.reduce((a, l) => a + l.weight, 0) * 1e6) / 1e6
     const sr = ws.getRow(r++)
     sr.getCell(3).value = 'TOTAL'
     sr.getCell(4).value = sum

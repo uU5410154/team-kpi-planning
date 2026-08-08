@@ -96,13 +96,9 @@ console.log('\n--- typed weights still land where you put them ---')
 const p0 = computePlan(base)
 const kade = p0.people.find((x) => x.id === 'kade')
 const dline = kade.kpiLines.find((l) => l.block === 'Delivery')
-// mirrors App.updatePersonKpi's sibling rescale
-const fixedSum = kade.kpiLines.filter((l) => l.block !== 'Delivery').reduce((a, l) => a + l.weight, 0)
-const pool = 1 - fixedSum
-const others = kade.kpiLines.filter((l) => l.block === 'Delivery' && l.id !== dline.id)
-const restNow = others.reduce((a, l) => a + l.weight, 0)
+// mirrors App.updatePersonKpi: only the edited line is written; the untouched
+// siblings share out whatever is left.
 const kpi = { [dline.id]: { weight: 0.2 } }
-for (const o of others) kpi[o.id] = { weight: restNow > 0 ? (o.weight / restNow) * (pool - 0.2) : (pool - 0.2) / others.length }
 const typed = computePlan({ ...base, people: base.people.map((p) => (p.id === 'kade' ? { ...p, kpi } : p)) })
 const kadeTyped = typed.people.find((x) => x.id === 'kade')
 check('the typed 20% comes back as 20%',
@@ -111,11 +107,13 @@ check('the typed 20% comes back as 20%',
 check('and the card still totals 100%', weightsValid(kadeTyped.kpiLines))
 
 /* ---- 6. a genuinely bad hand-typed weight IS still gated ---- */
+const polLines = p0.people.find((x) => x.id === 'pol').kpiLines.map((l) => l.id)
 const bad = computePlan({
   ...base,
-  people: base.people.map((p) => (p.id === 'pol' ? { ...p, kpi: { 'corp-sales': { weight: 0.8 }, 'corp-eat': { weight: 0.8 } } } : p)),
+  people: base.people.map((p) => (p.id === 'pol'
+    ? { ...p, kpi: Object.fromEntries(polLines.map((lid) => [lid, { weight: 0.8 }])) } : p)),
 })
-check('typing corporate weights over 100% is still blocked',
+check('typing every weight over 100% is still blocked',
   bad.invalid.some((x) => x.id === 'pol'),
   bad.invalid.map((x) => `${x.nick} ${(x.sum * 100).toFixed(0)}%`).join(', '))
 

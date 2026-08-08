@@ -163,26 +163,13 @@ export default function App() {
           delete entry.weight
         }
 
+        // Only the edited line is written. scorecardWeights holds a typed weight
+        // at exactly what was typed and shares the remainder across the lines
+        // that have not been touched, so the siblings must NOT be pinned here —
+        // pinning them all would leave nothing free to absorb the difference.
         if (Object.keys(entry).length) kpi[lineId] = entry
         else delete kpi[lineId]
 
-        // Delivery weights are rescaled to fill whatever the fixed blocks
-        // leave, so writing one alone would come back changed. Write the
-        // siblings too — absorbing the difference proportionally — and the
-        // number the user typed is the number they get.
-        const all = plan.people.find((x) => x.id === id)?.kpiLines || []
-        const edited = all.find((l) => l.id === lineId)
-        if ('weight' in patch && edited?.block === 'Delivery') {
-          const fixed = all.filter((l) => l.block !== 'Delivery').reduce((a, l) => a + l.weight, 0)
-          const pool = Math.max(0, 1 - fixed)
-          const others = all.filter((l) => l.block === 'Delivery' && l.id !== lineId)
-          const rest = Math.max(0, pool - patch.weight)
-          const restNow = others.reduce((a, l) => a + l.weight, 0)
-          for (const o of others) {
-            const w = restNow > 0 ? (o.weight / restNow) * rest : rest / (others.length || 1)
-            kpi[o.id] = { ...(kpi[o.id] || {}), weight: w }
-          }
-        }
         return { ...p, kpi }
       }),
     }))
@@ -190,7 +177,7 @@ export default function App() {
 
   const resetPersonKpi = useCallback((id) => {
     setState((s) => ({ ...s, people: s.people.map((p) => (p.id === id ? { ...p, kpi: {}, kpiHidden: [] } : p)) }))
-    setToast({ severity: 'info', msg: 'Weights, targets and removed lines all reset to the band defaults.' })
+    setToast({ severity: 'info', msg: 'Weights, targets and removed lines all reset to the defaults.' })
   }, [])
 
   /** Remove a KPI line from someone's scorecard (restorable). */

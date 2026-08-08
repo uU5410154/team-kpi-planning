@@ -26,18 +26,6 @@ export const DEFAULT_ROLE_WEIGHTS = {
   support: 0.2,
 }
 
-/**
- * Scorecard weight bands. Each band's three blocks sum to exactly 1.0, so a
- * person's total weight is 100% by construction regardless of how many
- * objectives they hold — the 2025 sheet's most visible defect (Gun totalled
- * 80%, James 75%) cannot recur.
- */
-export const DEFAULT_BANDS = {
-  lead: { corporate: 0.3, delivery: 0.45, people: 0.25 },
-  senior: { corporate: 0.3, delivery: 0.6, people: 0.1 },
-  analyst: { corporate: 0.3, delivery: 0.55, people: 0.15 },
-}
-
 /** Relative emphasis inside the delivery block, normalised over objectives held. */
 export const DEFAULT_OBJECTIVE_PRIORITY = {
   financial: 1,
@@ -81,7 +69,6 @@ export const DEFAULT_SETTINGS = {
   roleWeights: { ...DEFAULT_ROLE_WEIGHTS },
   // Whether "stretch" projects are shown inside the headline number.
   includeStretchInHeadline: false,
-  bands: JSON.parse(JSON.stringify(DEFAULT_BANDS)),
   objectivePriority: { ...DEFAULT_OBJECTIVE_PRIORITY },
   // Whoever absorbs saving hours that land on no scorecard owner — projects
   // owned by IT, or with no PIC at all. The team lead carries the team KPI.
@@ -105,17 +92,15 @@ export const DEFAULT_SETTINGS = {
  * someone is mid-edit; `weightsValid` is what gates saving.
  */
 export function scorecardWeights(person, settings, credited = {}) {
-  const band = settings.bands[person.band] || settings.bands.senior
   const held = person.objectives || []
   const prio = settings.objectivePriority
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
 
+  // 2026 carries no corporate (CP AXTRA Sales / EAT) or capability line, so the
+  // delivery objectives are the whole card and split 100% between them.
   // targetKind 'hours' -> a plain number the UI renders with a fixed unit.
   // 'text' -> a milestone or qualitative target a number cannot express.
-  const lines = [
-    { id: 'corp-sales', block: 'Corporate', label: 'CP AXTRA Sales', weight: band.corporate / 2, targetKind: 'text', target: 'Per corporate scorecard' },
-    { id: 'corp-eat', block: 'Corporate', label: 'CP AXTRA EAT', weight: band.corporate / 2, targetKind: 'text', target: 'Per corporate scorecard' },
-  ]
+  const lines = []
 
   if (totalPrio > 0) {
     held.forEach((id) => {
@@ -126,7 +111,7 @@ export function scorecardWeights(person, settings, credited = {}) {
         id: `obj-${id}`,
         block: 'Delivery',
         objective: id,
-        weight: (band.delivery * (prio[id] ?? 1)) / totalPrio,
+        weight: (prio[id] ?? 1) / totalPrio,
         targetKind: hours ? 'hours' : 'text',
         // Default = what this person actually carries, so the number starts
         // realistic rather than at the team's 3,000.
@@ -136,28 +121,17 @@ export function scorecardWeights(person, settings, credited = {}) {
   } else {
     // Nobody should hold zero objectives; if it happens, park the delivery
     // block on the pool objective rather than silently losing the weight.
-    lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: band.delivery, targetKind: 'hours', target: 0 })
+    lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: 1, targetKind: 'hours', target: 0 })
   }
-
-  lines.push({
-    id: 'people',
-    block: 'Capability',
-    label:
-      person.band === 'lead'
-        ? 'Team capability — GuRus delivered, digital-skill uplift, bench depth'
-        : person.band === 'analyst'
-          ? 'Own capability — new tech skill certified, GuRu contribution'
-          : 'Capability — 1 new tech skill, GuRu coaching',
-    weight: band.people,
-    targetKind: 'text',
-    target: person.band === 'lead' ? '2 GuRus · 60% at medium+' : '1 new tech skill',
-  })
 
   const ov = person.kpi || {}
   const hidden = new Set(person.kpiHidden || [])
 
-  const resolved = lines
-    .filter((l) => !hidden.has(l.id))
+  // A card has to keep at least one line: with the corporate and capability
+  // lines gone, the objectives are all there is, and hiding the last one would
+  // leave a 0% scorecard that nothing could rescale back to 100%.
+  const kept = lines.filter((l) => !hidden.has(l.id))
+  const resolved = (kept.length ? kept : lines.slice(0, 1))
     .map((l) => {
       const o = ov[l.id] || {}
       const hasTargetOverride =
@@ -167,7 +141,11 @@ export function scorecardWeights(person, settings, credited = {}) {
       const target = hasTargetOverride ? o.target : l.target
       return {
         ...l,
-        weight: typeof o.weight === 'number' ? o.weight : l.weight,
+        // A typed weight is held at exactly what was typed; the rest flex.
+        // Snapped on read so a weight saved before the 5-point grid — or edited
+        // by hand in a scenario file — cannot leave the card off the grid.
+        weight: typeof o.weight === 'number' ? snapWeight(o.weight * 100) / 100 : l.weight,
+        weightPinned: typeof o.weight === 'number',
         target,
         defaultWeight: l.weight,
         // The live figure straight from current project assignments. Reassign a
@@ -183,30 +161,32 @@ export function scorecardWeights(person, settings, credited = {}) {
 
   /*
    * Reassigning a project changes which objectives someone holds, which adds or
-   * removes delivery lines. Left alone that lands new weight on top of the
-   * existing ones and knocks the card off 100% — the app breaking its own
-   * scorecard and then blocking the save for it.
+   * removes lines. Left alone that lands new weight on top of the existing ones
+   * and knocks the card off 100% — the app breaking its own scorecard and then
+   * blocking the save for it.
    *
-   * So the delivery block always absorbs the slack: it is rescaled to fill
-   * whatever the corporate and capability lines leave. Setting a PIC therefore
-   * moves the target and nothing else. Only weights the user typed on the fixed
-   * blocks can push a card off 100%, which is a real error worth gating.
+   * So a weight the user typed is honoured exactly, and the lines they have NOT
+   * touched share out whatever is left. Setting a PIC therefore moves the target
+   * and nothing else, while typing 40% really does show 40%. Only typed weights
+   * can push a card off 100% — either past it, or short of it with no free line
+   * left to absorb the rest — and that is a real error worth gating.
    */
-  const delivery = resolved.filter((l) => l.block === 'Delivery')
-  const fixed = resolved.filter((l) => l.block !== 'Delivery').reduce((a, l) => a + l.weight, 0)
+  const pinned = resolved.filter((l) => l.weightPinned)
+  const flex = resolved.filter((l) => !l.weightPinned)
+  const fixed = pinned.reduce((a, l) => a + l.weight, 0)
   const pool = Math.max(0, 1 - fixed)
-  const rel = delivery.reduce((a, l) => a + l.weight, 0)
-  for (const l of delivery) {
-    l.weight = rel > 0 ? (l.weight / rel) * pool : pool / delivery.length
+  const rel = flex.reduce((a, l) => a + l.weight, 0)
+  for (const l of flex) {
+    l.weight = rel > 0 ? (l.weight / rel) * pool : pool / flex.length
   }
 
   // Whole percentages only — a scorecard put in front of someone should read
-  // 26%, not 26.5%. Skipped when the fixed blocks already exceed 100%, so that
-  // genuinely invalid state stays visible to the save gate instead of being
-  // rounded into looking fine.
-  if (fixed <= 1) {
-    const pct = toWholePercents(resolved.map((l) => l.weight))
-    resolved.forEach((l, i) => { l.weight = pct[i] })
+  // 25%, not 26.5%. Skipped when the typed weights already fill or overflow the
+  // card, so that genuinely invalid state stays visible to the save gate instead
+  // of being rounded into looking fine.
+  if (flex.length > 0 && fixed <= 1) {
+    const pct = toWholePercents(flex.map((l) => l.weight), WEIGHT_STEP, pool)
+    flex.forEach((l, i) => { l.weight = pct[i] })
   }
 
   return resolved
@@ -224,12 +204,15 @@ export const WEIGHT_STEP = 5
  * Every line that carries any weight is given at least one step, so a KPI
  * someone actually holds never shows as 0% and counts for nothing.
  *
+ * `share` is how much of the card these lines are between them — 1 for a whole
+ * card, or the remainder when some lines are pinned at a weight the user typed.
+ *
  * Returns decimals (0.25 for 25%).
  */
-export function toWholePercents(weights, step = WEIGHT_STEP) {
+export function toWholePercents(weights, step = WEIGHT_STEP, share = 1) {
   const n = weights.length
   if (!n) return []
-  const units = Math.round(100 / step) // 20 slots of 5 points
+  const units = Math.max(0, Math.round((100 * share) / step)) // 20 slots of 5 points for a whole card
   const total = weights.reduce((a, b) => a + b, 0)
   const exact = total > 0
     ? weights.map((w) => (w / total) * units)

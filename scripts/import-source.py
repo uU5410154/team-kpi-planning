@@ -42,10 +42,32 @@ ASSIGNEE = {
 }
 
 
+def fix_mojibake(s):
+    """Repair text that was UTF-8 encoded then decoded as Latin-1.
+
+    The source workbook carries a few cells like "â€” Actual & Forecast", which
+    is an em dash whose three UTF-8 bytes were each read as a separate Latin-1
+    character. Round-tripping back through Latin-1 recovers the original.
+    """
+    if not s or not any(m in s for m in ("â", "Ã", "Â")):
+        return s
+    # cp1252 first: the mojibake usually contains characters such as € and "
+    # that Latin-1 cannot encode, which is what makes a naive round-trip fail.
+    for codec in ("cp1252", "latin-1"):
+        try:
+            repaired = s.encode(codec).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        # only accept a repair that actually removed the tell-tale sequences
+        if repaired.count("â") < s.count("â") or repaired.count("Ã") < s.count("Ã"):
+            return repaired
+    return s
+
+
 def clean(v):
     if v is None:
         return None
-    s = str(v).strip()
+    s = fix_mojibake(str(v).strip())
     return s or None
 
 

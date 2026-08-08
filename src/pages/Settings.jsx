@@ -28,17 +28,6 @@ function Card({ title, subtitle, children }) {
 export default function Settings({ plan, state, onSettings, onPerson, scenarioName, onScenarioName }) {
   const { settings, people, totals } = plan
 
-  const setBand = (band, key, value) => {
-    const b = { ...settings.bands[band], [key]: value }
-    // Keep the three blocks summing to 1.0 by absorbing the delta into delivery,
-    // so a scorecard can never drift off 100%.
-    const others = ['corporate', 'delivery', 'people'].filter((k) => k !== key)
-    const rest = 1 - value
-    const restSum = others.reduce((a, k) => a + settings.bands[band][k], 0) || 1
-    others.forEach((k) => { b[k] = (settings.bands[band][k] / restSum) * rest })
-    onSettings({ bands: { ...settings.bands, [band]: b } })
-  }
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Alert severity="info" variant="outlined">
@@ -243,52 +232,6 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
                 individual target is signed.
               </Typography>
             </Box>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <Card
-            title="Scorecard weight bands"
-            subtitle="Each band's three blocks always total 100%. Move one and the others re-proportion automatically."
-          >
-            {BANDS.map((b) => {
-              const v = settings.bands[b.id]
-              const sum = v.corporate + v.delivery + v.people
-              return (
-                <Box key={b.id} sx={{ mb: 3 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{b.label}</Typography>
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      color={Math.abs(sum - 1) < 0.001 ? 'success' : 'error'}
-                      label={`Σ ${fmtPct(sum)}`}
-                    />
-                  </Box>
-                  {[
-                    ['corporate', 'Corporate KPI'],
-                    ['delivery', 'Delivery (held objectives)'],
-                    ['people', 'Capability / people'],
-                  ].map(([k, label]) => (
-                    <Box key={k} sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 0.5 }}>
-                      <Typography variant="caption" sx={{ width: 170, color: 'text.secondary' }}>{label}</Typography>
-                      <Slider
-                        size="small"
-                        value={v[k]}
-                        min={0}
-                        max={0.8}
-                        step={0.05}
-                        onChange={(_e, val) => setBand(b.id, k, val)}
-                        sx={{ flex: 1 }}
-                      />
-                      <Typography variant="caption" sx={{ width: 42, textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtPct(v[k])}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Box>
-              )
-            })}
           </Card>
         </Grid>
 

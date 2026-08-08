@@ -2,7 +2,10 @@ import seed from '../data/seed.json'
 import { DEFAULT_SETTINGS } from './model.js'
 
 const KEY = 'fa-tech-kpi-2026'
-const VERSION = 4
+// 5: the corporate and capability KPI lines were dropped, and typed weights are
+// now held rather than rescaled — cached state pinned by the old rescale would
+// come back off the grid and block the save.
+const VERSION = 5
 
 /** FNV-1a. Cheap, stable, and enough to tell two seed files apart. */
 function hash(str) {

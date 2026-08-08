@@ -1789,7 +1789,7 @@
   {
    "key": "FNP-1073",
    "jiraKey": "FNP-1073",
-   "summary": "Automation transaction audit â€” payroll & store expenses to 3rd parties",
+   "summary": "Automation transaction audit — payroll & store expenses to 3rd parties",
    "program": "PBI & Dashboard",
    "team": "Finance",
    "subTeam": "Channel",
@@ -1942,7 +1942,7 @@
   {
    "key": "FNP-865",
    "jiraKey": "FNP-865",
-   "summary": "Shrinkage Automation (Dashboard) â€” Actual & Forecast",
+   "summary": "Shrinkage Automation (Dashboard) — Actual & Forecast",
    "program": "PBI & Dashboard",
    "team": "Finance",
    "subTeam": "Channel",

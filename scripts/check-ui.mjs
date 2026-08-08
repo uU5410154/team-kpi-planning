@@ -196,15 +196,15 @@ try {
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
 
-  // Reassignment can no longer break a card — the delivery block absorbs it —
-  // so force the blocked state the only way that still can: push the fixed
-  // corporate weights past 100%.
+  // Reassignment can no longer break a card — the untouched lines absorb it —
+  // so force the blocked state the only way that still can: type a weight on
+  // EVERY line, leaving nothing free to take up the difference.
   await page.evaluate(() => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
-    const rows = [...document.querySelectorAll('tbody tr')]
-    for (const label of ['CP AXTRA Sales', 'CP AXTRA EAT']) {
-      const row = rows.find((r) => r.innerText.includes(label))
-      const inp = [...row.querySelectorAll('input')].find((i) => i.style.textAlign === 'right')
+    const rows = [...document.querySelectorAll('tbody tr')].filter((r) => /^Delivery/i.test(r.innerText))
+    for (const row of rows) {
+      const inp = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right').pop()
+      if (!inp) continue
       inp.focus(); setter.call(inp, '80'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
     }
   })
@@ -248,7 +248,7 @@ try {
   // input sits before it and is also right-aligned when it holds hours.
   const weightsOf = () => page.evaluate(() =>
     [...document.querySelectorAll('tbody tr')]
-      .filter((r) => /^(Corporate|Delivery|Capability)/i.test(r.innerText))
+      .filter((r) => /^Delivery/i.test(r.innerText))
       .map((r) => {
         const i = [...r.querySelectorAll('input')].filter((x) => x.style.textAlign === 'right').pop()
         return i ? Number(i.value) : null
@@ -258,6 +258,42 @@ try {
   const w = await weightsOf()
   check('every weight on screen is a multiple of 5', w.length > 0 && w.every((v) => v % 5 === 0), w.join(' / '))
   check('they total 100%', w.reduce((a, b) => a + b, 0) === 100, String(w.reduce((a, b) => a + b, 0)))
+
+  /* ---------- 2026 card: objectives only ---------- */
+  const blocks = await page.evaluate(() =>
+    [...new Set([...document.querySelectorAll('tbody tr td:first-child')]
+      .map((c) => c.innerText.trim()).filter((t) => /^(Corporate|Delivery|Capability)$/i.test(t)))])
+  check('the card carries only Delivery lines', blocks.length === 1 && blocks[0] === 'Delivery', blocks.join(', '))
+  check('CP AXTRA and capability lines are gone',
+    await page.evaluate(() => !/CP AXTRA|GuRu|capability/i.test(document.body.innerText)))
+
+  /* ---------- a typed weight is honoured exactly ---------- */
+  const typeWeight = (label, value) => page.evaluate((lbl, val) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes(lbl))
+    const inp = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right').pop()
+    inp.focus(); setter.call(inp, String(val)); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+  }, label, value)
+
+  await typeWeight('Obj 1 — Financial', 30)
+  await new Promise((r) => setTimeout(r, 700))
+  const typed = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 1 — Financial'))
+    return Number([...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right').pop().value)
+  })
+  const wAfter = await weightsOf()
+  check('a typed weight comes back exactly as typed', typed === 30, String(typed))
+  check('the untouched lines absorb the rest', wAfter.reduce((a, b) => a + b, 0) === 100, wAfter.join(' / '))
+  check('and they stay on the grid', wAfter.every((v) => v % 5 === 0), wAfter.join(' / '))
+
+  // reset so the rest of the run starts from the defaults again
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) => /reset to default/i.test(b.innerText))
+    if (btn) btn.click()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  check('reset restores the default weights', (await weightsOf()).join('/') === w.join('/'),
+    `${(await weightsOf()).join('/')} vs ${w.join('/')}`)
 
   /* ---------- clicking a KPI line filters the portfolio ---------- */
   // Headers are uppercased by the theme, so match case-insensitively.
@@ -329,6 +365,37 @@ try {
       (before2 + 100).toLocaleString('en-US'))
   check('weights are still on the grid after the edit',
     (await weightsOf()).every((v) => v % 5 === 0))
+
+  /* ---------- nothing may push the page sideways ---------- */
+  const overflow = async (label) => {
+    const r = await page.evaluate(() => {
+      const d = document.documentElement
+      const wide = [...document.querySelectorAll('body *')]
+        .filter((el) => el.getBoundingClientRect().right > d.clientWidth + 2)
+        .slice(0, 3)
+        .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 40)}`)
+      return { scrollW: d.scrollWidth, clientW: d.clientWidth, wide }
+    })
+    check(`${label}: the page does not scroll horizontally`,
+      r.scrollW <= r.clientW + 2, `${r.scrollW} vs ${r.clientW}${r.wide.length ? ` — ${r.wide.join(', ')}` : ''}`)
+  }
+  for (const [tab, w] of [['people', 1500], ['projects', 1500], ['dashboard', 1500], ['people', 1100]]) {
+    await page.setViewport({ width: w, height: 1000 })
+    await page.goto(`${base}/?v=${w}${tab}#${tab}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await new Promise((r) => setTimeout(r, 900))
+    await overflow(`${tab} @ ${w}px`)
+  }
+
+  /* ---------- text is not mangled ---------- */
+  await page.setViewport({ width: 1500, height: 1000 })
+  await page.goto(`${base}/?enc=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 900))
+  const mojibake = await page.evaluate(() => {
+    const t = document.body.innerText
+    const hits = t.match(/â€.|Ã.|Â./g) || []
+    return [...new Set(hits)].slice(0, 5)
+  })
+  check('no mis-encoded characters on screen', mojibake.length === 0, mojibake.join(' '))
 } catch (e) {
   failures++
   console.log(`FAIL  unexpected error — ${e.message}`)

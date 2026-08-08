@@ -73,11 +73,11 @@ try {
   const withKpi = {
     ...payload,
     people: payload.people.map((p) =>
-      p.id === 'gun' ? { ...p, kpi: { 'corp-sales': { weight: 0.2, target: '5% growth' } } } : p),
+      p.id === 'gun' ? { ...p, kpi: { 'obj-financial': { weight: 0.2, target: '5% growth' } } } : p),
   }
   await store.saveScenario('Baseline', withKpi, 'Gun')
   const k = (await store.getScenario('Baseline')).payload.people.find((p) => p.id === 'gun')
-  check('nested KPI overrides survive', k.kpi['corp-sales'].weight === 0.2 && k.kpi['corp-sales'].target === '5% growth',
+  check('nested KPI overrides survive', k.kpi['obj-financial'].weight === 0.2 && k.kpi['obj-financial'].target === '5% growth',
     JSON.stringify(k.kpi))
 
   // ---- update in place, not duplicate ----

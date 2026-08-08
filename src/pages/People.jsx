@@ -255,14 +255,14 @@ export default function People({
 
       {p.hours === 0 && (
         <Alert severity="warning" variant="outlined">
-          {p.nick} carries no quantified saving hours. A saving-hours KPI would be meaningless here — either transfer
-          quantified work to them on the Projects tab, or lean their scorecard on the capability and milestone lines below.
+          {p.nick} carries no quantified saving hours. A saving-hours KPI would be meaningless here — transfer
+          quantified work to them on the Projects tab, or set their targets by hand below.
         </Alert>
       )}
 
       <Grid container spacing={2.5}>
         {/* ---------- weight table ---------- */}
-        <Grid item xs={12} md={7}>
+        <Grid item xs={12} md={6}>
           <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
             <Box sx={{ px: 2.5, py: 2, bgcolor: 'action.hover', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
@@ -400,22 +400,23 @@ export default function People({
                         />
                       </TableCell>
                       <TableCell padding="checkbox" sx={{ verticalAlign: 'top', pt: 1.75 }} onClick={(e) => e.stopPropagation()}>
-                        <Tooltip title="Remove this line from the scorecard">
-                          <IconButton size="small" onClick={() => onRemoveLine(p.id, l.id)}>
-                            <DeleteOutlineIcon sx={{ fontSize: 17 }} />
-                          </IconButton>
+                        <Tooltip title={p.kpiLines.length > 1
+                          ? 'Remove this line from the scorecard'
+                          : 'A scorecard must keep at least one KPI line'}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              disabled={p.kpiLines.length <= 1}
+                              onClick={() => onRemoveLine(p.id, l.id)}
+                            >
+                              <DeleteOutlineIcon sx={{ fontSize: 17 }} />
+                            </IconButton>
+                          </span>
                         </Tooltip>
                       </TableCell>
                     </TableRow>
                   )
                 })}
-                {p.kpiLines.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                      Every line has been removed. Restore one below, or reset to the band defaults.
-                    </TableCell>
-                  </TableRow>
-                )}
                 <TableRow>
                   <TableCell colSpan={2} sx={{ borderTop: 2, borderColor: 'divider' }} />
                   <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
@@ -461,11 +462,9 @@ export default function People({
 
             <Box sx={{ px: 2.5, py: 2, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 320px' }}>
-                Weights are always multiples of {WEIGHT_STEP}% and total exactly 100%. Targets track project
-                assignments live — reassign a project and the credited figure here follows; typing over a target pins
-                it until you sync it back. Defaults come from the{' '}
-                <strong>{BAND_LABEL[p.band]}</strong> band ({fmtPct(settings.bands[p.band].corporate)} corporate /{' '}
-                {fmtPct(settings.bands[p.band].delivery)} delivery / {fmtPct(settings.bands[p.band].people)} capability).
+                Weights are always multiples of {WEIGHT_STEP}% and total exactly 100%, split across the objectives{' '}
+                {p.nick} holds. Targets track project assignments live — reassign a project and the credited figure
+                here follows; typing over a target pins it until you sync it back.
               </Typography>
               {!weightOk && (
                 <Button size="small" variant="outlined" onClick={() => onRebalance(p.id)}>
@@ -482,8 +481,11 @@ export default function People({
         </Grid>
 
         {/* ---------- portfolio ---------- */}
-        <Grid item xs={12} md={5}>
-          <Paper variant="outlined" sx={{ p: 2.5 }}>
+        <Grid item xs={12} md={6}>
+          {/* overflow hidden on the card + scroll on the table, so a wide
+              editable table scrolls inside its own panel instead of pushing
+              the page sideways */}
+          <Paper variant="outlined" sx={{ p: 2.5, overflow: 'hidden' }}>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 0.5 }}>
               <Typography variant="h4">
                 {p.aggregatesTeam ? 'Team project portfolio' : 'Project portfolio'}
@@ -505,16 +507,17 @@ export default function People({
                   ? 'Every in-plan project across the team, at full value — this is what the team figure above adds up to. Edit any of it here; the numbers everywhere follow.'
                   : "Contribution % is this person's normalised share. Credited hours = project hours × share. Edit any of it here."}
             </Typography>
-            <Table size="small">
+            <Box sx={{ overflowX: 'auto', mx: -2.5, px: 2.5 }}>
+            <Table size="small" sx={{ minWidth: 620 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>Jira</TableCell>
-                  <TableCell>Project</TableCell>
-                  <TableCell sx={{ minWidth: 96 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
+                  <TableCell sx={{ minWidth: 76 }}>Jira</TableCell>
+                  <TableCell sx={{ minWidth: 150 }}>Project</TableCell>
+                  <TableCell sx={{ minWidth: 88 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
                   <TableCell align="right">Share</TableCell>
-                  <TableCell align="right" sx={{ minWidth: 84 }}>Project hrs</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 76 }}>Project hrs</TableCell>
                   <TableCell align="right">Credited</TableCell>
-                  <TableCell sx={{ minWidth: 110 }}>Level</TableCell>
+                  <TableCell sx={{ minWidth: 104 }}>Level</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -603,6 +606,7 @@ export default function People({
                   })}
               </TableBody>
             </Table>
+            </Box>
           </Paper>
         </Grid>
       </Grid>
