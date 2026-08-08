@@ -18,9 +18,9 @@ import { useTheme } from '@mui/material/styles'
 const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
 const BAND_LABEL = { lead: 'Team Lead', senior: 'Senior', analyst: 'Analyst' }
 
-/** Percent input that commits on blur. Stored as a 0–1 fraction. */
+/** Whole-percent input that commits on blur. Stored as a 0–1 fraction. */
 function PctCell({ value, onChange, invalid }) {
-  const asPct = (v) => (v == null ? '' : String(Math.round(v * 1000) / 10))
+  const asPct = (v) => (v == null ? '' : String(Math.round(v * 100)))
   const [draft, setDraft] = useState(asPct(value))
   const [focused, setFocused] = useState(false)
   if (!focused && draft !== asPct(value)) setDraft(asPct(value))
@@ -33,9 +33,11 @@ function PctCell({ value, onChange, invalid }) {
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         setFocused(false)
-        const n = Number(draft.replace(/[%\s,]/g, ''))
+        // Whole percentages only — decimals here are what produced 26.5%.
+        const n = Math.round(Number(draft.replace(/[%\s,]/g, '')))
         if (Number.isFinite(n) && n >= 0 && n <= 100) {
           if (Math.abs(n / 100 - value) > 1e-9) onChange(n / 100)
+          else setDraft(asPct(value))
         } else setDraft(asPct(value))
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}

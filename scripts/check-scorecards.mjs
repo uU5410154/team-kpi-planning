@@ -23,6 +23,17 @@ const check = (name, ok, detail = '') => {
 const plan0 = computePlan(base)
 check('defaults total 100% for everyone', plan0.people.every((p) => weightsValid(p.kpiLines)),
   plan0.people.map((p) => `${p.nick} ${(weightSum(p.kpiLines) * 100).toFixed(1)}%`).join(', '))
+
+// Whole percentages everywhere, not just after a manual rebalance.
+const fractional = plan0.people.filter((p) =>
+  p.kpiLines.some((l) => Math.abs(l.weight * 100 - Math.round(l.weight * 100)) > 1e-9))
+check('every default weight is a whole percentage', fractional.length === 0,
+  fractional.map((p) => `${p.nick}: ${p.kpiLines.map((l) => (l.weight * 100).toFixed(2)).join('/')}`).join(' | '))
+console.log('\ndefault weights:')
+for (const p of plan0.people) {
+  console.log(`  ${p.nick.padEnd(10)} ${p.kpiLines.map((l) => `${Math.round(l.weight * 100)}%`).join(' ')}` +
+    `  = ${Math.round(weightSum(p.kpiLines) * 100)}%`)
+}
 check('no invalid scorecards by default', plan0.invalid.length === 0)
 
 // every member's delivery target is their own, not the team's 3,000

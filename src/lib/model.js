@@ -200,7 +200,42 @@ export function scorecardWeights(person, settings, credited = {}) {
     l.weight = rel > 0 ? (l.weight / rel) * pool : pool / delivery.length
   }
 
+  // Whole percentages only — a scorecard put in front of someone should read
+  // 26%, not 26.5%. Skipped when the fixed blocks already exceed 100%, so that
+  // genuinely invalid state stays visible to the save gate instead of being
+  // rounded into looking fine.
+  if (fixed <= 1) {
+    const pct = toWholePercents(resolved.map((l) => l.weight))
+    resolved.forEach((l, i) => { l.weight = pct[i] })
+  }
+
   return resolved
+}
+
+/**
+ * Largest-remainder apportionment: turn fractional shares into whole
+ * percentages that still total exactly 100%. Rounding each one independently
+ * would land on 99% or 101% and trip the save gate.
+ *
+ * Returns decimals (0.26 for 26%).
+ */
+export function toWholePercents(weights) {
+  const n = weights.length
+  if (!n) return []
+  const total = weights.reduce((a, b) => a + b, 0)
+  const exact = total > 0 ? weights.map((w) => (w / total) * 100) : weights.map(() => 100 / n)
+
+  const pct = exact.map((v) => Math.floor(v))
+  const leftover = 100 - pct.reduce((a, b) => a + b, 0)
+
+  // Biggest fractional part first; ties to the earlier line so the result is
+  // deterministic rather than dependent on sort stability.
+  const byRemainder = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+
+  for (let k = 0; k < leftover; k++) pct[byRemainder[k % n].i] += 1
+  return pct.map((p) => p / 100)
 }
 
 /** Render a KPI target for display or export. */
@@ -227,27 +262,9 @@ export function hiddenLines(person, settings, credited = {}) {
  * would miss 100% by a point or two, which the save gate would then block.
  */
 export function rebalanceWeights(lines) {
-  const n = lines.length
-  if (!n) return {}
-  const total = weightSum(lines)
-
-  // With nothing to go on, split evenly rather than leaving it at zero.
-  const exact = total > 0
-    ? lines.map((l) => ((l.weight || 0) / total) * 100)
-    : lines.map(() => 100 / n)
-
-  const pct = exact.map((v) => Math.floor(v))
-  const leftover = 100 - pct.reduce((a, b) => a + b, 0)
-
-  // Biggest fractional part first; ties go to the earlier line so the result is
-  // deterministic rather than dependent on sort stability.
-  const byRemainder = exact
-    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-    .sort((a, b) => b.frac - a.frac || a.i - b.i)
-
-  for (let k = 0; k < leftover; k++) pct[byRemainder[k % n].i] += 1
-
-  return Object.fromEntries(lines.map((l, i) => [l.id, pct[i] / 100]))
+  if (!lines.length) return {}
+  const pct = toWholePercents(lines.map((l) => l.weight || 0))
+  return Object.fromEntries(lines.map((l, i) => [l.id, pct[i]]))
 }
 
 export const weightSum = (lines) => lines.reduce((a, l) => a + (l.weight || 0), 0)
