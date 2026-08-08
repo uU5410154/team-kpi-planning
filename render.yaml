@@ -5,7 +5,11 @@ services:
   - type: web
     name: team-kpi-planning
     runtime: node
-    plan: free
+    # Instance type for the running service — NOT the build pipeline tier.
+    # "free" hibernates after ~15 min idle and cold-starts on the next request;
+    # "starter" stays warm. A blueprint sync overwrites whatever the dashboard
+    # says, so this line is what actually decides it.
+    plan: starter
     # --include=dev: Render sets NODE_ENV=production at build time, which would
     # otherwise make npm skip devDependencies (vite) and break the build.
     buildCommand: npm install --include=dev && npm run build
