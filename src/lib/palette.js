@@ -97,8 +97,12 @@ export const OBJECTIVES = [
     short: 'Data warehouse',
     detail: 'Reporting for own division by linking F&A datawarehouse (Acct data cube)',
     target: 'by Nov 2026',
+    // Measured by a date, not by hours — but the projects underneath it DO
+    // carry saving hours in the source workbook, so those hours still count
+    // toward the team total. Excluding them made the scorecards disagree with
+    // the headline by exactly 352 hrs.
     measure: 'milestone',
-    countsToPool: false,
+    countsToPool: true,
     guidelineName: 'F&A Data warehouse*',
     guidelineDetail:
       'To create reporting for own division operation by link F&A datawarehouse (Acct data cube)',

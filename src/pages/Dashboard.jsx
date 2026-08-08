@@ -341,7 +341,7 @@ export default function Dashboard({ plan, onGoTo }) {
                     <TableCell sx={{ minWidth: 260 }}>F&amp;A Tech</TableCell>
                     <TableCell align="right">Projects</TableCell>
                     <TableCell align="right">Hours</TableCell>
-                    <TableCell align="right">Pool</TableCell>
+                    <TableCell align="right">Measured by</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -385,8 +385,8 @@ export default function Dashboard({ plan, onGoTo }) {
                           <Chip
                             size="small"
                             variant="outlined"
-                            label={o.countsToPool ? 'Yes' : 'Gated'}
-                            color={o.countsToPool ? 'default' : 'warning'}
+                            label={o.measure === 'milestone' ? 'Date' : o.measure === 'ratio' ? 'Ratio' : 'Hours'}
+                            color={o.measure === 'hours' ? 'default' : 'info'}
                           />
                         </TableCell>
                       </TableRow>

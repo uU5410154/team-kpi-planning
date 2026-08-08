@@ -119,7 +119,9 @@ export function scorecardWeights(person, settings, credited = {}) {
 
   if (totalPrio > 0) {
     held.forEach((id) => {
-      const hours = OBJ_BY_ID[id]?.countsToPool
+      // How the TARGET is expressed, which is separate from whether the hours
+      // count: objective 3 is measured by a date but still contributes hours.
+      const hours = OBJ_BY_ID[id]?.measure !== 'milestone'
       lines.push({
         id: `obj-${id}`,
         block: 'Delivery',

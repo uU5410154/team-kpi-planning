@@ -30,6 +30,19 @@ check('exactly one person aggregates the team', plan.people.filter((p) => p.aggr
 check('it is the team lead', lead?.band === 'lead' && lead.id === 'gun')
 check('nobody else does', others.every((p) => !p.aggregatesTeam))
 
+console.log('\n--- the lead\'s number IS the headline ---')
+// The number on the lead's card and the number in the header must be the same
+// number. They diverged once by exactly the 352 objective-3 hours, which the
+// header counted and the scorecards did not.
+check('the lead figure equals the dashboard headline',
+  Math.abs(lead.scorecardHours - plan.totals.totalHours) < 0.01,
+  `lead ${lead.scorecardHours.toFixed(1)} vs header ${plan.totals.totalHours.toFixed(1)}`)
+check('and the headline equals the raw source column',
+  Math.abs(plan.totals.totalHours - seed.projects.reduce((a, p) => a + (p.savingHours ?? 0), 0)) < 0.01)
+check('every objective contributes its hours, including the date-gated one',
+  Math.abs(Object.values(plan.byObjective).reduce((a, b) => a + b, 0) - plan.totals.totalHours) < 0.01,
+  Object.entries(plan.byObjective).map(([k, v]) => `${k}=${Math.round(v)}`).join(' '))
+
 console.log('\n--- the lead\'s number IS the team\'s ---')
 const sumOfAll = plan.people.reduce((a, p) => a + p.ownHours, 0)
 console.log(`  members: ${plan.people.map((p) => `${p.nick} ${Math.round(p.ownHours)}`).join(' + ')}`)
@@ -53,13 +66,10 @@ check('IT-owned projects are in the portfolio', inPortfolio(itOwned), `${itOwned
 check('other members\' projects are in the portfolio', inPortfolio(teamMates), `${teamMates.length} projects`)
 
 console.log('\n--- the portfolio re-adds to the headline ---')
-const portfolioSum = lead.scorecardRows
-  .filter((r) => {
-    const o = ['financial', 'process_automation', 'efficiency', 'ai_automation']
-    return o.includes(r.p.objective)
-  })
-  .reduce((a, r) => a + (r.p.savingHours ?? 0) * r.share, 0)
-check('the pool-eligible rows sum to the lead\'s figure',
+// Every objective contributes now, including the date-gated one, so the whole
+// portfolio re-adds — no objective is quietly left out of the sum.
+const portfolioSum = lead.scorecardRows.reduce((a, r) => a + (r.p.savingHours ?? 0) * r.share, 0)
+check('the portfolio rows sum to the lead\'s figure',
   Math.abs(portfolioSum - lead.scorecardHours) < 0.01,
   `${portfolioSum.toFixed(1)} vs ${lead.scorecardHours.toFixed(1)}`)
 
