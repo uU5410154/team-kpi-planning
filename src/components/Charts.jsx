@@ -254,7 +254,10 @@ export function StackedHBar({ rows, series, valueFormat = (n) => Math.round(n).t
 /* Scatter — the efficiency gate (manday vs saving hours)              */
 /* ------------------------------------------------------------------ */
 
-export function GateScatter({ points, gate, height = 320, emptyMessage }) {
+export function GateScatter({
+  points, gate, height = 320, emptyMessage,
+  xLabel = 'Mandays invested', yLabel = 'Saving hours', fmt = (v) => Math.round(v).toLocaleString(),
+}) {
   const tokens = useChartTokens()
   const ref = useRef(null)
   const { tip, show, hide } = useTooltip(ref)
@@ -288,8 +291,8 @@ export function GateScatter({ points, gate, height = 320, emptyMessage }) {
   const H = height
 
   const { maxX, maxY } = useMemo(() => ({
-    maxX: Math.max(10, ...points.map((p) => p.manday)) * 1.08,
-    maxY: Math.max(10, ...points.map((p) => p.savingHours)) * 1.15,
+    maxX: Math.max(10, ...points.map((p) => p.x)) * 1.08,
+    maxY: Math.max(10, ...points.map((p) => p.y)) * 1.15,
   }), [points])
 
   // Log y — one epic at 1,262h beside a dozen under 20h is otherwise an
@@ -298,8 +301,10 @@ export function GateScatter({ points, gate, height = 320, emptyMessage }) {
   const yScale = (v) => H - padB - (Math.log10(Math.max(0, v) + 1) / lmax) * (H - padB - padT)
   const xScale = (v) => padL + (v / maxX) * (W - padL - padR)
 
-  const yTicks = [1, 10, 100, 1000, 10000].filter((t) => t <= maxY)
-  const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * maxX))
+  // Decade ticks across whatever magnitude the values span, so the same chart
+  // reads whether the axis is hours or millions of baht.
+  const yTicks = Array.from({ length: 12 }, (_, i) => 10 ** i).filter((t) => t <= maxY && t >= maxY / 1e5)
+  const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * maxX)
   // Park the gate caption on the curve at 45% of the x-range, where the
   // scatter is sparse — pinning it to a corner collides with real points.
   const capX = maxX * 0.45
@@ -322,14 +327,14 @@ export function GateScatter({ points, gate, height = 320, emptyMessage }) {
               <line x1={padL} x2={W - padR} y1={yScale(t)} y2={yScale(t)} stroke={tokens.gridline} strokeWidth="1" />
               <text x={padL - 8} y={yScale(t) + 4} textAnchor="end" fontSize="11" fill={tokens.muted}
                     style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {t.toLocaleString()}
+                {fmt(t)}
               </text>
             </g>
           ))}
           {xTicks.map((t, i) => (
             <text key={i} x={xScale(t)} y={H - padB + 16} textAnchor="middle" fontSize="11" fill={tokens.muted}
                   style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {t}
+              {fmt(t)}
             </text>
           ))}
           <line x1={padL} x2={W - padR} y1={H - padB} y2={H - padB} stroke={tokens.baseline} strokeWidth="1" />
@@ -341,25 +346,24 @@ export function GateScatter({ points, gate, height = 320, emptyMessage }) {
             fill={tokens.textSecondary}
             stroke={tokens.surface} strokeWidth="4" paintOrder="stroke"
           >
-            gate — {gate.toFixed(1)} hrs / manday
+            gate
           </text>
 
           {points.map((p) => {
-            const pass = p.savingHours >= gate * p.manday
+            const pass = p.y >= gate * p.x
             return (
               <circle
                 key={p.key}
-                cx={xScale(p.manday)}
-                cy={yScale(p.savingHours)}
-                r={p.savingHours > 300 ? 9 : 6}
+                cx={xScale(p.x)}
+                cy={yScale(p.y)}
+                r={p.y > maxY / 4 ? 9 : 6}
                 fill={pass ? STATUS.good : STATUS.critical}
                 fillOpacity="0.82"
                 stroke={tokens.surface}
                 strokeWidth="2"
                 style={{ cursor: 'pointer' }}
                 onMouseMove={(e) =>
-                  show(e,
-                    `${p.key} — ${p.summary}\n${Math.round(p.savingHours).toLocaleString()} hrs · ${p.manday.toFixed(1)} mandays\nratio ${(p.savingHours / p.manday).toFixed(1)} hrs/manday · ${pass ? 'PASSES' : 'FAILS'} the gate`)
+                  show(e, `${p.key} — ${p.summary}\n${p.note || `${fmt(p.x)} → ${fmt(p.y)}`}\n${pass ? 'PASSES' : 'FAILS'} the gate`)
                 }
                 onMouseLeave={hide}
               />
@@ -367,10 +371,10 @@ export function GateScatter({ points, gate, height = 320, emptyMessage }) {
           })}
 
           <text x={W / 2} y={H - 4} textAnchor="middle" fontSize="11" fill={tokens.textSecondary}>
-            Mandays invested
+            {xLabel}
           </text>
           <text transform={`rotate(-90 13 ${H / 2})`} x={13} y={H / 2} textAnchor="middle" fontSize="11" fill={tokens.textSecondary}>
-            Saving hours (log scale)
+            {yLabel} (log scale)
           </text>
         </svg>
         <Tip tip={tip} tokens={tokens} />
@@ -378,8 +382,8 @@ export function GateScatter({ points, gate, height = 320, emptyMessage }) {
       {/* status colour never carries meaning alone */}
       <Legend
         items={[
-          { label: `Passes gate (≥ ${gate.toFixed(1)} hrs/manday)`, color: STATUS.good },
-          { label: 'Below gate — review scope or effort', color: STATUS.critical },
+          { label: 'Clears the gate', color: STATUS.good },
+          { label: 'Below the gate — review scope or effort', color: STATUS.critical },
         ]}
       />
     </>

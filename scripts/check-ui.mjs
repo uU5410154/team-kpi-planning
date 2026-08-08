@@ -8,6 +8,13 @@
 import puppeteer from 'puppeteer-core'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { financeRates, DEFAULT_SETTINGS } from '../src/lib/model.js'
+
+// Objective 1 is measured in baht, so one extra saving hour per month moves its
+// target by a year of that hour's value. Taken from the model rather than
+// hardcoded, so the test cannot drift away from the app's own arithmetic.
+const RATES = financeRates(DEFAULT_SETTINGS)
+const PER_HOUR = 12 * RATES.acctHourRate
 
 const BROWSERS = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -140,7 +147,8 @@ try {
   await page.goto(`${base}/#people`, { waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 700))
   const after = Number(await scorecardTarget('Obj 1 — Financial'))
-  check('SCORECARD FOLLOWED THE +1 EDIT', after === before + 1, `${before} -> ${after}`)
+  check('SCORECARD FOLLOWED THE +1 EDIT', Math.abs(after - before - PER_HOUR) <= 1,
+    `${before} -> ${after} (one saved hour is worth ${Math.round(PER_HOUR)} a year)`)
 
   const driftWarning = await page.evaluate(() => document.body.innerText.includes('no longer match'))
   check('no spurious drift warning', driftWarning === false)
@@ -172,7 +180,8 @@ try {
   await new Promise((r) => setTimeout(r, 600))
   await page.goto(`${base}/#people`, { waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 700))
-  check('a second edit still reaches the scorecard', Number(await scorecardTarget('Obj 1 — Financial')) === before + 9,
+  check('a second edit still reaches the scorecard',
+    Math.abs(Number(await scorecardTarget('Obj 1 — Financial')) - before - 9 * PER_HOUR) <= 1,
     String(await scorecardTarget('Obj 1 — Financial')))
 
   /* ---------- deliberate override still pins ---------- */
@@ -365,6 +374,107 @@ try {
       (before2 + 100).toLocaleString('en-US'))
   check('weights are still on the grid after the edit',
     (await weightsOf()).every((v) => v % 5 === 0))
+
+  /* ---------- Objective 1 reads as money, end to end ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?money=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+
+  const colIndex = (label) => page.evaluate((lbl) => {
+    const table = document.querySelector('table')
+    const heads = [...table.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    return heads.findIndex((h) => h.startsWith(lbl.toLowerCase()))
+  }, label)
+
+  const roiCol = await colIndex('roi')
+  const costCol = await colIndex('build cost')
+  check('the Projects table has an ROI column', roiCol > 0, `index ${roiCol}`)
+  check('and a build cost column beside it', costCol > 0 && costCol < roiCol, `cost ${costCol} / roi ${roiCol}`)
+
+  // No effort in the seed, so ROI starts blank by design rather than as zero.
+  const roiBefore = await page.evaluate((ix) => {
+    const rows = [...document.querySelectorAll('tbody tr')]
+    return rows.slice(0, 5).map((r) => r.children[ix]?.innerText.trim())
+  }, roiCol)
+  check('ROI is blank while no effort is estimated, not 0%',
+    roiBefore.every((v) => v === '—'), roiBefore.join(' | '))
+
+  // Type mandays into the first row; the money columns must all come alive.
+  const filled = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const row = document.querySelector('tbody tr')
+    const nums = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right')
+    const md = nums[2] // saving hrs, HC, mandays
+    md.focus(); setter.call(md, '25'); md.dispatchEvent(new Event('input', { bubbles: true })); md.blur()
+    return md.value
+  })
+  await new Promise((r) => setTimeout(r, 800))
+  check('mandays are editable on the Projects tab', filled === '25', filled)
+
+  const money = await page.evaluate((c, r) => ({
+    cost: document.querySelector('tbody tr').children[c]?.innerText.trim(),
+    roi: document.querySelector('tbody tr').children[r]?.innerText.trim(),
+    strip: document.body.innerText.match(/BENEFIT \/ YEAR\s*\n\s*([^\n]+)/)?.[1]?.trim(),
+  }), costCol, roiCol)
+  check('entering mandays fills in the build cost', /\d/.test(money.cost) && money.cost !== '—', money.cost)
+  check('and shows an ROI for that project', /%/.test(money.roi), money.roi)
+  check('the benefit was already known without any effort estimate',
+    /\d/.test(money.strip || ''), String(money.strip))
+
+  /* ---------- the rates are live from the Model tab ---------- */
+  const annualTile = () => page.evaluate(() =>
+    document.body.innerText.match(/VALUE OF HOURS RELEASED\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null)
+
+  await page.goto(`${base}/?money=2#dashboard`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1200))
+  const benefitBefore = await annualTile()
+  check('the dashboard leads with the value of the hours released', !!benefitBefore, String(benefitBefore))
+  check('a return tile is present too',
+    await page.evaluate(() => /RETURN ON BUILD COST/i.test(document.body.innerText)))
+
+  await page.goto(`${base}/?money=3#settings`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1200))
+  const rateFields = await page.evaluate(() => {
+    const labels = [...document.querySelectorAll('label')].map((l) => l.innerText.trim())
+    return labels.filter((l) => /salary/i.test(l))
+  })
+  check('both salary rates are editable on the Model tab',
+    rateFields.some((l) => /developer/i.test(l)) && rateFields.some((l) => /accountant/i.test(l)),
+    rateFields.join(' | '))
+
+  const doubled = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const label = [...document.querySelectorAll('label')].find((l) => /accountant/i.test(l.innerText))
+    const input = label.closest('.MuiFormControl-root').querySelector('input')
+    input.focus(); setter.call(input, '60000'); input.dispatchEvent(new Event('input', { bubbles: true })); input.blur()
+    return input.value
+  })
+  await new Promise((r) => setTimeout(r, 900))
+  check('the accountant salary accepts an edit', doubled === '60000', doubled)
+
+  await page.goto(`${base}/?money=4#dashboard`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1200))
+  const benefitAfter = await annualTile()
+  check('doubling the accountant rate moves the dashboard headline',
+    benefitAfter !== benefitBefore, `${benefitBefore} -> ${benefitAfter}`)
+
+  /* ---------- the scorecard portfolio carries ROI per project ---------- */
+  await page.goto(`${base}/?money=5#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  const portfolioHeads = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    if (!heads.length) return []
+    return [...heads[heads.length - 1].closest('table').querySelectorAll('thead th')]
+      .map((h) => h.innerText.trim().toLowerCase())
+  })
+  check('the scorecard portfolio has an ROI column', portfolioHeads.includes('roi'), portfolioHeads.join(' | '))
+  check('and a per-project benefit column', portfolioHeads.some((h) => h.startsWith('benefit')), portfolioHeads.join(' | '))
+  check('and mandays, so a scorecard can be costed in place', portfolioHeads.includes('mandays'))
+  check("objective 1's target on the card is stated in baht",
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 1 — Financial'))
+      return row ? /฿|THB/.test(row.innerText) : false
+    }))
 
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {

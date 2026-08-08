@@ -149,7 +149,8 @@ console.log('\n--- the export credits nothing for it either ---')
     if (String(row.getCell(2).value || '') === biggest.summary) {
       projectHrs = row.getCell(6).value
       creditedHrs = row.getCell(7).value
-      level = row.getCell(10).value
+      // 9-11 are build cost / benefit / ROI, so Commit sits at 12.
+      level = row.getCell(12).value
     }
     if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(7).value
   })

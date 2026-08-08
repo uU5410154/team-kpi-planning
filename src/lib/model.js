@@ -47,13 +47,129 @@ export const SAVING_BASIS = {
 }
 
 /**
- * Months to repay the build effort, given a saving-hours-per-manday ratio.
- * One manday = 8 hours of build.
+ * Objective 1 is a money question, not an hours question: what does the build
+ * effort cost, what are the hours it gives back worth, and is the return worth
+ * having? The management guideline says as much — "man-hours the team invests
+ * vs. the benefits gained, whether it is worth it".
+ *
+ * Two rates drive everything, and both are meant to be argued about:
+ *   - the DEVELOPER rate turns mandays of build into a cost
+ *   - the ACCOUNTANT rate turns saved hours into a benefit
+ *
+ * Both are entered as a monthly salary, because that is the number anyone in
+ * the business can sanity-check, and converted to a day/hour rate here.
+ *
+ * `hoursPerFteMonth` is not a guess. The source workbook carries its own HC
+ * column beside the saving hours, and across the book 4,146.4 saving hrs/month
+ * sit against 23.9 HC — 173.5 hours per HC per month. That is 2,080/12, the
+ * standard full-time month, and it means this app divides the same way
+ * management already does.
  */
-export function paybackMonths(ratio, basis = 'annual') {
-  if (!ratio || ratio <= 0) return null
-  const hoursSavedPerMonthPerManday = basis === 'monthly' ? ratio : ratio / 12
-  return 8 / hoursSavedPerMonthPerManday
+export const DEFAULT_FINANCE = {
+  currency: 'THB',
+  symbol: '฿',
+  // Monthly salary of someone who BUILDS the automation.
+  devMonthlySalary: 60000,
+  // Monthly salary of the accountant whose manual hours are handed back.
+  acctMonthlySalary: 30000,
+  // Employer on-cost applied to both: social security, bonus, benefits, desk.
+  // 1.0 keeps the arithmetic literally the salaries above; finance would
+  // typically argue for 1.3-1.5. Because it multiplies BOTH rates it moves
+  // every magnitude and leaves every ROI exactly unchanged — the Settings card
+  // has to say so, or it reads as a broken knob.
+  loadFactor: 1.0,
+  // Hours in a full-time month (2,080/12). Not a guess: the source workbook's
+  // own HC column implies 173.5 (4,146.4 saving hrs against 23.9 HC), so this
+  // is management's own divisor.
+  hoursPerFteMonth: 173.3,
+  // Hours in a manday. The ONLY bridge between a day of build and an hour of
+  // saving, so working days per month is derived from it rather than being a
+  // second, independently editable calendar — two calendars silently put the
+  // cost side and the benefit side on different months.
+  hoursPerManday: 8,
+  // How long a delivered automation is credited with paying back. ROI and net
+  // benefit are both stated over this window, so it must be shown wherever
+  // they are.
+  horizonMonths: 12,
+  // Objective 1's gate: the minimum return on build cost across the horizon.
+  // 2.0 = the build cost comes back three times over inside the horizon, which
+  // is a payback of 12/3 = 4 months.
+  //
+  // This default is chosen to hold the old bar rather than quietly relax it.
+  // The gate it replaces was 4.0 saving hours per manday; at the default rates
+  // ROI >= g is the same as hrs/manday >= (1+g) x devDayRate / (horizon x
+  // acctHourRate), and g = 2.0 lands that on 4.0. Change the salaries and the
+  // equivalent hours-per-manday moves with them — which is the point.
+  roiGate: 2.0,
+}
+
+/**
+ * The two derived rates. Everything financial in the app comes through here,
+ * so changing a salary in Settings moves every number at once.
+ */
+export function financeRates(settings) {
+  const f = { ...DEFAULT_FINANCE, ...(settings?.finance || {}) }
+  // Every divisor falls back rather than producing Infinity, and every salary
+  // floors at zero — a negative rate would report a negative benefit, which is
+  // not a thing a saved hour can be worth.
+  const pos = (v, fallback) => (Number.isFinite(v) && v > 0 ? v : fallback)
+  const nonNeg = (v) => (Number.isFinite(v) && v > 0 ? v : 0)
+  const devMonthlySalary = nonNeg(f.devMonthlySalary)
+  const acctMonthlySalary = nonNeg(f.acctMonthlySalary)
+  const load = pos(f.loadFactor, 1)
+  const hoursPerFteMonth = pos(f.hoursPerFteMonth, DEFAULT_FINANCE.hoursPerFteMonth)
+  const hoursPerManday = pos(f.hoursPerManday, DEFAULT_FINANCE.hoursPerManday)
+  const horizonMonths = pos(f.horizonMonths, DEFAULT_FINANCE.horizonMonths)
+  // One calendar: a month is hoursPerFteMonth long and a day is hoursPerManday
+  // of it, so cost and benefit are always quoted against the same month.
+  const daysPerFteMonth = hoursPerFteMonth / hoursPerManday
+  const acctHourRate = (acctMonthlySalary * load) / hoursPerFteMonth
+  const devDayRate = (devMonthlySalary * load) / daysPerFteMonth
+  return {
+    ...f,
+    devMonthlySalary,
+    acctMonthlySalary,
+    loadFactor: load,
+    hoursPerFteMonth,
+    hoursPerManday,
+    horizonMonths,
+    roiGate: Number.isFinite(f.roiGate) && f.roiGate >= 0 ? f.roiGate : DEFAULT_FINANCE.roiGate,
+    daysPerFteMonth,
+    /** Cost of one manday of build. */
+    devDayRate,
+    /** Value of one accountant hour handed back. */
+    acctHourRate,
+    /** Value of one whole accountant freed for a month. */
+    acctMonthRate: acctMonthlySalary * load,
+  }
+}
+
+/**
+ * The gate restated in the units the team used before it was a money gate:
+ * the saving hours per manday a project needs to clear `roiGate`.
+ *
+ * ROI >= g  <=>  hrs x acctHourRate x horizon >= (1+g) x mandays x devDayRate
+ *           <=>  hrs/manday >= (1+g) x devDayRate / (horizon x acctHourRate)
+ *
+ * Shown beside the gate so moving it is never a silent change of standard.
+ */
+export function gateAsHoursPerManday(rates) {
+  const denom = rates.horizonMonths * rates.acctHourRate
+  if (!(denom > 0)) return null
+  return ((1 + rates.roiGate) * rates.devDayRate) / denom
+}
+
+/** The gate restated as a payback period: ROI >= g <=> payback <= H/(1+g). */
+export const gateAsPaybackMonths = (rates) =>
+  rates.roiGate + 1 > 0 ? rates.horizonMonths / (1 + rates.roiGate) : null
+
+/**
+ * Months for a project's monthly benefit to repay its build cost.
+ * Null when either side is unknown — an unknown payback is not a fast one.
+ */
+export function paybackMonths(buildCost, monthlyBenefit) {
+  if (buildCost == null || monthlyBenefit == null || monthlyBenefit <= 0) return null
+  return buildCost / monthlyBenefit
 }
 
 export const DEFAULT_SETTINGS = {
@@ -61,11 +177,7 @@ export const DEFAULT_SETTINGS = {
   // The source workbook's column is "Saving hrs/mth", and the 2025 plan was
   // also stated per month (1,823 hrs/month), so monthly is the right basis.
   savingBasis: 'monthly',
-  // Objective 1 gate: minimum saving hours returned per manday invested.
-  // 4.0 on an annual basis is a 24-month payback — a deliberately permissive
-  // provisional floor. It cannot be set responsibly until real effort data
-  // exists and the hours basis is confirmed with management.
-  ratioGate: 4.0,
+  finance: { ...DEFAULT_FINANCE },
   roleWeights: { ...DEFAULT_ROLE_WEIGHTS },
   // Whether "stretch" projects are shown inside the headline number.
   includeStretchInHeadline: false,
@@ -91,31 +203,51 @@ export const DEFAULT_SETTINGS = {
  * The DEFAULTS always total 1.0. Overrides can break that on purpose while
  * someone is mid-edit; `weightsValid` is what gates saving.
  */
-export function scorecardWeights(person, settings, credited = {}) {
+/**
+ * How an objective's KPI target is expressed. A POSITIVE switch on the
+ * objective's own `measure`, deliberately: this used to be `measure !==
+ * 'milestone' ? hours : text`, so changing objective 1 to a money measure
+ * would have left it silently rendering baht under an "hrs/month" label.
+ */
+export const targetKindFor = (objectiveId) => {
+  switch (OBJ_BY_ID[objectiveId]?.measure) {
+    case 'milestone': return 'text'
+    case 'money': return 'thb'
+    default: return 'hours'
+  }
+}
+
+export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
 
   // 2026 carries no corporate (CP AXTRA Sales / EAT) or capability line, so the
   // delivery objectives are the whole card and split 100% between them.
-  // targetKind 'hours' -> a plain number the UI renders with a fixed unit.
-  // 'text' -> a milestone or qualitative target a number cannot express.
+  // targetKind 'hours' -> a number the UI renders as hrs/month.
+  // 'thb'   -> a number the UI renders as annual baht (objective 1).
+  // 'text'  -> a milestone or qualitative target a number cannot express.
   const lines = []
 
   if (totalPrio > 0) {
     held.forEach((id) => {
       // How the TARGET is expressed, which is separate from whether the hours
       // count: objective 3 is measured by a date but still contributes hours.
-      const hours = OBJ_BY_ID[id]?.measure !== 'milestone'
+      const kind = targetKindFor(id)
+      const live = kind === 'thb'
+        ? Math.round(creditedMoney[id] || 0)
+        : kind === 'hours'
+          ? Math.round(credited[id] || 0)
+          : (OBJ_BY_ID[id]?.target || '—')
       lines.push({
         id: `obj-${id}`,
         block: 'Delivery',
         objective: id,
         weight: (prio[id] ?? 1) / totalPrio,
-        targetKind: hours ? 'hours' : 'text',
+        targetKind: kind,
         // Default = what this person actually carries, so the number starts
         // realistic rather than at the team's 3,000.
-        target: hours ? Math.round(credited[id] || 0) : (OBJ_BY_ID[id]?.target || '—'),
+        target: live,
       })
     })
   } else {
@@ -134,10 +266,10 @@ export function scorecardWeights(person, settings, credited = {}) {
   const resolved = (kept.length ? kept : lines.slice(0, 1))
     .map((l) => {
       const o = ov[l.id] || {}
-      const hasTargetOverride =
-        l.targetKind === 'hours'
-          ? typeof o.target === 'number'
-          : o.target != null && o.target !== ''
+      const numeric = l.targetKind === 'hours' || l.targetKind === 'thb'
+      const hasTargetOverride = numeric
+        ? typeof o.target === 'number'
+        : o.target != null && o.target !== ''
       const target = hasTargetOverride ? o.target : l.target
       return {
         ...l,
@@ -152,9 +284,15 @@ export function scorecardWeights(person, settings, credited = {}) {
         // project on the Projects tab and this moves immediately.
         defaultTarget: l.target,
         creditedHours: l.objective ? (credited[l.objective] || 0) : null,
+        creditedMoney: l.objective ? (creditedMoney[l.objective] || 0) : null,
         // A manual target that no longer matches what the person actually
         // carries — surfaced so it can be re-synced rather than silently drift.
-        drifted: !!l.objective && target !== l.target,
+        // Compared numerically where the target is a number: baht figures are
+        // large enough that a strict !== would flag a rounding difference of
+        // one satang as a drifted target.
+        drifted: !!l.objective && (numeric
+          ? Math.abs(Number(target) - Number(l.target)) > 0.5
+          : target !== l.target),
         overridden: typeof o.weight === 'number' || hasTargetOverride,
       }
     })
@@ -249,18 +387,61 @@ export function toWholePercents(weights, step = WEIGHT_STEP, share = 1) {
 export const snapWeight = (pct, step = WEIGHT_STEP) =>
   Math.min(100, Math.max(0, Math.round(pct / step) * step))
 
-/** Render a KPI target for display or export. */
-export const fmtTarget = (line, basis = 'monthly') =>
-  line.targetKind === 'hours'
-    ? `${Number(line.target || 0).toLocaleString()} ${basis === 'monthly' ? 'hrs/month' : 'hrs/year'}`
-    : String(line.target ?? '—')
+/** The unit a numeric KPI target is quoted in. */
+export const targetUnit = (line, basis = 'monthly', symbol = '฿') =>
+  line.targetKind === 'thb'
+    ? `${symbol}/year`
+    : basis === 'monthly' ? 'hrs/month' : 'hrs/year'
+
+/**
+ * Render a KPI target for display or export. Objective 1 is money, everything
+ * else that carries a number is hours; a milestone stays free text.
+ */
+export const fmtTarget = (line, basis = 'monthly', symbol = '฿') => {
+  if (line.targetKind === 'thb') {
+    return `${symbol}${Math.round(Number(line.target || 0)).toLocaleString()}/year`
+  }
+  if (line.targetKind === 'hours') {
+    return `${Number(line.target || 0).toLocaleString()} ${basis === 'monthly' ? 'hrs/month' : 'hrs/year'}`
+  }
+  return String(line.target ?? '—')
+}
 
 /** Lines removed from a scorecard, so they can be listed and restored. */
-export function hiddenLines(person, settings, credited = {}) {
+export function hiddenLines(person, settings, credited = {}, creditedMoney = {}) {
   const hidden = new Set(person.kpiHidden || [])
   if (!hidden.size) return []
-  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited)
+  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited, creditedMoney)
   return all.filter((l) => hidden.has(l.id))
+}
+
+/* ------------------------------------------------------------------ */
+/* money formatting                                                    */
+/* ------------------------------------------------------------------ */
+
+/** Full baht, for tables and anywhere a figure has to be checkable by hand. */
+export const fmtMoney = (n, symbol = '฿') =>
+  n == null ? '—' : `${n < 0 ? '-' : ''}${symbol}${Math.round(Math.abs(n)).toLocaleString()}`
+
+/** Compact baht, for hero tiles where the magnitude matters more than the digits. */
+export const fmtMoneyShort = (n, symbol = '฿') => {
+  if (n == null) return '—'
+  const a = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (a >= 1e6) return `${sign}${symbol}${(a / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M`
+  if (a >= 1e4) return `${sign}${symbol}${Math.round(a / 1e3)}k`
+  return `${sign}${symbol}${Math.round(a).toLocaleString()}`
+}
+
+/** ROI as a percentage. Negative is a loss, so the sign is always shown. */
+export const fmtRoi = (n) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${Math.round(n * 100)}%`)
+
+/** A payback period in the unit that reads best at its own magnitude. */
+export const fmtMonths = (n) => {
+  if (n == null || !Number.isFinite(n)) return '—'
+  if (n < 1) return `${(n * 30).toFixed(0)} days`
+  if (n < 24) return `${n.toFixed(1)} months`
+  return `${(n / 12).toFixed(1)} years`
 }
 
 /**
@@ -414,10 +595,111 @@ export function projectRatio(p) {
   return p.savingHours / p.manday
 }
 
-export function gateStatus(p, gate) {
-  const r = projectRatio(p)
-  if (r == null) return 'unknown'
-  return r >= gate ? 'pass' : 'fail'
+/**
+ * Whole weekdays from start to due, inclusive. Used only to offer a first
+ * effort estimate where none exists — public holidays are not modelled, which
+ * is well inside the error of the estimate itself.
+ */
+export function workingDaysBetween(start, due) {
+  if (!start || !due) return 0
+  const a = new Date(`${start}T00:00:00Z`)
+  const b = new Date(`${due}T00:00:00Z`)
+  if (Number.isNaN(+a) || Number.isNaN(+b) || b < a) return 0
+  const days = Math.round((b - a) / 86400000) + 1
+  const weeks = Math.floor(days / 7)
+  let out = weeks * 5
+  for (let i = weeks * 7; i < days; i++) {
+    const d = new Date(+a + i * 86400000).getUTCDay()
+    if (d !== 0 && d !== 6) out++
+  }
+  return out
+}
+
+/** Saving hours expressed per month, whatever basis the column is stated in. */
+export const monthlyHours = (p, basis = 'monthly') => {
+  // Anything that is not a finite number is "not quantified" rather than
+  // propagated. The Projects tab cannot produce a NaN, but a hand-edited
+  // scenario file or a bad row in the database can, and one NaN would otherwise
+  // spread silently through every benefit, cost and total in the app.
+  const h = Number(p.savingHours)
+  if (p.savingHours == null || !Number.isFinite(h)) return null
+  return h / (SAVING_BASIS[basis]?.monthsPerUnit ?? 1)
+}
+
+/**
+ * The business case for one project, in money.
+ *
+ *   build cost      = mandays x the developer day rate            (one-off)
+ *   monthly benefit = saved hours/month x the accountant hour rate (recurring)
+ *   net benefit     = monthly benefit x horizon - build cost      (over the horizon)
+ *   ROI             = net benefit / build cost
+ *
+ * Cost is NULL, never zero, when no mandays have been estimated. A project
+ * whose effort is unknown does not have a cost of nothing — it has an unknown
+ * cost, and everything downstream of it must stay blank rather than report an
+ * infinite return. That distinction is the whole reason this file has so many
+ * null checks: the source workbook carries no effort data at all.
+ *
+ * `breakEvenMandays` is the one figure that survives that gap. It needs only
+ * the saving hours, so it can be shown for every quantified project on day one:
+ * spend more than this many mandays and the project loses money over the
+ * horizon. `affordableMandays` is the same thing at the gate rather than at
+ * zero return — the effort budget a project has to stay inside to be worth
+ * committing.
+ */
+export function projectFinance(p, settings) {
+  const r = financeRates(settings)
+  const horizon = r.horizonMonths > 0 ? r.horizonMonths : DEFAULT_FINANCE.horizonMonths
+  const gate = r.roiGate ?? DEFAULT_FINANCE.roiGate
+
+  const hrs = monthlyHours(p, settings?.savingBasis)
+  const monthlyBenefit = hrs == null ? null : hrs * r.acctHourRate
+  const horizonBenefit = monthlyBenefit == null ? null : monthlyBenefit * horizon
+  const annualBenefit = monthlyBenefit == null ? null : monthlyBenefit * 12
+  // The saving expressed the way management already states it: whole people.
+  const fteReleased = hrs == null ? null : hrs / r.hoursPerFteMonth
+
+  // Same discipline as the saving hours: only a finite positive number is an
+  // effort estimate. Infinity or NaN is missing data, not an infinite cost.
+  const mdRaw = Number(p.manday)
+  const md = Number.isFinite(mdRaw) && mdRaw > 0 ? mdRaw : null
+  const buildCost = md == null ? null : md * r.devDayRate
+
+  const netBenefit = horizonBenefit == null || buildCost == null ? null : horizonBenefit - buildCost
+  const roi = buildCost == null || buildCost <= 0 || horizonBenefit == null
+    ? null
+    : (horizonBenefit - buildCost) / buildCost
+  const payback = paybackMonths(buildCost, monthlyBenefit)
+
+  const breakEvenMandays = horizonBenefit == null || r.devDayRate <= 0
+    ? null
+    : horizonBenefit / r.devDayRate
+  const affordableMandays = breakEvenMandays == null ? null : breakEvenMandays / (1 + gate)
+
+  return {
+    monthlyBenefit,
+    annualBenefit,
+    horizonBenefit,
+    fteReleased,
+    buildCost,
+    netBenefit,
+    roi,
+    paybackMonths: payback,
+    breakEvenMandays,
+    affordableMandays,
+  }
+}
+
+/**
+ * Does this project clear Objective 1's return gate?
+ *
+ * The tolerance is not decoration. A project sized to hit the gate exactly
+ * computes an ROI of 1.9999999999999998 against a gate of 2, and a bare `>=`
+ * marks work that precisely meets the standard as failing it.
+ */
+export function gateStatus(roi, gate) {
+  if (roi == null) return 'unknown'
+  return roi >= gate - 1e-9 ? 'pass' : 'fail'
 }
 
 /* ------------------------------------------------------------------ */
@@ -429,7 +711,14 @@ export function gateStatus(p, gate) {
  * here so the dashboard, the people view and the export can never disagree.
  */
 export function computePlan(state) {
-  const s = { ...DEFAULT_SETTINGS, ...(state.settings || {}) }
+  const s = {
+    ...DEFAULT_SETTINGS,
+    ...(state.settings || {}),
+    // Nested, so a scenario saved before the financial model still gets every
+    // rate rather than a half-populated object that divides by undefined.
+    finance: { ...DEFAULT_FINANCE, ...(state.settings?.finance || {}) },
+  }
+  const rates = financeRates(s)
   const projects = state.projects || []
   const allPeople = state.people || []
   // Only scorecard holders can be credited; IT and other partner teams are
@@ -441,15 +730,29 @@ export function computePlan(state) {
     fallbackPic: ownerIds.has(s.fallbackPic) ? s.fallbackPic : null,
   }
 
-  const perProject = projects.map((p) => {
+  const perProject = projects.map((raw) => {
+    /*
+     * Sanitise once, here, so nothing downstream has to. A saving-hours or
+     * manday cell that is not a finite number — from a hand-edited scenario
+     * file or a bad row in the database — is MISSING data, not a quantity.
+     * Left alone a single NaN propagates through the headline, every scorecard,
+     * every money figure and the exported workbook, and it does so silently,
+     * because every comparison against NaN is false.
+     */
+    const num = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v))
+    const p = { ...raw, savingHours: num(raw.savingHours), manday: num(raw.manday) ?? 0 }
     const { shares, partnerShare, fellBack } = projectShares(p, s.roleWeights, s.creditPartners, shareOpts)
+    const fin = projectFinance(p, s)
     return {
       ...p,
       shares,
       partnerShare,
       fellBack,
+      ...fin,
+      // Kept as a secondary diagnostic. The gate is now financial, but hours
+      // per manday is still the quickest read on whether an estimate is sane.
       ratio: projectRatio(p),
-      gate: gateStatus(p, s.ratioGate),
+      gate: gateStatus(fin.roi, rates.roiGate),
       poolHours: countsToPool(p) && isCounted(p) ? (p.savingHours ?? 0) : 0,
       pastDue: !!p.due && p.due < s.asOfDate && p.status !== 'Done',
     }
@@ -488,10 +791,59 @@ export function computePlan(state) {
   const nextYear = perProject.filter((p) => p.commitLevel === 'nextyear')
   const nextYearHours = nextYear.reduce((a, p) => a + (p.savingHours ?? 0), 0)
 
-  const totalManday = perProject
-    .filter(isCounted)
-    .reduce((a, p) => a + (p.manday || 0), 0)
-  const teamRatio = totalManday > 0 ? headlineHours / totalManday : null
+  // Effort and the hours it bought, measured over the SAME projects. This used
+  // to divide a commit-only numerator by a commit-plus-stretch denominator,
+  // which understated the ratio by however much stretch effort existed.
+  const ratioBase = perProject.filter((p) => isCounted(p) && countsToPool(p))
+  const totalManday = ratioBase.reduce((a, p) => a + (p.manday || 0), 0)
+  const ratioHours = ratioBase.reduce((a, p) => a + (p.savingHours ?? 0), 0)
+  const teamRatio = totalManday > 0 ? ratioHours / totalManday : null
+
+  /* ---- the money view ------------------------------------------------
+   * Benefit is summed over everything in plan, so it reconciles to the same
+   * book the hours headline reports. Cost and ROI are summed ONLY over the
+   * projects that actually carry an effort estimate — averaging a project with
+   * a known cost against one with no cost at all would report a return the
+   * team has not earned. `roiCoverage` says how much of the benefit that
+   * subset represents, so a flattering ROI over 3% of the book cannot be
+   * mistaken for the portfolio's.
+   */
+  const inPlan = perProject.filter(isInPlan)
+  const monthlyBenefit = inPlan.reduce((a, p) => a + (p.monthlyBenefit || 0), 0)
+  const annualBenefit = monthlyBenefit * 12
+  const horizonBenefit = monthlyBenefit * rates.horizonMonths
+  const fteReleased = inPlan.reduce((a, p) => a + (p.fteReleased || 0), 0)
+
+  const costed = inPlan.filter((p) => p.buildCost != null && p.monthlyBenefit != null)
+  const buildCost = costed.reduce((a, p) => a + p.buildCost, 0)
+  const costedHorizonBenefit = costed.reduce((a, p) => a + p.horizonBenefit, 0)
+  const costedMonthlyBenefit = costed.reduce((a, p) => a + p.monthlyBenefit, 0)
+  const netBenefit = costed.length ? costedHorizonBenefit - buildCost : null
+  const portfolioRoi = buildCost > 0 ? (costedHorizonBenefit - buildCost) / buildCost : null
+  const portfolioPayback = paybackMonths(costed.length ? buildCost : null, costedMonthlyBenefit)
+  const finance = {
+    ...rates,
+    monthlyBenefit,
+    annualBenefit,
+    horizonBenefit,
+    fteReleased,
+    buildCost: costed.length ? buildCost : null,
+    netBenefit,
+    roi: portfolioRoi,
+    paybackMonths: portfolioPayback,
+    costedCount: costed.length,
+    // Share of the book's benefit that has an effort estimate behind it.
+    roiCoverage: monthlyBenefit > 0 ? costedMonthlyBenefit / monthlyBenefit : 0,
+    uncostedCount: inPlan.filter((p) => p.buildCost == null && p.savingHours != null).length,
+    // Effort that IS estimated on projects whose benefit is still TBC. It
+    // cannot enter a return — there is no benefit to divide — but it is real
+    // money and silently dropping it would make the Summary disagree with the
+    // Projects sheet, which prints the cost of every row.
+    unreturnedCost: inPlan
+      .filter((p) => p.buildCost != null && p.monthlyBenefit == null)
+      .reduce((a, p) => a + p.buildCost, 0),
+    unreturnedCount: inPlan.filter((p) => p.buildCost != null && p.monthlyBenefit == null).length,
+  }
 
   // ---- per-person --------------------------------------------------
   const byPerson = people.map((person) => {
@@ -509,10 +861,28 @@ export function computePlan(state) {
       .reduce((a, r) => a + (countsToPool(r.p) ? (r.p.savingHours ?? 0) * r.share : 0), 0)
     const manday = counted.reduce((a, r) => a + (r.p.manday || 0) * r.share, 0)
 
+    // Money, credited on exactly the same share AND the same filter as the
+    // hours, so a person's benefit is identically their credited hours valued
+    // at the accountant rate. check-financial asserts that identity.
+    const monthlyBenefit = counted.reduce(
+      (a, r) => a + (countsToPool(r.p) ? (r.p.monthlyBenefit || 0) * r.share : 0),
+      0,
+    )
+    // Cost is only ever summed over rows that carry BOTH a cost and a benefit.
+    // Coercing an unknown cost to zero would divide a full portfolio benefit by
+    // a partial cost and report a return nobody earned.
+    const costedRows = counted.filter((r) => countsToPool(r.p) && r.p.buildCost != null && r.p.monthlyBenefit != null)
+    const buildCost = costedRows.reduce((a, r) => a + r.p.buildCost * r.share, 0)
+    const costedBenefit = costedRows.reduce((a, r) => a + r.p.horizonBenefit * r.share, 0)
+
     const byObjective = {}
+    const benefitByObjective = {}
     for (const r of counted) {
       const id = r.p.objective
       byObjective[id] = (byObjective[id] || 0) + (r.p.savingHours ?? 0) * r.share
+      // Annualised, because a yearly benefit is the number a business case is
+      // argued in. The scorecard's Objective 1 target reads this map.
+      benefitByObjective[id] = (benefitByObjective[id] || 0) + (r.p.monthlyBenefit || 0) * r.share * 12
     }
 
     // keep objective order stable (by guideline number), not by discovery order
@@ -526,6 +896,11 @@ export function computePlan(state) {
       commitHours,
       manday,
       byObjective,
+      benefitByObjective,
+      monthlyBenefit,
+      buildCost: costedRows.length ? buildCost : null,
+      costedBenefit: costedRows.length ? costedBenefit : null,
+      costedCount: costedRows.length,
       rows,
     }
   })
@@ -537,9 +912,17 @@ export function computePlan(state) {
   // the sum of the team's and the two can never disagree.
   const teamHours = byPerson.reduce((a, p) => a + p.hours, 0)
   const teamManday = byPerson.reduce((a, p) => a + p.manday, 0)
+  const teamMonthlyBenefit = byPerson.reduce((a, p) => a + p.monthlyBenefit, 0)
+  const teamBuildCost = byPerson.reduce((a, p) => a + (p.buildCost || 0), 0)
+  const teamCostedBenefit = byPerson.reduce((a, p) => a + (p.costedBenefit || 0), 0)
+  const teamCostedCount = byPerson.reduce((a, p) => a + p.costedCount, 0)
   const teamByObjective = {}
+  const teamBenefitByObjective = {}
   for (const p of byPerson) {
     for (const [k, v] of Object.entries(p.byObjective)) teamByObjective[k] = (teamByObjective[k] || 0) + v
+    for (const [k, v] of Object.entries(p.benefitByObjective)) {
+      teamBenefitByObjective[k] = (teamBenefitByObjective[k] || 0) + v
+    }
   }
   const teamCounted = perProject.filter((p) => isCounted(p) && Object.keys(p.shares).length > 0)
 
@@ -548,6 +931,7 @@ export function computePlan(state) {
     const scHours = aggregates ? teamHours : p.hours
     const scManday = aggregates ? teamManday : p.manday
     const scByObjective = aggregates ? teamByObjective : p.byObjective
+    const scBenefitByObjective = aggregates ? teamBenefitByObjective : p.benefitByObjective
     // The lead's portfolio is the whole in-plan book, so it re-adds to the
     // headline above it.
     const scRows = aggregates ? teamCounted.map((pr) => ({ p: pr, share: 1, owner: pr.pic })) : p.rows
@@ -556,6 +940,26 @@ export function computePlan(state) {
       || scRows.some((r) => r.p.objective === id))
     const withObjectives = { ...p, objectives, aggregatesTeam: aggregates }
 
+    // Money on the same aggregation rule as the hours: the lead carries the
+    // team's, everyone else carries their own.
+    const scMonthlyBenefit = aggregates ? teamMonthlyBenefit : p.monthlyBenefit
+    const scCostedCount = aggregates ? teamCostedCount : p.costedCount
+    const scBuildCost = scCostedCount > 0 ? (aggregates ? teamBuildCost : p.buildCost) : null
+    const scCostedBenefit = scCostedCount > 0 ? (aggregates ? teamCostedBenefit : p.costedBenefit) : null
+    const scFinance = {
+      monthlyBenefit: scMonthlyBenefit,
+      annualBenefit: scMonthlyBenefit * 12,
+      horizonBenefit: scMonthlyBenefit * rates.horizonMonths,
+      // Derived from the benefit, not from scHours: scHours is in whatever
+      // unit savingBasis names, and dividing a per-YEAR figure by a per-MONTH
+      // divisor reported twelve times the headcount on the annual basis.
+      fteReleased: rates.acctMonthRate > 0 ? (scMonthlyBenefit / rates.acctMonthRate) : null,
+      buildCost: scBuildCost,
+      netBenefit: scCostedBenefit == null ? null : scCostedBenefit - scBuildCost,
+      roi: scBuildCost > 0 ? (scCostedBenefit - scBuildCost) / scBuildCost : null,
+      costedCount: scCostedCount,
+    }
+
     return {
       ...withObjectives,
       scorecardHours: scHours,
@@ -563,12 +967,18 @@ export function computePlan(state) {
       scorecardRows: scRows,
       scorecardCount: scRows.length,
       byObjective: scByObjective,
-      // Kept so the tile can show "your own projects" beside the team figure.
+      benefitByObjective: scBenefitByObjective,
+      finance: scFinance,
+      // Kept so a chart can show "your own projects" beside the team figure.
+      // `byObjective` above is the SCORECARD map, which for the lead is the
+      // whole team — anything that stacks per-person bars must use this one or
+      // the lead's bar repeats everybody else's.
+      ownByObjective: p.byObjective,
       ownHours: p.hours,
       ownCount: p.countedCount,
       ratio: scManday > 0 ? scHours / scManday : null,
-      kpiLines: scorecardWeights(withObjectives, s, scByObjective),
-      kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective),
+      kpiLines: scorecardWeights(withObjectives, s, scByObjective, scBenefitByObjective),
+      kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective, scBenefitByObjective),
     }
   })
 
@@ -595,6 +1005,9 @@ export function computePlan(state) {
     missingSaving: projects.filter((p) => p.savingHours == null).length,
     missingPic: projects.filter((p) => !p.pic).length,
     estimatedManday: projects.filter((p) => p.mandayEstimated).length,
+    // What actually blocks the money view: a project can be marked "not an
+    // estimate" and still carry no effort at all, which the flag alone misses.
+    uncosted: perProject.filter((p) => isInPlan(p) && p.savingHours != null && !(p.manday > 0)).length,
     deleted: projects.filter((p) => p.deleted).length,
     pastDue: perProject.filter((p) => p.pastDue).length,
     pastDueHours: perProject
@@ -618,6 +1031,9 @@ export function computePlan(state) {
     settings: s,
     projects: perProject,
     people: withScorecards,
+    // Objective 1's money view: the two rates, and the portfolio's cost,
+    // benefit and return computed from them.
+    finance,
     totals: {
       committedHours,
       stretchHours,

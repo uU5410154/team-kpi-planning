@@ -87,17 +87,30 @@ check('headline = committed when stretch excluded', Math.abs(t.headlineHours - t
 check('coverage matches headline / target', Math.abs(t.coverage - t.headlineHours / t.target) < 1e-9)
 
 // 6. gate classification is consistent
-const badGate = plan.projects.filter(
-  (p) => p.ratio != null && ((p.ratio >= DEFAULT_SETTINGS.ratioGate) !== (p.gate === 'pass')),
-)
-check('gate flag matches the ratio', badGate.length === 0, badGate.map((p) => p.key).join(', '))
+//
+// Exercised over a COSTED copy of the book. Run against the shipped seed every
+// roi is null, so the predicate never fires and the check passes without
+// asserting anything — which is exactly how the old ratio version of this went
+// green after the setting it read had been deleted.
+const costed = computePlan({ ...state, projects: state.projects.map((p, i) => ({ ...p, manday: 1 + (i % 30) })) })
+const gate = costed.finance.roiGate
+const withRoi = costed.projects.filter((p) => p.roi != null)
+const badGate = withRoi.filter((p) => (p.roi >= gate - 1e-9) !== (p.gate === 'pass'))
+check('the gate flag matches the return', badGate.length === 0, badGate.map((p) => p.key).join(', '))
+check('the gate check actually had projects to classify', withRoi.length > 50,
+  `${withRoi.length} projects with a return · ${withRoi.filter((p) => p.gate === 'fail').length} below the gate`)
+check('an unknown return is never silently a pass',
+  plan.projects.every((p) => (p.roi == null) === (p.gate === 'unknown')))
 
 console.log('\n--- summary ---')
 console.log(`projects            ${plan.quality.total}`)
 console.log(`TOTAL saving hours  ${t.totalHours.toFixed(1)}  (${(t.totalCoverage * 100).toFixed(1)}% of ${t.target})`)
 Object.entries(t.byStatus).forEach(([k, v]) => console.log(`  ${k.padEnd(16)} ${Math.round(v).toLocaleString()}`))
 console.log(`headcount released  ${t.totalHC.toFixed(1)} HC`)
-console.log(`team ratio          ${t.teamRatio?.toFixed(2)} hrs/manday`)
+console.log(`team ratio          ${t.teamRatio?.toFixed(2) ?? '—'} hrs/manday`)
+console.log(`value released      ${Math.round(plan.finance.annualBenefit).toLocaleString()} ${plan.finance.currency}/year  (${plan.finance.fteReleased.toFixed(1)} FTE)`)
+console.log(`build cost          ${plan.finance.buildCost == null ? 'not estimated' : Math.round(plan.finance.buildCost).toLocaleString()}`)
+console.log(`portfolio ROI       ${plan.finance.roi == null ? 'not measurable' : `${Math.round(plan.finance.roi * 100)}%`}`)
 console.log(`top-2 concentration ${(t.top2Share * 100).toFixed(1)}%`)
 console.log(`failing the gate    ${t.failingGate}`)
 console.log('\nper person:')

@@ -7,7 +7,7 @@
  */
 import { readFileSync, unlinkSync, existsSync } from 'node:fs'
 import ExcelJS from 'exceljs'
-import { computePlan, DEFAULT_SETTINGS, fmtTarget, weightsValid } from '../src/lib/model.js'
+import { computePlan, DEFAULT_SETTINGS, fmtTarget, weightsValid, financeRates } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
@@ -47,6 +47,19 @@ const setSaving = (state, key, hours) => ({
 
 const lineFor = (plan, personId, objective) =>
   plan.people.find((p) => p.id === personId)?.kpiLines.find((l) => l.objective === objective)
+
+/*
+ * Objective 1 is measured in baht now, so one extra saving hour per month moves
+ * its target by a year of that hour's value rather than by 1. The propagation
+ * contract is unchanged; only the unit is. Everything below asserts the delta in
+ * the line's OWN unit, so this suite keeps guarding the reported bug
+ * (FNP-1431, 32 -> 33) instead of being quietly retargeted at another objective.
+ */
+const RATES = financeRates(DEFAULT_SETTINGS)
+const PER_HOUR = 12 * RATES.acctHourRate
+const step = (line, hours) => (line.targetKind === 'thb' ? hours * PER_HOUR : hours)
+// Targets are rounded to whole units, so a delta can land a unit either side.
+const near = (a, b, tol = 1) => Math.abs(a - b) <= tol
 
 const OBJ_LABEL = {
   financial: 'Financial',
@@ -107,20 +120,25 @@ const before = lineFor(plan, 'gun', 'financial')
 // Gun is the team lead, so his objective-1 line carries the TEAM's objective-1
 // total, not just his own project. Assert the delta, not a hardcoded constant.
 const start = before.target
-check('scorecard starts at a live figure', typeof start === 'number' && start >= 32, String(start))
+const hoursBefore = before.creditedHours
+check('scorecard starts at a live figure', typeof start === 'number' && start > 0, String(start))
+check('objective 1 is now measured in money', before.targetKind === 'thb', before.targetKind)
 
 // user edits the project on the Projects tab
 state = setSaving(state, KEY, 33)
 plan = computePlan(state)
 const after = lineFor(plan, 'gun', 'financial')
-check('scorecard target follows the edit', after.target === start + 1, `${start} -> ${after.target}`)
+const expected = start + step(before, 1)
+check('scorecard target follows the edit', near(after.target, expected),
+  `${start} -> ${after.target} (expected ~${Math.round(expected)})`)
 check('it is not flagged as drifted', after.drifted === false)
-check('credited hours follow too', after.creditedHours === start + 1, String(after.creditedHours))
-check('rendered with the fixed unit', fmtTarget(after) === `${start + 1} hrs/month`, fmtTarget(after))
+check('credited hours follow too', near(after.creditedHours, hoursBefore + 1), String(after.creditedHours))
+check('rendered in the unit its objective is measured in',
+  fmtTarget(after).includes(RATES.symbol) && fmtTarget(after).endsWith('/year'), fmtTarget(after))
 
 let xl = await exportedTarget(plan, state, 'gun', 'financial')
-check('Excel per-person sheet follows', xl.perPerson === `${start + 1} hrs/month`, String(xl.perPerson))
-check('Excel Overall_Objectives follows', xl.overall === `${start + 1} hrs/month`, String(xl.overall))
+check('Excel per-person sheet follows', near(Number(xl.perPerson), after.target), String(xl.perPerson))
+check('Excel Overall_Objectives follows', near(Number(xl.overall), after.target), String(xl.overall))
 check('both Excel sheets agree', xl.agree)
 
 /* ------------------------------------------------------------------ */
@@ -137,7 +155,7 @@ check('no override was stored', !(s2.people.find((p) => p.id === 'gun').kpi || {
 s2 = setSaving(s2, KEY, 33)
 p2 = computePlan(s2)
 check('the later project edit still reaches the scorecard',
-  lineFor(p2, 'gun', 'financial').target === shown + 1,
+  near(lineFor(p2, 'gun', 'financial').target, shown + step(before, 1)),
   `${shown} -> ${lineFor(p2, 'gun', 'financial').target}`)
 
 /* ------------------------------------------------------------------ */
@@ -154,16 +172,17 @@ p3 = computePlan(s3)
 const pinned = lineFor(p3, 'gun', 'financial')
 check('pinned target holds against a project edit', pinned.target === 500, String(pinned.target))
 check('and is flagged as drifted', pinned.drifted === true)
-check('while exposing the live figure', pinned.defaultTarget === start + 1, String(pinned.defaultTarget))
+check('while exposing the live figure', near(pinned.defaultTarget, start + step(before, 1)), String(pinned.defaultTarget))
 xl = await exportedTarget(p3, s3, 'gun', 'financial')
-check('Excel exports the pinned value in both sheets', xl.perPerson === '500 hrs/month' && xl.agree, JSON.stringify(xl))
+check('Excel exports the pinned value in both sheets', Number(xl.perPerson) === 500 && xl.agree, JSON.stringify(xl))
 
 // clearing it returns to live
 s3 = applyKpiEdit(s3, p3, 'gun', 'obj-financial', { target: null })
 p3 = computePlan(s3)
-check('clearing the override returns to live', lineFor(p3, 'gun', 'financial').target === start + 1)
+const cleared = lineFor(p3, 'gun', 'financial')
+check('clearing the override returns to live', near(cleared.target, start + step(before, 1)), String(cleared.target))
 xl = await exportedTarget(p3, s3, 'gun', 'financial')
-check('Excel follows back to live in both sheets', xl.perPerson === `${start + 1} hrs/month` && xl.agree, JSON.stringify(xl))
+check('Excel follows back to live in both sheets', near(Number(xl.perPerson), cleared.target) && xl.agree, JSON.stringify(xl))
 
 /* ------------------------------------------------------------------ */
 /* 4. propagation across every person, objective and edit             */
@@ -173,7 +192,7 @@ const basePlan = computePlan(base)
 let mismatches = 0
 let checked = 0
 for (const person of basePlan.people) {
-  for (const line of person.kpiLines.filter((l) => l.targetKind === 'hours')) {
+  for (const line of person.kpiLines.filter((l) => l.targetKind === 'hours' || l.targetKind === 'thb')) {
     // bump every one of this person's projects on that objective by +7
     const affected = base.projects.filter(
       (pr) => pr.objective === line.objective && (pr.pic === person.id || (pr.contributors || []).some((c) => c.person === person.id)),
@@ -196,7 +215,7 @@ for (const person of basePlan.people) {
     }
   }
 }
-check('every hour line moved when its projects moved', mismatches === 0, `${checked} lines exercised`)
+check('every numeric line moved when its projects moved', mismatches === 0, `${checked} lines exercised`)
 
 /* ------------------------------------------------------------------ */
 /* 5. reassignment, deletion and addition all propagate               */
@@ -210,12 +229,12 @@ const jamesBefore = lineFor(computePlan(base), 'james', 'financial')?.target ?? 
 check('the team figure is unchanged by an internal transfer',
   (lineFor(rp, 'gun', 'financial')?.target ?? 0) === start, String(lineFor(rp, 'gun', 'financial')?.target))
 check('the receiving member gains the hours',
-  (lineFor(rp, 'james', 'financial')?.target ?? 0) === jamesBefore + 32,
+  near(lineFor(rp, 'james', 'financial')?.target ?? 0, jamesBefore + step(before, 32)),
   `${jamesBefore} -> ${lineFor(rp, 'james', 'financial')?.target}`)
 
 const removed = { ...base, projects: base.projects.filter((p) => p.key !== KEY) }
 check('deleting a project removes its hours',
-  (lineFor(computePlan(removed), 'gun', 'financial')?.target ?? 0) === start - 32,
+  near(lineFor(computePlan(removed), 'gun', 'financial')?.target ?? 0, start - step(before, 32)),
   String(lineFor(computePlan(removed), 'gun', 'financial')?.target))
 
 const added = {
@@ -223,7 +242,7 @@ const added = {
   projects: [{ ...proj0, key: 'NEW-TEST', jiraKey: null, savingHours: 100 }, ...base.projects],
 }
 check('adding a project adds its hours',
-  lineFor(computePlan(added), 'gun', 'financial').target === start + 100,
+  near(lineFor(computePlan(added), 'gun', 'financial').target, start + step(before, 100)),
   String(lineFor(computePlan(added), 'gun', 'financial').target))
 
 /* ------------------------------------------------------------------ */

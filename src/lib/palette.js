@@ -69,8 +69,11 @@ export const OBJECTIVES = [
     name: 'Financial',
     short: 'Financial',
     detail: 'Activities which improve PL, BS, Cash flow',
-    target: 'Manday : saving-hours ratio',
-    measure: 'ratio',
+    target: 'Return on build cost',
+    // Money, not a ratio of hours to mandays. The guideline target below asks
+    // whether the man-hours invested are worth the benefit returned, which is
+    // a cost-benefit question and is answered in baht.
+    measure: 'money',
     countsToPool: true,
     guidelineName: 'Financial',
     guidelineDetail: 'Activities which improve PL, BS, Cash flow',

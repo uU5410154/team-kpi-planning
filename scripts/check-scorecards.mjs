@@ -247,8 +247,13 @@ const objOfA = OBJ_BY_ID[lineA.replace(/^obj-/, '')]
 let editedRow = null
 ov.eachRow((row) => { if (String(row.getCell(3).value || '').includes(`[Obj ${objOfA.no}]`)) editedRow = row })
 const gunIx = plan1.people.findIndex((p) => p.id === 'gun')
-check('export carries the edited target', editedRow?.getCell(4 + gunIx * 3).value === '5 hrs/month',
-  String(editedRow?.getCell(4 + gunIx * 3).value))
+// Targets export as NUMBERS with the unit in the number format, so the column
+// stays sortable and summable.
+check('export carries the edited target as a number', editedRow?.getCell(4 + gunIx * 3).value === 5,
+  `${editedRow?.getCell(4 + gunIx * 3).value} (${typeof editedRow?.getCell(4 + gunIx * 3).value})`)
+check('and carries its unit in the number format',
+  /hrs|THB/.test(String(editedRow?.getCell(4 + gunIx * 3).numFmt || '')),
+  String(editedRow?.getCell(4 + gunIx * 3).numFmt))
 check('export carries the edited weight', Math.abs(editedRow?.getCell(4 + gunIx * 3 + 1).value - 0.2) < 1e-9,
   String(editedRow?.getCell(4 + gunIx * 3 + 1).value))
 

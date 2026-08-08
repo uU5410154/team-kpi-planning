@@ -13,7 +13,10 @@ import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
 import StatTile from '../components/StatTile.jsx'
 import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS, OUT_OF_PLAN } from '../lib/palette.js'
-import { fmtHours, fmtPct, fmtRatio, weightSum, weightsValid, snapWeight, WEIGHT_STEP } from '../lib/model.js'
+import {
+  fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, targetUnit,
+  weightSum, weightsValid, snapWeight, WEIGHT_STEP,
+} from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
@@ -146,7 +149,8 @@ export default function People({
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
-  const { people, settings, totals } = plan
+  const { people, settings, totals, finance: fin } = plan
+  const sym = fin.symbol
   const [who, setWho] = useState(people[0]?.id)
   // Which KPI line is currently filtering the portfolio, by objective id.
   const [focus, setFocus] = useState(null)
@@ -223,11 +227,16 @@ export default function People({
         </Grid>
         <Grid item xs={6} md={3}>
           <StatTile
-            label="Efficiency ratio"
-            value={fmtRatio(p.ratio)}
-            unit="hrs / manday"
-            tone={p.ratio == null ? undefined : p.ratio >= settings.ratioGate ? 'good' : 'critical'}
-            context={`Gate ${settings.ratioGate.toFixed(1)} · ${fmtHours(p.scorecardManday)} mandays credited`}
+            label="Value released"
+            value={fmtMoneyShort(p.finance.annualBenefit, sym)}
+            unit="per year"
+            tone={p.finance.roi == null ? undefined : p.finance.roi >= fin.roiGate ? 'good' : 'critical'}
+            context={
+              p.finance.roi == null
+                ? `${p.finance.fteReleased.toFixed(1)} FTE · no effort estimated yet, so no return`
+                : `ROI ${fmtRoi(p.finance.roi)} on ${fmtMoneyShort(p.finance.buildCost, sym)} to build · gate ${fmtRoi(fin.roiGate)}`
+            }
+            help={`Objective 1. ${fmtHours(p.scorecardHours)} saving hrs/month at ${fmtMoney(fin.acctHourRate, sym)} an hour, annualised. The return underneath compares that against ${fmtHours(p.scorecardManday)} credited mandays at ${fmtMoney(fin.devDayRate, sym)} each, over ${fin.horizonMonths} months, counting only the projects that carry an effort estimate.`}
           />
         </Grid>
         <Grid item xs={6} md={3}>
@@ -262,7 +271,7 @@ export default function People({
 
       <Grid container spacing={2.5}>
         {/* ---------- weight table ---------- */}
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} md={5}>
           <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
             <Box sx={{ px: 2.5, py: 2, bgcolor: 'action.hover', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
@@ -370,10 +379,10 @@ export default function People({
                           cells must not pass their clicks up to it */}
                       <TableCell sx={{ verticalAlign: 'top', pt: 1.25 }} onClick={(e) => e.stopPropagation()}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          {l.targetKind === 'hours' ? (
+                          {l.targetKind === 'hours' || l.targetKind === 'thb' ? (
                             <HoursTargetCell
                               value={l.target}
-                              unit={unit}
+                              unit={targetUnit(l, settings.savingBasis, sym)}
                               onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
                             />
                           ) : (
@@ -384,7 +393,11 @@ export default function People({
                             />
                           )}
                           {l.drifted && (
-                            <Tooltip title={`Currently carrying ${fmtHours(l.creditedHours)} ${unit} — click to snap the target back to it`}>
+                            <Tooltip title={
+                              l.targetKind === 'thb'
+                                ? `Currently carrying ${fmtMoney(l.creditedMoney, sym)} a year — click to snap the target back to it`
+                                : `Currently carrying ${fmtHours(l.creditedHours)} ${unit} — click to snap the target back to it`
+                            }>
                               <IconButton size="small" onClick={() => onPersonKpi(p.id, l.id, { target: null })}>
                                 <SyncIcon sx={{ fontSize: 16, color: STATUS.warning }} />
                               </IconButton>
@@ -481,7 +494,7 @@ export default function People({
         </Grid>
 
         {/* ---------- portfolio ---------- */}
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} md={7}>
           {/* overflow hidden on the card + scroll on the table, so a wide
               editable table scrolls inside its own panel instead of pushing
               the page sideways */}
@@ -508,16 +521,25 @@ export default function People({
                   : "Contribution % is this person's normalised share. Credited hours = project hours × share. Edit any of it here."}
             </Typography>
             <Box sx={{ overflowX: 'auto', mx: -2.5, px: 2.5 }}>
-            <Table size="small" sx={{ minWidth: 620 }}>
+            {/* Ten columns in a half-width panel: the default 16px of cell
+                padding alone was 256px, which is what pushed the money columns
+                off the right edge. */}
+            <Table size="small" sx={{ minWidth: 720, '& th, & td': { px: 1 } }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ minWidth: 76 }}>Jira</TableCell>
-                  <TableCell sx={{ minWidth: 150 }}>Project</TableCell>
-                  <TableCell sx={{ minWidth: 88 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
-                  <TableCell align="right">Share</TableCell>
+                  <TableCell sx={{ minWidth: 66 }}>Jira</TableCell>
+                  <TableCell sx={{ minWidth: 128 }}>Project</TableCell>
+                  <TableCell sx={{ minWidth: 78 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
+                  {/* On the team card every row is credited whole, so Share and
+                      Credited are constants — dropping them is what leaves room
+                      for the money columns. */}
+                  {!p.aggregatesTeam && <TableCell align="right" sx={{ minWidth: 52 }}>Share</TableCell>}
                   <TableCell align="right" sx={{ minWidth: 76 }}>Project hrs</TableCell>
-                  <TableCell align="right">Credited</TableCell>
-                  <TableCell sx={{ minWidth: 104 }}>Level</TableCell>
+                  {!p.aggregatesTeam && <TableCell align="right" sx={{ minWidth: 62 }}>Cred.</TableCell>}
+                  <TableCell align="right" sx={{ minWidth: 68 }}>Mandays</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 76 }}>Benefit / yr</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 76 }}>ROI</TableCell>
+                  <TableCell sx={{ minWidth: 96 }}>Level</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -554,7 +576,7 @@ export default function People({
                               displayEmpty
                               value={pr.pic ?? ''}
                               onChange={(e) => onUpdate(pr.key, { pic: e.target.value || null })}
-                              sx={{ fontSize: '0.75rem', width: '100%' }}
+                              sx={{ fontSize: '0.75rem', width: 72, maxWidth: 72 }}
                               renderValue={(v) => (v ? (plan.assignees || people).find((x) => x.id === v)?.nick : 'TBC')}
                             >
                               <MenuItem value=""><em>TBC</em></MenuItem>
@@ -566,19 +588,57 @@ export default function People({
                             <Typography variant="caption" sx={{ fontWeight: 600 }}>{roles}</Typography>
                           )}
                         </TableCell>
-                        <TableCell align="right">{fmtPct(share)}</TableCell>
+                        {!p.aggregatesTeam && <TableCell align="right">{fmtPct(share)}</TableCell>}
                         <TableCell align="right">
                           <PortfolioNum
                             value={pr.savingHours}
                             onChange={(v) => onUpdate(pr.key, { savingHours: v, savingEstimated: v == null })}
                           />
                         </TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 600 }}>
-                          {!counted ? (
-                            <Tooltip title={`${COMMIT_LABEL[pr.commitLevel] || pr.commitLevel} — credits nothing this year`}>
-                              <Typography variant="body2" sx={{ color: 'text.disabled' }}>—</Typography>
+                        {!p.aggregatesTeam && (
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            {!counted ? (
+                              <Tooltip title={`${COMMIT_LABEL[pr.commitLevel] || pr.commitLevel} — credits nothing this year`}>
+                                <Typography variant="body2" sx={{ color: 'text.disabled' }}>—</Typography>
+                              </Tooltip>
+                            ) : pr.savingHours == null ? '—' : fmtHours(credited)}
+                          </TableCell>
+                        )}
+                        {/* Effort is editable here too, so a scorecard can be
+                            costed without leaving the page — the ROI beside it
+                            fills in as soon as a manday lands. */}
+                        <TableCell align="right">
+                          <PortfolioNum
+                            value={pr.manday || null}
+                            onChange={(v) => onUpdate(pr.key, { manday: v ?? 0, mandayEstimated: false })}
+                          />
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                          {!counted || pr.annualBenefit == null
+                            ? <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+                            : fmtMoneyShort(pr.annualBenefit * share, sym)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                          {!counted || pr.roi == null ? (
+                            <Tooltip title={
+                              pr.savingHours == null
+                                ? 'Saving hours are still TBC'
+                                : !counted
+                                  ? 'Out of plan — credits nothing this year'
+                                  : `No effort estimate. This project can absorb ${Math.round(pr.affordableMandays).toLocaleString()} mandays and still clear the gate.`
+                            }>
+                              <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
                             </Tooltip>
-                          ) : pr.savingHours == null ? '—' : fmtHours(credited)}
+                          ) : (
+                            <Tooltip title={`${fmtMoney(pr.horizonBenefit, sym)} back over ${fin.horizonMonths} months against ${fmtMoney(pr.buildCost, sym)} to build. Gate ${fmtRoi(fin.roiGate)}.`}>
+                              <Typography
+                                variant="body2"
+                                sx={{ fontWeight: 600, fontSize: '0.75rem', cursor: 'help', color: pr.gate === 'pass' ? STATUS.good : STATUS.critical }}
+                              >
+                                {fmtRoi(pr.roi)}
+                              </Typography>
+                            </Tooltip>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Select
@@ -586,7 +646,7 @@ export default function People({
                             variant="standard"
                             value={pr.commitLevel}
                             onChange={(e) => onUpdate(pr.key, { commitLevel: e.target.value })}
-                            sx={{ fontSize: '0.75rem', width: '100%' }}
+                            sx={{ fontSize: '0.75rem', width: 78, maxWidth: 78 }}
                             renderValue={(v) => (
                               <Typography
                                 variant="caption"

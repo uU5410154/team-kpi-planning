@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { OBJECTIVES, OBJ_BY_ID } from './palette.js'
-import { paybackMonths, SAVING_BASIS, fmtTarget } from './model.js'
+import { SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths } from './model.js'
 
 /* ------------------------------------------------------------------ */
 /* house style                                                         */
@@ -20,6 +20,12 @@ const FONT = 'Calibri'
 const N0 = '#,##0'
 const N1 = '#,##0.0'
 const PCT = '0%'
+// Money and returns stay NUMERIC in the workbook — a target written as the
+// string "฿132,949/year" is unsortable and unsummable, which defeats the point
+// of exporting to Excel at all. The unit lives in the column header and in the
+// number format, never in the value.
+const MONEY = '#,##0'
+const ROI = '+0%;-0%;0%'
 
 const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } })
 const thin = { style: 'thin', color: { argb: RULE } }
@@ -89,16 +95,38 @@ const tone = (cell, argb, bold = true) => {
   cell.font = { name: FONT, size: 9.5, bold, color: { argb } }
 }
 
+/**
+ * Write a KPI target into a cell.
+ *
+ * Numeric targets go in as NUMBERS with the unit carried by the number format,
+ * never as pre-formatted strings: a target written as "฿132,949/year" cannot be
+ * sorted, summed or charted, which is most of the reason to export to Excel.
+ * Only a milestone target, which has no number in it, goes in as text.
+ */
+function writeTarget(cell, line, basis, currency) {
+  if (line.targetKind === 'thb') {
+    cell.value = Math.round(Number(line.target || 0))
+    cell.numFmt = `#,##0" ${currency}/yr"`
+  } else if (line.targetKind === 'hours') {
+    cell.value = Number(line.target || 0)
+    cell.numFmt = basis === 'monthly' ? '#,##0" hrs/mth"' : '#,##0" hrs/yr"'
+  } else {
+    cell.value = String(line.target ?? '—')
+  }
+  cell.alignment = { horizontal: 'center' }
+}
+
 /* ------------------------------------------------------------------ */
 /* workbook                                                            */
 /* ------------------------------------------------------------------ */
 
 /** Builds the workbook. Pure — no DOM — so it can be exercised from Node. */
 export async function buildWorkbook(plan, state) {
-  const { totals, people, projects, quality, settings, byObjective } = plan
+  const { totals, people, projects, quality, settings, byObjective, finance: fin } = plan
   const stamp = new Date().toISOString().slice(0, 10)
   const basis = SAVING_BASIS[settings.savingBasis]
   const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
+  const cur = fin.currency
 
   const wb = new ExcelJS.Workbook()
   wb.creator = 'F&A Tech Team'
@@ -149,13 +177,44 @@ export async function buildWorkbook(plan, state) {
     styleBody(ws, bridgeStart, r - 1, 3)
 
     r++
-    sectionRow(ws, r++, 'OBJECTIVE 1 — EFFICIENCY GATE', 3)
+    sectionRow(ws, r++, `OBJECTIVE 1 — IS THE BUILD WORTH IT (${cur})`, 3)
     const gateStart = r
-    kv('Gate (saving hours per manday)', settings.ratioGate, N1)
+    kv('Developer salary (per month)', fin.devMonthlySalary, MONEY)
+    kv('  = cost of one manday', Math.round(fin.devDayRate), MONEY)
+    kv('Accountant salary (per month)', fin.acctMonthlySalary, MONEY)
+    kv('  = value of one saved hour', Math.round(fin.acctHourRate), MONEY)
+    kv('On-cost multiplier applied to both', fin.loadFactor, N1)
+    kv('Hours per full-time month', fin.hoursPerFteMonth, N1)
+    kv('Hours per manday', fin.hoursPerManday, N1)
     kv('Saving-hours basis', basis.label)
-    const pm = paybackMonths(settings.ratioGate, settings.savingBasis)
-    kv('Implied payback on build effort', pm == null ? 'n/a' : pm < 24 ? `${pm.toFixed(1)} months` : `${(pm / 12).toFixed(1)} years`)
-    kv('Team ratio achieved', totals.teamRatio == null ? 'not yet measurable' : Number(totals.teamRatio.toFixed(2)), totals.teamRatio == null ? undefined : N1)
+    r++
+    kv('Headcount released (FTE)', Number(fin.fteReleased.toFixed(2)), N1, NAVY)
+    kv('Value of hours released (per month)', Math.round(fin.monthlyBenefit), MONEY)
+    kv('Value of hours released (per year)', Math.round(fin.annualBenefit), MONEY, NAVY)
+    kv(`Benefit over the ${fin.horizonMonths}-month horizon`, Math.round(fin.horizonBenefit), MONEY)
+    r++
+    kv('Build cost of projects with BOTH an effort estimate and a benefit',
+      fin.buildCost == null ? 'not estimated yet' : Math.round(fin.buildCost), fin.buildCost == null ? undefined : MONEY)
+    if (fin.unreturnedCost > 0) {
+      kv(`  effort on ${fin.unreturnedCount} project(s) whose benefit is still TBC`,
+        Math.round(fin.unreturnedCost), MONEY, WARN)
+      kv('  = total effort estimated across the plan',
+        Math.round(fin.buildCost + fin.unreturnedCost), MONEY)
+    }
+    kv('Net benefit over the horizon',
+      fin.netBenefit == null ? 'not measurable without effort' : Math.round(fin.netBenefit),
+      fin.netBenefit == null ? undefined : MONEY,
+      fin.netBenefit == null ? MUTED : fin.netBenefit >= 0 ? GOOD : BAD)
+    kv('RETURN ON BUILD COST',
+      fin.roi == null ? 'not measurable without effort' : Number(fin.roi.toFixed(4)),
+      fin.roi == null ? undefined : ROI,
+      fin.roi == null ? MUTED : fin.roi >= fin.roiGate ? GOOD : BAD)
+    kv('  covering this share of the benefit', fin.roiCoverage, PCT, fin.roiCoverage >= 1 ? GOOD : WARN)
+    kv('  projects still without an effort estimate', fin.uncostedCount, N0, fin.uncostedCount ? WARN : GOOD)
+    r++
+    kv('Gate — minimum return', fin.roiGate, ROI)
+    kv('  as a payback period', fmtMonths(gateAsPaybackMonths(fin)))
+    kv('  as saving hours per manday', Number((gateAsHoursPerManday(fin) ?? 0).toFixed(2)), N1)
     kv('Projects below the gate', totals.failingGate, N0, totals.failingGate ? WARN : GOOD)
     kv('Mandays committed', Math.round(totals.totalManday), N0)
     styleBody(ws, gateStart, r - 1, 3)
@@ -173,7 +232,7 @@ export async function buildWorkbook(plan, state) {
     kv('Projects in plan', quality.total, N0)
     kv('Saving hours still TBC', quality.missingSaving, N0, quality.missingSaving ? WARN : GOOD)
     kv('No PIC assigned', quality.missingPic, N0, quality.missingPic ? WARN : GOOD)
-    kv('Mandays not yet entered', quality.estimatedManday, N0, quality.estimatedManday ? WARN : GOOD)
+    kv('No effort estimate (blocks ROI)', quality.uncosted, N0, quality.uncosted ? WARN : GOOD)
     kv('Past due and not Done', quality.pastDue, N0, quality.pastDue ? BAD : GOOD)
     styleBody(ws, qStart, r - 1, 3)
 
@@ -261,9 +320,17 @@ export async function buildWorkbook(plan, state) {
           row.getCell(c0 + 1).value = 0
           tone(row.getCell(c0), MUTED, false)
         } else {
-          row.getCell(c0).value = fmtTarget(line, settings.savingBasis)
+          writeTarget(row.getCell(c0), line, settings.savingBasis, cur)
           row.getCell(c0 + 1).value = line.weight
-          if (spec.objective) row.getCell(c0 + 2).value = Math.round(p.byObjective[spec.objective] || 0)
+          // The "Actual" column matches the target's own unit: baht a year for
+          // objective 1, saving hours for the rest.
+          if (spec.objective) {
+            const money = line.targetKind === 'thb'
+            row.getCell(c0 + 2).value = Math.round(
+              money ? (p.benefitByObjective[spec.objective] || 0) : (p.byObjective[spec.objective] || 0),
+            )
+            row.getCell(c0 + 2).numFmt = money ? MONEY : N0
+          }
           if (line.overridden) tone(row.getCell(c0), NAVY_MID, false)
         }
         row.getCell(c0).alignment = { horizontal: 'center' }
@@ -298,7 +365,9 @@ export async function buildWorkbook(plan, state) {
     const cols = [
       ['Jira', 12], ['Project', 44], ['Programme', 26], ['Team', 13], ['Sub team', 18],
       ['Objective', 24], ['PIC', 12], [`Saving ${unit}`, 13], ['HC', 8], ['Mandays', 10],
-      ['Ratio', 9], ['Gate', 9], ['Commit', 11], ['Status', 12], ['Start', 11], ['Due', 11], ['Remark', 40],
+      [`Build cost (${cur})`, 14], [`Benefit/yr (${cur})`, 15], [`Benefit ${fin.horizonMonths}mo (${cur})`, 16],
+      [`Net (${cur})`, 14], ['ROI', 10], ['Payback (mo)', 12], ['Break-even mandays', 15],
+      ['Gate', 9], ['Commit', 11], ['Status', 12], ['Start', 11], ['Due', 11], ['Remark', 40],
     ]
     const ws = wb.addWorksheet('Projects', {
       properties: { tabColor: { argb: 'FF1B6091' } },
@@ -328,7 +397,13 @@ export async function buildWorkbook(plan, state) {
         p.savingHours ?? null,
         p.hc ?? null,
         p.manday || null,
-        p.ratio == null ? null : Number(p.ratio.toFixed(2)),
+        p.buildCost == null ? null : Math.round(p.buildCost),
+        p.annualBenefit == null ? null : Math.round(p.annualBenefit),
+        p.horizonBenefit == null ? null : Math.round(p.horizonBenefit),
+        p.netBenefit == null ? null : Math.round(p.netBenefit),
+        p.roi == null ? null : Number(p.roi.toFixed(4)),
+        p.paybackMonths == null ? null : Number(p.paybackMonths.toFixed(1)),
+        p.breakEvenMandays == null ? null : Math.round(p.breakEvenMandays),
         p.gate === 'unknown' ? '' : p.gate === 'pass' ? 'Pass' : 'Below',
         p.commitLevel,
         p.status || '',
@@ -337,37 +412,41 @@ export async function buildWorkbook(plan, state) {
         p.notes || '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
-      ;[8, 9, 10, 11].forEach((c) => {
-        row.getCell(c).numFmt = c === 9 || c === 11 ? N1 : N0
+      // 8 saving · 9 HC · 10 mandays · 11-14 money · 15 ROI · 16 payback · 17 break-even
+      ;[8, 9, 10, 11, 12, 13, 14, 15, 16, 17].forEach((c) => {
+        row.getCell(c).numFmt = c === 9 || c === 16 ? N1 : c === 15 ? ROI : c >= 11 && c <= 14 ? MONEY : N0
         row.getCell(c).alignment = { horizontal: 'right' }
       })
-      ;[7, 12, 13, 14].forEach((c) => { row.getCell(c).alignment = { horizontal: 'center' } })
-      row.getCell(17).alignment = { vertical: 'middle', wrapText: false }
+      ;[7, 18, 19, 20].forEach((c) => { row.getCell(c).alignment = { horizontal: 'center' } })
+      row.getCell(23).alignment = { vertical: 'middle', wrapText: false }
 
       if (!person) tone(row.getCell(7), BAD)
       if (p.savingHours == null) tone(row.getCell(8), WARN)
-      if (p.gate === 'fail') tone(row.getCell(12), BAD)
-      if (p.gate === 'pass') tone(row.getCell(12), GOOD)
+      if (p.netBenefit != null) tone(row.getCell(14), p.netBenefit >= 0 ? GOOD : BAD, false)
+      if (p.gate === 'fail') { tone(row.getCell(15), BAD); tone(row.getCell(18), BAD) }
+      if (p.gate === 'pass') { tone(row.getCell(15), GOOD); tone(row.getCell(18), GOOD) }
       const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[p.commitLevel]
-      tone(row.getCell(13), lvl)
-      if (p.pastDue) tone(row.getCell(16), BAD)
+      tone(row.getCell(19), lvl)
+      if (p.pastDue) tone(row.getCell(22), BAD)
     })
     styleBody(ws, first, r - 1, cols.length)
 
     // totals strip
     const tr = ws.getRow(r)
     tr.getCell(2).value = `TOTAL — ${projects.length} projects`
-    tr.getCell(8).value = { formula: `SUM(H${first}:H${r - 1})` }
-    tr.getCell(9).value = { formula: `SUM(I${first}:I${r - 1})` }
-    tr.getCell(10).value = { formula: `SUM(J${first}:J${r - 1})` }
-    tr.getCell(8).numFmt = N0
-    tr.getCell(9).numFmt = N1
-    tr.getCell(10).numFmt = N0
+    // Live SUM()s, so the workbook still adds up after someone edits a cell.
+    // ROI and payback are deliberately NOT summed — an average of ratios is not
+    // a portfolio return. The Summary sheet carries the portfolio figure.
+    ;[['H', 8, N0], ['I', 9, N1], ['J', 10, N0], ['K', 11, MONEY], ['L', 12, MONEY],
+      ['M', 13, MONEY], ['N', 14, MONEY]].forEach(([col, ix, fmt]) => {
+      tr.getCell(ix).value = { formula: `SUM(${col}${first}:${col}${r - 1})` }
+      tr.getCell(ix).numFmt = fmt
+    })
     for (let c = 1; c <= cols.length; c++) {
       const cell = tr.getCell(c)
       cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
       cell.fill = fill(NAVY)
-      cell.alignment = { horizontal: c >= 8 && c <= 11 ? 'right' : 'left', vertical: 'middle' }
+      cell.alignment = { horizontal: c >= 8 && c <= 17 ? 'right' : 'left', vertical: 'middle' }
     }
     tr.height = 20
   }
@@ -376,7 +455,8 @@ export async function buildWorkbook(plan, state) {
   for (const p of people) {
     const cols = [
       ['Jira', 12], ['Project', 42], ['Objective', 22], ['Role', 11], ['Share', 9],
-      [`Project ${unit}`, 14], ['Credited', 11], ['Mandays', 10], ['Ratio', 9], ['Commit', 11], ['Status', 13],
+      [`Project ${unit}`, 14], ['Credited', 11], ['Mandays', 10],
+      [`Build cost (${cur})`, 14], [`Benefit/yr (${cur})`, 15], ['ROI', 10], ['Commit', 11], ['Status', 13],
     ]
     const safe = `Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31)
     const ws = wb.addWorksheet(safe, { views: [{ state: 'frozen', ySplit: 12 }] })
@@ -400,22 +480,37 @@ export async function buildWorkbook(plan, state) {
     kv(p.aggregatesTeam ? `Team saving hours (${unit}) — whole team` : `Credited saving hours (${unit})`, Math.round(p.scorecardHours), N0, NAVY)
     kv('Committed only', Math.round(p.commitHours), N0)
     kv('Mandays credited', Math.round(p.scorecardManday), N0)
-    kv('Efficiency ratio', p.ratio == null ? 'not yet measurable' : Number(p.ratio.toFixed(2)), p.ratio == null ? undefined : N1,
-      p.ratio == null ? MUTED : p.ratio >= settings.ratioGate ? GOOD : BAD)
+    kv(`Headcount released (FTE)`, Number(p.finance.fteReleased.toFixed(2)), N1)
+    kv(`Value of hours released (${cur}/year)`, Math.round(p.finance.annualBenefit), MONEY, NAVY)
+    kv(`Build cost (${cur})`,
+      p.finance.buildCost == null ? 'no effort estimated' : Math.round(p.finance.buildCost),
+      p.finance.buildCost == null ? undefined : MONEY)
+    kv(`Net benefit over ${fin.horizonMonths} months (${cur})`,
+      p.finance.netBenefit == null ? 'not measurable without effort' : Math.round(p.finance.netBenefit),
+      p.finance.netBenefit == null ? undefined : MONEY,
+      p.finance.netBenefit == null ? MUTED : p.finance.netBenefit >= 0 ? GOOD : BAD)
+    kv('Return on build cost',
+      p.finance.roi == null ? 'not measurable without effort' : Number(p.finance.roi.toFixed(4)),
+      p.finance.roi == null ? undefined : ROI,
+      p.finance.roi == null ? MUTED : p.finance.roi >= fin.roiGate ? GOOD : BAD)
     kv('Projects credited / touched', p.aggregatesTeam ? `[TEAM] ${p.scorecardCount} in plan · ${p.ownCount} their own` : `[PERSONAL] ${p.countedCount} / ${p.projectCount}`)
     kv('Saving hours still TBC', p.missingSaving, N0, p.missingSaving ? WARN : GOOD)
     styleBody(ws, sStart, r - 1, 3, { zebra: false })
 
     r++
     sectionRow(ws, r++, 'KPI SCORECARD', cols.length)
-    headerRow(ws, r++, ['Block', 'KPI line', `${p.nick}'s target`, 'Weight', '', '', '', '', '', '', ''])
+    headerRow(ws, r++, ['Block', 'KPI line', `${p.nick}'s target`, 'Weight', 'Unit', '', '', '', '', '', '', '', ''])
     const wStart = r
     p.kpiLines.forEach((l) => {
       const o = l.objective ? OBJ_BY_ID[l.objective] : null
       const row = ws.getRow(r++)
       row.getCell(1).value = l.block
       row.getCell(2).value = o ? `Obj ${o.no} — ${o.name}` : l.label
-      row.getCell(3).value = fmtTarget(l, settings.savingBasis)
+      writeTarget(row.getCell(3), l, settings.savingBasis, cur)
+      // Spelled out beside the number as well as inside its format, so the unit
+      // survives a copy-paste into a deck.
+      row.getCell(5).value = l.targetKind === 'text' ? '' : targetUnit(l, settings.savingBasis, cur)
+      row.getCell(5).font = { name: FONT, size: 9, color: { argb: MUTED } }
       row.getCell(4).value = l.weight
       row.getCell(4).numFmt = PCT
       row.getCell(4).alignment = { horizontal: 'center' }
@@ -452,17 +547,24 @@ export async function buildWorkbook(plan, state) {
         pr.savingHours ?? null,
         !counted || pr.savingHours == null ? null : Number(((pr.savingHours ?? 0) * share).toFixed(1)),
         pr.manday || null,
-        pr.ratio == null ? null : Number(pr.ratio.toFixed(2)),
+        // Cost and benefit at this person's SHARE, so the column adds up to the
+        // figure in their POSITION block above rather than to the whole project.
+        !counted || pr.buildCost == null ? null : Math.round(pr.buildCost * share),
+        !counted || pr.annualBenefit == null ? null : Math.round(pr.annualBenefit * share),
+        // ROI is share-invariant — both sides scale together — so the project's
+        // own return is the right number here.
+        !counted || pr.roi == null ? null : Number(pr.roi.toFixed(4)),
         pr.commitLevel,
         pr.status || '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
       row.getCell(5).numFmt = PCT
       ;[6, 7, 8].forEach((c) => { row.getCell(c).numFmt = N0 })
-      row.getCell(9).numFmt = N1
-      ;[5, 6, 7, 8, 9].forEach((c) => { row.getCell(c).alignment = { horizontal: 'right' } })
-      ;[4, 10, 11].forEach((c) => { row.getCell(c).alignment = { horizontal: 'center' } })
-      tone(row.getCell(10), { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[pr.commitLevel])
+      ;[9, 10].forEach((c) => { row.getCell(c).numFmt = MONEY })
+      row.getCell(11).numFmt = ROI
+      ;[5, 6, 7, 8, 9, 10, 11].forEach((c) => { row.getCell(c).alignment = { horizontal: 'right' } })
+      ;[4, 12, 13].forEach((c) => { row.getCell(c).alignment = { horizontal: 'center' } })
+      tone(row.getCell(12), { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[pr.commitLevel])
     })
     if (r > pStart) styleBody(ws, pStart, r - 1, cols.length)
 
@@ -470,11 +572,17 @@ export async function buildWorkbook(plan, state) {
     tr.getCell(2).value = 'TOTAL CREDITED'
     tr.getCell(7).value = Math.round(p.scorecardHours)
     tr.getCell(7).numFmt = N0
+    tr.getCell(9).value = p.finance.buildCost == null ? null : Math.round(p.finance.buildCost)
+    tr.getCell(9).numFmt = MONEY
+    tr.getCell(10).value = Math.round(p.finance.annualBenefit)
+    tr.getCell(10).numFmt = MONEY
+    tr.getCell(11).value = p.finance.roi == null ? null : Number(p.finance.roi.toFixed(4))
+    tr.getCell(11).numFmt = ROI
     for (let c = 1; c <= cols.length; c++) {
       const cell = tr.getCell(c)
       cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
       cell.fill = fill(NAVY)
-      cell.alignment = { horizontal: c === 7 ? 'right' : 'left', vertical: 'middle' }
+      cell.alignment = { horizontal: c >= 7 && c <= 11 ? 'right' : 'left', vertical: 'middle' }
     }
     tr.height = 20
   }

@@ -12,8 +12,11 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
-import { fmtHours, fmtRatio, fmtPct } from '../lib/model.js'
+import {
+  fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, workingDaysBetween,
+} from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_COLOR = {
@@ -95,7 +98,9 @@ export default function Projects({
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
-  const { projects, people, settings } = plan
+  const { projects, people, finance: fin } = plan
+  const sym = fin.symbol
+  const horizon = fin.horizonMonths
   // Includes partner teams like IT, which can own delivery without holding a
   // scorecard. Their hours fall to the team lead.
   const assignees = plan.assignees || people
@@ -121,7 +126,7 @@ export default function Projects({
       if (fCommit !== 'all' && p.commitLevel !== fCommit) return false
       if (fGap === 'saving' && p.savingHours != null) return false
       if (fGap === 'pic' && !!p.pic) return false
-      if (fGap === 'manday' && !p.mandayEstimated) return false
+      if (fGap === 'manday' && p.manday > 0) return false
       if (fGap === 'gate' && p.gate !== 'fail') return false
       if (fGap === 'pastdue' && !p.pastDue) return false
       if (fGap === 'nokey' && p.jiraKey) return false
@@ -180,24 +185,80 @@ export default function Projects({
     [projects],
   )
 
+  /*
+   * The source workbook carries no build effort at all, so every ROI starts
+   * blank. Rather than invent a number and present it as data, this offers one
+   * anchored to what the team actually has: a year of its own capacity, spread
+   * across the uncosted projects in proportion to how long each one runs.
+   *
+   * Anchoring on capacity matters. A naive "half a developer per project" over
+   * 86 projects produced 4,162 mandays — sixteen person-years out of a
+   * six-person team — and turned the portfolio return negative on an assumption
+   * nobody had made deliberately. Capacity cannot exceed what exists, so the
+   * total is defensible by construction and the split is the only judgement.
+   *
+   * Duration, not saving hours. Deriving effort from the benefit would make
+   * every ROI identical and the whole measure circular.
+   *
+   * Everything it writes stays flagged `mandayEstimated`, so the table shows it
+   * in the estimate style and the data-quality count keeps calling it a guess
+   * until someone types a real number over it.
+   */
+  const teamSize = people.length
+  const capacityMandays = Math.round(teamSize * fin.daysPerFteMonth * 12)
+  const uncosted = useMemo(
+    () => rows.filter((p) => !(p.manday > 0) && p.savingHours != null && p.start && p.due),
+    [rows],
+  )
+  const estimateEffort = () => {
+    const spans = uncosted.map((p) => ({ key: p.key, days: Math.max(1, workingDaysBetween(p.start, p.due)) }))
+    const totalDays = spans.reduce((a, s) => a + s.days, 0)
+    if (!spans.length || totalDays <= 0) return
+    // Whatever capacity the already-costed rows have not claimed.
+    const spent = rows.reduce((a, p) => a + (p.manday || 0), 0)
+    const pool = Math.max(spans.length, capacityMandays - spent)
+    const patch = {}
+    for (const s of spans) patch[s.key] = Math.max(1, Math.round((s.days / totalDays) * pool))
+    if (!confirm(
+      `Spread ${pool.toLocaleString()} mandays across ${spans.length} project${spans.length === 1 ? '' : 's'}, `
+      + `in proportion to how long each one runs?\n\n`
+      + `That is one year of your team's capacity — ${teamSize} people x ${Math.round(fin.daysPerFteMonth * 12)} working days`
+      + `${spent > 0 ? `, less the ${Math.round(spent).toLocaleString()} already entered` : ''}.\n\n`
+      + `A starting point for the ROI column, not a measurement. Every value stays marked as an estimate and you can type over any of them.`,
+    )) return
+    for (const k of Object.keys(patch)) onUpdate(k, { manday: patch[k], mandayEstimated: true })
+  }
+
   /** Totals for whatever the filters currently show — recomputed on every change. */
   const agg = useMemo(() => {
     const savingRows = rows.filter((p) => p.savingHours != null)
     const hours = savingRows.reduce((a, p) => a + p.savingHours, 0)
     const hc = rows.reduce((a, p) => a + (p.hc || 0), 0)
     const manday = rows.reduce((a, p) => a + (p.manday || 0), 0)
-    const withRatio = rows.filter((p) => p.ratio != null)
+
+    // Money for whatever is on screen. Benefit covers every quantified row;
+    // cost and ROI cover only the rows that carry an effort estimate, because
+    // dividing the whole view's benefit by a partial cost reports a return
+    // nobody earned. `roiRows` says how many rows the ROI actually spans.
+    // Out-of-plan rows contribute no money anywhere else in the app, so they
+    // must not contribute here either — otherwise filtering to "Next year"
+    // shows a cost and a return the Dashboard says do not exist.
+    const inPlanRows = rows.filter((p) => !OUT_OF_PLAN.has(p.commitLevel))
+    const annualBenefit = inPlanRows.reduce((a, p) => a + (p.annualBenefit || 0), 0)
+    const costedRows = inPlanRows.filter((p) => p.buildCost != null && p.horizonBenefit != null)
+    const buildCost = costedRows.reduce((a, p) => a + p.buildCost, 0)
+    const costedBenefit = costedRows.reduce((a, p) => a + p.horizonBenefit, 0)
+
     return {
       count: rows.length,
       hours,
       hc,
       manday,
-      // Portfolio ratio: total hours over total mandays. A plain mean of the
-      // per-project ratios would let a tiny project outweigh a large one.
-      ratio: manday > 0 ? hours / manday : null,
-      meanRatio: withRatio.length
-        ? withRatio.reduce((a, p) => a + p.ratio, 0) / withRatio.length
-        : null,
+      annualBenefit,
+      buildCost: costedRows.length ? buildCost : null,
+      roi: buildCost > 0 ? (costedBenefit - buildCost) / buildCost : null,
+      roiRows: costedRows.length,
+      inPlanCount: inPlanRows.length,
       done: rows.filter((p) => p.status === 'Done').reduce((a, p) => a + (p.savingHours ?? 0), 0),
       tbc: rows.filter((p) => p.savingHours == null).length,
       // Denominator is the whole register, so a view filtered to deferred or
@@ -276,8 +337,8 @@ export default function Projects({
               <MenuItem value="saving">Missing saving hrs</MenuItem>
               <MenuItem value="nokey">Missing Jira key</MenuItem>
               <MenuItem value="pic">Missing PIC</MenuItem>
-              <MenuItem value="manday">Manday still a guess</MenuItem>
-              <MenuItem value="gate">Below the gate</MenuItem>
+              <MenuItem value="manday">No effort estimate</MenuItem>
+              <MenuItem value="gate">Below the ROI gate</MenuItem>
               <MenuItem value="pastdue">Past due, not done</MenuItem>
             </Select>
           </FormControl>
@@ -299,6 +360,13 @@ export default function Projects({
             </Button>
           )}
           <Box sx={{ flex: 1 }} />
+          {uncosted.length > 0 && (
+            <Tooltip title={`Spreads a year of the team's capacity — ${teamSize} people, about ${capacityMandays.toLocaleString()} mandays — across the ${uncosted.length} project${uncosted.length === 1 ? '' : 's'} in view that carry no effort, in proportion to how long each runs. A starting point to edit, not a measurement; every value stays marked as an estimate.`}>
+              <Button size="small" variant="outlined" startIcon={<AutoFixHighIcon />} onClick={estimateEffort}>
+                Estimate effort ({uncosted.length})
+              </Button>
+            </Tooltip>
+          )}
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={onAdd}>
             Add project
           </Button>
@@ -394,11 +462,25 @@ export default function Projects({
             { label: 'Headcount', value: agg.hc ? agg.hc.toFixed(1) : '—', sub: 'HC released' },
             { label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
             {
-              label: 'Ratio (avg)',
-              value: agg.ratio == null ? '—' : fmtRatio(agg.ratio),
-              sub: agg.ratio == null ? 'needs mandays' : `gate ${settings.ratioGate.toFixed(1)}`,
-              tone: agg.ratio == null ? undefined : agg.ratio >= settings.ratioGate ? STATUS.good : STATUS.critical,
-              help: 'Total saving hours ÷ total mandays across the filtered rows. A weighted average — a plain mean of per-project ratios would let a tiny project outweigh a large one.',
+              label: 'Benefit / year',
+              value: fmtMoneyShort(agg.annualBenefit, sym),
+              sub: `${fmtMoney(fin.acctHourRate, sym)} per saved hour`,
+              help: `Saving hours x the accountant rate, annualised. Covers every quantified row in view, whether or not it has an effort estimate.`,
+            },
+            {
+              label: 'Build cost',
+              value: fmtMoneyShort(agg.buildCost, sym),
+              sub: agg.buildCost == null ? 'no mandays in view' : `${fmtMoney(fin.devDayRate, sym)} per manday`,
+              help: 'Mandays x the developer rate, across the rows in view that carry an effort estimate.',
+            },
+            {
+              label: 'ROI',
+              value: fmtRoi(agg.roi),
+              sub: agg.roi == null
+                ? 'needs mandays'
+                : `${agg.roiRows} of ${agg.inPlanCount} in-plan rows · gate ${fmtRoi(fin.roiGate)}`,
+              tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? STATUS.good : STATUS.critical,
+              help: `Return over ${horizon} months on what it cost to build, across only the rows in view that carry an effort estimate. Rows without mandays are excluded from BOTH sides, so this is never a whole-book benefit divided by a partial cost.`,
             },
           ].map((t, i) => (
             <Box
@@ -447,16 +529,17 @@ export default function Projects({
               <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }}>
                 <Checkbox size="small" checked={allSelected} indeterminate={sel.size > 0 && !allSelected} onChange={toggleAll} />
               </TableCell>
-              {head('jiraKey', 'Jira', 'left', 104)}
+              {head('jiraKey', 'Jira', 'left', 88)}
               {head('summary', 'Project')}
-              <TableCell sx={{ minWidth: 150 }}>Objective</TableCell>
-              <TableCell sx={{ minWidth: 118 }}>PIC</TableCell>
+              <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
+              <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>
               {head('savingHours', 'Saving hrs/mth', 'right')}
               {head('hc', 'HC', 'right')}
               {head('manday', 'Mandays', 'right')}
-              {head('ratio', 'Ratio', 'right')}
-              <TableCell sx={{ minWidth: 122 }}>Commit</TableCell>
-              <TableCell>Status</TableCell>
+              {head('buildCost', 'Build cost', 'right', 78)}
+              {head('roi', 'ROI', 'right', 78)}
+              <TableCell sx={{ minWidth: 104 }}>Commit</TableCell>
+              <TableCell sx={{ minWidth: 92, maxWidth: 104, width: 104 }}>Status</TableCell>
               <TableCell padding="checkbox" />
             </TableRow>
           </TableHead>
@@ -485,7 +568,7 @@ export default function Projects({
                     <TextCell
                       value={p.jiraKey}
                       placeholder="no key"
-                      width={92}
+                      width={78}
                       onChange={(v) => onUpdate(p.key, { jiraKey: v })}
                       bold
                     />
@@ -501,19 +584,19 @@ export default function Projects({
                       <TextCell
                         value={p.team}
                         placeholder="Team"
-                        width={92}
+                        width={58}
                         onChange={(v) => onUpdate(p.key, { team: v })}
                       />
                       <TextCell
                         value={p.subTeam}
                         placeholder="Sub team"
-                        width={112}
+                        width={66}
                         onChange={(v) => onUpdate(p.key, { subTeam: v })}
                       />
                       <TextCell
                         value={p.program}
                         placeholder="Programme"
-                        width={132}
+                        width={76}
                         onChange={(v) => onUpdate(p.key, { program: v })}
                       />
                     </Box>
@@ -524,13 +607,21 @@ export default function Projects({
                       variant="standard"
                       value={p.objective}
                       onChange={(e) => onUpdate(p.key, { objective: e.target.value })}
-                      sx={{ fontSize: '0.8125rem', width: '100%' }}
+                      // A hard width, not 100%: under table-layout auto the
+                      // intrinsic width of "2. Process automation" sets the
+                      // column, and maxWidth on the cell is ignored.
+                      sx={{ fontSize: '0.8125rem', width: 132, maxWidth: 132 }}
                       renderValue={(v) => {
                         const o = OBJ_BY_ID[v]
+                        // Ellipsised rather than allowed to set the column width:
+                        // "2. Process automation" alone was pushing the money
+                        // columns off the right edge of the table.
                         return (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
                             <Box sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: CHART[mode].series[objIdx], flexShrink: 0 }} />
-                            {o?.no}. {o?.short}
+                            <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {o?.no}. {o?.short}
+                            </Box>
                           </Box>
                         )
                       }}
@@ -545,7 +636,7 @@ export default function Projects({
                       displayEmpty
                       value={p.pic ?? ''}
                       onChange={(e) => onUpdate(p.key, { pic: e.target.value || null })}
-                      sx={{ fontSize: '0.8125rem', width: '100%', color: p.pic ? 'text.primary' : STATUS.critical }}
+                      sx={{ fontSize: '0.8125rem', width: 76, maxWidth: 76, color: p.pic ? 'text.primary' : STATUS.critical }}
                       renderValue={(v) => (v ? assignees.find((x) => x.id === v)?.nick : 'TBC')}
                     >
                       <MenuItem value=""><em>TBC — unassigned</em></MenuItem>
@@ -567,29 +658,45 @@ export default function Projects({
                   <TableCell align="right">
                     <NumCell
                       value={p.hc}
-                      width={56}
+                      width={48}
                       onChange={(v) => onUpdate(p.key, { hc: v })}
                     />
                   </TableCell>
                   <TableCell align="right">
                     <NumCell
                       value={p.manday}
-                      width={64}
+                      width={56}
                       estimated={p.mandayEstimated}
                       onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
                     />
                   </TableCell>
+                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
+                    {p.buildCost == null ? (
+                      <Tooltip title={`No effort estimate yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate.`}>
+                        <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
+                      </Tooltip>
+                    ) : fmtMoneyShort(p.buildCost, sym)}
+                  </TableCell>
                   <TableCell align="right">
-                    {p.ratio == null ? (
-                      <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+                    {p.roi == null ? (
+                      <Tooltip title={
+                        p.savingHours == null
+                          ? 'Saving hours are still TBC, so there is no benefit to return.'
+                          : `Worth ${fmtMoneyShort(p.annualBenefit, sym)} a year. Enter mandays to get a return — break-even is ${Math.round(p.breakEvenMandays).toLocaleString()} mandays, and ${Math.round(p.affordableMandays).toLocaleString()} clears the gate.`
+                      }>
+                        <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
+                      </Tooltip>
                     ) : (
-                      <Tooltip title={p.gate === 'pass' ? `Passes the ${settings.ratioGate.toFixed(1)} hrs/manday gate` : `Below the ${settings.ratioGate.toFixed(1)} hrs/manday gate`}>
-                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
+                      <Tooltip title={`${fmtMoney(p.horizonBenefit, sym)} over ${horizon} months against ${fmtMoney(p.buildCost, sym)} to build — net ${fmtMoney(p.netBenefit, sym)}, paying back in ${fmtMonths(p.paybackMonths)}. Gate is ${fmtRoi(fin.roiGate)}.`}>
+                        {/* Benefit per project lives in this tooltip, the totals
+                            strip, the scorecard portfolio and the workbook — a
+                            column for it as well pushed Commit off the table. */}
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.4, justifyContent: 'flex-end', cursor: 'help' }}>
                           {p.gate === 'pass'
-                            ? <CheckCircleOutlineIcon sx={{ fontSize: 14, color: STATUS.good }} />
-                            : <ErrorOutlineIcon sx={{ fontSize: 14, color: STATUS.critical }} />}
-                          <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                            {fmtRatio(p.ratio)}
+                            ? <CheckCircleOutlineIcon sx={{ fontSize: 13, color: STATUS.good }} />
+                            : <ErrorOutlineIcon sx={{ fontSize: 13, color: STATUS.critical }} />}
+                          <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.8125rem', color: p.gate === 'pass' ? STATUS.good : STATUS.critical }}>
+                            {fmtRoi(p.roi)}
                           </Typography>
                         </Box>
                       </Tooltip>
@@ -624,12 +731,14 @@ export default function Projects({
                       {p.srcStatus || p.status || '—'}
                     </Typography>
                     {p.pastDue && (
+                      // The date lives in the tooltip: spelled out here it was
+                      // the widest thing in the column and pushed ROI off-screen.
                       <Tooltip title={`Due ${p.due} and not Done — already past due`}>
                         <Typography
                           variant="caption"
-                          sx={{ display: 'block', color: STATUS.critical, fontWeight: 600, whiteSpace: 'nowrap' }}
+                          sx={{ display: 'block', color: STATUS.critical, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'help' }}
                         >
-                          past due {p.due}
+                          past due
                         </Typography>
                       </Tooltip>
                     )}

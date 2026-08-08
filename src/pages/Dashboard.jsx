@@ -6,7 +6,10 @@ import {
 import StatTile from '../components/StatTile.jsx'
 import { HBar, StackedHBar, GateScatter, Meter } from '../components/Charts.jsx'
 import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
-import { fmtHours, fmtPct, fmtRatio, paybackMonths, SAVING_BASIS } from '../lib/model.js'
+import {
+  fmtHours, fmtPct, fmtRatio, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths,
+  gateAsHoursPerManday, gateAsPaybackMonths,
+} from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
 function Section({ title, subtitle, children, action }) {
@@ -31,7 +34,8 @@ function Section({ title, subtitle, children, action }) {
 export default function Dashboard({ plan, onGoTo }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
-  const { totals, people, projects, quality, byObjective, settings } = plan
+  const { totals, people, projects, quality, byObjective, settings, finance: fin } = plan
+  const sym = fin.symbol
   const [byPersonView, setByPersonView] = useState('chart')
 
   // Personal contribution, so the bars add up to the team figure. The lead's
@@ -39,9 +43,17 @@ export default function Dashboard({ plan, onGoTo }) {
   // double-count everyone else.
   const ranked = [...people].sort((a, b) => b.ownHours - a.ownHours)
 
+  // x = what it cost to build, y = what it returns over the horizon. The gate
+  // line is y = (1 + roiGate) * x, so anything under it fails Objective 1.
   const gatePoints = projects
-    .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch') && p.savingHours != null && p.manday > 0)
-    .map((p) => ({ key: p.key, summary: p.summary, savingHours: p.savingHours, manday: p.manday }))
+    .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch') && p.buildCost != null && p.horizonBenefit != null)
+    .map((p) => ({
+      key: p.key,
+      summary: p.summary,
+      x: p.buildCost,
+      y: p.horizonBenefit,
+      note: `${fmtMoney(p.buildCost, sym)} to build · ${fmtMoney(p.horizonBenefit, sym)} back over ${fin.horizonMonths} months · ROI ${fmtRoi(p.roi)}`,
+    }))
 
   const series = OBJECTIVES.map((o, i) => ({
     id: o.id,
@@ -52,8 +64,10 @@ export default function Dashboard({ plan, onGoTo }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       {/* ---------- headline row ---------- */}
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={3}>
+      {/* Five tiles, so a flex strip rather than a 12-column grid: thirds at
+          tablet width, fifths once there is room for all of them. */}
+      <Grid container spacing={2} sx={{ '& > .MuiGrid-item': { flexBasis: { lg: '20%' }, maxWidth: { lg: '20%' } } }}>
+        <Grid item xs={12} sm={6} md={4}>
           <StatTile
             hero
             label="Total saving hours"
@@ -64,21 +78,30 @@ export default function Dashboard({ plan, onGoTo }) {
             help="Every project in the register, summed straight from the Saving hrs/mth column. No filtering — this always reconciles to the source workbook."
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={4}>
           <StatTile
-            label={totals.teamRatio == null ? 'Headcount released' : 'Efficiency ratio'}
-            value={totals.teamRatio == null ? fmtHours(totals.committedHC) : fmtRatio(totals.teamRatio)}
-            unit={totals.teamRatio == null ? 'HC' : 'hrs / manday'}
-            tone={totals.teamRatio == null ? undefined : totals.teamRatio >= settings.ratioGate ? 'good' : 'critical'}
-            context={
-              totals.teamRatio == null
-                ? `Objective 1 needs mandays — none entered yet on ${quality.estimatedManday} projects`
-                : `Gate is ${settings.ratioGate.toFixed(1)} · ${totals.failingGate} project${totals.failingGate === 1 ? '' : 's'} below it`
-            }
-            help={`Objective 1. Saving hours returned per manday invested. This is a gate, not a maximiser — it stops low-value work being booked for its hour count. On the ${SAVING_BASIS[settings.savingBasis].label.toLowerCase()} basis the gate implies a ${(() => { const m = paybackMonths(settings.ratioGate, settings.savingBasis); return m == null ? '—' : m < 24 ? `${m.toFixed(0)}-month` : `${(m / 12).toFixed(1)}-year` })()} payback on build effort.`}
+            label="Value of hours released"
+            value={fmtMoneyShort(fin.annualBenefit, sym)}
+            unit="per year"
+            context={`${fin.fteReleased.toFixed(1)} FTE at ${fmtMoney(fin.acctHourRate, sym)} an hour · ${fmtMoneyShort(fin.monthlyBenefit, sym)}/month`}
+            help={`Objective 1. The saving hours valued at the accountant rate set on the Model tab: ${fmtHours(totals.totalHours)} hrs/month ÷ ${fin.hoursPerFteMonth} hrs = ${fin.fteReleased.toFixed(1)} FTE. This is capacity released, not cash taken off the payroll.`}
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={4}>
+          <StatTile
+            label="Return on build cost"
+            value={fmtRoi(fin.roi)}
+            unit={`over ${fin.horizonMonths} months`}
+            tone={fin.roi == null ? undefined : fin.roi >= fin.roiGate ? 'good' : 'critical'}
+            context={
+              fin.roi == null
+                ? `No effort estimated yet on ${quality.uncosted} of ${quality.total} projects`
+                : `${fmtMoneyShort(fin.buildCost, sym)} to build · gate ${fmtRoi(fin.roiGate)} · covers ${fmtPct(fin.roiCoverage)} of the benefit`
+            }
+            help={`Objective 1's gate. Benefit over ${fin.horizonMonths} months against what it cost to build, at ${fmtMoney(fin.devDayRate, sym)} a manday. Only projects carrying an effort estimate are in EITHER side of this, so it is never a whole-book benefit divided by a partial cost. The gate of ${fmtRoi(fin.roiGate)} is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}, equivalent to ${gateAsHoursPerManday(fin)?.toFixed(2)} saving hours per manday.`}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4}>
           <StatTile
             label="Concentration"
             value={fmtPct(totals.top2Share)}
@@ -88,7 +111,7 @@ export default function Dashboard({ plan, onGoTo }) {
             help="Share of the committed pool sitting in the two largest projects. Above 40% the whole target depends on two deliveries landing."
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid item xs={12} sm={6} md={4}>
           <StatTile
             label="Past due, not done"
             value={quality.pastDue}
@@ -100,14 +123,21 @@ export default function Dashboard({ plan, onGoTo }) {
         </Grid>
       </Grid>
 
-      {quality.estimatedManday > 0 && (
-        <Alert severity="warning" variant="outlined">
-          <AlertTitle sx={{ fontWeight: 600 }}>Objective 1 has no denominator yet</AlertTitle>
-          The source workbook records saving hours and headcount but no build effort, so mandays are blank on{' '}
-          {quality.estimatedManday} of {quality.total} projects and the efficiency ratio cannot be computed. Enter
-          mandays on the Projects tab and the gate, the scatter and every per-person ratio come alive.{' '}
+      {quality.uncosted > 0 && (
+        <Alert severity={fin.roiCoverage >= 0.9 ? 'info' : 'warning'} variant="outlined">
+          <AlertTitle sx={{ fontWeight: 600 }}>
+            {fin.roi == null
+              ? 'Objective 1 has a benefit but no cost yet'
+              : `Objective 1 covers ${fmtPct(fin.roiCoverage)} of the benefit`}
+          </AlertTitle>
+          The source workbook records saving hours and headcount but no build effort, so{' '}
+          {quality.uncosted} of {quality.total} projects still carry no mandays. The benefit side is live —{' '}
+          <strong>{fmtMoneyShort(fin.annualBenefit, sym)} a year</strong> — but ROI, payback and net benefit stay
+          blank on those, because a project with unknown effort has an unknown cost, not a cost of nothing. They are
+          left out of both sides of the return rather than counted as free. Each one still shows the mandays it could
+          absorb and still clear the gate.{' '}
           <Link component="button" onClick={() => onGoTo('projects')} sx={{ fontWeight: 600 }}>
-            Enter mandays →
+            Estimate effort →
           </Link>
         </Alert>
       )}
@@ -267,7 +297,10 @@ export default function Dashboard({ plan, onGoTo }) {
             )}
             {byPersonView === 'mix' && (
               <StackedHBar
-                rows={ranked.map((p) => ({ label: p.nick, values: p.byObjective }))}
+                // ownByObjective, not byObjective: the lead's scorecard map is
+                // the whole team's, so stacking it beside the others counted
+                // every hour twice and the bars summed to 6,671 against 4,227.
+                rows={ranked.map((p) => ({ label: p.nick, values: p.ownByObjective }))}
                 series={series}
               />
             )}
@@ -278,8 +311,10 @@ export default function Dashboard({ plan, onGoTo }) {
                     <TableCell>Person</TableCell>
                     <TableCell align="right">Projects</TableCell>
                     <TableCell align="right">Credited hrs</TableCell>
+                    <TableCell align="right">Benefit / yr</TableCell>
                     <TableCell align="right">Mandays</TableCell>
-                    <TableCell align="right">Ratio</TableCell>
+                    <TableCell align="right">Build cost</TableCell>
+                    <TableCell align="right">ROI</TableCell>
                     <TableCell align="right">Missing data</TableCell>
                   </TableRow>
                 </TableHead>
@@ -289,10 +324,20 @@ export default function Dashboard({ plan, onGoTo }) {
                       <TableCell sx={{ fontWeight: 600 }}>{p.nick}</TableCell>
                       <TableCell align="right">{p.ownCount}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(p.ownHours)}</TableCell>
+                      <TableCell align="right">{fmtMoneyShort(p.monthlyBenefit * 12, sym)}</TableCell>
                       <TableCell align="right">{fmtHours(p.manday)}</TableCell>
-                      <TableCell align="right" sx={{ color: p.ratio != null && p.ratio < settings.ratioGate ? STATUS.critical : 'text.primary' }}>
-                        {fmtRatio(p.ratio)}
-                      </TableCell>
+                      <TableCell align="right">{fmtMoneyShort(p.buildCost, sym)}</TableCell>
+                      {/* Personal, like every other cell in this row — p.finance
+                          is the SCORECARD view, which for the lead is the whole
+                          team and would not belong beside their own hours. */}
+                      {(() => {
+                        const roi = p.buildCost > 0 ? (p.costedBenefit - p.buildCost) / p.buildCost : null
+                        return (
+                          <TableCell align="right" sx={{ color: roi != null && roi < fin.roiGate ? STATUS.critical : 'text.primary' }}>
+                            {fmtRoi(roi)}
+                          </TableCell>
+                        )
+                      })()}
                       <TableCell align="right">{p.missingSaving || '—'}</TableCell>
                     </TableRow>
                   ))}
@@ -304,6 +349,9 @@ export default function Dashboard({ plan, onGoTo }) {
                     <TableCell align="right" sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
                       {fmtHours(totals.teamHours)}
                     </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
+                      {fmtMoneyShort(ranked.reduce((a, x) => a + x.monthlyBenefit * 12, 0), sym)}
+                    </TableCell>
                     <TableCell colSpan={3} sx={{ borderTop: 2, borderColor: 'divider' }} />
                   </TableRow>
                 </TableBody>
@@ -312,16 +360,19 @@ export default function Dashboard({ plan, onGoTo }) {
           </Section>
         </Grid>
 
-        {/* ---------- efficiency gate ---------- */}
+        {/* ---------- objective 1: is it worth it ---------- */}
         <Grid item xs={12}>
           <Section
-            title="Objective 1 — the efficiency gate"
-            subtitle={`Each dot is a project. Anything below the dashed line returns less than ${settings.ratioGate.toFixed(1)} saving hours per manday invested.`}
+            title="Objective 1 — is the build worth it"
+            subtitle={`Each dot is a project: what it cost to build against what it gives back over ${fin.horizonMonths} months, both in ${fin.currency}. The dashed line is the gate — a return of ${fmtRoi(fin.roiGate)}, or a payback of ${fmtMonths(gateAsPaybackMonths(fin))}. Anything below it costs more than it is worth.`}
           >
             <GateScatter
               points={gatePoints}
-              gate={settings.ratioGate}
-              emptyMessage="No mandays have been entered yet, so there is nothing to plot. Add mandays on the Projects tab and every project appears here against the gate."
+              gate={1 + fin.roiGate}
+              xLabel={`Build cost (${fin.currency})`}
+              yLabel={`Benefit over ${fin.horizonMonths} months (${fin.currency})`}
+              fmt={(v) => fmtMoneyShort(v, sym)}
+              emptyMessage={`No build effort has been estimated yet, so there is nothing to plot. The benefit side is already known — ${fmtMoneyShort(fin.annualBenefit, sym)} a year — but a return needs a cost. Use "Estimate effort" on the Projects tab, or type mandays in, and every project appears here against the gate.`}
             />
           </Section>
         </Grid>
@@ -419,7 +470,10 @@ export default function Dashboard({ plan, onGoTo }) {
               <TableBody>
                 {totals.topProjects.map((p) => {
                   const person = people.find((x) => x.id === p.pic)
-                  const without = (totals.headlineHours - (p.savingHours ?? 0)) / totals.target
+                  // The target is user-editable and can be cleared to 0.
+                  const without = totals.target > 0
+                    ? (totals.headlineHours - (p.savingHours ?? 0)) / totals.target
+                    : null
                   return (
                     <TableRow key={p.key} hover>
                       <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{p.key}</TableCell>
