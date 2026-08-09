@@ -1508,6 +1508,101 @@ try {
   check('and it takes the line off the card', !/Close the books in three days/.test(kpiRemoved.text),
     `${kpiRemoved.lines} lines`)
 
+
+  /* ---------- typing a figure over the calculated one ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?ovr=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const ovrTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  const tabHours = (name) => page.evaluate((n) => {
+    const t = [...document.querySelectorAll('[role="tab"]')].find((x) => x.innerText.startsWith(n))
+    return t ? t.innerText.match(/([\d,]+)\s*hrs/)?.[1] ?? null : null
+  }, name)
+  const goTab = async (name) => {
+    await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+      ovrTabs.findIndex((t) => new RegExp(name).test(t)))
+    await new Promise((r) => setTimeout(r, 1200))
+  }
+  const tile = (label) => page.evaluate((lbl) => {
+    const head = [...document.querySelectorAll('*')]
+      .find((e) => e.children.length === 0 && e.textContent.trim() === lbl)
+    const card = head?.closest('.MuiPaper-root')
+    if (!card) return null
+    return {
+      text: card.innerText.split(String.fromCharCode(10)).join(' | '),
+      manual: /manual/i.test(card.innerText),
+      canEdit: !!card.querySelector(`[aria-label="override ${lbl}"]`),
+      canRevert: !!card.querySelector(`[aria-label="revert ${lbl}"]`),
+    }
+  }, label)
+
+  const leadBefore = await tabHours('Gun')
+  await goTab('James')
+  const HRS = 'Credited saving hours'
+  const beforeTile = await tile(HRS)
+  check('THE HOURS TILE CAN BE TYPED OVER', beforeTile?.canEdit === true, JSON.stringify(beforeTile))
+  check('and it is not marked manual to begin with', beforeTile.manual === false, beforeTile.text)
+  check('so there is nothing to revert yet', beforeTile.canRevert === false)
+
+  await page.evaluate((lbl) => {
+    const head = [...document.querySelectorAll('*')]
+      .find((e) => e.children.length === 0 && e.textContent.trim() === lbl)
+    head.closest('.MuiPaper-root').querySelector(`[aria-label="override ${lbl}"]`).click()
+  }, HRS)
+  await new Promise((r) => setTimeout(r, 600))
+  await page.evaluate((lbl) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const inp = document.querySelector(`input[aria-label="${lbl} value"]`)
+    inp.focus()
+    setter.call(inp, '200')
+    inp.dispatchEvent(new Event('input', { bubbles: true }))
+    inp.blur()
+  }, HRS)
+  await new Promise((r) => setTimeout(r, 1200))
+
+  const afterTile = await tile(HRS)
+  check('THE TILE SHOWS THE TYPED FIGURE', /\b200\b/.test(afterTile.text), afterTile.text.slice(0, 120))
+  check('and says it is manual', afterTile.manual === true, afterTile.text.slice(0, 140))
+  check('and states what the register still calculates',
+    /register/i.test(afterTile.text) && /80/.test(afterTile.text), afterTile.text.slice(0, 200))
+  check('A REVERT CONTROL APPEARS', afterTile.canRevert === true)
+
+  const moneyTile = await tile('Value released')
+  check('the money followed the hours', !!moneyTile && !/^฿0/.test(moneyTile.text), moneyTile.text.slice(0, 80))
+
+  const leadAfter = await tabHours('Gun')
+  check('THE LEAD FOLLOWED THE MEMBER',
+    Number(String(leadAfter).replace(/,/g, '')) - Number(String(leadBefore).replace(/,/g, '')) === 121,
+    `${leadBefore} -> ${leadAfter}`)
+
+  // The register is untouched: the header total is the project book.
+  const ovrHeadline = await page.evaluate(() =>
+    document.body.innerText.match(/([\d,]+)\s*\/\s*3,000/)?.[1] ?? null)
+  check('the committed headline is untouched by it', ovrHeadline === '4,227', String(ovrHeadline))
+
+  // It survives a reload, so it is in the plan and not just on the screen.
+  await page.goto(`${base}/?ovr=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  await goTab('James')
+  const reloadedTile = await tile(HRS)
+  check('it survives a reload', /\b200\b/.test(reloadedTile.text) && reloadedTile.manual,
+    reloadedTile.text.slice(0, 100))
+
+  // And back again.
+  await page.evaluate((lbl) => {
+    const head = [...document.querySelectorAll('*')]
+      .find((e) => e.children.length === 0 && e.textContent.trim() === lbl)
+    head.closest('.MuiPaper-root').querySelector(`[aria-label="revert ${lbl}"]`).click()
+  }, HRS)
+  await new Promise((r) => setTimeout(r, 1200))
+  const revertedTile = await tile(HRS)
+  check('REVERTING PUTS THE CALCULATED FIGURE BACK',
+    /\b80\b/.test(revertedTile.text) && !revertedTile.manual, revertedTile.text.slice(0, 120))
+  check('and the revert control goes away with it', revertedTile.canRevert === false)
+  const leadReverted = await tabHours('Gun')
+  check('the lead goes back too', leadReverted === leadBefore, `${leadAfter} -> ${leadReverted}`)
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

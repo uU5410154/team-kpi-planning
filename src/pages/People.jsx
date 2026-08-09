@@ -167,7 +167,7 @@ function PortfolioNum({ value, onChange }) {
 
 export default function People({
   plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets, onUpdate,
-  onAddObjective, onRemoveObjective, onSaveLine,
+  onAddObjective, onRemoveObjective, onSaveLine, onOverride,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -241,6 +241,14 @@ export default function People({
             label={p.aggregatesTeam ? 'Team saving hours' : 'Credited saving hours'}
             value={fmtHours(p.scorecardHours)}
             unit="hrs"
+            override={{
+              on: p.hoursOverridden,
+              current: p.scorecardHours,
+              calc: p.calcScorecardHours,
+              calcLabel: `${fmtHours(p.calcScorecardHours)} hrs`,
+              editHelp: 'Type the figure this scorecard should be appraised on. The project register is not changed.',
+              onChange: (v) => onOverride(p.id, { hours: v }),
+            }}
             context={
               p.aggregatesTeam
                 ? `Whole team · ${fmtHours(p.ownHours)} hrs from ${p.nick}'s own projects, IT and unassigned`
@@ -258,6 +266,14 @@ export default function People({
             label="Value released"
             value={fmtMoneyShort(p.finance.annualBenefit, sym)}
             unit="per year"
+            override={{
+              on: p.moneyOverridden,
+              current: Math.round(p.finance.annualBenefit),
+              calc: Math.round(p.calcAnnualBenefit),
+              calcLabel: `${fmtMoneyShort(p.calcAnnualBenefit, sym)} a year`,
+              editHelp: 'Type the annual value this scorecard should be appraised on. Leave it and it follows the hours.',
+              onChange: (v) => onOverride(p.id, { money: v }),
+            }}
             tone={p.finance.roi == null ? undefined : p.finance.roi >= fin.roiGate ? 'good' : 'critical'}
             context={
               p.finance.roi == null

@@ -307,7 +307,7 @@ export async function buildWorkbook(plan, state) {
       const c0 = 4 + i * 3
       ws.mergeCells(4, c0, 4, c0 + 2)
       const c = gRow.getCell(c0)
-      c.value = `${p.nick}  ·  ${p.band}`
+      c.value = `${p.nick}  ·  ${p.band}${p.overridden ? '  ·  MANUAL' : ''}`
       c.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
       c.fill = fill(i % 2 ? NAVY_MID : NAVY)
       c.alignment = { horizontal: 'center', vertical: 'middle' }
@@ -532,7 +532,15 @@ export async function buildWorkbook(plan, state) {
     const safe = `Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31)
     const ws = wb.addWorksheet(safe, { views: [{ state: 'frozen', ySplit: 6 }] })
     banner(ws, `${p.name.toUpperCase()}  ·  ${p.nick}`,
-      `${p.role} · band ${p.band} · holds ${p.objectives.map((o) => `Obj ${OBJ_BY_ID[o]?.no}`).join(', ') || 'no objectives'}`,
+      `${p.role} · band ${p.band} · holds ${p.objectives.map((o) => `Obj ${OBJ_BY_ID[o]?.no}`).join(', ') || 'no objectives'}`
+      // A figure typed over the calculated one is stated on the face of the
+      // sheet. A manual number that reads like a derived one is the way a
+      // workbook ends up trusted for something it never said.
+      + (p.overridden
+        ? ` · MANUAL FIGURE: appraised on ${Math.round(p.scorecardHours).toLocaleString()} ${unit}`
+          + `${p.hoursOverridden ? ` (the register calculates ${Math.round(p.calcScorecardHours).toLocaleString()})` : ''}`
+          + `${p.moneyOverridden ? ` and ${Math.round(p.finance.annualBenefit).toLocaleString()} ${cur}/yr (calculated ${Math.round(p.calcAnnualBenefit).toLocaleString()})` : ''}`
+        : ''),
       cols.length)
 
     // No POSITION block: the headline figures it carried are on the Summary and
@@ -608,13 +616,18 @@ export async function buildWorkbook(plan, state) {
     if (r > pStart) styleBody(ws, pStart, r - 1, cols.length)
 
     const tr = ws.getRow(r)
-    tr.getCell(2).value = 'TOTAL CREDITED'
+    // The label is also how the column is found, so a manual figure is marked
+    // on the ROW rather than by renaming the header out from under px().
+    tr.getCell(2).value = p.hoursOverridden
+      ? `TOTAL CREDITED — MANUAL (register: ${Math.round(p.calcScorecardHours).toLocaleString()})`
+      : 'TOTAL CREDITED'
     const total = (label, value, fmt) => {
       const c = tr.getCell(px(label))
       c.value = value
       c.numFmt = fmt
     }
     total('Credited', Math.round(p.scorecardHours), N0)
+    if (p.hoursOverridden) tone(tr.getCell(px('Credited')), WARN)
     total('Build cost', p.finance.buildCost == null ? null : Math.round(p.finance.buildCost), MONEY)
     total('Investment', p.finance.investment == null ? null : Math.round(p.finance.investment), MONEY)
     for (let c = 1; c <= cols.length; c++) {

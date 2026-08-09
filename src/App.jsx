@@ -228,6 +228,29 @@ export default function App() {
     })
   }, [])
 
+  /**
+    * Type a figure over the calculated one on somebody's scorecard, or take it
+    * back off. Passing null for a key reverts THAT figure and leaves the other.
+    */
+  const setPersonOverride = useCallback((id, patch) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) => {
+        if (p.id !== id) return p
+        const next = { ...(p.overrides || {}), ...patch }
+        for (const k of Object.keys(next)) if (next[k] == null) delete next[k]
+        return { ...p, overrides: next }
+      }),
+    }))
+    const reverting = Object.values(patch).every((v) => v == null)
+    setToast({
+      severity: reverting ? 'success' : 'warning',
+      msg: reverting
+        ? 'Back to the figure the project register calculates.'
+        : 'Manual figure set. It shows on the scorecard and in the export; the project register is unchanged.',
+    })
+  }, [])
+
   /** Add or update a KPI line somebody writes by hand. */
   const savePersonKpiLine = useCallback((id, line) => {
     setState((s) => ({
@@ -505,6 +528,7 @@ export default function App() {
               onResetKpi={resetPersonKpi}
               onRemoveLine={removePersonKpiLine}
               onSaveLine={savePersonKpiLine}
+              onOverride={setPersonOverride}
               onRestoreLine={restorePersonKpiLine}
               onAddObjective={addPersonObjective}
               onRemoveObjective={removePersonObjective}

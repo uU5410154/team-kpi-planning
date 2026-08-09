@@ -445,6 +445,86 @@ export function normalizeCustomLines(lines) {
     })
 }
 
+/**
+ * A figure somebody has typed over the calculated one.
+ *
+ * The scorecard is normally a reflection of the project register: credited
+ * hours are the sum of a person's share of their projects, and the money is
+ * those hours priced. Sometimes that is not the number to appraise against —
+ * work outside the register, an agreed carve-out, a figure already committed
+ * upstairs — and the plan has to be able to say so.
+ *
+ * Two rules keep an override honest:
+ *   - it never edits the register. The project book, the committed team total
+ *     and every ROI stay exactly what the projects say. An override changes
+ *     what a SCORECARD claims, and the app states everywhere that it is manual;
+ *   - it is always reversible, and the calculated figure is kept beside it, so
+ *     "revert" is a fact rather than a re-derivation that might not match.
+ */
+export function personOverrides(person) {
+  const o = (person && person.overrides) || {}
+  // Absence has to be tested BEFORE coercion: Number(null) and Number('') are
+  // both 0, so an absent override read as a deliberate override of zero and
+  // wiped the figure it was supposed to leave alone.
+  const num = (v) => {
+    if (v == null || v === '') return null
+    const n = Number(v)
+    return Number.isFinite(n) && n >= 0 ? n : null
+  }
+  return { hours: num(o.hours), money: num(o.money) }
+}
+
+export const hasOverride = (person) => {
+  const o = personOverrides(person)
+  return o.hours != null || o.money != null
+}
+
+/** Scale a per-objective map so its parts still add to the whole. */
+function scaleByObjective(map, k) {
+  if (!(k >= 0) || k === 1) return map
+  const out = {}
+  for (const [id, v] of Object.entries(map || {})) out[id] = v * k
+  return out
+}
+
+/**
+ * Apply a person's overrides to one set of scorecard figures.
+ *
+ * The per-objective maps are scaled by the same factor as the headline, so the
+ * KPI targets underneath still add up to the number above them. Money follows
+ * hours unless money is itself overridden — they are the same hours at the same
+ * rate, and letting them drift apart would put two answers on one card.
+ *
+ * `calcHours` and `calcMonthlyBenefit` come back untouched whatever happens, so
+ * the UI can show what the register says beside what the author typed.
+ */
+export function applyPersonOverride(person, figures) {
+  const ov = personOverrides(person)
+  const calcHours = figures.hours
+  const calcMonthlyBenefit = figures.monthlyBenefit
+
+  const hours = ov.hours != null ? ov.hours : calcHours
+  const hoursK = ov.hours != null && calcHours > 0 ? ov.hours / calcHours : 1
+  const monthlyBenefit = ov.money != null
+    ? ov.money / 12
+    : calcMonthlyBenefit * hoursK
+  const moneyK = calcMonthlyBenefit > 0 ? monthlyBenefit / calcMonthlyBenefit : 1
+
+  return {
+    ...figures,
+    hours,
+    monthlyBenefit,
+    byObjective: scaleByObjective(figures.byObjective, hoursK),
+    benefitByObjective: scaleByObjective(figures.benefitByObjective, moneyK),
+    calcHours,
+    calcMonthlyBenefit,
+    calcAnnualBenefit: calcMonthlyBenefit * 12,
+    hoursOverridden: ov.hours != null,
+    moneyOverridden: ov.money != null,
+    overridden: ov.hours != null || ov.money != null,
+  }
+}
+
 export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
@@ -1513,24 +1593,36 @@ export function computePlan(state) {
     }
   })
 
+  /*
+   * A figure typed over the calculated one, applied BEFORE the team is summed.
+   *
+   * The lead's card is the sum of the others, and that has to keep being true
+   * of what those cards actually say — otherwise overriding somebody would
+   * leave the lead quietly disagreeing with the people it aggregates. The
+   * lead's own override is applied later, to the aggregate.
+   */
+  const byPersonShown = byPerson.map((p) => (p.aggregatesTeam === true
+    ? { ...p, calcHours: p.hours, calcMonthlyBenefit: p.monthlyBenefit, overridden: false, hoursOverridden: false, moneyOverridden: false }
+    : applyPersonOverride(p, p)))
+
   /* ---- the team lead's scorecard is the TEAM's scorecard ------------- */
   // A lead flagged aggregatesTeam is measured on everything the team delivers,
   // not just their own slice. Their figures are built by summing the others'
   // rather than re-deriving from projects, so the lead's number is provably
   // the sum of the team's and the two can never disagree.
-  const teamHours = byPerson.reduce((a, p) => a + p.hours, 0)
-  const teamManday = byPerson.reduce((a, p) => a + p.manday, 0)
-  const teamMonthlyBenefit = byPerson.reduce((a, p) => a + p.monthlyBenefit, 0)
-  const teamBuildCost = byPerson.reduce((a, p) => a + (p.buildCost || 0), 0)
-  const teamCapex = byPerson.reduce((a, p) => a + (p.capex || 0), 0)
-  const teamInvestment = byPerson.reduce((a, p) => a + (p.investment || 0), 0)
-  const teamOpexRunRate = byPerson.reduce((a, p) => a + (p.opexRunRate || 0), 0)
-  const teamOpexYear = byPerson.reduce((a, p) => a + (p.opexYear || 0), 0)
-  const teamCostedBenefit = byPerson.reduce((a, p) => a + (p.costedBenefit || 0), 0)
-  const teamCostedCount = byPerson.reduce((a, p) => a + p.costedCount, 0)
+  const teamHours = byPersonShown.reduce((a, p) => a + p.hours, 0)
+  const teamManday = byPersonShown.reduce((a, p) => a + p.manday, 0)
+  const teamMonthlyBenefit = byPersonShown.reduce((a, p) => a + p.monthlyBenefit, 0)
+  const teamBuildCost = byPersonShown.reduce((a, p) => a + (p.buildCost || 0), 0)
+  const teamCapex = byPersonShown.reduce((a, p) => a + (p.capex || 0), 0)
+  const teamInvestment = byPersonShown.reduce((a, p) => a + (p.investment || 0), 0)
+  const teamOpexRunRate = byPersonShown.reduce((a, p) => a + (p.opexRunRate || 0), 0)
+  const teamOpexYear = byPersonShown.reduce((a, p) => a + (p.opexYear || 0), 0)
+  const teamCostedBenefit = byPersonShown.reduce((a, p) => a + (p.costedBenefit || 0), 0)
+  const teamCostedCount = byPersonShown.reduce((a, p) => a + p.costedCount, 0)
   const teamByObjective = {}
   const teamBenefitByObjective = {}
-  for (const p of byPerson) {
+  for (const p of byPersonShown) {
     for (const [k, v] of Object.entries(p.byObjective)) teamByObjective[k] = (teamByObjective[k] || 0) + v
     for (const [k, v] of Object.entries(p.benefitByObjective)) {
       teamBenefitByObjective[k] = (teamBenefitByObjective[k] || 0) + v
@@ -1538,12 +1630,22 @@ export function computePlan(state) {
   }
   const teamCounted = perProject.filter((p) => isCounted(p) && Object.keys(p.shares).length > 0)
 
-  const withScorecards = byPerson.map((p) => {
+  const withScorecards = byPersonShown.map((p) => {
     const aggregates = p.aggregatesTeam === true
-    const scHours = aggregates ? teamHours : p.hours
+    // The lead's override lands on the AGGREGATE, which is what their card
+    // shows; everyone else's has already been applied above.
+    const led = aggregates
+      ? applyPersonOverride(p, {
+        hours: teamHours,
+        monthlyBenefit: teamMonthlyBenefit,
+        byObjective: teamByObjective,
+        benefitByObjective: teamBenefitByObjective,
+      })
+      : null
+    const scHours = aggregates ? led.hours : p.hours
     const scManday = aggregates ? teamManday : p.manday
-    const scByObjective = aggregates ? teamByObjective : p.byObjective
-    const scBenefitByObjective = aggregates ? teamBenefitByObjective : p.benefitByObjective
+    const scByObjective = aggregates ? led.byObjective : p.byObjective
+    const scBenefitByObjective = aggregates ? led.benefitByObjective : p.benefitByObjective
     // The lead's portfolio is the whole in-plan book, so it re-adds to the
     // headline above it.
     const scRows = aggregates ? teamCounted.map((pr) => ({ p: pr, share: 1, owner: pr.pic })) : p.rows
@@ -1569,7 +1671,7 @@ export function computePlan(state) {
 
     // Money on the same aggregation rule as the hours: the lead carries the
     // team's, everyone else carries their own.
-    const scMonthlyBenefit = aggregates ? teamMonthlyBenefit : p.monthlyBenefit
+    const scMonthlyBenefit = aggregates ? led.monthlyBenefit : p.monthlyBenefit
     const scCostedCount = aggregates ? teamCostedCount : p.costedCount
     const scBuildCost = scCostedCount > 0 ? (aggregates ? teamBuildCost : p.buildCost) : null
     const scCapex = scCostedCount > 0 ? (aggregates ? teamCapex : p.capex) : null
@@ -1613,6 +1715,13 @@ export function computePlan(state) {
     return {
       ...withObjectives,
       scorecardHours: scHours,
+      // What the register says, kept beside what the card claims: "revert" is
+      // then a stored fact rather than a re-derivation that might not match.
+      calcScorecardHours: aggregates ? led.calcHours : p.calcHours,
+      calcAnnualBenefit: (aggregates ? led.calcMonthlyBenefit : p.calcMonthlyBenefit) * 12,
+      hoursOverridden: aggregates ? led.hoursOverridden : p.hoursOverridden,
+      moneyOverridden: aggregates ? led.moneyOverridden : p.moneyOverridden,
+      overridden: aggregates ? led.overridden : p.overridden,
       scorecardManday: scManday,
       scorecardRows: scRows,
       scorecardCount: scRows.length,
@@ -1624,7 +1733,10 @@ export function computePlan(state) {
       // whole team — anything that stacks per-person bars must use this one or
       // the lead's bar repeats everybody else's.
       ownByObjective: p.byObjective,
-      ownHours: p.hours,
+      // What this person's own projects actually credit them. Their own share
+      // of the real book, never the typed-over figure — the context line beside
+      // the headline exists precisely to say what the register says.
+      ownHours: p.calcHours ?? p.hours,
       ownCount: p.countedCount,
       ratio: scManday > 0 ? scHours / scManday : null,
       derivedObjectives,
