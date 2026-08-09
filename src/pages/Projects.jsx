@@ -17,7 +17,7 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
-  normalizeSoftBenefits, softBenefitsText,
+  normalizeSoftBenefits, softBenefitsText, impliedObjectives,
 } from '../lib/model.js'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
@@ -196,10 +196,28 @@ function AlsoServes({ project, onChange }) {
   const [anchor, setAnchor] = useState(null)
   const extra = (Array.isArray(project.objectives) ? project.objectives : [])
     .filter((id) => OBJ_BY_ID[id] && id !== project.objective)
-  const spare = OBJECTIVES.filter((o) => o.id !== project.objective && !extra.includes(o.id))
+  // Every project answers to these two: the return is worked out over all of
+  // them and the hours objective collects every saving hour. Shown, not
+  // implied — a row naming one objective reads as if the others do not apply.
+  const implied = impliedObjectives().filter((id) => id !== project.objective && !extra.includes(id))
+  const spare = OBJECTIVES.filter((o) => o.id !== project.objective
+    && !extra.includes(o.id) && !implied.includes(o.id))
 
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexWrap: 'wrap', mt: 0.25 }}>
+      {implied.map((id) => (
+        <Chip
+          key={id}
+          size="small"
+          variant="outlined"
+          label={`+${OBJ_BY_ID[id].no}`}
+          title={`Every project serves ${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].name} — ${
+            OBJ_BY_ID[id].measure === 'ratio'
+              ? 'its return is worked out over the whole register'
+              : 'its saving hours all count here'}. It cannot be removed.`}
+          sx={{ height: 17, fontSize: '0.625rem', fontWeight: 700, opacity: 0.62 }}
+        />
+      ))}
       {extra.map((id) => (
         <Chip
           key={id}

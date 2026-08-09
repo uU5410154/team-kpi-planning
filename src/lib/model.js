@@ -457,8 +457,20 @@ export const MONEY_OBJECTIVE = (OBJECTIVES.find((o) => o.measure === 'money'
 export const RATIO_OBJECTIVE = (OBJECTIVES.find((o) => o.measure === 'ratio') || {}).id || null
 export const COUNT_OBJECTIVES = OBJECTIVES.filter((o) => o.measure === 'count').map((o) => o.id)
 
+/**
+ * The objectives EVERY project serves, tag or no tag.
+ *
+ * The return is worked out over every project and the hours objective collects
+ * every saving hour, so both are true of everything in the register. They are
+ * shown on each row rather than left implicit — a register that only names one
+ * of the objectives a project answers to is a register that reads as if the
+ * others do not apply to it.
+ */
+export const impliedObjectives = () => [RATIO_OBJECTIVE, HOURS_OBJECTIVE].filter(Boolean)
+
 /** Does this project's work count toward that objective? */
-export const servesObjective = (p, id) => projectObjectives(p).includes(id)
+export const servesObjective = (p, id) => impliedObjectives().includes(id)
+  || projectObjectives(p).includes(id)
 
 /**
  * How a KPI target is expressed.
