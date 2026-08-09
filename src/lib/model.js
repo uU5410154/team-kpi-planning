@@ -115,6 +115,11 @@ export const DEFAULT_FINANCE = {
   // acctHourRate), and g = 2.0 lands that on 4.0. Change the salaries and the
   // equivalent hours-per-manday moves with them — which is the point.
   roiGate: 2.0,
+  // How the accountant rate was arrived at. Stated rather than derived: the
+  // blend behind it is a management assumption, not something the register
+  // knows, and it belongs beside the number it produced.
+  acctRateNote: 'Based on a blended user mix of 20% Manager and 80% Staff: '
+    + '(20% x THB 6,500 x 22 days) + (80% x THB 1,700 x 22 days)',
 }
 
 /**
@@ -148,6 +153,7 @@ export function financeRates(settings) {
     hoursPerManday,
     horizonMonths,
     roiGate: Number.isFinite(f.roiGate) && f.roiGate >= 0 ? f.roiGate : DEFAULT_FINANCE.roiGate,
+    acctRateNote: String(f.acctRateNote ?? DEFAULT_FINANCE.acctRateNote ?? ''),
     daysPerFteMonth,
     /** Cost of one manday of build. */
     devDayRate,

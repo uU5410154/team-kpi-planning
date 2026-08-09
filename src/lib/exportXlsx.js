@@ -188,9 +188,22 @@ export async function buildWorkbook(plan, state) {
     r++
     sectionRow(ws, r++, `OBJECTIVE 1 — IS THE BUILD WORTH IT (${cur})`, 3)
     const gateStart = r
-    kv('Developer salary (per month)', fin.devMonthlySalary, MONEY)
+    // Where the two rates come from, beside the rates themselves. A number
+    // this much depends on should not need a conversation to explain it.
+    const note = (row, text) => {
+      const c = row.getCell(3)
+      c.value = text
+      c.font = { name: FONT, size: 9, italic: true, color: { argb: MUTED } }
+      c.alignment = { horizontal: 'left', vertical: 'top', wrapText: true }
+      row.height = Math.min(64, 14 * (1 + Math.floor(text.length / 60)))
+    }
+    note(kv('Developer salary (per month)', fin.devMonthlySalary, MONEY),
+      `${cur} ${Math.round(fin.devMonthlySalary).toLocaleString()}/month = ${cur} ${Math.round(fin.devDayRate).toLocaleString()}`
+      + ` per manday x ${fin.daysPerFteMonth} working days`)
     kv('  = cost of one manday', Math.round(fin.devDayRate), MONEY)
-    kv('Accountant salary (per month)', fin.acctMonthlySalary, MONEY)
+    note(kv('Accountant salary (per month)', fin.acctMonthlySalary, MONEY),
+      `${cur} ${Math.round(fin.acctMonthlySalary).toLocaleString()}/month`
+      + (fin.acctRateNote ? ` — ${fin.acctRateNote} = ${cur} ${Math.round(fin.acctMonthlySalary).toLocaleString()}` : ''))
     kv('  = value of one saved hour', Math.round(fin.acctHourRate), MONEY)
     kv('On-cost multiplier applied to both', fin.loadFactor, N1)
     kv('Hours per FTE / month (the FTE ratio)', fin.hoursPerFteMonth, N1)
@@ -369,7 +382,29 @@ export async function buildWorkbook(plan, state) {
     })
     styleBody(ws, first, r - 1, width)
 
-    r++
+    // The saving hours each person's card states, under their own columns —
+    // the same figure their scorecard totals to, so the two can be checked
+    // against each other without leaving the sheet.
+    const tot = ws.getRow(r++)
+    tot.getCell(3).value = `TOTAL SAVING ${unit.toUpperCase()}`
+    tot.getCell(3).font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } }
+    people.forEach((p, i) => {
+      const c = tot.getCell(4 + i * 3)
+      c.value = Number((p.kpiTotals.savingHours || 0).toFixed(1))
+      c.numFmt = N1
+      c.alignment = { horizontal: 'center' }
+      tone(c, NAVY)
+      // What the register credits, beside it, where the card states something
+      // different — so a typed target is never silent on this sheet either.
+      const actual = tot.getCell(4 + i * 3 + 2)
+      actual.value = Number((p.registerHours || 0).toFixed(1))
+      actual.numFmt = N1
+      actual.alignment = { horizontal: 'right' }
+      if (Math.abs((p.kpiTotals.savingHours || 0) - (p.registerHours || 0)) > 0.5) tone(actual, WARN, false)
+    })
+    tot.height = 18
+    for (let c = 1; c <= width; c++) tot.getCell(c).border = { top: { style: 'medium', color: { argb: NAVY } }, bottom: thin }
+
     const chk = ws.getRow(r)
     chk.getCell(3).value = 'WEIGHT TOTAL — must be 100%'
     chk.getCell(3).font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } }
@@ -410,6 +445,11 @@ export async function buildWorkbook(plan, state) {
     const ec = (label) => cols.findIndex((c) => String(c[0]).startsWith(label)) + 1
 
     const ws = wb.addWorksheet('Effort_Return', {
+      // Hidden, not removed: the register and the per-person sheets quote
+      // figures that are worked out here, and deleting the working would leave
+      // nothing to check them against. Right-click any tab and Unhide to read
+      // it.
+      state: 'hidden',
       properties: { tabColor: { argb: 'FF7C5CD6' } },
       views: [{ state: 'frozen', xSplit: 2, ySplit: 4 }],
       pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
@@ -536,8 +576,8 @@ export async function buildWorkbook(plan, state) {
     const cols = [
       ['Jira', 12], ['Project', 42], ['Objective', 22],
       [`Project ${unit}`, 14], ['Credited', 11],
-      [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14],
-      [`Cash benefit/yr (${cur})`, 16], ['Status', 13],
+      ['Mandays', 11], [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14],
+      [`Cash benefit/yr (${cur})`, 16], ['ROI', 10], ['Status', 13],
       // What each project delivers beyond the hours. On the person's own sheet
       // because a scorecard read on its own has to carry the whole case.
       ['Soft benefits', 46],
@@ -636,16 +676,26 @@ export async function buildWorkbook(plan, state) {
         // `inTotal` is the SAME predicate model.js uses to build p.finance —
         // counted, pool-eligible, and carrying both a cost and a benefit. The
         // rows printed here therefore add up to the TOTAL CREDITED row below.
+        // Effort and return, on the person's own sheet: the same figures the
+        // Projects tab shows, credited on this person's share where the money
+        // is theirs and stated whole where it belongs to the project.
+        pr.manday || null,
         !inTotal || pr.buildCost == null ? null : Math.round(pr.buildCost * share),
         !inTotal || pr.investment == null ? null : Math.round(pr.investment * share),
         // Credited on the same share as the hours: it is the same project.
         !counted || !pr.monetaryAnnualBenefit ? null : Math.round(pr.monetaryAnnualBenefit * share),
+        // A ratio, so it is NOT shared out: the project returns what it
+        // returns whoever is credited on it.
+        !inTotal || pr.roi == null ? null : Number(pr.roi.toFixed(4)),
         pr.status || '',
         // Not shared out: a soft benefit is not divisible. Two people credited
         // on a project both deliver the whole of it.
         counted ? (pr.softBenefits || []).map((b) => `• ${b}`).join('\n') : '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
+      row.getCell(px('Mandays')).numFmt = N1
+      row.getCell(px('ROI')).numFmt = ROI
+      if (inTotal && pr.roi != null) tone(row.getCell(px('ROI')), pr.gate === 'pass' ? GOOD : BAD, false)
       if (counted && (pr.softBenefits || []).length) {
         row.getCell(px('Soft benefits')).alignment = { vertical: 'top', wrapText: true }
         row.height = Math.min(90, 12 + pr.softBenefits.length * 12)
@@ -669,6 +719,8 @@ export async function buildWorkbook(plan, state) {
       c.numFmt = fmt
     }
     total('Credited', Math.round(p.scorecardHours), N0)
+    total('Mandays', Number((p.scorecardManday || 0).toFixed(1)), N1)
+    total('ROI', p.finance.roi == null ? null : Number(p.finance.roi.toFixed(4)), ROI)
     if (p.hoursOverridden) tone(tr.getCell(px('Credited')), WARN)
     total('Build cost', p.finance.buildCost == null ? null : Math.round(p.finance.buildCost), MONEY)
     total('Investment', p.finance.investment == null ? null : Math.round(p.finance.investment), MONEY)
