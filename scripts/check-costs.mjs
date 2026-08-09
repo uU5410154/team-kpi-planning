@@ -21,6 +21,7 @@ import {
   financeRates, gateStatus, isInPlan, countsToPool, isCounted,
   DEFAULT_SETTINGS, DEFAULT_FINANCE, MONTHS_IN_YEAR, MONTH_LABELS, newProject, newOpexLine,
   fmtMoney, fmtRoi,
+  mandayToMoney, moneyToManday,
 } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
@@ -623,6 +624,84 @@ console.log('\n--- the exported workbook carries the same numbers ---')
   }
 
   unlinkSync(file)
+}
+
+
+/* ================= tasks, and the manday they resolve to ================= */
+console.log('\n--- effort broken into tasks ---')
+{
+  const F = financeRates(DEFAULT_SETTINGS)
+  const one = base.projects.find((p) => p.savingHours > 0)
+  const withTasks = (tasks, stored) => computePlan({
+    ...base,
+    projects: base.projects.map((p) => (p.key === one.key ? { ...p, manday: stored ?? 0, tasks } : p)),
+  }).projects.find((p) => p.key === one.key)
+
+  check('tasks sum to the project manday',
+    withTasks([{ id: 'a', manday: 4 }, { id: 'b', manday: 11 }]).manday === 15, '4 + 11')
+  check('and they beat a stale stored total',
+    withTasks([{ id: 'a', manday: 4 }, { id: 'b', manday: 11 }], 99).manday === 15,
+    'stored 99, tasks 15')
+  check('no tasks keeps the stored total', withTasks([], 7).manday === 7)
+  check('removing every task falls back to the stored total', withTasks([], 7).manday === 7)
+  check('build cost follows the resolved manday', (() => {
+    const p = withTasks([{ id: 'a', manday: 10 }])
+    return near(p.buildCost, 10 * F.devDayRate, 1e-6)
+  })(), fmtMoney(withTasks([{ id: 'a', manday: 10 }]).buildCost))
+  check('the investment follows it too', (() => {
+    const p = withTasks([{ id: 'a', manday: 10 }])
+    return near(p.investment, 10 * F.devDayRate, 1e-6)
+  })())
+
+  // Junk cannot reach a total.
+  const junk = withTasks([
+    { id: 'a', manday: NaN }, { id: 'b', manday: Infinity },
+    { id: 'c', manday: -5 }, { id: 'd', manday: 'abc' }, { id: 'e', manday: 3 },
+  ])
+  check('non-finite and negative task effort is neutralised', junk.manday === 3, String(junk.manday))
+  check('and nothing downstream goes non-finite',
+    Number.isFinite(junk.buildCost) && Number.isFinite(junk.investment))
+
+  check('a task list that is not a list is ignored', (() => {
+    const p = computePlan({
+      ...base,
+      projects: base.projects.map((x) => (x.key === one.key ? { ...x, manday: 6, tasks: 'nope' } : x)),
+    }).projects.find((x) => x.key === one.key)
+    return p.manday === 6
+  })())
+
+  // Money <-> manday, both ways, at the live rate.
+  check('mandays convert to money at the developer day rate',
+    near(mandayToMoney(10, F), 10 * F.devDayRate, 1e-9), fmtMoney(mandayToMoney(10, F)))
+  check('and money converts back', near(moneyToManday(mandayToMoney(10, F), F), 10, 1e-9))
+  check('the conversion re-prices when the salary moves', (() => {
+    const dearer = financeRates({ finance: { ...DEFAULT_FINANCE, devMonthlySalary: 120000 } })
+    // Same 10 mandays of WORK, twice the money — the effort is what is stored.
+    return near(mandayToMoney(10, dearer), 2 * mandayToMoney(10, F), 1e-9)
+  })())
+
+  check('the plan manday total counts the resolved figures', (() => {
+    const plan2 = computePlan({
+      ...base,
+      projects: base.projects.map((p, i) => (i < 3 ? { ...p, manday: 0, tasks: [{ id: 'x', manday: 2 }] } : p)),
+    })
+    return near(plan2.finance.planMandays, 6, 1e-9)
+  })())
+
+  check('comments survive computePlan untouched', (() => {
+    const p = computePlan({
+      ...base,
+      projects: base.projects.map((x) => (x.key === one.key ? { ...x, comment: 'see https://x.test/a' } : x)),
+    }).projects.find((x) => x.key === one.key)
+    return p.comment === 'see https://x.test/a'
+  })())
+  check('a non-string comment becomes an empty string', (() => {
+    const p = computePlan({
+      ...base,
+      projects: base.projects.map((x) => (x.key === one.key ? { ...x, comment: 42 } : x)),
+    }).projects.find((x) => x.key === one.key)
+    return p.comment === ''
+  })())
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)

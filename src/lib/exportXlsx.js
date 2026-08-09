@@ -655,7 +655,123 @@ export async function buildWorkbook(plan, state) {
     grand.height = 20
   }
 
-  /* ============ 5. one sheet per person ============ */
+  /* ============ 5. Effort & Return — mandays, ROI and payback ============
+   *
+   * Asked for as its own sheet. One block per project: the task lines that make
+   * up its effort, then the project total, then what that effort costs and what
+   * it returns. Every figure here is the same one computePlan produced — the
+   * suite reconciles this sheet against the Projects sheet row for row, so the
+   * two can never drift.
+   */
+  {
+    const cols = [
+      ['Jira', 12], ['Project', 40], ['PIC', 12], ['Line', 30],
+      ['Mandays', 11], [`Cost (${cur})`, 14],
+      [`CAPEX (${cur})`, 13], [`Investment (${cur})`, 15],
+      [`OPEX/mth (${cur})`, 13], [`Benefit/yr (${cur})`, 15],
+      ['ROI', 10], ['Payback (mo)', 12], ['Gate', 9], ['Commit', 11],
+    ]
+    const ws = wb.addWorksheet('Effort_Return', {
+      properties: { tabColor: { argb: 'FF7C5CD6' } },
+      views: [{ state: 'frozen', xSplit: 2, ySplit: 4 }],
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    })
+    banner(ws, 'EFFORT AND RETURN',
+      `mandays at ${Math.round(fin.devDayRate).toLocaleString()} ${cur} each · return over ${fin.horizonMonths} months · gate ${Math.round(fin.roiGate * 100)}%`,
+      cols.length)
+    headerRow(ws, 4, cols.map((c) => c[0]), cols.map((c) => c[1]))
+
+    let r = 5
+    const first = r
+    const inPlan = projects.filter((p) => !OUT_OF_PLAN.has(p.commitLevel))
+    const sorted = [...inPlan].sort((a, b) => (b.manday || 0) - (a.manday || 0))
+
+    for (const p of sorted) {
+      const person = people.find((x) => x.id === p.pic)
+      const tasks = p.tasks || []
+
+      // The task lines, where there are any. A project imported with a bare
+      // total gets ONE line saying so, which is exactly what the app shows when
+      // its breakdown is opened.
+      const lines = tasks.length
+        ? tasks.map((t) => [t.label || '(unnamed task)', t.manday])
+        : (p.manday > 0 ? [['Total as entered', p.manday]] : [])
+
+      for (const [label, md] of lines) {
+        const row = ws.getRow(r++)
+        row.getCell(1).value = p.jiraKey || ''
+        row.getCell(2).value = p.summary
+        row.getCell(4).value = label
+        row.getCell(5).value = md
+        row.getCell(5).numFmt = N1
+        row.getCell(6).value = Math.round(md * fin.devDayRate)
+        row.getCell(6).numFmt = MONEY
+        for (const c of [5, 6]) row.getCell(c).alignment = { horizontal: 'right' }
+        tone(row.getCell(4), MUTED, false)
+      }
+
+      // The project line: its total effort and everything that follows from it.
+      const tr = ws.getRow(r++)
+      tr.values = [
+        p.jiraKey || '',
+        p.summary,
+        person ? person.nick : 'TBC',
+        lines.length > 1 ? `TOTAL — ${lines.length} tasks` : 'TOTAL',
+        p.manday || null,
+        p.buildCost == null ? null : Math.round(p.buildCost),
+        p.capex == null ? null : Math.round(p.capex),
+        p.investment == null ? null : Math.round(p.investment),
+        p.opexRunRate > 0 ? Math.round(p.opexRunRate) : null,
+        p.annualBenefit == null ? null : Math.round(p.annualBenefit),
+        p.roi == null ? null : Number(p.roi.toFixed(4)),
+        p.paybackMonths == null ? null : Number(p.paybackMonths.toFixed(1)),
+        p.gate === 'unknown' ? '' : p.gate === 'pass' ? 'Pass' : 'Below',
+        p.commitLevel,
+      ]
+      tr.getCell(5).numFmt = N1
+      for (const c of [6, 7, 8, 9, 10]) tr.getCell(c).numFmt = MONEY
+      tr.getCell(11).numFmt = ROI
+      tr.getCell(12).numFmt = N1
+      for (let c = 5; c <= 12; c++) tr.getCell(c).alignment = { horizontal: 'right' }
+      for (const c of [3, 13, 14]) tr.getCell(c).alignment = { horizontal: 'center' }
+      for (let c = 1; c <= cols.length; c++) tr.getCell(c).font = { name: FONT, size: 9.5, bold: true }
+      if (p.gate === 'fail') { tone(tr.getCell(11), BAD); tone(tr.getCell(13), BAD) }
+      if (p.gate === 'pass') { tone(tr.getCell(11), GOOD); tone(tr.getCell(13), GOOD) }
+      // Payback is blank when OPEX is at or above the benefit — say why here
+      // too, since this sheet is read on its own.
+      // "never" means the running cost eats the benefit — NOT that the benefit
+      // is merely unknown, which is a blank.
+      if (p.investment != null && p.paybackMonths == null && p.netMonthly != null && p.netMonthly <= 0) {
+        tr.getCell(12).value = 'never'
+        tone(tr.getCell(12), BAD)
+      }
+    }
+    styleBody(ws, first, r - 1, cols.length)
+
+    const gr = ws.getRow(r)
+    gr.getCell(2).value = `PLAN TOTAL — ${inPlan.length} in-plan projects`
+    gr.getCell(5).value = Math.round(fin.planMandays * 10) / 10
+    gr.getCell(5).numFmt = N1
+    gr.getCell(6).value = fin.planBuildCost == null ? null : Math.round(fin.planBuildCost)
+    gr.getCell(7).value = Math.round(fin.planCapex)
+    gr.getCell(8).value = Math.round(fin.planInvestment)
+    gr.getCell(9).value = Math.round(fin.planOpexRunRate)
+    gr.getCell(10).value = Math.round(fin.annualBenefit)
+    for (const c of [6, 7, 8, 9, 10]) gr.getCell(c).numFmt = MONEY
+    gr.getCell(11).value = fin.roi == null ? null : Number(fin.roi.toFixed(4))
+    gr.getCell(11).numFmt = ROI
+    gr.getCell(12).value = fin.paybackMonths == null ? null : Number(fin.paybackMonths.toFixed(1))
+    gr.getCell(12).numFmt = N1
+    for (let c = 1; c <= cols.length; c++) {
+      const cell = gr.getCell(c)
+      cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
+      cell.fill = fill(NAVY)
+      cell.alignment = { horizontal: c >= 5 && c <= 12 ? 'right' : 'left', vertical: 'middle' }
+    }
+    gr.height = 20
+  }
+
+  /* ============ 6. one sheet per person ============ */
   for (const p of people) {
     // Money columns carry this person's SHARE of each project, so the column
     // adds up to the figure in their POSITION block rather than to the whole

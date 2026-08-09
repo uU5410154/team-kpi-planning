@@ -13,11 +13,12 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
 } from '../lib/model.js'
-import ProjectCostDialog, { rowOpenHandler } from '../components/ProjectCostDialog.jsx'
+import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_COLOR = {
@@ -574,6 +575,10 @@ export default function Projects({
               <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }}>
                 <Checkbox size="small" checked={allSelected} indeterminate={sel.size > 0 && !allSelected} onChange={toggleAll} />
               </TableCell>
+              {/* Opening the cost panel is an explicit button, not a click
+                  anywhere on the row — a row full of editable cells is a bad
+                  click target, and an accidental popup mid-edit is worse. */}
+              <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }} />
               {head('jiraKey', 'Jira', 'left', 88)}
               {head('summary', 'Project')}
               <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
@@ -600,11 +605,7 @@ export default function Projects({
                   key={p.key}
                   hover
                   selected={sel.has(p.key)}
-                  // Opens the cost dialog — except on the editable cells, the
-                  // dropdowns, the checkbox and the delete button, which every
-                  // row carries and which must keep doing their own job.
-                  onClick={rowOpenHandler(() => setCostKey(p.key))}
-                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) ? 0.55 : 1, cursor: 'pointer' }}
+                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) ? 0.55 : 1 }}
                 >
                   <TableCell padding="checkbox">
                     <Checkbox
@@ -616,6 +617,13 @@ export default function Projects({
                         return n
                       })}
                     />
+                  </TableCell>
+                  <TableCell padding="checkbox">
+                    <Tooltip title={`Effort, CAPEX, monthly cost and notes for ${p.jiraKey || p.key}`}>
+                      <IconButton size="small" onClick={() => setCostKey(p.key)} aria-label="open cost breakdown">
+                        <ReceiptLongIcon sx={{ fontSize: 17, color: p.comment ? STATUS.good : undefined }} />
+                      </IconButton>
+                    </Tooltip>
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
                     <TextCell
@@ -731,12 +739,31 @@ export default function Projects({
                     </Tooltip>
                   </TableCell>
                   <TableCell align="right">
-                    <NumCell
-                      value={p.manday}
-                      width={56}
-                      estimated={p.mandayEstimated}
-                      onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
-                    />
+                    {p.tasks && p.tasks.length ? (
+                      // Derived from the tasks, so it is a result, not an input.
+                      // Clicking it opens the breakdown it is the sum of.
+                      <Tooltip title={`${p.tasks.length} task${p.tasks.length === 1 ? '' : 's'} totalling ${fmtHours(p.manday)} mandays — click to see the breakdown`}>
+                        <Box
+                          component="button"
+                          type="button"
+                          onClick={() => setCostKey(p.key)}
+                          sx={{
+                            border: 0, background: 'none', p: 0, cursor: 'pointer', font: 'inherit',
+                            fontSize: '0.8125rem', fontVariantNumeric: 'tabular-nums',
+                            color: 'primary.main', textDecoration: 'underline dotted',
+                          }}
+                        >
+                          {fmtHours(p.manday)}
+                        </Box>
+                      </Tooltip>
+                    ) : (
+                      <NumCell
+                        value={p.manday}
+                        width={56}
+                        estimated={p.mandayEstimated}
+                        onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
+                      />
+                    )}
                   </TableCell>
                   <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
                     {p.investment == null ? (

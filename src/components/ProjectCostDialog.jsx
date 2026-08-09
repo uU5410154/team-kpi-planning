@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography, Button, IconButton,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, Select, MenuItem, Tooltip,
-  Divider, Chip, Alert,
+  Divider, Chip, Alert, InputAdornment, Link,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
@@ -10,7 +10,80 @@ import CloseIcon from '@mui/icons-material/Close'
 import { STATUS } from '../lib/palette.js'
 import {
   MONTH_LABELS, MONTHS_IN_YEAR, newOpexLine, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtHours,
+  normalizeTasks, mandayToMoney, moneyToManday,
 } from '../lib/model.js'
+
+/**
+ * A number that commits on blur, shown in mandays and in money side by side.
+ * Typing in either fills the other at the developer day rate. The MANDAY is
+ * what gets stored — money is a view of it — so changing the developer salary
+ * re-prices the plan instead of silently changing how much work a task is.
+ */
+function EffortField({ manday, onChange, rates, symbol }) {
+  const asMd = (v) => (v ? String(v) : '')
+  const asMoney = (v) => (v ? String(Math.round(mandayToMoney(v, rates) || 0)) : '')
+  const [md, setMd] = useState(asMd(manday))
+  const [money, setMoney] = useState(asMoney(manday))
+  const [editing, setEditing] = useState(false)
+  // Follow the stored value whenever the user is not mid-edit.
+  if (!editing && md !== asMd(manday)) { setMd(asMd(manday)); setMoney(asMoney(manday)) }
+
+  const num = (t) => Number(String(t).replace(/[,\s]/g, ''))
+  const commit = (next) => {
+    const v = Number.isFinite(next) && next > 0 ? Math.round(next * 100) / 100 : 0
+    if (v !== manday) onChange(v)
+    setMd(asMd(v))
+    setMoney(asMoney(v))
+  }
+
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+      <TextField
+        size="small"
+        label="Mandays"
+        value={md}
+        onFocus={() => setEditing(true)}
+        onChange={(e) => {
+          setMd(e.target.value)
+          const n = num(e.target.value)
+          setMoney(Number.isFinite(n) ? String(Math.round(mandayToMoney(n, rates) || 0)) : '')
+        }}
+        onBlur={() => { setEditing(false); commit(num(md)) }}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 68 } }}
+      />
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>=</Typography>
+      <TextField
+        size="small"
+        label="Cost"
+        value={money}
+        onFocus={() => setEditing(true)}
+        onChange={(e) => {
+          setMoney(e.target.value)
+          const n = num(e.target.value)
+          const asDays = moneyToManday(n, rates)
+          setMd(Number.isFinite(asDays) ? String(Math.round(asDays * 100) / 100) : '')
+        }}
+        onBlur={() => { setEditing(false); commit(moneyToManday(num(money), rates)) }}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        InputProps={{ startAdornment: <InputAdornment position="start">{symbol}</InputAdornment> }}
+        inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 96 } }}
+      />
+    </Box>
+  )
+}
+
+/** Free text with any URL turned into a real link. */
+export function LinkedText({ text }) {
+  const parts = String(text || '').split(/(https?:\/\/[^\s]+)/g)
+  return (
+    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      {parts.map((t, i) => (/^https?:\/\//.test(t)
+        ? <Link key={i} href={t} target="_blank" rel="noopener noreferrer">{t}</Link>
+        : <span key={i}>{t}</span>))}
+    </Typography>
+  )
+}
 
 /*
  * Anything a click can land on that is already a control. A click on one of
@@ -126,6 +199,22 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
   const addLine = () => patchOpex([...opex, newOpexLine(opex.length + 1)])
   const removeLine = (id) => patchOpex(opex.filter((l) => l.id !== id))
 
+  /*
+   * A project imported from the workbook has a manday total and no tasks. Show
+   * that total as a single line rather than an empty table, so opening the
+   * breakdown never loses the number and never changes it. It becomes a real
+   * stored task the moment the user edits anything here.
+   */
+  const stored = normalizeTasks(p.tasks)
+  const tasks = stored.length
+    ? stored
+    : (p.manday > 0 ? [{ id: 't1', label: 'Total as entered', manday: p.manday, note: '' }] : [])
+  const taskTotal = tasks.reduce((a, t) => a + t.manday, 0)
+  const patchTasks = (next) => onUpdate(p.key, { tasks: next, mandayEstimated: false })
+  const setTask = (id, patch) => patchTasks(tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  const removeTask = (id) => patchTasks(tasks.filter((t) => t.id !== id))
+  const addTask = () => patchTasks([...tasks, { id: 't' + Date.now().toString(36), label: '', manday: 0, note: '' }])
+
   const lineYear = (l) => l.monthly * (l.endMonth - l.startMonth + 1)
   const active = (l, m) => m + 1 >= l.startMonth && m + 1 <= l.endMonth
 
@@ -180,6 +269,73 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
             invested in it. Payback is shown as blank rather than as a number — there isn't one.
           </Alert>
         )}
+
+        {/* ---------- effort ---------- */}
+        <Typography variant="h4" sx={{ mb: 0.5 }}>Effort — mandays by task</Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+          Break the build into tasks and the project total becomes the sum of them. Type either the mandays
+          or the cost — the other follows at {fmtMoney(fin.devDayRate, sym)} a manday. Mandays are what is
+          stored, so changing the developer salary re-prices the plan rather than changing the work.
+        </Typography>
+        <Table size="small" sx={{ mb: 1, '& th, & td': { px: 1 } }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Task</TableCell>
+              <TableCell sx={{ width: 300 }}>Effort</TableCell>
+              <TableCell>Note</TableCell>
+              <TableCell padding="checkbox" />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {tasks.map((t) => (
+              <TableRow key={t.id}>
+                <TableCell>
+                  <TextFieldOnBlur
+                    value={t.label}
+                    placeholder="What this covers"
+                    onChange={(v) => setTask(t.id, { label: v })}
+                    sx={{ width: '100%' }}
+                  />
+                </TableCell>
+                <TableCell>
+                  <EffortField
+                    manday={t.manday}
+                    rates={fin}
+                    symbol={sym}
+                    onChange={(v) => setTask(t.id, { manday: v })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextFieldOnBlur
+                    value={t.note}
+                    placeholder="optional"
+                    onChange={(v) => setTask(t.id, { note: v })}
+                    sx={{ width: '100%' }}
+                  />
+                </TableCell>
+                <TableCell padding="checkbox">
+                  <IconButton size="small" onClick={() => removeTask(t.id)} aria-label="remove task">
+                    <DeleteOutlineIcon sx={{ fontSize: 17 }} />
+                  </IconButton>
+                </TableCell>
+              </TableRow>
+            ))}
+            <TableRow>
+              <TableCell sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>TOTAL</TableCell>
+              <TableCell sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', borderTop: 2, borderColor: 'divider' }}>
+                {fmtHours(taskTotal)} mandays = {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
+              </TableCell>
+              <TableCell colSpan={2} sx={{ borderTop: 2, borderColor: 'divider' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  {stored.length
+                    ? 'the project carries the sum of these lines'
+                    : 'one line, carrying the total entered before this breakdown existed'}
+                </Typography>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <Button size="small" startIcon={<AddIcon />} onClick={addTask} sx={{ mb: 3 }}>Add task</Button>
 
         {/* ---------- CAPEX ---------- */}
         <Typography variant="h4" sx={{ mb: 0.5 }}>CAPEX — one-off investment</Typography>
@@ -408,6 +564,34 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
             2026 budget view, which is why its total can differ from twelve times the run-rate.
           </Typography>
         </Alert>
+        {/* ---------- comments ---------- */}
+        <Divider sx={{ my: 3 }} />
+        <Typography variant="h4" sx={{ mb: 0.5 }}>Notes and links</Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+          Anything worth recording about this project — a decision, a caveat, a link to the spec or the
+          ticket. Pasted addresses become clickable once saved.
+        </Typography>
+        <TextField
+          fullWidth
+          multiline
+          minRows={3}
+          size="small"
+          placeholder="Type a note, or paste a link…"
+          defaultValue={p.comment || ''}
+          onBlur={(e) => {
+            const v = e.target.value
+            if (v !== (p.comment || '')) onUpdate(p.key, { comment: v })
+          }}
+        />
+        {p.comment ? (
+          <Box sx={{ mt: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
+              As it reads
+            </Typography>
+            <LinkedText text={p.comment} />
+          </Box>
+        ) : null}
+
       </DialogContent>
 
       <DialogActions>

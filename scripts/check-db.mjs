@@ -114,6 +114,33 @@ try {
     Array.isArray(costed[1].opex) && costed[1].opex.length === 0)
   await store.saveScenario('Baseline', payload, 'Gun')
 
+  // ---- tasks and comments ----
+  // Tasks carry the effort now, so a manday coming back as a string, or a task
+  // list coming back as an object, would move every cost on the next load.
+  const withTasks = {
+    ...payload,
+    projects: payload.projects.map((p, i) => (i === 0
+      ? {
+        ...p,
+        tasks: [
+          { id: 't1', label: 'Design', manday: 4, note: 'incl. review' },
+          { id: 't2', label: 'Build', manday: 11.5, note: '' },
+        ],
+        comment: 'spec: https://example.com/a\nsecond line',
+      }
+      : { ...p, tasks: [], comment: '' })),
+  }
+  await store.saveScenario('Baseline', withTasks, 'Gun')
+  const tk = (await store.getScenario('Baseline')).payload.projects
+  check('tasks survive the round trip with their numbers intact',
+    tk[0].tasks.length === 2 && tk[0].tasks[0].manday === 4 && tk[0].tasks[1].manday === 11.5
+    && tk[0].tasks[0].label === 'Design', JSON.stringify(tk[0].tasks))
+  check('an empty task list stays an empty array',
+    Array.isArray(tk[1].tasks) && tk[1].tasks.length === 0)
+  check('a multi-line comment with a link survives byte for byte',
+    tk[0].comment === 'spec: https://example.com/a\nsecond line', JSON.stringify(tk[0].comment))
+  await store.saveScenario('Baseline', payload, 'Gun')
+
   // ---- update in place, not duplicate ----
   check('re-saving the same name updates rather than duplicates', (await store.listScenarios()).length === 1)
 

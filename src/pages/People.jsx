@@ -11,8 +11,9 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import SyncIcon from '@mui/icons-material/Sync'
 import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import StatTile from '../components/StatTile.jsx'
-import ProjectCostDialog, { rowOpenHandler } from '../components/ProjectCostDialog.jsx'
+import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
 import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS, OUT_OF_PLAN } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, targetUnit,
@@ -528,6 +529,7 @@ export default function People({
             <Table size="small" sx={{ minWidth: 720, '& th, & td': { px: 1 } }}>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox" />
                   <TableCell sx={{ minWidth: 66 }}>Jira</TableCell>
                   <TableCell sx={{ minWidth: 118 }}>Project</TableCell>
                   <TableCell sx={{ minWidth: 78 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
@@ -562,15 +564,20 @@ export default function People({
                     // its share here would contradict the totals above it.
                     const credited = counted ? (pr.savingHours ?? 0) * share : 0
                     return (
-                      // Opens the SAME cost dialog as the Projects tab. The
-                      // guard skips the owner and level dropdowns and the two
-                      // editable number cells, which keep their own behaviour.
+                      // The cost dialog opens from an explicit button in the
+                      // first cell, not from a click anywhere on the row.
                       <TableRow
                         key={pr.key}
                         hover
-                        onClick={rowOpenHandler(() => setCostKey(pr.key))}
-                        sx={{ opacity: counted ? 1 : 0.5, cursor: 'pointer' }}
+                        sx={{ opacity: counted ? 1 : 0.5 }}
                       >
+                        <TableCell padding="checkbox">
+                          <Tooltip title={`Effort, CAPEX, monthly cost and notes for ${pr.jiraKey || pr.key}`}>
+                            <IconButton size="small" onClick={() => setCostKey(pr.key)} aria-label="open cost breakdown">
+                              <ReceiptLongIcon sx={{ fontSize: 16, color: pr.comment ? STATUS.good : undefined }} />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
                         <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{pr.key}</TableCell>
                         <TableCell>
                           <Typography variant="body2" sx={{ lineHeight: 1.3 }}>{pr.summary}</Typography>
@@ -618,10 +625,27 @@ export default function People({
                             costed without leaving the page — the ROI beside it
                             fills in as soon as a manday lands. */}
                         <TableCell align="right">
-                          <PortfolioNum
-                            value={pr.manday || null}
-                            onChange={(v) => onUpdate(pr.key, { manday: v ?? 0, mandayEstimated: false })}
-                          />
+                          {pr.tasks && pr.tasks.length ? (
+                            <Tooltip title={`${pr.tasks.length} task${pr.tasks.length === 1 ? '' : 's'} totalling ${fmtHours(pr.manday)} mandays — click to see the breakdown`}>
+                              <Box
+                                component="button"
+                                type="button"
+                                onClick={() => setCostKey(pr.key)}
+                                sx={{
+                                  border: 0, background: 'none', p: 0, cursor: 'pointer', font: 'inherit',
+                                  fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums',
+                                  color: 'primary.main', textDecoration: 'underline dotted',
+                                }}
+                              >
+                                {fmtHours(pr.manday)}
+                              </Box>
+                            </Tooltip>
+                          ) : (
+                            <PortfolioNum
+                              value={pr.manday || null}
+                              onChange={(v) => onUpdate(pr.key, { manday: v ?? 0, mandayEstimated: false })}
+                            />
+                          )}
                         </TableCell>
                         <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
                           {!counted || pr.annualBenefit == null

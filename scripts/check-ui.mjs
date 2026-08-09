@@ -504,9 +504,20 @@ try {
   await new Promise((r) => setTimeout(r, 300))
 
   const roiBeforeCapex = await page.evaluate((r) => document.querySelector('tbody tr').children[r]?.innerText.trim(), roiCol)
+  // The row itself is inert now — only the button opens the dialog.
   await clickRowCell(roiCol)
-  await new Promise((r) => setTimeout(r, 600))
-  check('clicking a project row on the Projects tab opens the cost dialog', await dialogOpen())
+  await new Promise((r) => setTimeout(r, 400))
+  check('clicking the row body does NOT open the dialog', (await dialogOpen()) === false)
+
+  const openViaButton = () => page.evaluate(() => {
+    const btn = document.querySelector('tbody tr button[aria-label="open cost breakdown"]')
+    if (!btn) return false
+    btn.click()
+    return true
+  })
+  check('every row carries an open button', await openViaButton())
+  await new Promise((r) => setTimeout(r, 700))
+  check('the button opens the cost dialog', await dialogOpen())
   const dlg = await dialogText()
   check('the dialog offers CAPEX, OPEX and a monthly table',
     /CAPEX/.test(dlg) && /OPEX/.test(dlg) && /Monthly cost/i.test(dlg) && /FY2026/.test(dlg),
@@ -557,6 +568,8 @@ try {
   await new Promise((r) => setTimeout(r, 1500))
   check('the scorecard opens with no dialog', (await dialogOpen()) === false)
   await page.evaluate(() => {
+    const btn = document.querySelector('tbody tr button[aria-label="open cost breakdown"]')
+    if (btn) { btn.click(); return }
     const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
     const table = heads[heads.length - 1].closest('table')
     const row = table.querySelector('tbody tr')
@@ -691,6 +704,120 @@ try {
   check('and moves the money with it, because it sets the hourly rate too',
     ratioAfter.money !== ratioBefore.money, `${ratioBefore.money} -> ${ratioAfter.money}`)
   await page.evaluate(() => localStorage.clear())
+
+
+  /* ---------- tasks, money<->manday, comments ---------- */
+  await page.goto(`${base}/?tasks=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  // Give the first row a manday total the old way — a bare number typed into
+  // the inline cell — so the migration path is what actually gets exercised:
+  // opening the breakdown on a project that has a total and no tasks.
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.findIndex((h) => h.startsWith('manday'))
+    const inp = document.querySelector('tbody tr').children[ix].querySelector('input')
+    inp.focus(); setter.call(inp, '12'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+
+  await page.evaluate(() => document.querySelector('tbody tr button[aria-label="open cost breakdown"]').click())
+  await new Promise((r) => setTimeout(r, 700))
+  const effortText = await dialogText()
+  check('the dialog carries the effort breakdown', /Effort .* mandays by task/i.test(effortText),
+    effortText.slice(0, 90).replace(/\n/g, ' / '))
+
+  // A project imported with a bare total must show exactly ONE line carrying it.
+  const firstLine = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    const inputs = [...d.querySelectorAll('input')]
+    const md = inputs.find((i) => i.closest('.MuiFormControl-root')?.querySelector('label')?.innerText.startsWith('Mandays'))
+    const label = [...d.querySelectorAll('input')].find((i) => i.value === 'Total as entered')
+    return { manday: md ? md.value : null, hasTotalLine: !!label }
+  })
+  check('an existing manday total appears as one line, carrying the number',
+    firstLine.hasTotalLine && Number(firstLine.manday) === 12, JSON.stringify(firstLine))
+
+  // Money in -> mandays out.
+  const conv = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const d = document.querySelector('[role="dialog"]')
+    const fc = [...d.querySelectorAll('.MuiFormControl-root')]
+    const costFc = fc.find((f) => f.querySelector('label')?.innerText.startsWith('Cost'))
+    const mdFc = fc.find((f) => f.querySelector('label')?.innerText.startsWith('Mandays'))
+    const cost = costFc.querySelector('input')
+    cost.focus(); setter.call(cost, '272727'); cost.dispatchEvent(new Event('input', { bubbles: true }))
+    return { md: mdFc.querySelector('input').value }
+  })
+  check('typing a cost fills in the mandays', Number(conv.md) > 99 && Number(conv.md) < 101,
+    `THB 272,727 -> ${conv.md} mandays`)
+
+  // Mandays in -> money out.
+  const conv2 = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const d = document.querySelector('[role="dialog"]')
+    const fc = [...d.querySelectorAll('.MuiFormControl-root')]
+    const mdFc = fc.find((f) => f.querySelector('label')?.innerText.startsWith('Mandays'))
+    const costFc = fc.find((f) => f.querySelector('label')?.innerText.startsWith('Cost'))
+    const md = mdFc.querySelector('input')
+    md.focus(); setter.call(md, '10'); md.dispatchEvent(new Event('input', { bubbles: true })); md.blur()
+    return { cost: costFc.querySelector('input').value }
+  })
+  await new Promise((r) => setTimeout(r, 600))
+  check('typing mandays fills in the cost', Number(conv2.cost) > 27000 && Number(conv2.cost) < 27500,
+    `10 mandays -> THB ${conv2.cost}`)
+
+  // Add a second task; the Projects-tab total must become the sum.
+  await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    ;[...d.querySelectorAll('button')].find((b) => /add task/i.test(b.innerText)).click()
+  })
+  await new Promise((r) => setTimeout(r, 500))
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const d = document.querySelector('[role="dialog"]')
+    const mdFields = [...d.querySelectorAll('.MuiFormControl-root')]
+      .filter((f) => f.querySelector('label')?.innerText.startsWith('Mandays'))
+    const last = mdFields[mdFields.length - 1].querySelector('input')
+    last.focus(); setter.call(last, '5'); last.dispatchEvent(new Event('input', { bubbles: true })); last.blur()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+
+  // A comment with a link.
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    const ta = document.querySelector('[role="dialog"] textarea')
+    ta.focus(); setter.call(ta, 'see https://example.com/spec'); ta.dispatchEvent(new Event('input', { bubbles: true })); ta.blur()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  const link = await page.evaluate(() => {
+    const a = document.querySelector('[role="dialog"] a[href^="https://example.com"]')
+    return a ? { href: a.getAttribute('href'), target: a.getAttribute('target'), rel: a.getAttribute('rel') } : null
+  })
+  check('a pasted URL renders as a real link', !!link && link.target === '_blank' && /noopener/.test(link.rel || ''),
+    JSON.stringify(link))
+
+  await closeDialog()
+  await new Promise((r) => setTimeout(r, 600))
+  const mdCell = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.findIndex((h) => h.startsWith('manday'))
+    return document.querySelector('tbody tr').children[ix]?.innerText.trim()
+  })
+  check('the Projects tab shows the task total', Number(String(mdCell).replace(/,/g, '')) === 15,
+    `10 + 5 -> ${mdCell} (was 12 before the breakdown was edited)`)
+  const mdClickable = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.findIndex((h) => h.startsWith('manday'))
+    const cell = document.querySelector('tbody tr').children[ix]
+    const btn = cell.querySelector('button')
+    if (!btn) return false
+    btn.click()
+    return true
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  check('the manday total is clickable once it is a sum of tasks', mdClickable && await dialogOpen())
+  await closeDialog()
 
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {

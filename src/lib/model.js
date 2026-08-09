@@ -232,6 +232,47 @@ export const newOpexLine = (seq = 1) => ({
  * than swapped, so a half-typed range shows one month instead of a row of zeros
  * whose FY total disagrees with the run-rate.
  */
+/**
+ * Clean a project's task list. Each task is a slice of the build effort with
+ * its own manday figure; the money beside it in the UI is DERIVED at the
+ * developer day rate and never stored, so moving the salary re-prices the plan
+ * instead of silently changing how much work a task is.
+ */
+export function normalizeTasks(tasks) {
+  if (!Array.isArray(tasks)) return []
+  return tasks.map((raw, i) => {
+    const n = Number(raw && raw.manday)
+    return {
+      id: (raw && raw.id) || `t${i + 1}`,
+      label: String((raw && raw.label) || '').slice(0, 200),
+      // Non-finite or negative is missing data, not effort.
+      manday: Number.isFinite(n) && n > 0 ? n : 0,
+      note: String((raw && raw.note) || '').slice(0, 500),
+    }
+  })
+}
+
+/**
+ * The mandays a project actually carries.
+ *
+ * Tasks win when there are any: the total is then the sum of its parts and
+ * cannot drift from them. With no tasks the stored figure stands, which is what
+ * every project imported from the workbook has and what the bulk effort
+ * estimator writes.
+ */
+export function resolveManday(p) {
+  const tasks = normalizeTasks(p && p.tasks)
+  if (tasks.length) return tasks.reduce((a, t) => a + t.manday, 0)
+  const n = Number(p && p.manday)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+/** Mandays <-> money, at the developer day rate. Both directions, one place. */
+export const mandayToMoney = (manday, rates) =>
+  (Number.isFinite(manday) && rates && rates.devDayRate > 0 ? manday * rates.devDayRate : null)
+export const moneyToManday = (money, rates) =>
+  (Number.isFinite(money) && rates && rates.devDayRate > 0 ? money / rates.devDayRate : null)
+
 export function normalizeOpex(lines) {
   if (!Array.isArray(lines)) return []
   return lines.map((raw, i) => {
@@ -634,6 +675,8 @@ export function newProject(seq) {
     capex: null,
     capexNote: '',
     opex: [],
+    tasks: [],
+    comment: '',
     status: 'Not Start',
     srcStatus: null,
     start: null,
@@ -942,7 +985,18 @@ export function computePlan(state) {
      * because every comparison against NaN is false.
      */
     const num = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v))
-    const p = { ...raw, savingHours: num(raw.savingHours), manday: num(raw.manday) ?? 0, capex: num(raw.capex) }
+    // Tasks are resolved HERE, at the one read boundary, so buildCost, the
+    // tables, the scorecards, every rollup and the workbook all see the same
+    // number and nothing downstream has to know tasks exist.
+    const tasks = normalizeTasks(raw.tasks)
+    const p = {
+      ...raw,
+      tasks,
+      savingHours: num(raw.savingHours),
+      manday: resolveManday(raw),
+      capex: num(raw.capex),
+      comment: typeof raw.comment === 'string' ? raw.comment : '',
+    }
     const { shares, partnerShare, fellBack } = projectShares(p, s.roleWeights, s.creditPartners, shareOpts)
     const fin = projectFinance(p, s)
     // The month grid lives here rather than in projectFinance so that every
@@ -1088,6 +1142,7 @@ export function computePlan(state) {
     paybackMonths: portfolioPayback,
     costedCount: costed.length,
     // Whole-plan money, for the budget tables rather than for the return.
+    planMandays: inPlan.reduce((a, p) => a + (p.manday || 0), 0),
     planBuildCost: inPlan.reduce((a, p) => a + (p.buildCost ?? 0), 0),
     planCapex: inPlan.reduce((a, p) => a + (p.capex ?? 0), 0),
     planInvestment: inPlan.reduce((a, p) => a + (p.investment ?? 0), 0),
