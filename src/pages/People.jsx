@@ -482,6 +482,16 @@ export default function People({
                             </Tooltip>
                           )}
                         </Box>
+                        {/* Under the field, not beside it: beside it this
+                            widened the column and pushed the delete button
+                            back outside the card. */}
+                        {l.creditedHours > 0 && l.targetKind !== 'hours' && (
+                          <Tooltip title="The saving hours behind this line. Its target is stated in another unit, but the hours still count toward the total below.">
+                            <Typography variant="caption" sx={{ color: 'text.secondary', cursor: 'help', display: 'block', mt: 0.25 }}>
+                              carries {fmtHours(l.creditedHours)} {unit}
+                            </Typography>
+                          </Tooltip>
+                        )}
                       </TableCell>
                       <TableCell align="right" sx={{ verticalAlign: 'top', pt: 1.25 }} onClick={(e) => e.stopPropagation()}>
                         <PctCell
@@ -509,10 +519,24 @@ export default function People({
                   )
                 })}
                 <TableRow>
-                  {/* one fewer column since Block was dropped */}
-                  <TableCell sx={{ borderTop: 2, borderColor: 'divider' }} />
-                  <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
+                  <TableCell sx={{ borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
                     TOTAL
+                  </TableCell>
+                  {/* The saving hours the card carries. Objective 1 states its
+                      target in baht and objective 3 states a date, so adding
+                      the hours-typed targets alone would report well short of
+                      what this person actually holds. */}
+                  <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider' }}>
+                    <Tooltip title={`The saving hours behind every line on this card, added up${p.aggregatesTeam ? ' — the whole team' : ''}. Objective 1 is stated in baht and objective 3 as a date, but both still carry hours, so this is the total of what is behind the targets rather than of the targets themselves.`}>
+                      <Box>
+                        <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', fontVariantNumeric: 'tabular-nums', cursor: 'help' }}>
+                          {fmtHours(p.kpiTotals.savingHours)}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', lineHeight: 1.2 }}>
+                          {unit}{p.hoursOverridden ? ' · manual' : ''}
+                        </Typography>
+                      </Box>
+                    </Tooltip>
                   </TableCell>
                   <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider' }}>
                     <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', color: weightOk ? STATUS.good : STATUS.critical, fontVariantNumeric: 'tabular-nums' }}>

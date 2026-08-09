@@ -301,5 +301,88 @@ console.log('\n--- editing it, and taking it off again ---')
     weightsValid(removed.people.find((p) => p.id === 'james').kpiLines))
 }
 
+/* ---------------- 8. what the card adds up to ---------------- */
+console.log('\n--- the card states the saving hours it carries ---')
+{
+  const plan = computePlan(base)
+  for (const p of plan.people) {
+    check(`${p.nick}: THE CARD TOTAL IS THE HEADLINE ABOVE IT`,
+      Math.abs(p.kpiTotals.savingHours - p.scorecardHours) < 1e-6,
+      `${p.kpiTotals.savingHours.toFixed(2)} vs ${p.scorecardHours.toFixed(2)}`)
+    check(`${p.nick}: and it is the sum of what is behind each line`,
+      Math.abs(p.kpiLines.reduce((a, l) => a + (l.creditedHours ?? 0), 0) - p.kpiTotals.savingHours) < 1e-9)
+  }
+
+  // Adding only the hours-TYPED targets is the trap: objective 1 states baht
+  // and objective 3 a date, so that sum is short of what the person carries.
+  const james = plan.people.find((p) => p.id === 'james')
+  check('the hours-typed targets alone are NOT the total',
+    james.kpiTotals.hours < james.kpiTotals.savingHours,
+    `${james.kpiTotals.hours} typed vs ${james.kpiTotals.savingHours.toFixed(1)} carried`)
+  check('and the money-typed targets are reported separately',
+    james.kpiTotals.money > 0, String(Math.round(james.kpiTotals.money)))
+
+  // A hand-added line carries no hours of its own, so it cannot inflate it.
+  const withCustom = computePlan({
+    ...base,
+    people: base.people.map((p) => (p.id === 'james'
+      ? { ...p, customLines: [{ id: 'c1', label: 'x', objective: 'process_automation', targetKind: 'hours', target: 9999 }] }
+      : p)),
+  }).people.find((p) => p.id === 'james')
+  check('A HAND-WRITTEN LINE DOES NOT INFLATE THE TOTAL',
+    Math.abs(withCustom.kpiTotals.savingHours - james.kpiTotals.savingHours) < 1e-9,
+    `${withCustom.kpiTotals.savingHours.toFixed(1)} vs ${james.kpiTotals.savingHours.toFixed(1)}`)
+
+  // A typed TARGET is a target, not hours carried: the total stays the truth.
+  const typed = computePlan({
+    ...base,
+    people: base.people.map((p) => (p.id === 'james'
+      ? { ...p, kpi: { 'obj-efficiency': { target: 5000 } } } : p)),
+  }).people.find((p) => p.id === 'james')
+  check('typing a target over does not change what the card carries',
+    Math.abs(typed.kpiTotals.savingHours - james.kpiTotals.savingHours) < 1e-9,
+    `${typed.kpiTotals.savingHours.toFixed(1)} vs ${james.kpiTotals.savingHours.toFixed(1)}`)
+
+  // An override does move it — that is the whole point of an override.
+  const over = computePlan({
+    ...base,
+    people: base.people.map((p) => (p.id === 'james' ? { ...p, overrides: { hours: 200 } } : p)),
+  })
+  const overJames = over.people.find((p) => p.id === 'james')
+  check('AN OVERRIDE MOVES IT, AND IT STILL EQUALS THE HEADLINE',
+    Math.abs(overJames.kpiTotals.savingHours - 200) < 1e-6
+    && Math.abs(overJames.kpiTotals.savingHours - overJames.scorecardHours) < 1e-6,
+    `${overJames.kpiTotals.savingHours.toFixed(2)} vs ${overJames.scorecardHours}`)
+  check('and the lead\'s card total follows it too',
+    Math.abs(over.people.find((p) => p.id === 'gun').kpiTotals.savingHours
+      - over.people.find((p) => p.id === 'gun').scorecardHours) < 1e-6)
+}
+
+/* ---------------- 9. and the workbook says the same ---------------- */
+console.log('\n--- the workbook carries the same total ---')
+{
+  const plan = computePlan(base)
+  const wb = await buildWorkbook(plan, base)
+  const back = new ExcelJS.Workbook()
+  await back.xlsx.load(await wb.xlsx.writeBuffer())
+
+  for (const p of plan.people) {
+    const ws = back.getWorksheet(`Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31))
+    let total = null
+    let lineSum = 0
+    ws.eachRow((r) => {
+      const isTotal = String(r.getCell(3).value || '') === 'TOTAL'
+      const h = r.getCell(6).value
+      if (isTotal && total == null) total = h
+      else if (total == null && typeof h === 'number') lineSum += h
+    })
+    check(`${p.nick}: THE SHEET CARRIES THE CARD TOTAL`,
+      typeof total === 'number' && Math.abs(total - p.kpiTotals.savingHours) < 0.06,
+      `${total} vs ${p.kpiTotals.savingHours.toFixed(1)}`)
+    check(`${p.nick}: and the lines on it add up to that total`,
+      Math.abs(lineSum - total) < 0.06, `${lineSum.toFixed(1)} vs ${total}`)
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

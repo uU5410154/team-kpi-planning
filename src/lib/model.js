@@ -525,6 +525,47 @@ export function applyPersonOverride(person, figures) {
   }
 }
 
+/**
+ * What the saving-hours targets on a scorecard add up to.
+ *
+ * Not the same question as "what does this person carry": the headline above
+ * the card is the credited figure, while this is the sum of the targets
+ * actually written on it. They agree until somebody types a target over, and
+ * the point of showing both is that the difference becomes visible instead of
+ * being carried into an appraisal unnoticed.
+ *
+ * Only the hours lines are added. A money target, a date and a sentence are
+ * not hours, and a total that quietly mixed them would be worse than no total.
+ */
+export function kpiTargetTotals(lines) {
+  const list = Array.isArray(lines) ? lines : []
+  const sumOf = (kind) => list
+    .filter((l) => l.targetKind === kind)
+    .reduce((a, l) => a + (Number(l.target) || 0), 0)
+
+  /*
+   * The saving hours BEHIND the card, which is not the same as the sum of the
+   * hours written in the Target column.
+   *
+   * Objective 1 states its target in baht and objective 3 states a date, but
+   * both still carry saving hours. Adding only the hours-typed targets left
+   * those out and reported a total well short of what the person actually
+   * carries — a number that looks like the headline, is not, and would be
+   * taken for it.
+   */
+  const savingHours = list.reduce((a, l) => a + (l.creditedHours ?? 0), 0)
+
+  return {
+    // What the person carries across every line on the card.
+    savingHours,
+    // What is literally typed in the Target column, by unit.
+    hours: sumOf('hours'),
+    money: sumOf('thb'),
+    hoursLines: list.filter((l) => l.targetKind === 'hours').length,
+    moneyLines: list.filter((l) => l.targetKind === 'thb').length,
+  }
+}
+
 export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
@@ -1712,6 +1753,9 @@ export function computePlan(state) {
       costedCount: scCostedCount,
     }
 
+    const lines = scorecardWeights(withObjectives, s, scByObjective, scBenefitByObjective)
+      .map((l) => ({ ...l, manual: !!l.objective && addedObjectives.includes(l.objective) }))
+
     return {
       ...withObjectives,
       scorecardHours: scHours,
@@ -1743,8 +1787,10 @@ export function computePlan(state) {
       addedObjectives,
       // Which objectives are still available to add by hand.
       addableObjectives: OBJECTIVE_ORDER.filter((id) => !objectives.includes(id)),
-      kpiLines: scorecardWeights(withObjectives, s, scByObjective, scBenefitByObjective)
-        .map((l) => ({ ...l, manual: !!l.objective && addedObjectives.includes(l.objective) })),
+      kpiLines: lines,
+      // What the targets on the card add up to, so the card can state its own
+      // sum rather than leaving it to be read off four separate rows.
+      kpiTotals: kpiTargetTotals(lines),
       kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective, scBenefitByObjective),
     }
   })

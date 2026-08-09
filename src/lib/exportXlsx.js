@@ -548,8 +548,8 @@ export async function buildWorkbook(plan, state) {
     // disagreeing. This sheet opens straight on the scorecard.
     let r = 4
     sectionRow(ws, r++, 'KPI SCORECARD', cols.length)
-    headerRow(ws, r++, ['Block', 'KPI line', `${p.nick}'s target`, 'Weight', 'Unit',
-      ...new Array(Math.max(0, cols.length - 5)).fill('')])
+    headerRow(ws, r++, ['Block', 'KPI line', `${p.nick}'s target`, 'Weight', 'Unit', `Saving ${unit}`,
+      ...new Array(Math.max(0, cols.length - 6)).fill('')])
     const wStart = r
     p.kpiLines.forEach((l) => {
       const o = l.objective ? OBJ_BY_ID[l.objective] : null
@@ -566,6 +566,14 @@ export async function buildWorkbook(plan, state) {
       // survives a copy-paste into a deck.
       row.getCell(5).value = l.targetKind === 'text' ? '' : targetUnit(l, settings.savingBasis, cur)
       row.getCell(5).font = { name: FONT, size: 9, color: { argb: MUTED } }
+      // The saving hours behind the line, whatever unit its target is stated
+      // in. Objective 1 is quoted in baht and objective 3 as a date, so without
+      // this column the hours total below could not be checked by adding up.
+      if (l.creditedHours != null && l.creditedHours > 0) {
+        row.getCell(6).value = Number(l.creditedHours.toFixed(1))
+        row.getCell(6).numFmt = N1
+        row.getCell(6).alignment = { horizontal: 'right' }
+      }
       row.getCell(4).value = l.weight
       row.getCell(4).numFmt = PCT
       row.getCell(4).alignment = { horizontal: 'center' }
@@ -578,9 +586,15 @@ export async function buildWorkbook(plan, state) {
     sr.getCell(4).value = sum
     sr.getCell(4).numFmt = PCT
     sr.getCell(4).alignment = { horizontal: 'center' }
+    // The saving hours this card carries, the same figure the app shows under
+    // the scorecard and the same one in the headline above it.
+    sr.getCell(6).value = Number(p.kpiTotals.savingHours.toFixed(1))
+    sr.getCell(6).numFmt = N1
+    sr.getCell(6).alignment = { horizontal: 'right' }
     tone(sr.getCell(3), NAVY)
     tone(sr.getCell(4), Math.abs(sum - 1) < 0.0005 ? GOOD : BAD)
-    styleBody(ws, wStart, r - 1, 4)
+    tone(sr.getCell(6), NAVY)
+    styleBody(ws, wStart, r - 1, 6)
 
     r++
     sectionRow(ws, r++, 'PROJECT PORTFOLIO', cols.length)

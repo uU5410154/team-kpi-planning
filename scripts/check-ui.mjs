@@ -1603,6 +1603,36 @@ try {
   const leadReverted = await tabHours('Gun')
   check('the lead goes back too', leadReverted === leadBefore, `${leadAfter} -> ${leadReverted}`)
 
+
+  /* ---------- the card states the hours it carries ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?tot=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const totTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  for (const nick of ['Gun', 'James', 'Kade']) {
+    await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+      totTabs.findIndex((t) => new RegExp(nick).test(t)))
+    await new Promise((r) => setTimeout(r, 1200))
+    const seen = await page.evaluate(() => {
+      const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+      const c = head.closest('.MuiPaper-root')
+      const total = [...c.querySelectorAll('tbody tr')].find((r) => /^TOTAL/.test(r.innerText.trim()))
+      const tileHead = [...document.querySelectorAll('*')]
+        .find((e) => e.children.length === 0 && /saving hours$/i.test(e.textContent.trim()))
+      const tile = tileHead?.closest('.MuiPaper-root')
+      return {
+        row: total ? total.innerText.split(String.fromCharCode(9)).join(' ').split(String.fromCharCode(10)).join(' ') : null,
+        tile: tile ? tile.innerText.split(String.fromCharCode(10))[1] : null,
+      }
+    })
+    const onRow = (seen.row || '').match(/([\d,]+(?:\.\d+)?)/)?.[1] ?? null
+    check(`${nick}: THE SCORECARD STATES ITS SAVING HOURS`, !!onRow && /%/.test(seen.row),
+      String(seen.row))
+    check(`${nick}: and it is the figure in the headline tile`, onRow === seen.tile,
+      `${onRow} vs ${seen.tile}`)
+  }
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {
