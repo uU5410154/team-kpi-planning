@@ -10,7 +10,7 @@ import { readFileSync, unlinkSync, existsSync } from 'node:fs'
 import ExcelJS from 'exceljs'
 import {
   computePlan, DEFAULT_SETTINGS, weightsValid,
-  toWholePercents, snapWeight, WEIGHT_STEP, rebalanceWeights,
+  toWholePercents, snapWeight, WEIGHT_STEP, rebalanceWeights, HOURS_OBJECTIVE,
 } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 import { OBJ_BY_ID } from '../src/lib/palette.js'
@@ -125,11 +125,16 @@ check('the headline gains them', Math.abs(edited.totals.totalHours - plan.totals
   `${plan.totals.totalHours} -> ${edited.totals.totalHours}`)
 check('the lead figure gains them', Math.abs(leadA.scorecardHours - lead.scorecardHours - 50) < 0.01)
 check('lead still equals the headline', Math.abs(leadA.scorecardHours - edited.totals.totalHours) < 0.01)
-check('the objective total gains them',
-  Math.abs((edited.byObjective[target.objective] || 0) - (plan.byObjective[target.objective] || 0) - 50) < 0.01)
+// The hours objective carries every saving hour, so an edit shows up there
+// rather than under whichever objective the project is tagged to.
+check('the hours objective gains them',
+  Math.abs((edited.byObjective[HOURS_OBJECTIVE] || 0) - (plan.byObjective[HOURS_OBJECTIVE] || 0) - 50) < 0.01,
+  `${Math.round(plan.byObjective[HOURS_OBJECTIVE] || 0)} -> ${Math.round(edited.byObjective[HOURS_OBJECTIVE] || 0)}`)
 check('the owner KPI target follows',
-  kadeA.kpiLines.find((l) => l.objective === target.objective).target
-  === kadeB.kpiLines.find((l) => l.objective === target.objective).target + 50)
+  kadeA.kpiLines.find((l) => l.objective === HOURS_OBJECTIVE).target
+  === kadeB.kpiLines.find((l) => l.objective === HOURS_OBJECTIVE).target + 50,
+  `${kadeB.kpiLines.find((l) => l.objective === HOURS_OBJECTIVE).target} -> `
+  + `${kadeA.kpiLines.find((l) => l.objective === HOURS_OBJECTIVE).target}`)
 check('weights stay on the grid after the edit',
   edited.people.every((p) => p.kpiLines.every((l) => isStep(l.weight)) && weightsValid(p.kpiLines)))
 check('nothing is blocked', edited.invalid.length === 0)

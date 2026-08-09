@@ -127,13 +127,13 @@ console.log('\n--- tied to an objective, it behaves like one ---')
   // It must NOT be added to the objectives held: that would build a second,
   // derived line for the same objective and put the same thing on the card
   // twice.
-  check('it does not silently grow a second line for that objective',
-    james.kpiLines.filter((l) => l.objective === 'process_automation').length === 1,
+  // Everyone with saving hours holds the hours objective, so a hand-written
+  // line tied to it sits BESIDE the derived one rather than replacing it.
+  check('a hand-written line sits beside the derived one, not instead of it',
+    james.kpiLines.filter((l) => l.objective === 'process_automation').length === 2,
     james.kpiLines.filter((l) => l.objective === 'process_automation').map((l) => l.id).join(', '))
-  check('and where the person already holds the objective, the two sit side by side',
-    computePlan(withLines('kade', [{ ...tied, objective: 'process_automation' }]))
-      .people.find((p) => p.id === 'kade').kpiLines
-      .filter((l) => l.objective === 'process_automation').length === 2)
+  check('and only one of the two is the derived line',
+    james.kpiLines.filter((l) => l.objective === 'process_automation' && !l.custom).length === 1)
   check('IT IS NOT OFFERED A SYNC IT HAS NOTHING TO SYNC TO', line.drifted === false)
   check('and it claims none of the register\'s credited hours',
     line.creditedHours === null && line.creditedMoney === null,
@@ -316,9 +316,18 @@ console.log('\n--- the card states the saving hours it carries ---')
   // Adding only the hours-TYPED targets is the trap: objective 1 states baht
   // and objective 3 a date, so that sum is short of what the person carries.
   const james = plan.people.find((p) => p.id === 'james')
-  check('the hours-typed targets alone are NOT the total',
-    james.kpiTotals.hours < james.kpiTotals.savingHours,
-    `${james.kpiTotals.hours} typed vs ${james.kpiTotals.savingHours.toFixed(1)} carried`)
+  // The money line prices the SAME hours the hours line carries, and the
+  // counted lines count deliverables, so neither contributes hours. If either
+  // did, the card would state the plan's saving hours twice over.
+  check('THE MONEY LINE CARRIES NO HOURS OF ITS OWN',
+    james.kpiLines.find((l) => l.targetKind === 'thb')?.creditedHours == null)
+  check('and neither does a counted line',
+    james.kpiLines.filter((l) => l.targetKind === 'number' && !l.custom)
+      .every((l) => l.creditedHours == null))
+  check('so the card total is exactly the hours line',
+    Math.abs(james.kpiTotals.savingHours
+      - (james.kpiLines.find((l) => l.targetKind === 'hours' && !l.custom)?.creditedHours || 0)) < 1e-9,
+    `${james.kpiTotals.savingHours.toFixed(1)}`)
   check('and the money-typed targets are reported separately',
     james.kpiTotals.money > 0, String(Math.round(james.kpiTotals.money)))
 
@@ -353,14 +362,16 @@ console.log('\n--- the card states the saving hours it carries ---')
     }).people.find((p) => p.id === 'james').kpiTotals.savingHours - james.kpiTotals.savingHours) < 1e-9)
 
   // A typed TARGET is a target, not hours carried: the total stays the truth.
+  // Into the HOURS line: objective 4 is counted now, and typing a dashboard
+  // count would rightly leave the saving-hours total where it was.
   const typed = computePlan({
     ...base,
     people: base.people.map((p) => (p.id === 'james'
-      ? { ...p, kpi: { 'obj-efficiency': { target: 5000 } } } : p)),
+      ? { ...p, kpi: { 'obj-process_automation': { target: 5000 } } } : p)),
   }).people.find((p) => p.id === 'james')
   // A typed target IS the commitment, so the total under the rows moves with
   // it — a card whose total ignored its own rows could not be added up.
-  const typedLine = james.kpiLines.find((l) => l.id === 'obj-efficiency')
+  const typedLine = james.kpiLines.find((l) => l.id === 'obj-process_automation')
   // Against the EXACT credited figure, not the rounded one shown in the box:
   // an untouched line contributes the register's own number, so that is what
   // the typed figure replaces.
@@ -379,7 +390,7 @@ console.log('\n--- the card states the saving hours it carries ---')
     Math.abs(computePlan({
       ...base,
       people: base.people.map((p) => (p.id === 'james'
-        ? { ...p, kpi: { 'obj-efficiency': { target: 5000 } } } : p)),
+        ? { ...p, kpi: { 'obj-process_automation': { target: 5000 } } } : p)),
     }).totals.committedHours - computePlan(base).totals.committedHours) < 1e-9)
 
   // An override does move it — that is the whole point of an override.

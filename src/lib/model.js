@@ -413,9 +413,39 @@ export const targetKindFor = (objectiveId) => {
   switch (OBJ_BY_ID[objectiveId]?.measure) {
     case 'milestone': return 'text'
     case 'money': return 'thb'
+    case 'count': return 'number'
     default: return 'hours'
   }
 }
+
+/**
+ * Every objective a project answers to.
+ *
+ * One project can serve several: a PBI dashboard removes manual work AND is a
+ * dashboard delivered. `objective` stays the primary one — it is what the
+ * register shows in a single column and what every saved plan already holds —
+ * and `objectives` carries the rest.
+ */
+export function projectObjectives(p) {
+  const extra = Array.isArray(p && p.objectives) ? p.objectives : []
+  const all = [p && p.objective, ...extra].filter((id) => OBJ_BY_ID[id])
+  return OBJECTIVE_ORDER.filter((id) => all.includes(id))
+}
+
+/**
+ * The one objective measured in hours, and the one measured in money.
+ *
+ * Found from the definitions rather than hardcoded, so changing which
+ * objective carries the hours is a change to the guideline table and not a
+ * hunt through the engine.
+ */
+export const HOURS_OBJECTIVE = (OBJECTIVES.find((o) => o.accrues === 'allHours')
+  || OBJECTIVES.find((o) => o.measure === 'hours') || {}).id || null
+export const MONEY_OBJECTIVE = (OBJECTIVES.find((o) => o.measure === 'money') || {}).id || null
+export const COUNT_OBJECTIVES = OBJECTIVES.filter((o) => o.measure === 'count').map((o) => o.id)
+
+/** Does this project's work count toward that objective? */
+export const servesObjective = (p, id) => projectObjectives(p).includes(id)
 
 /**
  * How a KPI target is expressed.
@@ -645,7 +675,7 @@ export function kpiTargetTotals(lines) {
   }
 }
 
-export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}) {
+export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}, counted = {}) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
@@ -666,13 +696,19 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
         ? Math.round(creditedMoney[id] || 0)
         : kind === 'hours'
           ? Math.round(credited[id] || 0)
-          : (OBJ_BY_ID[id]?.target || '—')
+          // A counted objective starts at what the person is actually
+          // delivering, the same discipline as the hours: the target begins
+          // realistic instead of at somebody's round number.
+          : kind === 'number'
+            ? Math.round(counted[id] || 0)
+            : (OBJ_BY_ID[id]?.target || '—')
       lines.push({
         id: `obj-${id}`,
         block: 'Delivery',
         objective: id,
         weight: (prio[id] ?? 1) / totalPrio,
         targetKind: kind,
+        unit: kind === 'number' ? (OBJ_BY_ID[id]?.countUnit || '') : '',
         // Default = what this person actually carries, so the number starts
         // realistic rather than at the team's 3,000.
         target: live,
@@ -742,8 +778,16 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
         // The live figure straight from current project assignments. Reassign a
         // project on the Projects tab and this moves immediately.
         defaultTarget: l.target,
-        creditedHours: l.objective && !l.custom ? (credited[l.objective] || 0) : null,
-        creditedMoney: l.objective && !l.custom ? (creditedMoney[l.objective] || 0) : null,
+        // Hours only where the objective is measured in hours. A money line
+        // prices the SAME hours and a counted line counts deliverables, so
+        // neither carries hours of its own — reporting them here as well would
+        // add the plan's saving hours to the card two and three times over.
+        creditedHours: l.objective && !l.custom && l.targetKind === 'hours'
+          ? (credited[l.objective] || 0) : null,
+        creditedMoney: l.objective && !l.custom && l.targetKind === 'thb'
+          ? (creditedMoney[l.objective] || 0) : null,
+        creditedCount: l.objective && !l.custom && l.targetKind === 'number'
+          ? (counted[l.objective] || 0) : null,
         // A manual target that no longer matches what the person actually
         // carries — surfaced so it can be re-synced rather than silently drift.
         // Compared numerically where the target is a number: baht figures are
@@ -876,10 +920,10 @@ export const fmtTarget = (line, basis = 'monthly', symbol = '฿') => {
 }
 
 /** Lines removed from a scorecard, so they can be listed and restored. */
-export function hiddenLines(person, settings, credited = {}, creditedMoney = {}) {
+export function hiddenLines(person, settings, credited = {}, creditedMoney = {}, counted = {}) {
   const hidden = new Set(person.kpiHidden || [])
   if (!hidden.size) return []
-  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited, creditedMoney)
+  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited, creditedMoney, counted)
   return all.filter((l) => hidden.has(l.id))
 }
 
@@ -1726,14 +1770,40 @@ export function computePlan(state) {
     const opexYear = costedRows.reduce((a, r) => a + r.p.opexYear * r.share, 0)
     const costedBenefit = costedRows.reduce((a, r) => a + r.p.horizonBenefit * r.share, 0)
 
+    /*
+     * How a project's work lands on the objectives it serves.
+     *
+     * One project can answer to several, so the ONLY thing that keeps it from
+     * being counted twice is that each objective is measured in a different
+     * unit:
+     *   - hours go to the hours objective, and to that one alone. Every saving
+     *     hour in the plan lands there whatever else the project is tagged to,
+     *     because a dashboard that removes eight hours of manual work has
+     *     removed eight hours of manual work;
+     *   - money is those same hours priced, plus any cash stated outright, and
+     *     it is the money OBJECTIVE's figure — not a second helping of hours;
+     *   - a counted objective accrues one per project, not its hours;
+     *   - a milestone objective accrues neither. Its projects still give their
+     *     hours to the hours objective.
+     */
     const byObjective = {}
     const benefitByObjective = {}
+    const countByObjective = {}
     for (const r of counted) {
-      const id = r.p.objective
-      byObjective[id] = (byObjective[id] || 0) + (r.p.savingHours ?? 0) * r.share
+      const hrs = (r.p.savingHours ?? 0) * r.share
+      const money = (r.p.monthlyBenefit || 0) * r.share * 12
+      if (HOURS_OBJECTIVE) byObjective[HOURS_OBJECTIVE] = (byObjective[HOURS_OBJECTIVE] || 0) + hrs
       // Annualised, because a yearly benefit is the number a business case is
       // argued in. The scorecard's Objective 1 target reads this map.
-      benefitByObjective[id] = (benefitByObjective[id] || 0) + (r.p.monthlyBenefit || 0) * r.share * 12
+      if (MONEY_OBJECTIVE) {
+        benefitByObjective[MONEY_OBJECTIVE] = (benefitByObjective[MONEY_OBJECTIVE] || 0) + money
+      }
+      for (const id of projectObjectives(r.p)) {
+        if (OBJ_BY_ID[id]?.measure !== 'count') continue
+        // A deliverable is not divisible: two people credited on one dashboard
+        // have each delivered a dashboard, not half of one.
+        countByObjective[id] = (countByObjective[id] || 0) + 1
+      }
     }
 
     // keep objective order stable (by guideline number), not by discovery order
@@ -1748,6 +1818,7 @@ export function computePlan(state) {
       manday,
       byObjective,
       benefitByObjective,
+      countByObjective,
       monthlyBenefit,
       hoursMonthlyBenefit,
       monetaryAnnualBenefit,
@@ -1789,14 +1860,18 @@ export function computePlan(state) {
    * the lead disagreeing with the people underneath it the moment one of them
    * typed a target.
    */
-  const cardOf = (person, byObj, benefitByObj, rows) => {
+  const cardOf = (person, byObj, benefitByObj, rows, countByObj = {}) => {
+    // An objective is held when it carries a figure OR when a project serves
+    // it — a counted objective has no hours behind it, so presence in the
+    // portfolio is what puts it on the card.
     const derived = OBJECTIVE_ORDER.filter((id) => (byObj[id] || 0) > 0
-      || rows.some((r) => r.p.objective === id))
+      || (countByObj[id] || 0) > 0
+      || rows.some((r) => servesObjective(r.p, id)))
     const added = (Array.isArray(person.extraObjectives) ? person.extraObjectives : [])
       .filter((id) => OBJ_BY_ID[id] && !derived.includes(id))
     const objectives = OBJECTIVE_ORDER.filter((id) => derived.includes(id) || added.includes(id))
     const withObjectives = { ...person, objectives }
-    const lines = scorecardWeights(withObjectives, s, byObj, benefitByObj)
+    const lines = scorecardWeights(withObjectives, s, byObj, benefitByObj, countByObj)
       .map((l) => ({ ...l, manual: !!l.objective && added.includes(l.objective) }))
     return {
       derived, added, objectives, withObjectives, lines,
@@ -1808,7 +1883,7 @@ export function computePlan(state) {
   const memberCards = new Map()
   for (const p of byPersonShown) {
     if (p.aggregatesTeam === true) continue
-    memberCards.set(p.id, cardOf(p, p.byObjective, p.benefitByObjective, p.rows))
+    memberCards.set(p.id, cardOf(p, p.byObjective, p.benefitByObjective, p.rows, p.countByObjective))
   }
 
   // The lead's own personal share has no card of its own, so it enters the
@@ -1828,6 +1903,7 @@ export function computePlan(state) {
   const teamCostedCount = byPersonShown.reduce((a, p) => a + p.costedCount, 0)
   const teamByObjective = {}
   const teamBenefitByObjective = {}
+  const teamCountByObjective = {}
   for (const p of byPersonShown) {
     // A member contributes what their CARD states; the lead's own personal
     // share has no card of its own, so it contributes what the register says.
@@ -1839,6 +1915,9 @@ export function computePlan(state) {
     for (const [k, v] of Object.entries(contributes)) teamByObjective[k] = (teamByObjective[k] || 0) + v
     for (const [k, v] of Object.entries(p.benefitByObjective)) {
       teamBenefitByObjective[k] = (teamBenefitByObjective[k] || 0) + v
+    }
+    for (const [k, v] of Object.entries(p.countByObjective || {})) {
+      teamCountByObjective[k] = (teamCountByObjective[k] || 0) + v
     }
   }
   const teamCounted = perProject.filter((p) => isCounted(p) && Object.keys(p.shares).length > 0)
@@ -1875,7 +1954,7 @@ export function computePlan(state) {
      * so the two kinds are kept apart and every line says which it is.
      */
     const card = aggregates
-      ? cardOf(p, scByObjective, scBenefitByObjective, scRows)
+      ? cardOf(p, scByObjective, scBenefitByObjective, scRows, teamCountByObjective)
       : memberCards.get(p.id)
     const derivedObjectives = card.derived
     const addedObjectives = card.added
@@ -1978,7 +2057,9 @@ export function computePlan(state) {
       // What the targets on the card add up to, so the card can state its own
       // sum rather than leaving it to be read off four separate rows.
       kpiTotals: kpiTargetTotals(lines),
-      kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective, scBenefitByObjective),
+      kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective, scBenefitByObjective,
+        aggregates ? teamCountByObjective : (p.countByObjective || {})),
+      countByObjective: aggregates ? teamCountByObjective : (p.countByObjective || {}),
     }
   })
 
@@ -2017,10 +2098,29 @@ export function computePlan(state) {
       .reduce((a, p) => a + (p.savingHours ?? 0), 0),
   }
 
-  // ---- objective mix ------------------------------------------------
+  /* ---- objective mix -------------------------------------------------
+   *
+   * Two different questions, so two different maps.
+   *
+   * `byObjective` answers the KPI question and follows the same rule as every
+   * scorecard: all the hours sit on the hours objective, because that is the
+   * one measured in hours. It is what a target is checked against.
+   *
+   * `mixByObjective` answers "where does the work sit", splitting the hours by
+   * the objective each project is primarily tagged to. It is for the chart,
+   * and it is NOT a set of targets — the two would otherwise be read as the
+   * same thing and one of them would be wrong.
+   */
   const byObjective = {}
+  const mixByObjective = {}
+  const countByObjective = {}
   for (const p of perProject.filter(isCounted)) {
-    byObjective[p.objective] = (byObjective[p.objective] || 0) + (p.savingHours ?? 0)
+    const hrs = p.savingHours ?? 0
+    if (HOURS_OBJECTIVE) byObjective[HOURS_OBJECTIVE] = (byObjective[HOURS_OBJECTIVE] || 0) + hrs
+    mixByObjective[p.objective] = (mixByObjective[p.objective] || 0) + hrs
+    for (const id of projectObjectives(p)) {
+      if (OBJ_BY_ID[id]?.measure === 'count') countByObjective[id] = (countByObjective[id] || 0) + 1
+    }
   }
 
   // ---- concentration ------------------------------------------------
@@ -2071,6 +2171,8 @@ export function computePlan(state) {
       doneCoverage: s.targetHours > 0 ? doneHours / s.targetHours : 0,
     },
     byObjective,
+    mixByObjective,
+    countByObjective,
     quality,
     // Everyone assignable as PIC, including partner teams like IT that hold no
     // scorecard. Dropdowns read this; scorecards read `people`.

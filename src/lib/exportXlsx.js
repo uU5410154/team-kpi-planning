@@ -365,11 +365,20 @@ export async function buildWorkbook(plan, state) {
           // The "Actual" column matches the target's own unit: baht a year for
           // objective 1, saving hours for the rest.
           if (spec.objective) {
-            const money = line.targetKind === 'thb'
-            row.getCell(c0 + 2).value = Math.round(
-              money ? (p.benefitByObjective[spec.objective] || 0) : (p.byObjective[spec.objective] || 0),
-            )
-            row.getCell(c0 + 2).numFmt = money ? MONEY : N0
+            // The Actual column speaks the target's own unit: baht for the
+            // money objective, a count of deliverables for a counted one, and
+            // saving hours for the one objective measured in hours. A counted
+            // objective has no hours behind it by design — its projects give
+            // their hours to objective 2 — so printing hours here would state
+            // the same saving twice.
+            const kind = line.targetKind
+            const actual = kind === 'thb'
+              ? (p.benefitByObjective[spec.objective] || 0)
+              : kind === 'number'
+                ? (p.countByObjective?.[spec.objective] || 0)
+                : (p.byObjective[spec.objective] || 0)
+            row.getCell(c0 + 2).value = Math.round(actual)
+            row.getCell(c0 + 2).numFmt = kind === 'thb' ? MONEY : N0
           }
           if (line.overridden) tone(row.getCell(c0), NAVY_MID, false)
         }

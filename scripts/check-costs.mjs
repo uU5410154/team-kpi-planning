@@ -637,12 +637,15 @@ console.log('\n--- the exported workbook carries the same numbers ---')
     const col = (l) => head.findIndex((h) => h && h.startsWith(l))
     check(`${p.nick}: no credited CAPEX or investment block remains`,
       !labels.some((t) => t.startsWith('Investment credited') || t.startsWith('CAPEX credited') || t === 'POSITION'))
-    check(`${p.nick}: the portfolio keeps hours, credit and the two cost columns`,
-      col('Project ') > 0 && col('Credited') > 0 && col('Build cost') > 0 && col('Investment') > 0,
+    check(`${p.nick}: the portfolio keeps hours, credit, effort and the return`,
+      col('Project ') > 0 && col('Credited') > 0 && col('Mandays') > 0
+      && col('Build cost') > 0 && col('Investment') > 0 && col('ROI') > 0,
       head.filter(Boolean).join(' | '))
-    check(`${p.nick}: and drops the rest`,
-      ['Role', 'Share', 'Mandays', 'CAPEX', 'OPEX', 'Benefit', 'ROI', 'Payback', 'Commit']
-        .every((l) => col(l) < 0),
+    // Role, share, CAPEX, OPEX, payback and commit stay off: they are stated
+    // once elsewhere, and a sheet that repeats them is a sheet that can
+    // disagree with itself.
+    check(`${p.nick}: and drops the ones that live elsewhere`,
+      ['Role', 'Share', 'CAPEX', 'OPEX', 'Payback', 'Commit'].every((l) => col(l) < 0),
       head.filter(Boolean).join(' | '))
   }
 

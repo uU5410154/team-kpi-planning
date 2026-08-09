@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs'
 import {
  computePlan, DEFAULT_SETTINGS, weightSum, weightsValid, rebalanceWeights,
-  reassignPatch,
+  reassignPatch, HOURS_OBJECTIVE,
 } from '../src/lib/model.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
@@ -43,9 +43,13 @@ check('saving is not blocked', after.invalid.length === 0,
   after.invalid.map((x) => `${x.nick} ${(x.sum * 100).toFixed(1)}%`).join(', '))
 check('he gains the objective', jamesAfter.objectives.length > jamesBefore.objectives.length,
   `${jamesBefore.objectives.length} -> ${jamesAfter.objectives.length}`)
-check('and the target reflects it',
-  (jamesAfter.byObjective[DATACUBE.objective] || 0) > (jamesBefore.byObjective[DATACUBE.objective] || 0),
-  `${Math.round(jamesBefore.byObjective[DATACUBE.objective] || 0)} -> ${Math.round(jamesAfter.byObjective[DATACUBE.objective] || 0)}`)
+// Every saving hour lands on the hours objective, whatever else the project
+// is tagged to, so that is where a reassignment shows up.
+check('and the hours objective reflects it',
+  (jamesAfter.byObjective[HOURS_OBJECTIVE] || 0) > (jamesBefore.byObjective[HOURS_OBJECTIVE] || 0),
+  `${Math.round(jamesBefore.byObjective[HOURS_OBJECTIVE] || 0)} -> ${Math.round(jamesAfter.byObjective[HOURS_OBJECTIVE] || 0)}`)
+check('and the project still counts toward the objective it serves',
+  after.projects.find((p) => p.key === DATACUBE.key).objective === DATACUBE.objective)
 
 /* ---- 2. the same, on a card that has been hand-edited ---- */
 console.log('\n--- with weights already customised ---')

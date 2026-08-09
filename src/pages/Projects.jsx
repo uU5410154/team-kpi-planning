@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
-  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover,
+  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
@@ -177,6 +177,65 @@ function SoftBenefitCell({ value, onChange }) {
         </Box>
       </Popover>
     </>
+  )
+}
+
+
+/**
+ * The other objectives a project answers to.
+ *
+ * One piece of work can serve several: a dashboard removes manual work AND is
+ * a dashboard delivered. Only the hours objective counts hours, so tagging a
+ * project to more of them adds what it delivers without adding its saving
+ * hours a second time.
+ *
+ * The primary tag above stays what the register reports in one column; these
+ * are the rest.
+ */
+function AlsoServes({ project, onChange }) {
+  const [anchor, setAnchor] = useState(null)
+  const extra = (Array.isArray(project.objectives) ? project.objectives : [])
+    .filter((id) => OBJ_BY_ID[id] && id !== project.objective)
+  const spare = OBJECTIVES.filter((o) => o.id !== project.objective && !extra.includes(o.id))
+
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexWrap: 'wrap', mt: 0.25 }}>
+      {extra.map((id) => (
+        <Chip
+          key={id}
+          size="small"
+          label={`+${OBJ_BY_ID[id].no}`}
+          title={`Also serves ${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].name}`}
+          onDelete={() => onChange(extra.filter((x) => x !== id))}
+          sx={{ height: 17, fontSize: '0.625rem', fontWeight: 700, '& .MuiChip-deleteIcon': { fontSize: 12 } }}
+        />
+      ))}
+      {spare.length > 0 && (
+        <Tooltip title="Also counts toward another objective">
+          <IconButton
+            size="small"
+            aria-label="add objective tag"
+            sx={{ p: 0.1 }}
+            onClick={(e) => setAnchor(e.currentTarget)}
+          >
+            <AddIcon sx={{ fontSize: 13 }} />
+          </IconButton>
+        </Tooltip>
+      )}
+      <Menu open={!!anchor} anchorEl={anchor} onClose={() => setAnchor(null)}>
+        {spare.map((o) => (
+          <MenuItem
+            key={o.id}
+            onClick={() => { onChange([...extra, o.id]); setAnchor(null) }}
+          >
+            {o.no}. {o.name}
+            <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+              {o.measure === 'count' ? `counts ${o.countUnit}` : o.measure === 'hours' ? 'counts the hours' : o.measure}
+            </Typography>
+          </MenuItem>
+        ))}
+      </Menu>
+    </Box>
   )
 }
 
@@ -862,6 +921,10 @@ export default function Projects({
                     >
                       {OBJECTIVES.map((o) => <MenuItem key={o.id} value={o.id}>{o.no}. {o.short}</MenuItem>)}
                     </Select>
+                    <AlsoServes
+                      project={p}
+                      onChange={(ids) => onUpdate(p.key, { objectives: ids })}
+                    />
                   </TableCell>
                   <TableCell>
                     <Select

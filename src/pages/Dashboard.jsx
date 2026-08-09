@@ -34,7 +34,10 @@ function Section({ title, subtitle, children, action }) {
 export default function Dashboard({ plan, onGoTo }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
-  const { totals, people, projects, quality, byObjective, settings, finance: fin } = plan
+  // mixByObjective, not byObjective: this chart asks where the work SITS,
+  // which is the project's own objective. byObjective is the KPI map, and
+  // every saving hour sits on the hours objective there.
+  const { totals, people, projects, quality, mixByObjective: byObjective, settings, finance: fin } = plan
   const sym = fin.symbol
   const [byPersonView, setByPersonView] = useState('chart')
 

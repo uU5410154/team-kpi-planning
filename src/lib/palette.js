@@ -69,7 +69,7 @@ export const OBJECTIVES = [
     name: 'Financial',
     short: 'Financial',
     detail: 'Activities which improve PL, BS, Cash flow',
-    target: 'Return on build cost',
+    target: 'Value of every hour released',
     // Money, not a ratio of hours to mandays. The guideline target below asks
     // whether the man-hours invested are worth the benefit returned, which is
     // a cost-benefit question and is answered in baht.
@@ -87,7 +87,17 @@ export const OBJECTIVES = [
     short: 'Process automation',
     detail: 'Transform all manual work to automation',
     target: '3,000 hrs',
+    /*
+     * THE hours objective. Every saving hour in the plan lands here, whatever
+     * else the project is tagged to — a dashboard that saves eight hours a
+     * month is still eight hours of manual work removed.
+     *
+     * It is the only objective measured in hours, which is what makes tagging a
+     * project to several of them safe: the others count deliverables, state a
+     * date, or price the same hours in money, so nothing is counted twice.
+     */
     measure: 'hours',
+    accrues: 'allHours',
     countsToPool: true,
     guidelineName: 'F&A process automation',
     guidelineDetail: 'to transform all manual work to automation',
@@ -117,8 +127,12 @@ export const OBJECTIVES = [
     name: 'Efficiency and integration',
     short: 'Efficiency',
     detail: 'Developing reporting to enhance efficiency and productivity',
-    target: 'propose',
-    measure: 'hours_part',
+    target: 'Dashboards delivered',
+    // Counted, not weighed in hours. The work is dashboards delivered; the
+    // hours they save are real but they belong to objective 2, and reporting
+    // them here as well would state the same saving twice.
+    measure: 'count',
+    countUnit: 'dashboards',
     countsToPool: true,
     guidelineName: 'Efficiency and integration',
     guidelineDetail: 'Developing reporting to enhance efficiency and productivity',
@@ -130,8 +144,11 @@ export const OBJECTIVES = [
     name: 'Automation E2E, AI development',
     short: 'E2E / AI',
     detail: 'RPA and AI-included project delivery',
-    target: 'propose',
-    measure: 'hours',
+    target: 'E2E / AI solutions delivered',
+    // Same rule as objective 4: the deliverable is the automation, the hours
+    // it saves belong to objective 2.
+    measure: 'count',
+    countUnit: 'solutions',
     countsToPool: true,
     // blank in the source — grouped under "Efficiency and integration"
     guidelineName: '',

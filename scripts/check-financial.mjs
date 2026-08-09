@@ -372,8 +372,16 @@ console.log('\n--- money is credited on the same share as the hours ---')
 
 console.log('\n--- objective 1 reads as money on every card ---')
 check('objective 1 maps to a thb target kind', targetKindFor('financial') === 'thb')
-check('the other hour objectives still map to hours',
-  ['process_automation', 'efficiency', 'ai_automation'].every((o) => targetKindFor(o) === 'hours'))
+// One objective in hours, one in money, one a date, two counted. That split
+// is what lets a project answer to several at once without being counted
+// twice, so it is asserted rather than assumed.
+check('ONLY ONE OBJECTIVE IS MEASURED IN HOURS',
+  ['financial', 'process_automation', 'datawarehouse', 'efficiency', 'ai_automation']
+    .filter((o) => targetKindFor(o) === 'hours').join(',') === 'process_automation',
+  ['financial', 'process_automation', 'datawarehouse', 'efficiency', 'ai_automation']
+    .map((o) => `${o}:${targetKindFor(o)}`).join(' '))
+check('objectives 4 and 5 are counted, not weighed in hours',
+  ['efficiency', 'ai_automation'].every((o) => targetKindFor(o) === 'number'))
 check('objective 3 is still a milestone', targetKindFor('datawarehouse') === 'text')
 for (const p of plan.people) {
   const l = p.kpiLines.find((x) => x.objective === 'financial')
