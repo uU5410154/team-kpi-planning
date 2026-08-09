@@ -132,6 +132,17 @@ export const PROJECT_COLUMNS = [
     },
   },
   {
+    key: 'monetaryBenefit', label: 'Cash benefit/yr', width: 16, match: /^cash/i,
+    field: 'monetaryBenefit', numFmt: '#,##0',
+    read: (p) => p.monetaryAnnualBenefit ?? null,
+    parse: (raw) => {
+      const n = parseNumber(raw)
+      if (n === undefined) return undefined
+      if (n === 'TBC') return null_hours
+      return n == null || n < 0 ? null : n
+    },
+  },
+  {
     // Beside the hours, as on screen. One bullet a line inside the cell, and
     // the same on the way back in — a semicolon-separated blob would import as
     // one very long benefit.

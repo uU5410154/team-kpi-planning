@@ -751,8 +751,11 @@ export default function Projects({
               <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
               <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>
               {head('savingHours', 'Saving hrs/mth', 'right')}
-              {/* Beside the hours deliberately: it is the other half of the
-                  benefit, and a case made only of hours is half a case. */}
+              {/* The other half of the QUANTIFIED benefit: money that is money
+                  rather than time, so it sits next to the hours it adds to. */}
+              {head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 96)}
+              {/* And beside them the part no number carries: a case made only
+                  of figures is half a case. */}
               <TableCell sx={{ minWidth: 150, maxWidth: 170, width: 160 }}>Soft benefits</TableCell>
               {head('fte', 'FTE', 'right')}
               {head('manday', 'Mandays', 'right')}
@@ -885,6 +888,20 @@ export default function Projects({
                       estimated={false}
                       onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
                     />
+                  </TableCell>
+                  <TableCell align="right">
+                    <Tooltip title={p.monetaryAnnualBenefit
+                      ? `${fmtMoney(p.monetaryAnnualBenefit, sym)} a year of cash benefit, on top of ${fmtMoney((p.hoursMonthlyBenefit || 0) * 12, sym)} from the hours. Both count toward the ROI.`
+                      : 'Cash this delivers that the saving hours do not already capture — a licence dropped, a penalty avoided. Stated per year. Leave empty where the hours ARE the saving, or it is counted twice.'}>
+                      <Box>
+                        <NumCell
+                          value={p.monetaryAnnualBenefit ?? null}
+                          estimated={false}
+                          width={92}
+                          onChange={(v) => onUpdate(p.key, { monetaryBenefit: v })}
+                        />
+                      </Box>
+                    </Tooltip>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <SoftBenefitCell
@@ -1071,7 +1088,7 @@ export default function Projects({
             })}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={15} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={16} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   No projects match these filters.
                 </TableCell>
               </TableRow>

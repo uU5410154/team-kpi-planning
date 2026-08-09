@@ -1643,10 +1643,15 @@ try {
 
   const softCol = await page.evaluate(() => {
     const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
-    return { ix: heads.indexOf('soft benefits'), saving: heads.findIndex((h) => h.startsWith('saving')) }
+    return {
+      ix: heads.indexOf('soft benefits'),
+      cash: heads.findIndex((h) => h.startsWith('cash benefit')),
+      saving: heads.findIndex((h) => h.startsWith('saving')),
+    }
   })
   check('THERE IS A SOFT BENEFITS COLUMN', softCol.ix > 0, JSON.stringify(softCol))
-  check('and it sits beside the saving hours', softCol.ix === softCol.saving + 1, JSON.stringify(softCol))
+  check('and it sits beside the saving hours and the cash', softCol.ix === softCol.saving + 2, JSON.stringify(softCol))
+  check('THERE IS A CASH BENEFIT COLUMN TOO', softCol.cash === softCol.saving + 1, JSON.stringify(softCol))
 
   await page.evaluate(() => {
     document.querySelector('tbody tr [aria-label="edit soft benefits"]').click()
@@ -1676,6 +1681,23 @@ try {
     /Removes a manual reconciliation/.test(softCell || '') && /Full audit trail/.test(softCell || ''),
     String(softCell))
 
+  // Cash benefit, typed in the column beside it.
+  await page.evaluate((ix) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const inp = document.querySelector('tbody tr').children[ix].querySelector('input')
+    inp.focus(); setter.call(inp, '600000'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+  }, softCol.cash)
+  await new Promise((r) => setTimeout(r, 1000))
+  const cashBack = await page.evaluate((ix) => {
+    const row = document.querySelector('tbody tr')
+    const inp = row.children[ix].querySelector('input')
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const roiIx = heads.indexOf('roi')
+    return { typed: inp?.value ?? null, roi: row.children[roiIx]?.innerText.trim() ?? null }
+  }, softCol.cash)
+  check('THE CASH FIGURE IS ACCEPTED', String(cashBack.typed).replace(/,/g, '') === '600000',
+    JSON.stringify(cashBack))
+
   // the scorecard of the person credited on it
   await page.goto(`${base}/?soft=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 1800))
@@ -1694,6 +1716,17 @@ try {
     softOnCard.slice(-220))
   check('and names the project they come from', /FNP-379/.test(softOnCard), softOnCard.slice(-160))
   check('the card total is untouched by them', /100%/.test(softOnCard))
+
+  const cashOnCard = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    const t = heads[heads.length - 1].closest('table')
+    const cols = [...t.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = cols.findIndex((h) => h.startsWith('cash'))
+    const row = [...t.querySelectorAll('tbody tr')].find((r) => /FNP-379/.test(r.innerText))
+    return { ix, value: row && ix >= 0 ? row.children[ix].innerText.trim() : null }
+  })
+  check('THE SCORECARD SHOWS THE CASH BENEFIT TOO', cashOnCard.ix > 0 && /\d/.test(cashOnCard.value || ''),
+    JSON.stringify(cashOnCard))
 
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {

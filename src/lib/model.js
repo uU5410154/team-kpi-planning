@@ -1298,10 +1298,35 @@ export function projectFinance(p, settings) {
   const gate = r.roiGate ?? DEFAULT_FINANCE.roiGate
 
   const hrs = monthlyHours(p, settings?.savingBasis)
-  const monthlyBenefit = hrs == null ? null : hrs * r.acctHourRate
+  // The benefit that comes from the hours: time released, priced.
+  const hoursMonthlyBenefit = hrs == null ? null : hrs * r.acctHourRate
+
+  /*
+   * The benefit stated directly in money.
+   *
+   * Not every return is time. A licence dropped, a penalty avoided, an interest
+   * charge that stops — that is cash, and pricing it as hours would be a
+   * fiction. Stated PER YEAR, because a saving of this kind is always quoted
+   * that way, and divided down to the month here so both halves of the benefit
+   * meet in the same unit.
+   *
+   * Additive, not an alternative: a project may release hours AND save cash,
+   * and they are different money. Where the hours already ARE the saving this
+   * must be left empty — nothing can tell a second benefit apart from the same
+   * benefit counted twice.
+   */
+  const monetaryRaw = Number(p.monetaryBenefit)
+  const monetaryBenefit = Number.isFinite(monetaryRaw) && monetaryRaw > 0 ? monetaryRaw : null
+  const monetaryMonthlyBenefit = monetaryBenefit == null ? null : monetaryBenefit / 12
+
+  const monthlyBenefit = hoursMonthlyBenefit == null && monetaryMonthlyBenefit == null
+    ? null
+    : (hoursMonthlyBenefit ?? 0) + (monetaryMonthlyBenefit ?? 0)
   const horizonBenefit = monthlyBenefit == null ? null : monthlyBenefit * horizon
   const annualBenefit = monthlyBenefit == null ? null : monthlyBenefit * 12
   // The saving expressed the way management already states it: whole people.
+  // Hours ONLY — cash releases no capacity, and folding it in here would report
+  // people freed up who are not.
   const fteReleased = hrs == null ? null : hrs / r.hoursPerFteMonth
 
   // Same discipline as the saving hours: only a finite positive number is an
@@ -1340,6 +1365,11 @@ export function projectFinance(p, settings) {
     monthlyBenefit,
     annualBenefit,
     horizonBenefit,
+    // The two halves, kept apart so every screen and every sheet can say which
+    // part of the return is time and which is cash.
+    hoursMonthlyBenefit,
+    monetaryAnnualBenefit: monetaryBenefit,
+    monetaryMonthlyBenefit,
     fteReleased,
     buildCost,
     capex,
@@ -1513,6 +1543,9 @@ export function computePlan(state) {
    */
   const inPlan = perProject.filter(isInPlan)
   const monthlyBenefit = inPlan.reduce((a, p) => a + (p.monthlyBenefit || 0), 0)
+  // The same total, split by where it comes from.
+  const hoursMonthlyBenefit = inPlan.reduce((a, p) => a + (p.hoursMonthlyBenefit || 0), 0)
+  const monetaryAnnualBenefit = inPlan.reduce((a, p) => a + (p.monetaryAnnualBenefit || 0), 0)
   const annualBenefit = monthlyBenefit * 12
   const horizonBenefit = monthlyBenefit * rates.horizonMonths
   const fteReleased = inPlan.reduce((a, p) => a + (p.fteReleased || 0), 0)
@@ -1554,6 +1587,9 @@ export function computePlan(state) {
     monthlyBenefit,
     annualBenefit,
     horizonBenefit,
+    // How the annual benefit divides: time released, and cash stated outright.
+    hoursAnnualBenefit: hoursMonthlyBenefit * 12,
+    monetaryAnnualBenefit,
     fteReleased,
     buildCost: costed.length ? buildCost : null,
     capex: costed.length ? capex : null,
@@ -1605,6 +1641,11 @@ export function computePlan(state) {
     // Money, credited on exactly the same share AND the same filter as the
     // hours, so a person's benefit is identically their credited hours valued
     // at the accountant rate. check-financial asserts that identity.
+    // Split the same way, so the FTE released stays a measure of TIME.
+    const hoursMonthlyBenefit = counted.reduce(
+      (a, r) => a + (countsToPool(r.p) ? (r.p.hoursMonthlyBenefit || 0) * r.share : 0), 0)
+    const monetaryAnnualBenefit = counted.reduce(
+      (a, r) => a + (countsToPool(r.p) ? (r.p.monetaryAnnualBenefit || 0) * r.share : 0), 0)
     const monthlyBenefit = counted.reduce(
       (a, r) => a + (countsToPool(r.p) ? (r.p.monthlyBenefit || 0) * r.share : 0),
       0,
@@ -1648,6 +1689,8 @@ export function computePlan(state) {
       byObjective,
       benefitByObjective,
       monthlyBenefit,
+      hoursMonthlyBenefit,
+      monetaryAnnualBenefit,
       buildCost: costedRows.length ? buildCost : null,
       capex: costedRows.length ? capex : null,
       investment: costedRows.length ? investment : null,
@@ -1681,6 +1724,8 @@ export function computePlan(state) {
   const teamHours = byPersonShown.reduce((a, p) => a + p.hours, 0)
   const teamManday = byPersonShown.reduce((a, p) => a + p.manday, 0)
   const teamMonthlyBenefit = byPersonShown.reduce((a, p) => a + p.monthlyBenefit, 0)
+  const teamHoursMonthlyBenefit = byPersonShown.reduce((a, p) => a + (p.hoursMonthlyBenefit || 0), 0)
+  const teamMonetaryAnnualBenefit = byPersonShown.reduce((a, p) => a + (p.monetaryAnnualBenefit || 0), 0)
   const teamBuildCost = byPersonShown.reduce((a, p) => a + (p.buildCost || 0), 0)
   const teamCapex = byPersonShown.reduce((a, p) => a + (p.capex || 0), 0)
   const teamInvestment = byPersonShown.reduce((a, p) => a + (p.investment || 0), 0)
@@ -1740,6 +1785,8 @@ export function computePlan(state) {
     // Money on the same aggregation rule as the hours: the lead carries the
     // team's, everyone else carries their own.
     const scMonthlyBenefit = aggregates ? led.monthlyBenefit : p.monthlyBenefit
+    const scHoursMonthlyBenefit = aggregates ? teamHoursMonthlyBenefit : (p.hoursMonthlyBenefit || 0)
+    const scMonetaryAnnualBenefit = aggregates ? teamMonetaryAnnualBenefit : (p.monetaryAnnualBenefit || 0)
     const scCostedCount = aggregates ? teamCostedCount : p.costedCount
     const scBuildCost = scCostedCount > 0 ? (aggregates ? teamBuildCost : p.buildCost) : null
     const scCapex = scCostedCount > 0 ? (aggregates ? teamCapex : p.capex) : null
@@ -1757,10 +1804,14 @@ export function computePlan(state) {
       monthlyBenefit: scMonthlyBenefit,
       annualBenefit: scMonthlyBenefit * 12,
       horizonBenefit: scMonthlyBenefit * rates.horizonMonths,
-      // Derived from the benefit, not from scHours: scHours is in whatever
-      // unit savingBasis names, and dividing a per-YEAR figure by a per-MONTH
-      // divisor reported twelve times the FTE on the annual basis.
-      fteReleased: rates.acctMonthRate > 0 ? (scMonthlyBenefit / rates.acctMonthRate) : null,
+      // Derived from the HOURS half of the benefit, not from scHours: scHours is
+      // in whatever unit savingBasis names, and dividing a per-YEAR figure by a
+      // per-MONTH divisor reported twelve times the FTE on the annual basis.
+      // Cash is excluded on purpose — a licence saved frees nobody's time.
+      fteReleased: rates.acctMonthRate > 0 ? (scHoursMonthlyBenefit / rates.acctMonthRate) : null,
+      // The two halves of what this person is credited with.
+      hoursAnnualBenefit: scHoursMonthlyBenefit * 12,
+      monetaryAnnualBenefit: scMonetaryAnnualBenefit,
       buildCost: scBuildCost,
       capex: scCapex,
       investment: scInvestment,

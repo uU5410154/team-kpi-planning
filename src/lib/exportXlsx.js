@@ -199,7 +199,11 @@ export async function buildWorkbook(plan, state) {
     r++
     kv('FTE released (saving hours ÷ the ratio)', Number(fin.fteReleased.toFixed(2)), N1, NAVY)
     kv('Value of hours released (per month)', Math.round(fin.monthlyBenefit), MONEY)
-    kv('Value of hours released (per year)', Math.round(fin.annualBenefit), MONEY, NAVY)
+    kv('Value of hours released (per year)', Math.round(fin.hoursAnnualBenefit), MONEY, NAVY)
+    // Stated on its own line rather than folded in silently: a reader has to be
+    // able to see how much of the return is time and how much is cash.
+    kv('Cash benefit stated on projects (per year)', Math.round(fin.monetaryAnnualBenefit || 0), MONEY, NAVY)
+    kv('Total annual benefit', Math.round(fin.annualBenefit), MONEY, NAVY)
     kv(`Benefit over the ${fin.horizonMonths}-month horizon`, Math.round(fin.horizonBenefit), MONEY)
     r++
     // The whole-plan spend, whether or not it can carry a return — this is the
@@ -397,10 +401,14 @@ export async function buildWorkbook(plan, state) {
       ['Mandays', 11], [`Cost (${cur})`, 14],
       [`CAPEX (${cur})`, 13], [`Investment (${cur})`, 15],
       [`OPEX/mth (${cur})`, 13], [`OPEX 2026 (${cur})`, 14],
-      [`Benefit/yr (${cur})`, 15], [`Net ${fin.horizonMonths}mo (${cur})`, 16],
+      [`Cash/yr (${cur})`, 14], [`Benefit/yr (${cur})`, 15], [`Net ${fin.horizonMonths}mo (${cur})`, 16],
       ['ROI', 10], ['Payback (mo)', 12], ['Break-even mandays', 15],
       ['Gate', 9], ['Commit', 11],
     ]
+    // 1-based column index by header label, so every format and every colour
+    // below asks for a column by name.
+    const ec = (label) => cols.findIndex((c) => String(c[0]).startsWith(label)) + 1
+
     const ws = wb.addWorksheet('Effort_Return', {
       properties: { tabColor: { argb: 'FF7C5CD6' } },
       views: [{ state: 'frozen', xSplit: 2, ySplit: 4 }],
@@ -453,6 +461,7 @@ export async function buildWorkbook(plan, state) {
         p.investment == null ? null : Math.round(p.investment),
         p.opexRunRate > 0 ? Math.round(p.opexRunRate) : null,
         p.opexYear > 0 ? Math.round(p.opexYear) : null,
+        p.monetaryAnnualBenefit == null ? null : Math.round(p.monetaryAnnualBenefit),
         p.annualBenefit == null ? null : Math.round(p.annualBenefit),
         p.netBenefit == null ? null : Math.round(p.netBenefit),
         p.roi == null ? null : Number(p.roi.toFixed(4)),
@@ -461,25 +470,31 @@ export async function buildWorkbook(plan, state) {
         p.gate === 'unknown' ? '' : p.gate === 'pass' ? 'Pass' : 'Below',
         p.commitLevel,
       ]
-      tr.getCell(5).numFmt = N1
-      for (const c of [6, 7, 8, 9, 10, 11, 12]) tr.getCell(c).numFmt = MONEY
-      tr.getCell(13).numFmt = ROI
-      tr.getCell(14).numFmt = N1
-      tr.getCell(15).numFmt = N0
-      for (let c = 5; c <= 15; c++) tr.getCell(c).alignment = { horizontal: 'right' }
-      for (const c of [3, 16, 17]) tr.getCell(c).alignment = { horizontal: 'center' }
+      // By NAME, not by position. Written as bare indices, inserting one
+      // column silently gave the ROI cell a decimal format and the gate colour
+      // to its neighbour — the numbers stayed right and the sheet stopped
+      // saying what they were.
+      tr.getCell(ec('Mandays')).numFmt = N1
+      for (const label of ['Cost', 'CAPEX', 'Investment', 'OPEX/mth', 'OPEX 2026', 'Cash/yr', 'Benefit/yr', 'Net ']) {
+        tr.getCell(ec(label)).numFmt = MONEY
+      }
+      tr.getCell(ec('ROI')).numFmt = ROI
+      tr.getCell(ec('Payback')).numFmt = N1
+      tr.getCell(ec('Break-even')).numFmt = N0
+      for (let c = ec('Mandays'); c <= ec('Break-even'); c++) tr.getCell(c).alignment = { horizontal: 'right' }
+      for (const label of ['PIC', 'Gate', 'Commit']) tr.getCell(ec(label)).alignment = { horizontal: 'center' }
       for (let c = 1; c <= cols.length; c++) tr.getCell(c).font = { name: FONT, size: 9.5, bold: true }
-      if (p.netBenefit != null) tone(tr.getCell(12), p.netBenefit >= 0 ? GOOD : BAD, false)
-      if (p.opexRunRate > 0) tone(tr.getCell(9), WARN, false)
-      if (p.gate === 'fail') { tone(tr.getCell(13), BAD); tone(tr.getCell(16), BAD) }
-      if (p.gate === 'pass') { tone(tr.getCell(13), GOOD); tone(tr.getCell(16), GOOD) }
+      if (p.netBenefit != null) tone(tr.getCell(ec('Net ')), p.netBenefit >= 0 ? GOOD : BAD, false)
+      if (p.opexRunRate > 0) tone(tr.getCell(ec('OPEX/mth')), WARN, false)
+      if (p.gate === 'fail') { tone(tr.getCell(ec('ROI')), BAD); tone(tr.getCell(ec('Gate')), BAD) }
+      if (p.gate === 'pass') { tone(tr.getCell(ec('ROI')), GOOD); tone(tr.getCell(ec('Gate')), GOOD) }
       // Payback is blank when OPEX is at or above the benefit — say why here
       // too, since this sheet is read on its own.
       // "never" means the running cost eats the benefit — NOT that the benefit
       // is merely unknown, which is a blank.
       if (p.investment != null && p.paybackMonths == null && p.netMonthly != null && p.netMonthly <= 0) {
-        tr.getCell(14).value = 'never'
-        tone(tr.getCell(14), BAD)
+        tr.getCell(ec('Payback')).value = 'never'
+        tone(tr.getCell(ec('Payback')), BAD)
       }
     }
     styleBody(ws, first, r - 1, cols.length)
@@ -521,7 +536,8 @@ export async function buildWorkbook(plan, state) {
     const cols = [
       ['Jira', 12], ['Project', 42], ['Objective', 22],
       [`Project ${unit}`, 14], ['Credited', 11],
-      [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14], ['Status', 13],
+      [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14],
+      [`Cash benefit/yr (${cur})`, 16], ['Status', 13],
       // What each project delivers beyond the hours. On the person's own sheet
       // because a scorecard read on its own has to carry the whole case.
       ['Soft benefits', 46],
@@ -529,7 +545,7 @@ export async function buildWorkbook(plan, state) {
     // 1-based index by header label, so inserting a column cannot silently
     // re-format its neighbours.
     const px = (label) => cols.findIndex((c) => String(c[0]).startsWith(label)) + 1
-    const MONEY_COLS = [px('Build cost'), px('Investment')]
+    const MONEY_COLS = [px('Build cost'), px('Investment'), px('Cash benefit')]
     const NUM_FIRST = px(`Project ${unit}`)
     const NUM_LAST = px('Investment')
     const safe = `Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31)
@@ -622,6 +638,8 @@ export async function buildWorkbook(plan, state) {
         // rows printed here therefore add up to the TOTAL CREDITED row below.
         !inTotal || pr.buildCost == null ? null : Math.round(pr.buildCost * share),
         !inTotal || pr.investment == null ? null : Math.round(pr.investment * share),
+        // Credited on the same share as the hours: it is the same project.
+        !counted || !pr.monetaryAnnualBenefit ? null : Math.round(pr.monetaryAnnualBenefit * share),
         pr.status || '',
         // Not shared out: a soft benefit is not divisible. Two people credited
         // on a project both deliver the whole of it.
@@ -693,6 +711,9 @@ export async function buildWorkbook(plan, state) {
       // instead of taking the hours on trust.
       { label: 'Team (roles, share)', width: 42, align: 'left' },
       { label: `Saving ${unit}`, width: 13, fmt: N0 },
+      // The other half of the QUANTIFIED benefit. A number, not a note: it
+      // counts toward the return exactly as the hours do.
+      { label: `Cash benefit/yr (${cur})`, width: 16, fmt: MONEY },
       // Beside the hours, as on screen: the other half of the benefit. One
       // bullet a line inside the cell, so it reads as a list rather than a
       // paragraph with semicolons in it.
@@ -745,6 +766,7 @@ export async function buildWorkbook(plan, state) {
         person ? person.nick : 'TBC',
         creditSummary(p, p.shares, (id) => people.find((x) => x.id === id)?.nick || id),
         p.savingHours ?? null,
+        p.monetaryAnnualBenefit ?? null,
         (p.softBenefits || []).map((b) => `• ${b}`).join('\n'),
         p.fte ?? null,
         p.commitLevel,

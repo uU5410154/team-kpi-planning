@@ -288,7 +288,7 @@ export default function People({
                 ? `${p.finance.fteReleased.toFixed(1)} FTE · no cost estimated yet, so no return`
                 : `ROI ${fmtRoi(p.finance.roi)} on ${fmtMoneyShort(p.finance.investment, sym)} invested · gate ${fmtRoi(fin.roiGate)}`
             }
-            help={`Objective 1. ${fmtHours(p.scorecardHours)} saving hrs/month at ${fmtMoney(fin.acctHourRate, sym)} an hour, annualised. The return underneath compares that — net of ${fmtMoney(p.finance.opexRunRate, sym)} a month of credited OPEX — against ${fmtMoney(p.finance.buildCost ?? 0, sym)} of build (${fmtHours(p.scorecardManday)} credited mandays at ${fmtMoney(fin.devDayRate, sym)} each) plus ${fmtMoney(p.finance.capex ?? 0, sym)} of CAPEX, over ${fin.horizonMonths} months. Cost and benefit are credited on the same share and over the same projects, counting only the ones that carry a cost estimate.`}
+            help={`Objective 1. ${fmtHours(p.scorecardHours)} saving hrs/month at ${fmtMoney(fin.acctHourRate, sym)} an hour, annualised${p.finance.monetaryAnnualBenefit ? `, plus ${fmtMoney(p.finance.monetaryAnnualBenefit, sym)} a year of cash benefit stated directly on the projects` : ''}. The return underneath compares that — net of ${fmtMoney(p.finance.opexRunRate, sym)} a month of credited OPEX — against ${fmtMoney(p.finance.buildCost ?? 0, sym)} of build (${fmtHours(p.scorecardManday)} credited mandays at ${fmtMoney(fin.devDayRate, sym)} each) plus ${fmtMoney(p.finance.capex ?? 0, sym)} of CAPEX, over ${fin.horizonMonths} months. Cost and benefit are credited on the same share and over the same projects, counting only the ones that carry a cost estimate.`}
           />
         </Grid>
         <Grid item xs={6} md={3}>
@@ -742,6 +742,7 @@ export default function People({
                   <TableCell align="right" sx={{ minWidth: 76 }}>Project hrs</TableCell>
                   {!p.aggregatesTeam && <TableCell align="right" sx={{ minWidth: 62 }}>Cred.</TableCell>}
                   <TableCell align="right" sx={{ minWidth: 68 }}>Mandays</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 62 }}>Cash / yr</TableCell>
                   <TableCell align="right" sx={{ minWidth: 68 }}>Benefit / yr</TableCell>
                   <TableCell align="right" sx={{ minWidth: 76 }}>ROI</TableCell>
                   <TableCell align="right" sx={{ minWidth: 62 }}>Payback</TableCell>
@@ -849,10 +850,27 @@ export default function People({
                             />
                           )}
                         </TableCell>
+                        {/* The cash half on its own, so a benefit that is not
+                            time can be seen rather than inferred from a total. */}
+                        <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                          {!counted || !pr.monetaryAnnualBenefit
+                            ? <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+                            : (
+                              <Tooltip title={`${fmtMoney(pr.monetaryAnnualBenefit, sym)} a year on the project, credited at ${Math.round(share * 100)}%. Counted in the Benefit and the ROI beside it.`}>
+                                <span>{fmtMoneyShort(pr.monetaryAnnualBenefit * share, sym)}</span>
+                              </Tooltip>
+                            )}
+                        </TableCell>
                         <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
                           {!counted || pr.annualBenefit == null
                             ? <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
-                            : fmtMoneyShort(pr.annualBenefit * share, sym)}
+                            : (
+                              <Tooltip title={pr.monetaryAnnualBenefit
+                                ? `${fmtMoney((pr.hoursMonthlyBenefit || 0) * 12 * share, sym)} from the hours + ${fmtMoney(pr.monetaryAnnualBenefit * share, sym)} cash`
+                                : `${fmtMoney(pr.annualBenefit * share, sym)} a year, all of it from the hours released`}>
+                                <span>{fmtMoneyShort(pr.annualBenefit * share, sym)}</span>
+                              </Tooltip>
+                            )}
                         </TableCell>
                         <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
                           {!counted || pr.roi == null ? (
