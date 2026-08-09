@@ -268,5 +268,37 @@ console.log('\n--- the workbook states each objective in its own unit ---')
     `${totalRow.getCell(4).value} vs ${lead.kpiTotals.savingHours.toFixed(1)}`)
 }
 
+/* ---------------- 8. the workbook reads the same average ---------------- */
+console.log(String.fromCharCode(10) + '--- the exported total row is the same average the card shows ---')
+{
+  const priced = {
+    ...base,
+    projects: base.projects.map((p, i) => (p.savingHours > 0 ? { ...p, manday: 5 + (i % 40) } : p)),
+  }
+  const plan = computePlan(priced)
+  const wb = await buildWorkbook(plan, priced)
+  const back = new ExcelJS.Workbook()
+  await back.xlsx.load(await wb.xlsx.writeBuffer())
+
+  for (const p of plan.people) {
+    const ws = back.getWorksheet(`Obj-${p.nick}`.replace(/[:\\?*[\]/]/g, '').slice(0, 31))
+    let col = -1
+    let totalRoi = null
+    ws.eachRow((r) => {
+      const vals = r.values.map((v) => String(v || '').trim())
+      if (col < 0 && vals.indexOf('ROI') > 0) col = vals.indexOf('ROI')
+      if (col > 0 && /^TOTAL CREDITED/.test(String(r.getCell(2).value || ''))) totalRoi = r.getCell(col).value
+    })
+    check(`${p.nick}: THE SHEET'S ROI IS THE AVERAGE THE CARD READS`,
+      p.avgProjectRoi == null
+        ? totalRoi == null
+        : Math.abs(totalRoi - p.avgProjectRoi) < 1e-4,
+      `${totalRoi} vs ${p.avgProjectRoi == null ? null : p.avgProjectRoi.toFixed(4)}`)
+    const line = p.kpiLines.find((l) => l.targetKind === 'percent')
+    check(`${p.nick}: and it is what objective 1 is measured on`,
+      (line?.creditedRatio ?? null) === (p.avgProjectRoi ?? null))
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

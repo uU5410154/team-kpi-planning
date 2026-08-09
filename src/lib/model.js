@@ -2153,6 +2153,11 @@ export function computePlan(state) {
        */
       scorecardHours: (aggregates ? led.hoursOverridden : p.hoursOverridden) ? scHours : card.stated,
       registerHours: scHours,
+      // The average the CARD reads. For the lead that is the whole book, not
+      // their personal slice — the sheet under it lists the whole book too.
+      avgProjectRoi: avgRoi,
+      ownAvgProjectRoi: p.avgProjectRoi ?? null,
+      roiRowCount: aggregates ? teamRoiRows.length : (p.roiRowCount || 0),
       // What the register says, kept beside what the card claims: "revert" is
       // then a stored fact rather than a re-derivation that might not match.
       calcScorecardHours: aggregates ? led.calcHours : p.calcHours,

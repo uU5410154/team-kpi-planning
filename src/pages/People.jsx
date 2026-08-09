@@ -99,15 +99,33 @@ function HoursTargetCell({ value, onChange, unit }) {
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
       InputProps={{
         endAdornment: (
-          <InputAdornment position="end" sx={{ ml: 0.25 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>{unit}</Typography>
+          // The unit gives way, never the number. "dashboards/reports/portals"
+          // is wider than the whole field, and left to size itself it pushed
+          // the figure out of sight — the one thing on the row that has to be
+          // readable. It truncates and carries the full text as a tooltip.
+          <InputAdornment position="end" sx={{ ml: 0.25, flexShrink: 1, minWidth: 0 }}>
+            <Typography
+              variant="caption"
+              title={unit}
+              sx={{
+                color: 'text.secondary',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 62,
+                cursor: unit && unit.length > 10 ? 'help' : 'inherit',
+              }}
+            >
+              {unit}
+            </Typography>
           </InputAdornment>
         ),
       }}
       inputProps={{
         style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.8125rem', padding: '6px 2px 6px 8px' },
       }}
-      sx={{ width: 116 }}
+      // The figure keeps its room whatever the unit is called.
+      sx={{ width: 116, '& .MuiInputBase-input': { minWidth: 34, flexShrink: 0 } }}
     />
   )
 }

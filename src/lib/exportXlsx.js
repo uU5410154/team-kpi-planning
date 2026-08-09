@@ -743,7 +743,12 @@ export async function buildWorkbook(plan, state) {
     }
     total('Credited', Math.round(p.scorecardHours), N0)
     total('Mandays', Number((p.scorecardManday || 0).toFixed(1)), N1)
-    total('ROI', p.finance.roi == null ? null : Number(p.finance.roi.toFixed(4)), ROI)
+    // The AVERAGE of the ROI column above it, which is what objective 1 on the
+    // scorecard reads. The portfolio return — total net benefit over total
+    // investment — is a different number, and printing it at the foot of a
+    // column of per-project returns invited the two to be compared and found
+    // not to match.
+    total('ROI', p.avgProjectRoi == null ? null : Number(p.avgProjectRoi.toFixed(4)), ROI)
     if (p.hoursOverridden) tone(tr.getCell(px('Credited')), WARN)
     total('Build cost', p.finance.buildCost == null ? null : Math.round(p.finance.buildCost), MONEY)
     total('Investment', p.finance.investment == null ? null : Math.round(p.finance.investment), MONEY)
