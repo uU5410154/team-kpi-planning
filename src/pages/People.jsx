@@ -52,7 +52,7 @@ function PctCell({ value, onChange, invalid }) {
       InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0 }}>%</InputAdornment> }}
       inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, padding: '6px 4px 6px 8px' } }}
       error={invalid}
-      sx={{ width: 92 }}
+      sx={{ width: 80 }}
     />
   )
 }
@@ -89,7 +89,7 @@ function HoursTargetCell({ value, onChange, unit }) {
       inputProps={{
         style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.8125rem', padding: '6px 2px 6px 8px' },
       }}
-      sx={{ width: 132 }}
+      sx={{ width: 116 }}
     />
   )
 }
@@ -279,7 +279,10 @@ export default function People({
 
       <Grid container spacing={2.5}>
         {/* ---------- weight table ---------- */}
-        <Grid item xs={12} md={4}>
+        {/* Five twelfths below lg, not four: at 1100px a third of the row was
+            337px against a table that cannot shrink below 391, and the delete
+            button went back outside the frame. */}
+        <Grid item xs={12} md={5} lg={4}>
           <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
             <Box sx={{ px: 2.5, py: 2, bgcolor: 'action.hover', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
@@ -334,13 +337,22 @@ export default function People({
               </Alert>
             )}
 
-            <Table size="small">
+            {/*
+              * The card clips what overflows it, so this table has to fit
+              * inside a third-width column: at the default cell padding it ran
+              * 483px wide in a 451px card and the delete button — last column,
+              * hard against the right edge — was cut off and unclickable.
+              * The scroller is the guarantee rather than the arithmetic: at
+              * any width the button can still be reached.
+              */}
+            <Box sx={{ overflowX: 'auto' }}>
+            <Table size="small" sx={{ '& th, & td': { px: 1 } }}>
               <TableHead>
                 <TableRow>
                   <TableCell>KPI line</TableCell>
-                  <TableCell sx={{ minWidth: 168 }}>Target</TableCell>
-                  <TableCell align="right" sx={{ width: 110 }}>Weight</TableCell>
-                  <TableCell padding="checkbox" />
+                  <TableCell sx={{ minWidth: 116 }}>Target</TableCell>
+                  <TableCell align="right" sx={{ width: 84 }}>Weight</TableCell>
+                  <TableCell padding="none" sx={{ width: 34 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -419,7 +431,7 @@ export default function People({
                           onChange={(v) => onPersonKpi(p.id, l.id, { weight: v })}
                         />
                       </TableCell>
-                      <TableCell padding="checkbox" sx={{ verticalAlign: 'top', pt: 1.75 }} onClick={(e) => e.stopPropagation()}>
+                      <TableCell padding="none" sx={{ verticalAlign: 'top', pt: 1.75, pr: 0.5, width: 34 }} onClick={(e) => e.stopPropagation()}>
                         <Tooltip title={p.kpiLines.length > 1
                           ? 'Remove this line from the scorecard'
                           : 'A scorecard must keep at least one KPI line'}>
@@ -452,6 +464,7 @@ export default function People({
                 </TableRow>
               </TableBody>
             </Table>
+            </Box>
 
             {/* ---------- objectives added by hand ---------- */}
             <Box sx={{ px: 2.5, py: 1.75, borderTop: 1, borderColor: 'divider' }}>
@@ -549,7 +562,7 @@ export default function People({
         </Grid>
 
         {/* ---------- portfolio ---------- */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} md={7} lg={8}>
           {/* overflow hidden on the card + scroll on the table, so a wide
               editable table scrolls inside its own panel instead of pushing
               the page sideways */}

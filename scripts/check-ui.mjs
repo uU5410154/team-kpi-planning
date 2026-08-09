@@ -1307,6 +1307,69 @@ try {
 
   rmSync(dlDir, { recursive: true, force: true })
 
+
+  /* ---------- the delete button on the scorecard is reachable ---------- */
+  // It sat in the last column of a table 483px wide inside a 451px card, and
+  // the card clips what overflows it: the button was cut off and could not be
+  // clicked at all. Being inside the frame is not the test — being clickable
+  // is, so this clicks it and counts the lines before and after.
+  await page.evaluate(() => localStorage.clear())
+  for (const width of [1700, 1440, 1280, 1100]) {
+    await page.setViewport({ width, height: 1000 })
+    await page.goto(`${base}/?bin=${width}#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await new Promise((r) => setTimeout(r, 1600))
+    const geom = await page.evaluate(() => {
+      const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+      const card = head?.closest('.MuiPaper-root')
+      const table = card?.querySelector('table')
+      const bin = [...card.querySelectorAll('button')].find((b) => b.querySelector('[data-testid="DeleteOutlineIcon"]'))
+      if (!bin) return { ok: false, why: 'no delete button' }
+      const cardBox = card.getBoundingClientRect()
+      const binBox = bin.getBoundingClientRect()
+      const x = Math.round(binBox.x + binBox.width / 2)
+      const y = Math.round(binBox.y + binBox.height / 2)
+      const at = document.elementFromPoint(x, y)
+      return {
+        ok: true,
+        inside: binBox.right <= cardBox.right + 0.5 && binBox.left >= cardBox.left - 0.5,
+        // what a real click at the button's centre would actually hit
+        hits: !!at && (at === bin || bin.contains(at)),
+        over: Math.round(binBox.right - cardBox.right),
+        table: Math.round(table.getBoundingClientRect().width),
+        card: Math.round(cardBox.width),
+      }
+    })
+    check(`@${width}px: THE DELETE BUTTON IS INSIDE THE CARD`, geom.ok && geom.inside,
+      JSON.stringify(geom))
+    check(`@${width}px: and a click at its centre lands on it`, geom.hits, JSON.stringify(geom))
+  }
+
+  // Now actually use it.
+  await page.setViewport({ width: 1440, height: 1000 })
+  await page.goto(`${base}/?bin=go#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1600))
+  const kpiLines = () => page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const card = head.closest('.MuiPaper-root')
+    return card.querySelectorAll('tbody tr').length
+  })
+  const linesBefore = await kpiLines()
+  const binPoint = await page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const card = head.closest('.MuiPaper-root')
+    const bin = [...card.querySelectorAll('button')].find((b) => b.querySelector('[data-testid="DeleteOutlineIcon"]') && !b.disabled)
+    if (!bin) return null
+    const r = bin.getBoundingClientRect()
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+  })
+  check('an enabled delete button is on screen', !!binPoint, JSON.stringify(binPoint))
+  if (binPoint) await page.mouse.click(binPoint.x, binPoint.y)
+  await new Promise((r) => setTimeout(r, 1000))
+  const linesAfter = await kpiLines()
+  check('A REAL CLICK ON IT REMOVES THE KPI LINE', linesAfter === linesBefore - 1,
+    `${linesBefore} -> ${linesAfter}`)
+  await page.setViewport({ width: 1700, height: 1000 })
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {
