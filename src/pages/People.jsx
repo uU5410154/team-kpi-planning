@@ -149,6 +149,7 @@ function PortfolioNum({ value, onChange }) {
 
 export default function People({
   plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets, onUpdate,
+  onAddObjective, onRemoveObjective,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -367,6 +368,11 @@ export default function People({
                               sx={{ fontWeight: 600, lineHeight: 1.35, textDecoration: active ? 'underline' : 'none' }}
                             >
                               {o ? `Obj ${o.no} — ${o.name}` : l.label}
+                              {l.manual && (
+                                <Typography component="span" variant="caption" sx={{ ml: 0.75, color: 'primary.main', fontWeight: 700 }}>
+                                  added
+                                </Typography>
+                              )}
                             </Typography>
                             {selectable && (
                               <Typography variant="caption" sx={{ color: active ? 'primary.main' : 'text.disabled' }}>
@@ -446,6 +452,53 @@ export default function People({
                 </TableRow>
               </TableBody>
             </Table>
+
+            {/* ---------- objectives added by hand ---------- */}
+            <Box sx={{ px: 2.5, py: 1.75, borderTop: 1, borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                  ADD AN OBJECTIVE
+                </Typography>
+                {p.addableObjectives.length ? (
+                  <Select
+                    size="small"
+                    value=""
+                    displayEmpty
+                    onChange={(e) => { if (e.target.value) onAddObjective(p.id, e.target.value) }}
+                    sx={{ fontSize: '0.8125rem', minWidth: 230 }}
+                    renderValue={() => <em>choose an objective…</em>}
+                  >
+                    {p.addableObjectives.map((id) => {
+                      const o = OBJ_BY_ID[id]
+                      return <MenuItem key={id} value={id}>Obj {o.no} — {o.name}</MenuItem>
+                    })}
+                  </Select>
+                ) : (
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    {p.nick} already holds all five.
+                  </Typography>
+                )}
+                {p.addedObjectives.map((id) => {
+                  const o = OBJ_BY_ID[id]
+                  return (
+                    <Chip
+                      key={id}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                      label={`Obj ${o.no} — ${o.short} (added)`}
+                      onDelete={() => onRemoveObjective(p.id, id)}
+                    />
+                  )
+                })}
+              </Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
+                An objective normally appears here because {p.nick} owns a project carrying it. One added by hand
+                has no projects behind it yet, so its target starts at zero and the other lines give up weight to
+                it — which is the point, if the work is committed but not scoped. Give {p.nick} a project on that
+                objective and the line becomes a normal one; removing the chip then leaves it in place.
+              </Typography>
+            </Box>
 
             {removed.length > 0 && (
               <Box sx={{ px: 2.5, py: 1.75, borderTop: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>

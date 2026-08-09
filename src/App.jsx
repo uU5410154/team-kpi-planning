@@ -191,6 +191,34 @@ export default function App() {
     setToast({ severity: 'info', msg: 'Line removed. Weights no longer total 100% — rebalance before saving.' })
   }, [])
 
+  /*
+   * Add an objective to someone's scorecard by hand. It carries no projects, so
+   * its target starts at zero and the other lines give up weight to it — which
+   * is the point: it commits the person to work that is not scoped yet.
+   */
+  const addPersonObjective = useCallback((id, objective) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) => (p.id === id
+        ? { ...p, extraObjectives: [...new Set([...(p.extraObjectives || []), objective])] }
+        : p)),
+    }))
+  }, [])
+
+  /*
+   * Removing it only takes back the manual addition. If the person has since
+   * been given a project on that objective, the line stays — it is derived at
+   * that point, and hiding a derived line is what the bin icon is for.
+   */
+  const removePersonObjective = useCallback((id, objective) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) => (p.id === id
+        ? { ...p, extraObjectives: (p.extraObjectives || []).filter((o) => o !== objective) }
+        : p)),
+    }))
+  }, [])
+
   const restorePersonKpiLine = useCallback((id, lineId) => {
     setState((s) => ({
       ...s,
@@ -414,6 +442,8 @@ export default function App() {
               onResetKpi={resetPersonKpi}
               onRemoveLine={removePersonKpiLine}
               onRestoreLine={restorePersonKpiLine}
+              onAddObjective={addPersonObjective}
+              onRemoveObjective={removePersonObjective}
               onRebalance={rebalancePersonKpi}
               onSyncTargets={syncPersonTargets}
               onUpdate={updateProject}

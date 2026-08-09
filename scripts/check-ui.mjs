@@ -819,6 +819,84 @@ try {
   check('the manday total is clickable once it is a sum of tasks', mdClickable && await dialogOpen())
   await closeDialog()
 
+
+  /* ---------- an objective can be added to a scorecard ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?obj=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1600))
+  // James, not the lead — the lead already holds all five.
+  const tabNames = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split('\n')[0].trim()))
+  await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+    tabNames.findIndex((t) => /James/.test(t)))
+  await new Promise((r) => setTimeout(r, 1200))
+
+  const objRows = () => page.evaluate(() =>
+    [...document.querySelectorAll('tbody tr')]
+      .map((r) => r.innerText.split('\n')[0].trim())
+      .filter((t) => /^Obj \d+ —/.test(t)))
+  const objWeights = () => page.evaluate(() =>
+    [...document.querySelectorAll('tbody tr')]
+      .filter((r) => /^Obj \d+ —/.test(r.innerText))
+      .map((r) => {
+        const i = [...r.querySelectorAll('input')].filter((x) => x.style.textAlign === 'right').pop()
+        return i ? Number(i.value) : null
+      }).filter((v) => v !== null))
+
+  const objRowsBefore = await objRows()
+  const objWBefore = await objWeights()
+  check('James holds fewer than all five objectives to begin with', objRowsBefore.length < 5,
+    objRowsBefore.join(' | '))
+  check('the card offers an "add an objective" control',
+    await page.evaluate(() => /ADD AN OBJECTIVE/i.test(document.body.innerText)))
+
+  // Pick the Data warehouse objective out of the dropdown.
+  const comboOpened = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('*')]
+    const label = heads.find((e) => e.textContent && e.textContent.trim() === 'ADD AN OBJECTIVE')
+    const box = label && label.parentElement
+    const combo = box && box.querySelector('[role="combobox"]')
+    if (!combo) return false
+    combo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    return true
+  })
+  check('the objective dropdown opens', comboOpened)
+  await new Promise((r) => setTimeout(r, 500))
+  await page.evaluate(() => {
+    const opt = [...document.querySelectorAll('[role="option"]')].find((o) => /Data warehouse/i.test(o.textContent))
+    if (opt) opt.click()
+  })
+  await new Promise((r) => setTimeout(r, 900))
+
+  const objRowsAfter = await objRows()
+  const objWAfter = await objWeights()
+  check('ADDING AN OBJECTIVE PUTS IT ON THE SCORECARD',
+    objRowsAfter.length === objRowsBefore.length + 1 && objRowsAfter.some((t) => /Data warehouse/i.test(t)),
+    objRowsAfter.join(' | '))
+  check('it is marked as added by hand',
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('tbody tr')].find((r) => /Data warehouse/i.test(r.innerText))
+      return row ? /added/i.test(row.innerText) : false
+    }))
+  check('the weights still total 100%', objWAfter.reduce((a, b) => a + b, 0) === 100,
+    `${objWBefore.join('+')} -> ${objWAfter.join('+')}`)
+  check('and are still multiples of 5', objWAfter.every((v) => v % 5 === 0), objWAfter.join(' / '))
+  check('a chip records that it was added', await page.evaluate(() => /\(added\)/.test(document.body.innerText)))
+
+  // Take it off again; the card must go back exactly.
+  await page.evaluate(() => {
+    const chip = [...document.querySelectorAll('.MuiChip-root')].find((c) => /\(added\)/.test(c.innerText))
+    // The delete affordance is an <svg>, which has no .click() — dispatch it.
+    const del = chip && chip.querySelector('.MuiChip-deleteIcon')
+    if (del) del.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await new Promise((r) => setTimeout(r, 900))
+  const objRowsBack = await objRows()
+  const objWBack = await objWeights()
+  check('removing it restores the card exactly',
+    objRowsBack.join('|') === objRowsBefore.join('|') && objWBack.join('+') === objWBefore.join('+'),
+    `${objWBack.join('+')} vs ${objWBefore.join('+')}`)
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

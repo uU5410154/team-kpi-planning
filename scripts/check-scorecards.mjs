@@ -263,6 +263,77 @@ sheet.eachRow((row) => { if (String(row.getCell(3).value || '').includes("Gun's 
 check('per-person sheet has a Target column', hasTargetCol)
 
 unlinkSync(file)
+
+/* ================= objectives added by hand ================= */
+console.log('\n--- an objective can be added to a scorecard by hand ---')
+{
+  const withExtra = (id, extras) => computePlan({
+    ...base,
+    people: base.people.map((p) => (p.id === id ? { ...p, extraObjectives: extras } : p)),
+  }).people.find((p) => p.id === id)
+
+  const before = computePlan(base).people.find((p) => p.id === 'james')
+  check('James does not hold the data warehouse to begin with',
+    !before.objectives.includes('datawarehouse'), before.objectives.join(', '))
+  check('and it is offered as addable', before.addableObjectives.includes('datawarehouse'))
+
+  const after = withExtra('james', ['datawarehouse'])
+  check('adding it puts it on the card', after.objectives.includes('datawarehouse'),
+    after.objectives.join(', '))
+  check('it arrives as a KPI line', !!after.kpiLines.find((l) => l.objective === 'datawarehouse'))
+  check('flagged as added by hand, and the derived ones are not',
+    after.kpiLines.find((l) => l.objective === 'datawarehouse').manual === true
+    && after.kpiLines.filter((l) => l.objective !== 'datawarehouse').every((l) => l.manual === false))
+  check('the card still totals exactly 100%', weightsValid(after.kpiLines),
+    `${(weightSum(after.kpiLines) * 100).toFixed(1)}%`)
+  check('and every weight is still on the 5-point grid',
+    after.kpiLines.every((l) => Math.abs((l.weight * 100) % 5) < 1e-9),
+    after.kpiLines.map((l) => `${Math.round(l.weight * 100)}%`).join(' '))
+  check('the other lines gave up the weight',
+    after.kpiLines.filter((l) => l.objective !== 'datawarehouse').length === before.kpiLines.length)
+  check('nothing is blocked from saving',
+    computePlan({
+      ...base,
+      people: base.people.map((p) => (p.id === 'james' ? { ...p, extraObjectives: ['datawarehouse'] } : p)),
+    }).invalid.length === 0)
+
+  // It carries no projects, so it starts at nothing — that is the point of it.
+  const line = after.kpiLines.find((l) => l.objective === 'datawarehouse')
+  check('its target starts at zero, because no project carries it',
+    line.targetKind === 'text' || Number(line.target) === 0, String(line.target))
+  check('and it is no longer offered as addable', !after.addableObjectives.includes('datawarehouse'))
+
+  // Removing it takes the card back exactly.
+  const removed = withExtra('james', [])
+  check('removing it restores the original card',
+    removed.objectives.join(',') === before.objectives.join(',')
+    && removed.kpiLines.map((l) => Math.round(l.weight * 100)).join(',')
+      === before.kpiLines.map((l) => Math.round(l.weight * 100)).join(','))
+
+  // An objective already held is not doubled by adding it.
+  const dup = withExtra('james', [before.objectives[0]])
+  check('adding one already held changes nothing',
+    dup.objectives.join(',') === before.objectives.join(',')
+    && dup.kpiLines.length === before.kpiLines.length)
+  check('and it is not marked as added by hand',
+    dup.kpiLines.every((l) => l.manual === false))
+
+  check('an unknown objective id is ignored', (() => {
+    const junk = withExtra('james', ['not-an-objective', null, 42])
+    return junk.objectives.join(',') === before.objectives.join(',')
+  })())
+
+  // Everyone can be given one, and every card stays valid.
+  const all = computePlan({
+    ...base,
+    people: base.people.map((p) => ({ ...p, extraObjectives: ['datawarehouse', 'ai_automation'] })),
+  })
+  check('every scorecard survives objectives being added to all of them',
+    all.people.every((p) => weightsValid(p.kpiLines)) && all.invalid.length === 0)
+  check('and everyone now holds the added ones',
+    all.people.every((p) => p.objectives.includes('datawarehouse') && p.objectives.includes('ai_automation')))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
 

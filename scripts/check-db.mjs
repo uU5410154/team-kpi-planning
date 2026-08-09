@@ -141,6 +141,18 @@ try {
     tk[0].comment === 'spec: https://example.com/a\nsecond line', JSON.stringify(tk[0].comment))
   await store.saveScenario('Baseline', payload, 'Gun')
 
+  // ---- objectives added by hand ----
+  const withExtra = {
+    ...payload,
+    people: payload.people.map((p) => (p.id === 'james' ? { ...p, extraObjectives: ['datawarehouse'] } : p)),
+  }
+  await store.saveScenario('Baseline', withExtra, 'Gun')
+  const ex = (await store.getScenario('Baseline')).payload.people.find((p) => p.id === 'james')
+  check('a hand-added objective survives the round trip',
+    Array.isArray(ex.extraObjectives) && ex.extraObjectives[0] === 'datawarehouse',
+    JSON.stringify(ex.extraObjectives))
+  await store.saveScenario('Baseline', payload, 'Gun')
+
   // ---- update in place, not duplicate ----
   check('re-saving the same name updates rather than duplicates', (await store.listScenarios()).length === 1)
 

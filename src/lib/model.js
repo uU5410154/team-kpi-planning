@@ -1272,8 +1272,23 @@ export function computePlan(state) {
     // headline above it.
     const scRows = aggregates ? teamCounted.map((pr) => ({ p: pr, share: 1, owner: pr.pic })) : p.rows
 
-    const objectives = OBJECTIVE_ORDER.filter((id) => (scByObjective[id] || 0) > 0
+    /*
+     * Objectives are normally DERIVED — you hold one because you own a project
+     * tagged with it, which is why the weights re-split by themselves when work
+     * is reassigned. `extraObjectives` lets one be added by hand on top, for
+     * committing someone to work that is not scoped yet.
+     *
+     * A hand-added objective has no projects behind it, so its target starts at
+     * zero and it takes weight from the rest. That is the point of it, but it
+     * does mean the card stops being purely a reflection of the project book —
+     * so the two kinds are kept apart and every line says which it is.
+     */
+    const derivedObjectives = OBJECTIVE_ORDER.filter((id) => (scByObjective[id] || 0) > 0
       || scRows.some((r) => r.p.objective === id))
+    const addedObjectives = (Array.isArray(p.extraObjectives) ? p.extraObjectives : [])
+      .filter((id) => OBJ_BY_ID[id] && !derivedObjectives.includes(id))
+    const objectives = OBJECTIVE_ORDER.filter(
+      (id) => derivedObjectives.includes(id) || addedObjectives.includes(id))
     const withObjectives = { ...p, objectives, aggregatesTeam: aggregates }
 
     // Money on the same aggregation rule as the hours: the lead carries the
@@ -1336,7 +1351,12 @@ export function computePlan(state) {
       ownHours: p.hours,
       ownCount: p.countedCount,
       ratio: scManday > 0 ? scHours / scManday : null,
-      kpiLines: scorecardWeights(withObjectives, s, scByObjective, scBenefitByObjective),
+      derivedObjectives,
+      addedObjectives,
+      // Which objectives are still available to add by hand.
+      addableObjectives: OBJECTIVE_ORDER.filter((id) => !objectives.includes(id)),
+      kpiLines: scorecardWeights(withObjectives, s, scByObjective, scBenefitByObjective)
+        .map((l) => ({ ...l, manual: !!l.objective && addedObjectives.includes(l.objective) })),
       kpiHiddenLines: hiddenLines(withObjectives, s, scByObjective, scBenefitByObjective),
     }
   })
