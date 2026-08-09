@@ -155,13 +155,23 @@ console.log('\n--- the export credits nothing for it either ---')
     if (String(row.getCell(2).value || '') === biggest.summary) {
       projectHrs = row.getCell(col('Project ')).value
       creditedHrs = row.getCell(col('Credited')).value
-      level = row.getCell(col('Commit')).value
+      // The Commit column came off these sheets — the level is asserted on the
+      // Projects sheet below instead, where the register still carries it.
+      level = null
     }
     if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(col('Credited')).value
   })
   check('the deferred project is still listed in the export', projectHrs === biggest.savingHours,
     String(projectHrs))
-  check('its level is printed as nextyear', level === 'nextyear', String(level))
+  check('its level is printed as nextyear on the register', (() => {
+    const ps = back.getWorksheet('Projects')
+    const ph = []
+    ps.getRow(4).eachCell((c, n) => { ph[n] = String(c.value || '') })
+    const pcol = (l) => ph.findIndex((h) => h && h.startsWith(l))
+    let lvl = null
+    ps.eachRow((row) => { if (String(row.getCell(2).value || '') === biggest.summary) lvl = row.getCell(pcol('Commit')).value })
+    return lvl === 'nextyear'
+  })(), String(level))
   check('but it credits nothing in the export', creditedHrs === null, String(creditedHrs))
   check('the export TOTAL CREDITED matches the app', Math.abs(totalCredited - Math.round(af.hours)) < 1,
     `${totalCredited} vs ${Math.round(af.hours)}`)

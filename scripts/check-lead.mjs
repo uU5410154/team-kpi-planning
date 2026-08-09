@@ -116,19 +116,28 @@ console.log('\n--- the export agrees ---')
   await wb.xlsx.writeFile(file)
   const back = new ExcelJS.Workbook()
   await back.xlsx.readFile(file)
+  // The POSITION block came off these sheets, so the lead's figure is asserted
+  // where it still lives: the TOTAL CREDITED row of their own portfolio, and
+  // the Summary. Both must equal the team total the model computed.
   const ws = back.getWorksheet(`Obj-${lead.nick}`)
-  let headline = null
+  const head = []
+  ws.eachRow((row) => { if (row.getCell(1).value === 'Jira') row.eachCell((c, n) => { head[n] = String(c.value || '') }) })
+  const col = (label) => head.findIndex((h) => h && h.startsWith(label))
+  check('the lead sheet carries a portfolio with a Credited column', col('Credited') > 0,
+    head.filter(Boolean).join(' | '))
   let totalCredited = null
   ws.eachRow((row) => {
-    const a = String(row.getCell(1).value || '')
-    if (a.startsWith('Team saving hours')) headline = row.getCell(3).value
-    if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(7).value
+    if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(col('Credited')).value
   })
-  check('the export labels it as the team figure', headline !== null, String(headline))
-  check('the exported headline matches the app',
-    Math.abs(headline - Math.round(lead.scorecardHours)) < 1, `${headline} vs ${Math.round(lead.scorecardHours)}`)
-  check('the exported TOTAL CREDITED matches too',
-    Math.abs(totalCredited - Math.round(lead.scorecardHours)) < 1, `${totalCredited}`)
+  check('the exported TOTAL CREDITED is the team figure',
+    Math.abs(totalCredited - Math.round(lead.scorecardHours)) < 1,
+    `${totalCredited} vs ${Math.round(lead.scorecardHours)}`)
+
+  const sum = back.getWorksheet('Summary')
+  let book = null
+  sum.eachRow((row) => { if (String(row.getCell(1).value || '').startsWith('Total book')) book = row.getCell(2).value })
+  check('and the Summary book total agrees with it',
+    Math.abs(book - Math.round(lead.scorecardHours)) < 1, `${book} vs ${Math.round(lead.scorecardHours)}`)
   unlinkSync(file)
 }
 

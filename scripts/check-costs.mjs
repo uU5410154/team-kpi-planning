@@ -620,22 +620,30 @@ console.log('\n--- the exported workbook carries the same numbers ---')
     && Math.abs(kv['RETURN ON INVESTMENT'] - plan.finance.roi) < 1e-4,
     `${kv['RETURN ON INVESTMENT']} vs ${plan.finance.roi}`)
 
-  /* ---- per-person ---- */
+  /* ---- per-person: a scorecard, not a cost model ----
+   * The credited CAPEX and investment figures came off these sheets on
+   * purpose. Every money figure is stated once, on Effort_Return and the
+   * Summary, so what is asserted here is that they are GONE and that the
+   * portfolio columns that remain still add to the sheet's own footer.
+   */
   for (const p of plan.people) {
-    const ws = back.getWorksheet(`Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31))
-    let investment = null
-    let capex = null
+    const ws = back.getWorksheet(('Obj-' + p.nick).slice(0, 31))
+    const labels = []
+    const head = []
     ws.eachRow((r) => {
-      const a = String(r.getCell(1).value || '')
-      if (a.startsWith('Investment credited')) investment = r.getCell(3).value
-      if (a.startsWith('CAPEX credited')) capex = r.getCell(3).value
+      labels.push(String(r.getCell(1).value || ''))
+      if (r.getCell(1).value === 'Jira') r.eachCell((c, n) => { head[n] = String(c.value || '') })
     })
-    check(`${p.nick}: exported credited investment matches the app`,
-      p.finance.investment == null ? typeof investment === 'string' : investment === Math.round(p.finance.investment),
-      `${investment} vs ${p.finance.investment == null ? 'null' : Math.round(p.finance.investment)}`)
-    check(`${p.nick}: exported credited CAPEX matches the app`,
-      p.finance.capex == null ? typeof capex === 'string' : capex === Math.round(p.finance.capex),
-      `${capex} vs ${p.finance.capex == null ? 'null' : Math.round(p.finance.capex)}`)
+    const col = (l) => head.findIndex((h) => h && h.startsWith(l))
+    check(`${p.nick}: no credited CAPEX or investment block remains`,
+      !labels.some((t) => t.startsWith('Investment credited') || t.startsWith('CAPEX credited') || t === 'POSITION'))
+    check(`${p.nick}: the portfolio keeps hours, credit and the two cost columns`,
+      col('Project ') > 0 && col('Credited') > 0 && col('Build cost') > 0 && col('Investment') > 0,
+      head.filter(Boolean).join(' | '))
+    check(`${p.nick}: and drops the rest`,
+      ['Role', 'Share', 'Mandays', 'CAPEX', 'OPEX', 'Benefit', 'ROI', 'Payback', 'Commit']
+        .every((l) => col(l) < 0),
+      head.filter(Boolean).join(' | '))
   }
 
   unlinkSync(file)

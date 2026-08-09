@@ -168,12 +168,17 @@ console.log('\n--- the exported workbook matches the app ---')
   // per-person headline + weights
   for (const p of edited.people) {
     const ws = back.getWorksheet(`Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31))
+    // The POSITION block came off these sheets; the person's figure is now the
+    // TOTAL CREDITED row of their own portfolio.
+    const head = []
+    ws.eachRow((row) => { if (row.getCell(1).value === 'Jira') row.eachCell((c, n) => { head[n] = String(c.value || '') }) })
+    const col = (label) => head.findIndex((h) => h && h.startsWith(label))
     let headline = null
     let total = null
     const weights = []
     ws.eachRow((row) => {
       const a = String(row.getCell(1).value || '')
-      if (a.startsWith('Credited saving hours') || a.startsWith('Team saving hours')) headline = row.getCell(3).value
+      if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') headline = row.getCell(col('Credited')).value
       if (String(row.getCell(3).value || '') === 'TOTAL') total = row.getCell(4).value
       if (a === 'Delivery') weights.push(row.getCell(4).value)
     })

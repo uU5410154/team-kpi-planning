@@ -377,252 +377,7 @@ export async function buildWorkbook(plan, state) {
     for (let c = 1; c <= width; c++) chk.getCell(c).border = { top: { style: 'medium', color: { argb: NAVY } }, bottom: thin }
   }
 
-  /* ============ 3. Projects ============ */
-  {
-    /*
-     * Every column carries its own width, number format, alignment and — where
-     * it is a number — the value to read out of a project. Indices are then
-     * DERIVED from this list rather than hardcoded further down: adding CAPEX,
-     * OPEX and Investment to a sheet that had twenty-three hand-numbered cells
-     * would otherwise have silently shifted the format of every column after
-     * them.
-     */
-    const cols = [
-      { label: 'Jira', width: 12, align: 'left' },
-      { label: 'Project', width: 44, align: 'left' },
-      { label: 'Programme', width: 26, align: 'left' },
-      { label: 'Team', width: 13, align: 'left' },
-      { label: 'Sub team', width: 18, align: 'left' },
-      { label: 'Objective', width: 24, align: 'left' },
-      { label: 'PIC', width: 12, align: 'center' },
-      { label: `Saving ${unit}`, width: 13, fmt: N0 },
-      // Headed FTE to match the app and the source workbook's own meaning; the
-      // value behind it is still the stored `hc` field.
-      { label: 'FTE', width: 8, fmt: N1 },
-      // Effort, cost and return are NOT here. They live on Effort_Return, on
-      // their own, so this sheet stays the register it says it is and the two
-      // cannot state the same figure twice with different filters behind them.
-      { label: 'Commit', width: 11, align: 'center' },
-      { label: 'Status', width: 12, align: 'center' },
-      { label: 'Start', width: 11, align: 'left' },
-      { label: 'Due', width: 11, align: 'left' },
-      { label: 'Remark', width: 40, align: 'left' },
-    ]
-    // 1-based column index by header label. Everything below asks for a column
-    // by name, so inserting one can never mis-format its neighbours.
-    const ix = (label) => cols.findIndex((c) => c.label.startsWith(label)) + 1
-    const colLetter = (n) => {
-      let s = ''
-      for (let x = n; x > 0; x = Math.floor((x - 1) / 26)) s = String.fromCharCode(65 + ((x - 1) % 26)) + s
-      return s
-    }
-
-    const ws = wb.addWorksheet('Projects', {
-      properties: { tabColor: { argb: 'FF1B6091' } },
-      views: [{ state: 'frozen', xSplit: 2, ySplit: 4 }],
-      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
-    })
-    banner(ws, 'PROJECT REGISTER',
-      `${projects.length} projects · ${Math.round(totals.headlineHours).toLocaleString()} ${unit} committed · effort, cost and return are on Effort_Return · source: ${state.meta?.source || 'plan'}`,
-      cols.length)
-    headerRow(ws, 4, cols.map((c) => c.label), cols.map((c) => c.width))
-    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + projects.length, column: cols.length } }
-
-    let r = 5
-    const first = r
-    const sorted = [...projects].sort((a, b) => (b.savingHours ?? 0) - (a.savingHours ?? 0))
-    sorted.forEach((p) => {
-      const person = people.find((x) => x.id === p.pic)
-      const row = ws.getRow(r++)
-      row.values = [
-        p.jiraKey || '',
-        p.summary,
-        p.program || '',
-        p.team || '',
-        p.subTeam || '',
-        OBJ_BY_ID[p.objective] ? `${OBJ_BY_ID[p.objective].no}. ${OBJ_BY_ID[p.objective].name}` : '',
-        person ? person.nick : 'TBC',
-        p.savingHours ?? null,
-        p.fte ?? null,
-        p.commitLevel,
-        p.status || '',
-        p.start || '',
-        p.due || '',
-        p.notes || '',
-      ]
-      row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
-      cols.forEach((c, i) => {
-        const cell = row.getCell(i + 1)
-        if (c.fmt) { cell.numFmt = c.fmt; cell.alignment = { horizontal: 'right' } }
-        else if (c.align === 'center') cell.alignment = { horizontal: 'center' }
-      })
-      row.getCell(ix('Remark')).alignment = { vertical: 'middle', wrapText: false }
-
-      if (!person) tone(row.getCell(ix('PIC')), BAD)
-      if (p.savingHours == null) tone(row.getCell(ix('Saving')), WARN)
-      const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[p.commitLevel]
-      tone(row.getCell(ix('Commit')), lvl)
-      if (p.pastDue) tone(row.getCell(ix('Due')), BAD)
-    })
-    styleBody(ws, first, r - 1, cols.length)
-
-    // totals strip
-    const tr = ws.getRow(r)
-    tr.getCell(2).value = `TOTAL — ${projects.filter((p) => !OUT_OF_PLAN.has(p.commitLevel)).length} in-plan of ${projects.length} projects`
-    // Live SUM()s, so the workbook still adds up after someone edits a cell.
-    // ROI, payback and break-even are deliberately NOT summed — an average of
-    // ratios is not a portfolio return. The Summary sheet carries that figure.
-    // IN-PLAN ONLY, via SUMIFS on the Commit column. A plain SUM() spanned every
-    // exported row including Excluded and Next year, so this strip disagreed
-    // with both the Summary and the Costs sheet on every money line the moment
-    // a project was deferred. The sheet still LISTS those rows — it is the
-    // register — but they contribute nothing, exactly as in the app.
-    const cl = colLetter(ix('Commit'))
-    const range = (n) => `${colLetter(n)}${first}:${colLetter(n)}${r - 1}`
-    const summed = ['Saving', 'FTE']
-    summed.forEach((label) => {
-      const n = ix(label)
-      if (n <= 0) return
-      tr.getCell(n).value = {
-        formula: `SUMIFS(${range(n)},${cl}${first}:${cl}${r - 1},"<>nextyear",${cl}${first}:${cl}${r - 1},"<>excluded")`,
-      }
-      tr.getCell(n).numFmt = cols[n - 1].fmt
-    })
-    tr.getCell(ix('Commit')).value = 'in plan only'
-    for (let c = 1; c <= cols.length; c++) {
-      const cell = tr.getCell(c)
-      cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
-      cell.fill = fill(NAVY)
-      cell.alignment = { horizontal: cols[c - 1].fmt ? 'right' : 'left', vertical: 'middle' }
-    }
-    tr.height = 20
-  }
-
-  /* ============ 4. Costs — the monthly cost grid ============
-   * Laid out like the source budget sheet (BG 2026): identifying columns, a
-   * yearly amount, a note, then twelve monthly columns in G..R and an FY total
-   * in S — the same cells, so the two can be read side by side.
-   *
-   * Deliberately NOT like BG 2026 in one respect: no depreciation. CAPEX sits
-   * on its own one-off row and is never spread across the months, which is the
-   * decision the team took.
-   */
-  {
-    const cols = [
-      ['Jira', 12], ['Project', 40], ['Cost type', 12], ['Item', 30],
-      [`Yearly (${cur})`, 14], ['Note', 30],
-      ...MONTH_LABELS.map((m) => [`${m}-26`, 11]),
-      [`FY2026 (${cur})`, 15],
-    ]
-    const MONTH_1 = 7          // column G, exactly as in BG 2026
-    const FY_COL = MONTH_1 + MONTHS_IN_YEAR  // column S
-    const ws = wb.addWorksheet('Costs', {
-      properties: { tabColor: { argb: 'FF7C5CD6' } },
-      views: [{ state: 'frozen', xSplit: 4, ySplit: 4 }],
-      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
-    })
-    banner(ws, 'PROJECT COSTS — CAPEX AND OPEX',
-      `Monthly operating cost across 2026 in G..R with the FY total in S, as in BG 2026 · one-off investment on its own rows · ${cur} · no depreciation applied`,
-      cols.length)
-    headerRow(ws, 4, cols.map((c) => c[0]), cols.map((c) => c[1]))
-
-    let r = 5
-    const first = r
-    /** One row of the grid. `months` is a 12-array or null for a one-off row. */
-    // The FY cell is the sum of the ROUNDED month cells, not a separately
-    // rounded product: this grid is sold as summable, so selecting G:R in Excel
-    // has to give the same number the S column prints.
-    const fySum = (months) => (months || []).reduce((a, m) => a + Math.round(m || 0), 0)
-    const costRow = (p, type, item, yearly, note, months, fy, opts = {}) => {
-      const row = ws.getRow(r++)
-      row.getCell(1).value = p ? (p.jiraKey || p.key) : ''
-      row.getCell(2).value = p ? p.summary : ''
-      row.getCell(3).value = type
-      row.getCell(4).value = item
-      row.getCell(5).value = yearly == null ? null : Math.round(yearly)
-      row.getCell(5).numFmt = MONEY
-      row.getCell(6).value = note || ''
-      for (let m = 0; m < MONTHS_IN_YEAR; m++) {
-        const cell = row.getCell(MONTH_1 + m)
-        // Numbers, never pre-formatted strings — the whole point of a monthly
-        // grid is that it can be summed, charted and compared in Excel.
-        cell.value = months && months[m] > 0 ? Math.round(months[m]) : null
-        cell.numFmt = MONEY
-        cell.alignment = { horizontal: 'right' }
-      }
-      const fyCell = row.getCell(FY_COL)
-      // When the row HAS a month grid, the FY total is the sum of the cells
-      // actually written. Rounding the annual product separately made a grid
-      // that Excel's own status bar disagreed with.
-      fyCell.value = months ? fySum(months) : (fy == null ? null : Math.round(fy))
-      fyCell.numFmt = MONEY
-      fyCell.alignment = { horizontal: 'right' }
-      row.getCell(3).alignment = { horizontal: 'center' }
-      if (opts.bold) {
-        for (let c = 1; c <= cols.length; c++) row.getCell(c).font = { name: FONT, size: 9.5, bold: true }
-      }
-      return row
-    }
-
-    const withCost = projects.filter((p) => !OUT_OF_PLAN.has(p.commitLevel)
-      && (p.buildCost != null || p.capex != null || (p.opex || []).length > 0))
-
-    if (!withCost.length) {
-      const row = ws.getRow(r++)
-      row.getCell(1).value = 'No CAPEX, OPEX or build effort has been entered on any in-plan project yet.'
-      row.getCell(2).value = 'Click a project row on the Projects tab or on any scorecard to add its costs.'
-      tone(row.getCell(1), MUTED, false)
-    }
-
-    for (const p of withCost) {
-      for (const l of p.opex) {
-        const active = new Array(MONTHS_IN_YEAR).fill(0)
-        for (let m = l.startMonth; m <= l.endMonth; m++) active[m - 1] = l.monthly
-        const months = l.endMonth - l.startMonth + 1
-        costRow(p, 'OPEX', l.label, l.monthly * months,
-          `${MONTH_LABELS[l.startMonth - 1]}–${MONTH_LABELS[l.endMonth - 1]} · ${Math.round(l.monthly).toLocaleString()}/month`,
-          active, l.monthly * months)
-      }
-      if (p.opex.length) {
-        costRow(p, 'OPEX', 'OPEX total', p.opexYear, 'sum of the lines above', p.opexByMonth, p.opexYear, { bold: true })
-      }
-      if (p.capex != null) {
-        costRow(p, 'CAPEX', p.capexNote || 'Capital investment', p.capex,
-          'one-off — charged whole, not depreciated', null, p.capex)
-      }
-      if (p.buildCost != null) {
-        costRow(p, 'BUILD', `${Math.round(p.manday).toLocaleString()} mandays`, p.buildCost,
-          `mandays x ${Math.round(fin.devDayRate).toLocaleString()} a day`, null, p.buildCost)
-      }
-      costRow(p, 'TOTAL', 'Project total 2026', (p.investment ?? 0) + p.opexYear,
-        'one-off investment + the year of OPEX', null, (p.investment ?? 0) + p.opexYear, { bold: true })
-    }
-    styleBody(ws, first, r - 1, cols.length, { zebra: false })
-
-    // grand totals, matching the Summary sheet's plan-wide figures
-    r++
-    sectionRow(ws, r++, 'ACROSS THE WHOLE PLAN', cols.length)
-    const gStart = r
-    // Everything on this sheet is IN-PLAN ONLY, matching the Summary and the
-    // Projects totals strip. Deferred and excluded projects are listed on the
-    // Projects sheet but cost the plan nothing, so they carry no grid here.
-    costRow(null, 'OPEX', 'OPEX — every in-plan project', fin.planOpexYear,
-      `run-rate ${Math.round(fin.planOpexRunRate).toLocaleString()} a month`, fin.planOpexByMonth, fin.planOpexYear, { bold: true })
-    costRow(null, 'CAPEX', 'CAPEX — every in-plan project', fin.planCapex,
-      'one-off — not depreciated', null, fin.planCapex, { bold: true })
-    costRow(null, 'BUILD', 'Build cost — every in-plan project', fin.planBuildCost,
-      'mandays x the developer day rate', null, fin.planBuildCost, { bold: true })
-    const grand = costRow(null, 'TOTAL', 'PLAN TOTAL 2026', fin.planInvestment + fin.planOpexYear,
-      'investment + the year of OPEX', null, fin.planInvestment + fin.planOpexYear, { bold: true })
-    for (let c = 1; c <= cols.length; c++) {
-      grand.getCell(c).fill = fill(NAVY)
-      grand.getCell(c).font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
-    }
-    styleBody(ws, gStart, r - 2, cols.length, { zebra: false })
-    grand.height = 20
-  }
-
-  /* ============ 5. Effort & Return — mandays, ROI and payback ============
+  /* ============ 3. Effort & Return — mandays, ROI and payback ============
    *
    * Asked for as its own sheet. One block per project: the task lines that make
    * up its effort, then the project total, then what that effort costs and what
@@ -748,74 +503,36 @@ export async function buildWorkbook(plan, state) {
     gr.height = 20
   }
 
-  /* ============ 6. one sheet per person ============ */
+  /* ============ 4. one sheet per person ============ */
   for (const p of people) {
-    // Money columns carry this person's SHARE of each project, so the column
-    // adds up to the figure in their POSITION block rather than to the whole
-    // project. ROI is share-invariant — both sides scale together.
+    /*
+     * A scorecard, not a cost model. The effort and return figures were asked to
+     * come off these sheets — they live on Effort_Return, in one place, where
+     * they are stated once and cannot disagree with a share-weighted copy here.
+     * What is left is what this sheet is for: which projects the person carries,
+     * how many hours those are worth, and how much of that is credited to them.
+     */
     const cols = [
-      ['Jira', 12], ['Project', 42], ['Objective', 22], ['Role', 11], ['Share', 9],
-      [`Project ${unit}`, 14], ['Credited', 11], ['Mandays', 10],
-      [`Build cost (${cur})`, 14], [`CAPEX (${cur})`, 13], [`Investment (${cur})`, 14],
-      [`OPEX/mth (${cur})`, 13], [`Benefit/yr (${cur})`, 15], ['ROI', 10], ['Payback (mo)', 12],
-      ['Commit', 11], ['Status', 13],
+      ['Jira', 12], ['Project', 42], ['Objective', 22],
+      [`Project ${unit}`, 14], ['Credited', 11],
+      [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14], ['Status', 13],
     ]
     // 1-based index by header label, so inserting a column cannot silently
     // re-format its neighbours.
     const px = (label) => cols.findIndex((c) => String(c[0]).startsWith(label)) + 1
-    const MONEY_COLS = [px('Build cost'), px('CAPEX'), px('Investment'), px('OPEX/mth'), px('Benefit/yr')]
+    const MONEY_COLS = [px('Build cost'), px('Investment')]
     const NUM_FIRST = px(`Project ${unit}`)
-    const NUM_LAST = px('ROI')
+    const NUM_LAST = px('Investment')
     const safe = `Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31)
-    const ws = wb.addWorksheet(safe, { views: [{ state: 'frozen', ySplit: 12 }] })
+    const ws = wb.addWorksheet(safe, { views: [{ state: 'frozen', ySplit: 6 }] })
     banner(ws, `${p.name.toUpperCase()}  ·  ${p.nick}`,
       `${p.role} · band ${p.band} · holds ${p.objectives.map((o) => `Obj ${OBJ_BY_ID[o]?.no}`).join(', ') || 'no objectives'}`,
       cols.length)
 
+    // No POSITION block: the headline figures it carried are on the Summary and
+    // on Effort_Return, and repeating them here is how two sheets end up
+    // disagreeing. This sheet opens straight on the scorecard.
     let r = 4
-    sectionRow(ws, r++, 'POSITION', cols.length)
-    const sStart = r
-    const kv = (label, value, fmt, colour) => {
-      const row = ws.getRow(r++)
-      row.getCell(1).value = label
-      ws.mergeCells(row.number, 1, row.number, 2)
-      const v = row.getCell(3)
-      v.value = value
-      if (fmt) v.numFmt = fmt
-      v.alignment = { horizontal: 'left' }
-      if (colour) tone(v, colour)
-    }
-    kv(p.aggregatesTeam ? `Team saving hours (${unit}) — whole team` : `Credited saving hours (${unit})`, Math.round(p.scorecardHours), N0, NAVY)
-    kv('Committed only', Math.round(p.commitHours), N0)
-    kv('Mandays credited', Math.round(p.scorecardManday), N0)
-    kv(`FTE released`, Number(p.finance.fteReleased.toFixed(2)), N1)
-    kv(`Value of hours released (${cur}/year)`, Math.round(p.finance.annualBenefit), MONEY, NAVY)
-    // Every one of these is this person's SHARE of the projects their hours
-    // were credited from — the same share, over the same rows.
-    kv(`Build cost (${cur})`,
-      p.finance.buildCost == null ? 'no cost estimated' : Math.round(p.finance.buildCost),
-      p.finance.buildCost == null ? undefined : MONEY)
-    kv(`CAPEX credited (${cur})`,
-      p.finance.capex == null ? 'no cost estimated' : Math.round(p.finance.capex),
-      p.finance.capex == null ? undefined : MONEY)
-    kv(`Investment credited (${cur}) — build + CAPEX`,
-      p.finance.investment == null ? 'no cost estimated' : Math.round(p.finance.investment),
-      p.finance.investment == null ? undefined : MONEY, NAVY)
-    kv(`OPEX credited (${cur}/month)`, Math.round(p.finance.opexRunRate), MONEY,
-      p.finance.opexRunRate > 0 ? WARN : undefined)
-    kv(`Net benefit over ${fin.horizonMonths} months (${cur})`,
-      p.finance.netBenefit == null ? 'not measurable without a cost' : Math.round(p.finance.netBenefit),
-      p.finance.netBenefit == null ? undefined : MONEY,
-      p.finance.netBenefit == null ? MUTED : p.finance.netBenefit >= 0 ? GOOD : BAD)
-    kv('Return on investment',
-      p.finance.roi == null ? 'not measurable without a cost' : Number(p.finance.roi.toFixed(4)),
-      p.finance.roi == null ? undefined : ROI,
-      p.finance.roi == null ? MUTED : p.finance.roi >= fin.roiGate ? GOOD : BAD)
-    kv('Projects credited / touched', p.aggregatesTeam ? `[TEAM] ${p.scorecardCount} in plan · ${p.ownCount} their own` : `[PERSONAL] ${p.countedCount} / ${p.projectCount}`)
-    kv('Saving hours still TBC', p.missingSaving, N0, p.missingSaving ? WARN : GOOD)
-    styleBody(ws, sStart, r - 1, 3, { zebra: false })
-
-    r++
     sectionRow(ws, r++, 'KPI SCORECARD', cols.length)
     headerRow(ws, r++, ['Block', 'KPI line', `${p.nick}'s target`, 'Weight', 'Unit',
       ...new Array(Math.max(0, cols.length - 5)).fill('')])
@@ -852,7 +569,6 @@ export async function buildWorkbook(plan, state) {
     const pStart = r
     const rowsSorted = [...p.scorecardRows].sort((a, b) => (b.p.savingHours ?? 0) * b.share - (a.p.savingHours ?? 0) * a.share)
     rowsSorted.forEach(({ p: pr, share }) => {
-      const roles = pr.contributors?.find((c) => c.person === p.id)?.roles.join('/') || (pr.pic === p.id ? 'pic' : '—')
       // Deferred and excluded projects credit nothing — printing their share
       // would contradict the TOTAL CREDITED row below.
       const counted = pr.commitLevel === 'commit' || pr.commitLevel === 'stretch'
@@ -863,36 +579,20 @@ export async function buildWorkbook(plan, state) {
         pr.jiraKey || '',
         pr.summary,
         OBJ_BY_ID[pr.objective] ? `${OBJ_BY_ID[pr.objective].no}. ${OBJ_BY_ID[pr.objective].short}` : '',
-        roles,
-        share,
         pr.savingHours ?? null,
         !counted || pr.savingHours == null ? null : Number(((pr.savingHours ?? 0) * share).toFixed(1)),
-        pr.manday || null,
         // `inTotal` is the SAME predicate model.js uses to build p.finance —
         // counted, pool-eligible, and carrying both a cost and a benefit. The
         // rows printed here therefore add up to the TOTAL CREDITED row below.
-        // Printing a cost on a row the total excludes made the column disagree
-        // with its own footer.
         !inTotal || pr.buildCost == null ? null : Math.round(pr.buildCost * share),
-        !inTotal || pr.capex == null ? null : Math.round(pr.capex * share),
         !inTotal || pr.investment == null ? null : Math.round(pr.investment * share),
-        !inTotal || !(pr.opexRunRate > 0) ? null : Math.round(pr.opexRunRate * share),
-        !inTotal || pr.annualBenefit == null ? null : Math.round(pr.annualBenefit * share),
-        !inTotal || pr.roi == null ? null : Number(pr.roi.toFixed(4)),
-        // Blank when it never pays back — OPEX at or above the benefit. A
-        // blank is honest; a zero or a negative month count would not be.
-        !inTotal || pr.paybackMonths == null ? null : Number(pr.paybackMonths.toFixed(1)),
-        pr.commitLevel,
         pr.status || '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
-      row.getCell(px('Share')).numFmt = PCT
-      ;[NUM_FIRST, px('Credited'), px('Mandays')].forEach((c) => { row.getCell(c).numFmt = N0 })
+      ;[NUM_FIRST, px('Credited')].forEach((c) => { row.getCell(c).numFmt = N0 })
       MONEY_COLS.forEach((c) => { row.getCell(c).numFmt = MONEY })
-      row.getCell(px('ROI')).numFmt = ROI
-      for (let c = px('Share'); c <= NUM_LAST; c++) row.getCell(c).alignment = { horizontal: 'right' }
-      ;[px('Role'), px('Commit'), px('Status')].forEach((c) => { row.getCell(c).alignment = { horizontal: 'center' } })
-      tone(row.getCell(px('Commit')), { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[pr.commitLevel])
+      for (let c = NUM_FIRST; c <= NUM_LAST; c++) row.getCell(c).alignment = { horizontal: 'right' }
+      row.getCell(px('Status')).alignment = { horizontal: 'center' }
     })
     if (r > pStart) styleBody(ws, pStart, r - 1, cols.length)
 
@@ -905,12 +605,7 @@ export async function buildWorkbook(plan, state) {
     }
     total('Credited', Math.round(p.scorecardHours), N0)
     total('Build cost', p.finance.buildCost == null ? null : Math.round(p.finance.buildCost), MONEY)
-    total('CAPEX', p.finance.capex == null ? null : Math.round(p.finance.capex), MONEY)
     total('Investment', p.finance.investment == null ? null : Math.round(p.finance.investment), MONEY)
-    total('OPEX/mth', p.finance.opexRunRate > 0 ? Math.round(p.finance.opexRunRate) : null, MONEY)
-    total('Benefit/yr', Math.round(p.finance.annualBenefit), MONEY)
-    total('ROI', p.finance.roi == null ? null : Number(p.finance.roi.toFixed(4)), ROI)
-    total('Payback', p.finance.paybackMonths == null ? null : Number(p.finance.paybackMonths.toFixed(1)), N1)
     for (let c = 1; c <= cols.length; c++) {
       const cell = tr.getCell(c)
       cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
@@ -918,6 +613,258 @@ export async function buildWorkbook(plan, state) {
       cell.alignment = { horizontal: c >= px('Credited') && c <= NUM_LAST ? 'right' : 'left', vertical: 'middle' }
     }
     tr.height = 20
+  }
+
+  /*
+   * The two reference tables come LAST on purpose: the workbook reads Summary,
+   * then the objectives, then effort and return, then a card per person, and
+   * the register and the monthly cost grid are looked up rather than read
+   * through. ExcelJS writes sheets in creation order, so this order is the
+   * order they are built in — there is no reordering step to get out of step.
+   */
+  /* ============ 5. Projects ============ */
+  {
+    /*
+     * Every column carries its own width, number format, alignment and — where
+     * it is a number — the value to read out of a project. Indices are then
+     * DERIVED from this list rather than hardcoded further down: adding CAPEX,
+     * OPEX and Investment to a sheet that had twenty-three hand-numbered cells
+     * would otherwise have silently shifted the format of every column after
+     * them.
+     */
+    const cols = [
+      { label: 'Jira', width: 12, align: 'left' },
+      { label: 'Project', width: 44, align: 'left' },
+      { label: 'Programme', width: 26, align: 'left' },
+      { label: 'Team', width: 13, align: 'left' },
+      { label: 'Sub team', width: 18, align: 'left' },
+      { label: 'Objective', width: 24, align: 'left' },
+      { label: 'PIC', width: 12, align: 'center' },
+      { label: `Saving ${unit}`, width: 13, fmt: N0 },
+      // Headed FTE to match the app and the source workbook's own meaning; the
+      // value behind it is still the stored `hc` field.
+      { label: 'FTE', width: 8, fmt: N1 },
+      // Effort, cost and return are NOT here. They live on Effort_Return, on
+      // their own, so this sheet stays the register it says it is and the two
+      // cannot state the same figure twice with different filters behind them.
+      { label: 'Commit', width: 11, align: 'center' },
+      { label: 'Status', width: 12, align: 'center' },
+      { label: 'Start', width: 11, align: 'left' },
+      { label: 'Due', width: 11, align: 'left' },
+      { label: 'Remark', width: 40, align: 'left' },
+    ]
+    // 1-based column index by header label. Everything below asks for a column
+    // by name, so inserting one can never mis-format its neighbours.
+    const ix = (label) => cols.findIndex((c) => c.label.startsWith(label)) + 1
+    const colLetter = (n) => {
+      let s = ''
+      for (let x = n; x > 0; x = Math.floor((x - 1) / 26)) s = String.fromCharCode(65 + ((x - 1) % 26)) + s
+      return s
+    }
+
+    const ws = wb.addWorksheet('Projects', {
+      properties: { tabColor: { argb: 'FF1B6091' } },
+      views: [{ state: 'frozen', xSplit: 2, ySplit: 4 }],
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    })
+    banner(ws, 'PROJECT REGISTER',
+      `${projects.length} projects · ${Math.round(totals.headlineHours).toLocaleString()} ${unit} committed · effort, cost and return are on Effort_Return · source: ${state.meta?.source || 'plan'}`,
+      cols.length)
+    headerRow(ws, 4, cols.map((c) => c.label), cols.map((c) => c.width))
+    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + projects.length, column: cols.length } }
+
+    let r = 5
+    const first = r
+    const sorted = [...projects].sort((a, b) => (b.savingHours ?? 0) - (a.savingHours ?? 0))
+    sorted.forEach((p) => {
+      const person = people.find((x) => x.id === p.pic)
+      const row = ws.getRow(r++)
+      row.values = [
+        p.jiraKey || '',
+        p.summary,
+        p.program || '',
+        p.team || '',
+        p.subTeam || '',
+        OBJ_BY_ID[p.objective] ? `${OBJ_BY_ID[p.objective].no}. ${OBJ_BY_ID[p.objective].name}` : '',
+        person ? person.nick : 'TBC',
+        p.savingHours ?? null,
+        p.fte ?? null,
+        p.commitLevel,
+        p.status || '',
+        p.start || '',
+        p.due || '',
+        p.notes || '',
+      ]
+      row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
+      cols.forEach((c, i) => {
+        const cell = row.getCell(i + 1)
+        if (c.fmt) { cell.numFmt = c.fmt; cell.alignment = { horizontal: 'right' } }
+        else if (c.align === 'center') cell.alignment = { horizontal: 'center' }
+      })
+      row.getCell(ix('Remark')).alignment = { vertical: 'middle', wrapText: false }
+
+      if (!person) tone(row.getCell(ix('PIC')), BAD)
+      if (p.savingHours == null) tone(row.getCell(ix('Saving')), WARN)
+      const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[p.commitLevel]
+      tone(row.getCell(ix('Commit')), lvl)
+      if (p.pastDue) tone(row.getCell(ix('Due')), BAD)
+    })
+    styleBody(ws, first, r - 1, cols.length)
+
+    // totals strip
+    const tr = ws.getRow(r)
+    tr.getCell(2).value = `TOTAL — ${projects.filter((p) => !OUT_OF_PLAN.has(p.commitLevel)).length} in-plan of ${projects.length} projects`
+    // Live SUM()s, so the workbook still adds up after someone edits a cell.
+    // ROI, payback and break-even are deliberately NOT summed — an average of
+    // ratios is not a portfolio return. The Summary sheet carries that figure.
+    // IN-PLAN ONLY, via SUMIFS on the Commit column. A plain SUM() spanned every
+    // exported row including Excluded and Next year, so this strip disagreed
+    // with both the Summary and the Costs sheet on every money line the moment
+    // a project was deferred. The sheet still LISTS those rows — it is the
+    // register — but they contribute nothing, exactly as in the app.
+    const cl = colLetter(ix('Commit'))
+    const range = (n) => `${colLetter(n)}${first}:${colLetter(n)}${r - 1}`
+    const summed = ['Saving', 'FTE']
+    summed.forEach((label) => {
+      const n = ix(label)
+      if (n <= 0) return
+      tr.getCell(n).value = {
+        formula: `SUMIFS(${range(n)},${cl}${first}:${cl}${r - 1},"<>nextyear",${cl}${first}:${cl}${r - 1},"<>excluded")`,
+      }
+      tr.getCell(n).numFmt = cols[n - 1].fmt
+    })
+    tr.getCell(ix('Commit')).value = 'in plan only'
+    for (let c = 1; c <= cols.length; c++) {
+      const cell = tr.getCell(c)
+      cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
+      cell.fill = fill(NAVY)
+      cell.alignment = { horizontal: cols[c - 1].fmt ? 'right' : 'left', vertical: 'middle' }
+    }
+    tr.height = 20
+  }
+
+  /* ============ 6. Costs — the monthly cost grid ============
+   * Laid out like the source budget sheet (BG 2026): identifying columns, a
+   * yearly amount, a note, then twelve monthly columns in G..R and an FY total
+   * in S — the same cells, so the two can be read side by side.
+   *
+   * Deliberately NOT like BG 2026 in one respect: no depreciation. CAPEX sits
+   * on its own one-off row and is never spread across the months, which is the
+   * decision the team took.
+   */
+  {
+    const cols = [
+      ['Jira', 12], ['Project', 40], ['Cost type', 12], ['Item', 30],
+      [`Yearly (${cur})`, 14], ['Note', 30],
+      ...MONTH_LABELS.map((m) => [`${m}-26`, 11]),
+      [`FY2026 (${cur})`, 15],
+    ]
+    const MONTH_1 = 7          // column G, exactly as in BG 2026
+    const FY_COL = MONTH_1 + MONTHS_IN_YEAR  // column S
+    const ws = wb.addWorksheet('Costs', {
+      properties: { tabColor: { argb: 'FF7C5CD6' } },
+      views: [{ state: 'frozen', xSplit: 4, ySplit: 4 }],
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    })
+    banner(ws, 'PROJECT COSTS — CAPEX AND OPEX',
+      `Monthly operating cost across 2026 in G..R with the FY total in S, as in BG 2026 · one-off investment on its own rows · ${cur} · no depreciation applied`,
+      cols.length)
+    headerRow(ws, 4, cols.map((c) => c[0]), cols.map((c) => c[1]))
+
+    let r = 5
+    const first = r
+    /** One row of the grid. `months` is a 12-array or null for a one-off row. */
+    // The FY cell is the sum of the ROUNDED month cells, not a separately
+    // rounded product: this grid is sold as summable, so selecting G:R in Excel
+    // has to give the same number the S column prints.
+    const fySum = (months) => (months || []).reduce((a, m) => a + Math.round(m || 0), 0)
+    const costRow = (p, type, item, yearly, note, months, fy, opts = {}) => {
+      const row = ws.getRow(r++)
+      row.getCell(1).value = p ? (p.jiraKey || p.key) : ''
+      row.getCell(2).value = p ? p.summary : ''
+      row.getCell(3).value = type
+      row.getCell(4).value = item
+      row.getCell(5).value = yearly == null ? null : Math.round(yearly)
+      row.getCell(5).numFmt = MONEY
+      row.getCell(6).value = note || ''
+      for (let m = 0; m < MONTHS_IN_YEAR; m++) {
+        const cell = row.getCell(MONTH_1 + m)
+        // Numbers, never pre-formatted strings — the whole point of a monthly
+        // grid is that it can be summed, charted and compared in Excel.
+        cell.value = months && months[m] > 0 ? Math.round(months[m]) : null
+        cell.numFmt = MONEY
+        cell.alignment = { horizontal: 'right' }
+      }
+      const fyCell = row.getCell(FY_COL)
+      // When the row HAS a month grid, the FY total is the sum of the cells
+      // actually written. Rounding the annual product separately made a grid
+      // that Excel's own status bar disagreed with.
+      fyCell.value = months ? fySum(months) : (fy == null ? null : Math.round(fy))
+      fyCell.numFmt = MONEY
+      fyCell.alignment = { horizontal: 'right' }
+      row.getCell(3).alignment = { horizontal: 'center' }
+      if (opts.bold) {
+        for (let c = 1; c <= cols.length; c++) row.getCell(c).font = { name: FONT, size: 9.5, bold: true }
+      }
+      return row
+    }
+
+    const withCost = projects.filter((p) => !OUT_OF_PLAN.has(p.commitLevel)
+      && (p.buildCost != null || p.capex != null || (p.opex || []).length > 0))
+
+    if (!withCost.length) {
+      const row = ws.getRow(r++)
+      row.getCell(1).value = 'No CAPEX, OPEX or build effort has been entered on any in-plan project yet.'
+      row.getCell(2).value = 'Click a project row on the Projects tab or on any scorecard to add its costs.'
+      tone(row.getCell(1), MUTED, false)
+    }
+
+    for (const p of withCost) {
+      for (const l of p.opex) {
+        const active = new Array(MONTHS_IN_YEAR).fill(0)
+        for (let m = l.startMonth; m <= l.endMonth; m++) active[m - 1] = l.monthly
+        const months = l.endMonth - l.startMonth + 1
+        costRow(p, 'OPEX', l.label, l.monthly * months,
+          `${MONTH_LABELS[l.startMonth - 1]}–${MONTH_LABELS[l.endMonth - 1]} · ${Math.round(l.monthly).toLocaleString()}/month`,
+          active, l.monthly * months)
+      }
+      if (p.opex.length) {
+        costRow(p, 'OPEX', 'OPEX total', p.opexYear, 'sum of the lines above', p.opexByMonth, p.opexYear, { bold: true })
+      }
+      if (p.capex != null) {
+        costRow(p, 'CAPEX', p.capexNote || 'Capital investment', p.capex,
+          'one-off — charged whole, not depreciated', null, p.capex)
+      }
+      if (p.buildCost != null) {
+        costRow(p, 'BUILD', `${Math.round(p.manday).toLocaleString()} mandays`, p.buildCost,
+          `mandays x ${Math.round(fin.devDayRate).toLocaleString()} a day`, null, p.buildCost)
+      }
+      costRow(p, 'TOTAL', 'Project total 2026', (p.investment ?? 0) + p.opexYear,
+        'one-off investment + the year of OPEX', null, (p.investment ?? 0) + p.opexYear, { bold: true })
+    }
+    styleBody(ws, first, r - 1, cols.length, { zebra: false })
+
+    // grand totals, matching the Summary sheet's plan-wide figures
+    r++
+    sectionRow(ws, r++, 'ACROSS THE WHOLE PLAN', cols.length)
+    const gStart = r
+    // Everything on this sheet is IN-PLAN ONLY, matching the Summary and the
+    // Projects totals strip. Deferred and excluded projects are listed on the
+    // Projects sheet but cost the plan nothing, so they carry no grid here.
+    costRow(null, 'OPEX', 'OPEX — every in-plan project', fin.planOpexYear,
+      `run-rate ${Math.round(fin.planOpexRunRate).toLocaleString()} a month`, fin.planOpexByMonth, fin.planOpexYear, { bold: true })
+    costRow(null, 'CAPEX', 'CAPEX — every in-plan project', fin.planCapex,
+      'one-off — not depreciated', null, fin.planCapex, { bold: true })
+    costRow(null, 'BUILD', 'Build cost — every in-plan project', fin.planBuildCost,
+      'mandays x the developer day rate', null, fin.planBuildCost, { bold: true })
+    const grand = costRow(null, 'TOTAL', 'PLAN TOTAL 2026', fin.planInvestment + fin.planOpexYear,
+      'investment + the year of OPEX', null, fin.planInvestment + fin.planOpexYear, { bold: true })
+    for (let c = 1; c <= cols.length; c++) {
+      grand.getCell(c).fill = fill(NAVY)
+      grand.getCell(c).font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
+    }
+    styleBody(ws, gStart, r - 2, cols.length, { zebra: false })
+    grand.height = 20
   }
 
   return wb

@@ -542,23 +542,20 @@ console.log('\n--- the exported workbook carries the same figures ---')
   check('payback matches the app',
     Math.abs(row.getCell(ecol('Payback')).value - target.paybackMonths) < 0.1)
 
-  // per-person sheets
+  // per-person sheets — a scorecard now, not a cost model. The benefit and the
+  // return came off them deliberately; they are stated once, on Effort_Return
+  // and the Summary. What must still hold here is the KPI target itself.
   for (const p of p2.people) {
     const ws = back.getWorksheet(`Obj-${p.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31))
-    let annual = null
-    let roi = null
+    const sheetText = []
     let objOneTarget = null
     ws.eachRow((r) => {
-      const a = String(r.getCell(1).value || '')
-      if (a.startsWith('Value of hours released')) annual = r.getCell(3).value
-      if (a === 'Return on investment') roi = r.getCell(3).value
+      sheetText.push(String(r.getCell(1).value || ''))
       if (String(r.getCell(2).value || '').includes('Obj 1')) objOneTarget = r.getCell(3).value
     })
-    check(`${p.nick}: exported annual benefit matches the app`,
-      annual === Math.round(p.finance.annualBenefit), `${annual} vs ${Math.round(p.finance.annualBenefit)}`)
-    check(`${p.nick}: exported ROI matches the app`,
-      p.finance.roi == null ? typeof roi === 'string' : Math.abs(roi - p.finance.roi) < 1e-4,
-      `${roi} vs ${p.finance.roi}`)
+    check(`${p.nick}: the sheet carries no POSITION block`,
+      !sheetText.some((t) => t === 'POSITION' || t.startsWith('Value of hours released') || t === 'Return on investment'),
+      sheetText.filter(Boolean).slice(0, 3).join(' / '))
     if (objOneTarget != null) {
       const line = p.kpiLines.find((l) => l.objective === 'financial')
       check(`${p.nick}: objective 1 target exports as a number in baht`,
