@@ -498,22 +498,35 @@ console.log('\n--- the exported workbook carries the same numbers ---')
   const back = new ExcelJS.Workbook()
   await back.xlsx.readFile(file)
 
-  /* ---- Projects sheet ---- */
+  /* ---- the register keeps out of the economics ---- */
   const ps = back.getWorksheet('Projects')
   const head = []
   ps.getRow(4).eachCell((c, n) => { head[n] = String(c.value || '') })
-  const col = (label) => head.findIndex((h) => h && h.startsWith(label))
-  check('the Projects sheet has CAPEX, OPEX and Investment columns',
-    col('CAPEX') > 0 && col('OPEX/mth') > 0 && col('OPEX 2026') > 0 && col('Investment') > 0,
+  const pcol = (label) => head.findIndex((h) => h && h.startsWith(label))
+  check('the Projects sheet is the register: hours and FTE, no money',
+    pcol('Saving') > 0 && pcol('FTE') > 0
+    && ['CAPEX', 'OPEX', 'Investment', 'Build cost', 'ROI', 'Payback', 'Mandays'].every((l) => pcol(l) < 0),
     head.filter(Boolean).join(' | '))
-  check('and still has Build cost, ROI and Payback',
-    col('Build cost') > 0 && col('ROI') > 0 && col('Payback') > 0)
+
+  /* ---- Effort_Return owns effort, cost and return ---- */
+  const ps2 = back.getWorksheet('Effort_Return')
+  const head2 = []
+  ps2.getRow(4).eachCell((c, n) => { head2[n] = String(c.value || '') })
+  const col = (label) => head2.findIndex((h) => h && h.startsWith(label))
+  check('Effort_Return has CAPEX, OPEX and Investment columns',
+    col('CAPEX') > 0 && col('OPEX/mth') > 0 && col('OPEX 2026') > 0 && col('Investment') > 0,
+    head2.filter(Boolean).join(' | '))
+  check('and Mandays, Cost, ROI and Payback',
+    col('Mandays') > 0 && col('Cost') > 0 && col('ROI') > 0 && col('Payback') > 0)
 
   const target = plan.projects.find((p) => p.capex != null && p.opexRunRate > 0 && p.monthlyBenefit != null)
   check('the self-test produced a project with both a CAPEX and an OPEX', !!target,
     target ? target.key : 'none')
   let row = null
-  ps.eachRow((r) => { if (String(r.getCell(2).value || '') === target.summary) row = r })
+  // The project TOTAL line, not one of its task lines.
+  ps2.eachRow((r) => {
+    if (String(r.getCell(2).value || '') === target.summary && String(r.getCell(4).value || '').startsWith('TOTAL')) row = r
+  })
   const cell = (label) => row.getCell(col(label)).value
   check('exported CAPEX matches the app', cell('CAPEX') === Math.round(target.capex),
     `${cell('CAPEX')} vs ${Math.round(target.capex)}`)
@@ -531,10 +544,12 @@ console.log('\n--- the exported workbook carries the same numbers ---')
       return typeof c.value === 'number' && /#,##0/.test(String(c.numFmt))
     }))
   check('a project with no CAPEX exports an empty cell, not a zero', (() => {
-    const none = plan.projects.find((p) => p.capex == null)
+    const none = plan.projects.find((p) => p.capex == null && isInPlan(p))
     let r2 = null
-    ps.eachRow((r) => { if (String(r.getCell(2).value || '') === none.summary) r2 = r })
-    return r2.getCell(col('CAPEX')).value == null
+    ps2.eachRow((r) => {
+      if (String(r.getCell(2).value || '') === none.summary && String(r.getCell(4).value || '').startsWith('TOTAL')) r2 = r
+    })
+    return r2 == null || r2.getCell(col('CAPEX')).value == null
   })())
 
   /* ---- Costs sheet ---- */

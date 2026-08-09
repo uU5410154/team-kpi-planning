@@ -500,27 +500,47 @@ console.log('\n--- the exported workbook carries the same figures ---')
   check('Summary ROI is exported as a NUMBER, not a string',
     typeof kv['RETURN ON INVESTMENT'] === 'number', typeof kv['RETURN ON INVESTMENT'])
 
-  // Projects sheet
+  // Projects sheet — the REGISTER. Effort, cost and return deliberately do not
+  // appear here any more; they live on Effort_Return, so the two sheets cannot
+  // state the same figure twice with different populations behind them.
   const ps = back.getWorksheet('Projects')
   const head = []
   ps.getRow(4).eachCell((c, n) => { head[n] = String(c.value || '') })
   const col = (label) => head.findIndex((h) => h && h.startsWith(label))
   const target = p2.projects.find((p) => p.key === 'FNP-88')
+  check('the register carries the saving hours and the FTE',
+    col('Saving') > 0 && col('FTE') > 0, head.filter(Boolean).join(' | '))
+  check('and carries no cost or return column',
+    ['Build cost', 'CAPEX', 'Investment', 'OPEX', 'Benefit', 'ROI', 'Payback', 'Mandays']
+      .every((l) => col(l) < 0),
+    head.filter(Boolean).join(' | '))
+
+  // Effort_Return — where they went.
+  const er = back.getWorksheet('Effort_Return')
+  const ehead = []
+  er.getRow(4).eachCell((c, n) => { ehead[n] = String(c.value || '') })
+  const ecol = (label) => ehead.findIndex((h) => h && h.startsWith(label))
   let row = null
-  ps.eachRow((r) => { if (String(r.getCell(2).value || '') === target.summary) row = r })
-  check('the Projects sheet has a build cost column', col('Build cost') > 0, String(col('Build cost')))
-  check('project build cost matches the app', row.getCell(col('Build cost')).value === Math.round(target.buildCost),
-    `${row.getCell(col('Build cost')).value} vs ${Math.round(target.buildCost)}`)
+  er.eachRow((r) => {
+    if (String(r.getCell(2).value || '') === target.summary && String(r.getCell(4).value || '').startsWith('TOTAL')) row = r
+  })
+  check('Effort_Return has a row for the project', !!row)
+  check('the sheet has a build cost column', ecol('Cost') > 0, String(ecol('Cost')))
+  check('project build cost matches the app', row.getCell(ecol('Cost')).value === Math.round(target.buildCost),
+    `${row.getCell(ecol('Cost')).value} vs ${Math.round(target.buildCost)}`)
+  check('project mandays match the app',
+    Math.abs(row.getCell(ecol('Mandays')).value - target.manday) < 0.05,
+    `${row.getCell(ecol('Mandays')).value} vs ${target.manday}`)
   check('project annual benefit matches the app',
-    row.getCell(col('Benefit/yr')).value === Math.round(target.annualBenefit))
+    row.getCell(ecol('Benefit/yr')).value === Math.round(target.annualBenefit))
   check('project ROI matches the app',
-    Math.abs(row.getCell(col('ROI')).value - target.roi) < 1e-4,
-    `${row.getCell(col('ROI')).value} vs ${target.roi}`)
+    Math.abs(row.getCell(ecol('ROI')).value - target.roi) < 1e-4,
+    `${row.getCell(ecol('ROI')).value} vs ${target.roi}`)
   check('project ROI is a number with a percent format',
-    typeof row.getCell(col('ROI')).value === 'number' && String(row.getCell(col('ROI')).numFmt).includes('%'),
-    String(row.getCell(col('ROI')).numFmt))
+    typeof row.getCell(ecol('ROI')).value === 'number' && String(row.getCell(ecol('ROI')).numFmt).includes('%'),
+    String(row.getCell(ecol('ROI')).numFmt))
   check('payback matches the app',
-    Math.abs(row.getCell(col('Payback')).value - target.paybackMonths) < 0.1)
+    Math.abs(row.getCell(ecol('Payback')).value - target.paybackMonths) < 0.1)
 
   // per-person sheets
   for (const p of p2.people) {

@@ -399,20 +399,9 @@ export async function buildWorkbook(plan, state) {
       // Headed FTE to match the app and the source workbook's own meaning; the
       // value behind it is still the stored `hc` field.
       { label: 'FTE', width: 8, fmt: N1 },
-      { label: 'Mandays', width: 10, fmt: N0 },
-      { label: `Build cost (${cur})`, width: 14, fmt: MONEY },
-      { label: `CAPEX (${cur})`, width: 13, fmt: MONEY },
-      { label: `Investment (${cur})`, width: 14, fmt: MONEY },
-      { label: `OPEX/mth (${cur})`, width: 13, fmt: MONEY },
-      { label: `OPEX 2026 (${cur})`, width: 14, fmt: MONEY },
-      { label: `Benefit/yr (${cur})`, width: 15, fmt: MONEY },
-      { label: `Benefit ${fin.horizonMonths}mo (${cur})`, width: 16, fmt: MONEY },
-      { label: `Net of OPEX ${fin.horizonMonths}mo (${cur})`, width: 18, fmt: MONEY },
-      { label: `Net (${cur})`, width: 14, fmt: MONEY },
-      { label: 'ROI', width: 10, fmt: ROI },
-      { label: 'Payback (mo)', width: 12, fmt: N1 },
-      { label: 'Break-even mandays', width: 15, fmt: N0 },
-      { label: 'Gate', width: 9, align: 'center' },
+      // Effort, cost and return are NOT here. They live on Effort_Return, on
+      // their own, so this sheet stays the register it says it is and the two
+      // cannot state the same figure twice with different filters behind them.
       { label: 'Commit', width: 11, align: 'center' },
       { label: 'Status', width: 12, align: 'center' },
       { label: 'Start', width: 11, align: 'left' },
@@ -434,12 +423,11 @@ export async function buildWorkbook(plan, state) {
       pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
     })
     banner(ws, 'PROJECT REGISTER',
-      `${projects.length} projects · ${Math.round(totals.headlineHours).toLocaleString()} ${unit} committed · source: ${state.meta?.source || 'plan'}`,
+      `${projects.length} projects · ${Math.round(totals.headlineHours).toLocaleString()} ${unit} committed · effort, cost and return are on Effort_Return · source: ${state.meta?.source || 'plan'}`,
       cols.length)
     headerRow(ws, 4, cols.map((c) => c.label), cols.map((c) => c.width))
     ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + projects.length, column: cols.length } }
 
-    const money = (v) => (v == null ? null : Math.round(v))
     let r = 5
     const first = r
     const sorted = [...projects].sort((a, b) => (b.savingHours ?? 0) - (a.savingHours ?? 0))
@@ -456,22 +444,6 @@ export async function buildWorkbook(plan, state) {
         person ? person.nick : 'TBC',
         p.savingHours ?? null,
         p.fte ?? null,
-        p.manday || null,
-        money(p.buildCost),
-        money(p.capex),
-        money(p.investment),
-        // A zero run-rate means "no operating cost entered", which reads better
-        // as an empty cell than as a nought in a column of baht.
-        p.opexRunRate > 0 ? Math.round(p.opexRunRate) : null,
-        p.opexYear > 0 ? Math.round(p.opexYear) : null,
-        money(p.annualBenefit),
-        money(p.horizonBenefit),
-        money(p.netHorizonBenefit),
-        money(p.netBenefit),
-        p.roi == null ? null : Number(p.roi.toFixed(4)),
-        p.paybackMonths == null ? null : Number(p.paybackMonths.toFixed(1)),
-        p.breakEvenMandays == null ? null : Math.round(p.breakEvenMandays),
-        p.gate === 'unknown' ? '' : p.gate === 'pass' ? 'Pass' : 'Below',
         p.commitLevel,
         p.status || '',
         p.start || '',
@@ -488,10 +460,6 @@ export async function buildWorkbook(plan, state) {
 
       if (!person) tone(row.getCell(ix('PIC')), BAD)
       if (p.savingHours == null) tone(row.getCell(ix('Saving')), WARN)
-      if (p.netBenefit != null) tone(row.getCell(ix('Net (')), p.netBenefit >= 0 ? GOOD : BAD, false)
-      if (p.opexRunRate > 0) tone(row.getCell(ix('OPEX/mth')), WARN, false)
-      if (p.gate === 'fail') { tone(row.getCell(ix('ROI')), BAD); tone(row.getCell(ix('Gate')), BAD) }
-      if (p.gate === 'pass') { tone(row.getCell(ix('ROI')), GOOD); tone(row.getCell(ix('Gate')), GOOD) }
       const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[p.commitLevel]
       tone(row.getCell(ix('Commit')), lvl)
       if (p.pastDue) tone(row.getCell(ix('Due')), BAD)
@@ -511,8 +479,7 @@ export async function buildWorkbook(plan, state) {
     // register — but they contribute nothing, exactly as in the app.
     const cl = colLetter(ix('Commit'))
     const range = (n) => `${colLetter(n)}${first}:${colLetter(n)}${r - 1}`
-    const summed = ['Saving', 'FTE', 'Mandays', 'Build cost', 'CAPEX', 'Investment',
-      'OPEX/mth', 'OPEX 2026', 'Benefit/yr', `Benefit ${fin.horizonMonths}mo`, 'Net of OPEX', 'Net (']
+    const summed = ['Saving', 'FTE']
     summed.forEach((label) => {
       const n = ix(label)
       if (n <= 0) return
@@ -668,8 +635,10 @@ export async function buildWorkbook(plan, state) {
       ['Jira', 12], ['Project', 40], ['PIC', 12], ['Line', 30],
       ['Mandays', 11], [`Cost (${cur})`, 14],
       [`CAPEX (${cur})`, 13], [`Investment (${cur})`, 15],
-      [`OPEX/mth (${cur})`, 13], [`Benefit/yr (${cur})`, 15],
-      ['ROI', 10], ['Payback (mo)', 12], ['Gate', 9], ['Commit', 11],
+      [`OPEX/mth (${cur})`, 13], [`OPEX 2026 (${cur})`, 14],
+      [`Benefit/yr (${cur})`, 15], [`Net ${fin.horizonMonths}mo (${cur})`, 16],
+      ['ROI', 10], ['Payback (mo)', 12], ['Break-even mandays', 15],
+      ['Gate', 9], ['Commit', 11],
     ]
     const ws = wb.addWorksheet('Effort_Return', {
       properties: { tabColor: { argb: 'FF7C5CD6' } },
@@ -722,28 +691,34 @@ export async function buildWorkbook(plan, state) {
         p.capex == null ? null : Math.round(p.capex),
         p.investment == null ? null : Math.round(p.investment),
         p.opexRunRate > 0 ? Math.round(p.opexRunRate) : null,
+        p.opexYear > 0 ? Math.round(p.opexYear) : null,
         p.annualBenefit == null ? null : Math.round(p.annualBenefit),
+        p.netBenefit == null ? null : Math.round(p.netBenefit),
         p.roi == null ? null : Number(p.roi.toFixed(4)),
         p.paybackMonths == null ? null : Number(p.paybackMonths.toFixed(1)),
+        p.breakEvenMandays == null ? null : Math.round(p.breakEvenMandays),
         p.gate === 'unknown' ? '' : p.gate === 'pass' ? 'Pass' : 'Below',
         p.commitLevel,
       ]
       tr.getCell(5).numFmt = N1
-      for (const c of [6, 7, 8, 9, 10]) tr.getCell(c).numFmt = MONEY
-      tr.getCell(11).numFmt = ROI
-      tr.getCell(12).numFmt = N1
-      for (let c = 5; c <= 12; c++) tr.getCell(c).alignment = { horizontal: 'right' }
-      for (const c of [3, 13, 14]) tr.getCell(c).alignment = { horizontal: 'center' }
+      for (const c of [6, 7, 8, 9, 10, 11, 12]) tr.getCell(c).numFmt = MONEY
+      tr.getCell(13).numFmt = ROI
+      tr.getCell(14).numFmt = N1
+      tr.getCell(15).numFmt = N0
+      for (let c = 5; c <= 15; c++) tr.getCell(c).alignment = { horizontal: 'right' }
+      for (const c of [3, 16, 17]) tr.getCell(c).alignment = { horizontal: 'center' }
       for (let c = 1; c <= cols.length; c++) tr.getCell(c).font = { name: FONT, size: 9.5, bold: true }
-      if (p.gate === 'fail') { tone(tr.getCell(11), BAD); tone(tr.getCell(13), BAD) }
-      if (p.gate === 'pass') { tone(tr.getCell(11), GOOD); tone(tr.getCell(13), GOOD) }
+      if (p.netBenefit != null) tone(tr.getCell(12), p.netBenefit >= 0 ? GOOD : BAD, false)
+      if (p.opexRunRate > 0) tone(tr.getCell(9), WARN, false)
+      if (p.gate === 'fail') { tone(tr.getCell(13), BAD); tone(tr.getCell(16), BAD) }
+      if (p.gate === 'pass') { tone(tr.getCell(13), GOOD); tone(tr.getCell(16), GOOD) }
       // Payback is blank when OPEX is at or above the benefit — say why here
       // too, since this sheet is read on its own.
       // "never" means the running cost eats the benefit — NOT that the benefit
       // is merely unknown, which is a blank.
       if (p.investment != null && p.paybackMonths == null && p.netMonthly != null && p.netMonthly <= 0) {
-        tr.getCell(12).value = 'never'
-        tone(tr.getCell(12), BAD)
+        tr.getCell(14).value = 'never'
+        tone(tr.getCell(14), BAD)
       }
     }
     styleBody(ws, first, r - 1, cols.length)
@@ -756,17 +731,19 @@ export async function buildWorkbook(plan, state) {
     gr.getCell(7).value = Math.round(fin.planCapex)
     gr.getCell(8).value = Math.round(fin.planInvestment)
     gr.getCell(9).value = Math.round(fin.planOpexRunRate)
-    gr.getCell(10).value = Math.round(fin.annualBenefit)
-    for (const c of [6, 7, 8, 9, 10]) gr.getCell(c).numFmt = MONEY
-    gr.getCell(11).value = fin.roi == null ? null : Number(fin.roi.toFixed(4))
-    gr.getCell(11).numFmt = ROI
-    gr.getCell(12).value = fin.paybackMonths == null ? null : Number(fin.paybackMonths.toFixed(1))
-    gr.getCell(12).numFmt = N1
+    gr.getCell(10).value = Math.round(fin.planOpexYear)
+    gr.getCell(11).value = Math.round(fin.annualBenefit)
+    gr.getCell(12).value = fin.netBenefit == null ? null : Math.round(fin.netBenefit)
+    for (const c of [6, 7, 8, 9, 10, 11, 12]) gr.getCell(c).numFmt = MONEY
+    gr.getCell(13).value = fin.roi == null ? null : Number(fin.roi.toFixed(4))
+    gr.getCell(13).numFmt = ROI
+    gr.getCell(14).value = fin.paybackMonths == null ? null : Number(fin.paybackMonths.toFixed(1))
+    gr.getCell(14).numFmt = N1
     for (let c = 1; c <= cols.length; c++) {
       const cell = gr.getCell(c)
       cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
       cell.fill = fill(NAVY)
-      cell.alignment = { horizontal: c >= 5 && c <= 12 ? 'right' : 'left', vertical: 'middle' }
+      cell.alignment = { horizontal: c >= 5 && c <= 15 ? 'right' : 'left', vertical: 'middle' }
     }
     gr.height = 20
   }
