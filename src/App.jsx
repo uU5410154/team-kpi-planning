@@ -201,15 +201,50 @@ export default function App() {
     setToast({ severity: 'info', msg: 'Weights, targets and removed lines all reset to the defaults.' })
   }, [])
 
-  /** Remove a KPI line from someone's scorecard (restorable). */
+  /**
+    * Remove a KPI line from someone's scorecard.
+    *
+    * A derived line is HIDDEN, so it can be restored — it still exists, it is
+    * just off the card. A hand-added one is DELETED: there is nothing behind it
+    * to come back to, and leaving it in a restore strip only invites somebody
+    * to resurrect a line the author had finished with.
+    */
   const removePersonKpiLine = useCallback((id, lineId) => {
+    const custom = String(lineId).startsWith('custom-')
     setState((s) => ({
       ...s,
-      people: s.people.map((p) =>
-        p.id === id ? { ...p, kpiHidden: [...new Set([...(p.kpiHidden || []), lineId])] } : p,
-      ),
+      people: s.people.map((p) => {
+        if (p.id !== id) return p
+        return custom
+          ? { ...p, customLines: (p.customLines || []).filter((l) => l.id !== lineId) }
+          : { ...p, kpiHidden: [...new Set([...(p.kpiHidden || []), lineId])] }
+      }),
     }))
-    setToast({ severity: 'info', msg: 'Line removed. Weights no longer total 100% — rebalance before saving.' })
+    setToast({
+      severity: 'info',
+      msg: custom
+        ? 'KPI line deleted. Weights no longer total 100% — rebalance before saving.'
+        : 'Line removed. Weights no longer total 100% — rebalance before saving.',
+    })
+  }, [])
+
+  /** Add or update a KPI line somebody writes by hand. */
+  const savePersonKpiLine = useCallback((id, line) => {
+    setState((s) => ({
+      ...s,
+      people: s.people.map((p) => {
+        if (p.id !== id) return p
+        const lines = p.customLines || []
+        const at = lines.findIndex((l) => l.id === line.id)
+        return {
+          ...p,
+          customLines: at < 0 ? [...lines, line] : lines.map((l) => (l.id === line.id ? line : l)),
+          // Adding a line to a card that had one hidden must not bring the
+          // hidden one back; nothing else about the card changes.
+          kpiHidden: p.kpiHidden || [],
+        }
+      }),
+    }))
   }, [])
 
   /*
@@ -469,6 +504,7 @@ export default function App() {
               onPersonKpi={updatePersonKpi}
               onResetKpi={resetPersonKpi}
               onRemoveLine={removePersonKpiLine}
+              onSaveLine={savePersonKpiLine}
               onRestoreLine={restorePersonKpiLine}
               onAddObjective={addPersonObjective}
               onRemoveObjective={removePersonObjective}

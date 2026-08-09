@@ -1370,6 +1370,144 @@ try {
     `${linesBefore} -> ${linesAfter}`)
   await page.setViewport({ width: 1700, height: 1000 })
 
+
+  /* ---------- a KPI line written by hand ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?kpi=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const kpiTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+    kpiTabs.findIndex((t) => /James/.test(t)))
+  await new Promise((r) => setTimeout(r, 1400))
+
+  const card = () => page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const c = head.closest('.MuiPaper-root')
+    const rows = [...c.querySelectorAll('tbody tr')]
+    return {
+      lines: rows.length,
+      text: c.innerText.split(String.fromCharCode(10)).join(' | '),
+      total: c.innerText.match(/TOTAL[^%]*?(\d+)\s*%/)?.[1] ?? null,
+    }
+  })
+  const kpiBefore = await card()
+  check('the scorecard is on screen', kpiBefore.lines > 0, `${kpiBefore.lines} lines`)
+
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /^New KPI$/.test(x.innerText.trim()))
+    if (b) b.click()
+  })
+  await new Promise((r) => setTimeout(r, 900))
+  check('THERE IS A WAY TO ADD A KPI LINE BY HAND',
+    await page.evaluate(() => !!document.querySelector('[role="dialog"]')))
+
+  // Name it, tie it to an objective, and measure it in something that is NOT
+  // saving hours.
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const d = document.querySelector('[role="dialog"]')
+    const label = [...d.querySelectorAll('.MuiFormControl-root')]
+      .find((f) => /What is the KPI/.test(f.innerText))?.querySelector('input')
+    setter.call(label, 'Close the books in three days')
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await new Promise((r) => setTimeout(r, 400))
+
+  const pickIn = async (labelText, wanted) => {
+    await page.evaluate((lt) => {
+      const d = document.querySelector('[role="dialog"]')
+      const fc = [...d.querySelectorAll('.MuiFormControl-root')].find((f) => new RegExp(lt).test(f.innerText))
+      fc.querySelector('[role="combobox"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    }, labelText)
+    await new Promise((r) => setTimeout(r, 400))
+    let box = null
+    let prev = null
+    for (let i = 0; i < 40 && !box; i++) {
+      const now = await page.evaluate((w) => {
+        const opt = [...document.querySelectorAll('[role="option"]')]
+          .find((o) => new RegExp(w).test((o.textContent || '').trim()))
+        if (!opt) return null
+        const r = opt.getBoundingClientRect()
+        if (!r.width || !r.height) return null
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+      }, wanted)
+      if (now && prev && now.x === prev.x && now.y === prev.y) box = now
+      prev = now
+      if (!box) await new Promise((r) => setTimeout(r, 200))
+    }
+    if (box) await page.mouse.click(box.x, box.y)
+    await new Promise((r) => setTimeout(r, 600))
+    return !!box
+  }
+
+  check('it can be tied to an objective', await pickIn('Objective', '^2\\.'))
+  check('AND MEASURED IN SOMETHING OTHER THAN SAVING HOURS', await pickIn('Measured in', '^A number'))
+
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const d = document.querySelector('[role="dialog"]')
+    const fc = (re) => [...d.querySelectorAll('.MuiFormControl-root')].find((f) => re.test(f.innerText))
+    const unit = fc(/^Unit/)?.querySelector('input')
+    if (unit) { setter.call(unit, 'days'); unit.dispatchEvent(new Event('input', { bubbles: true })) }
+    const target = fc(/^Target/)?.querySelector('input')
+    if (target) { setter.call(target, '3'); target.dispatchEvent(new Event('input', { bubbles: true })) }
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    ;[...d.querySelectorAll('button')].find((b) => /^Save$/.test(b.innerText.trim())).click()
+  })
+  await new Promise((r) => setTimeout(r, 1200))
+
+  const kpiAfter = await card()
+  check('THE LINE IS ON THE SCORECARD', kpiAfter.lines === kpiBefore.lines + 1,
+    `${kpiBefore.lines} -> ${kpiAfter.lines}`)
+  check('under the name that was typed', /Close the books in three days/.test(kpiAfter.text),
+    kpiAfter.text.slice(0, 160))
+  // The target lives in an input, and an input's value is not innerText — read
+  // the field itself.
+  const customTarget = await page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const row = [...head.closest('.MuiPaper-root').querySelectorAll('tbody tr')]
+      .find((r) => /Close the books/.test(r.innerText))
+    if (!row) return null
+    return { value: row.querySelector('input')?.value ?? null, unit: row.innerText.replace(/\s+/g, ' ') }
+  })
+  check('WITH ITS OWN TARGET AND UNIT, NOT SAVING HOURS',
+    customTarget?.value === '3' && /days/.test(customTarget.unit) && !/hrs/.test(customTarget.unit),
+    JSON.stringify(customTarget))
+  check('and it says which objective it is under',
+    /under Obj 2/.test(kpiAfter.text), kpiAfter.text.slice(0, 220))
+  check('THE CARD STILL TOTALS 100%', kpiAfter.total === '100', String(kpiAfter.total))
+
+  // It survives a reload, so it is in the plan and not just on the screen.
+  await page.goto(`${base}/?kpi=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+    kpiTabs.findIndex((t) => /James/.test(t)))
+  await new Promise((r) => setTimeout(r, 1400))
+  const kpiReloaded = await card()
+  check('it survives a reload', /Close the books in three days/.test(kpiReloaded.text)
+    && kpiReloaded.lines === kpiAfter.lines, `${kpiReloaded.lines} lines`)
+
+  // And it can be taken off again.
+  const gone = await page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const c = head.closest('.MuiPaper-root')
+    const row = [...c.querySelectorAll('tbody tr')].find((r) => /Close the books/.test(r.innerText))
+    if (!row) return false
+    const bin = row.querySelector('button [data-testid="DeleteOutlineIcon"]')?.closest('button')
+    if (!bin) return false
+    bin.click()
+    return true
+  })
+  check('the bin is on the hand-written line too', gone)
+  await new Promise((r) => setTimeout(r, 1000))
+  const kpiRemoved = await card()
+  check('and it takes the line off the card', !/Close the books in three days/.test(kpiRemoved.text),
+    `${kpiRemoved.lines} lines`)
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

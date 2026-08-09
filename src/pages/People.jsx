@@ -8,17 +8,20 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
+import AddIcon from '@mui/icons-material/Add'
 import SyncIcon from '@mui/icons-material/Sync'
 import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import StatTile from '../components/StatTile.jsx'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
+import KpiLineDialog from '../components/KpiLineDialog.jsx'
 import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS, OUT_OF_PLAN } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, targetUnit,
   weightSum, weightsValid, snapWeight, WEIGHT_STEP,
-  fmtMonthsShort, gateAsPaybackMonths,
+  fmtMonthsShort, gateAsPaybackMonths, isNumericKind,
 } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -53,6 +56,21 @@ function PctCell({ value, onChange, invalid }) {
       inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, padding: '6px 4px 6px 8px' } }}
       error={invalid}
       sx={{ width: 80 }}
+    />
+  )
+}
+
+/** A milestone date. Stored as YYYY-MM-DD, the same as every date in the plan. */
+function DateTargetCell({ value, onChange }) {
+  return (
+    <TextField
+      size="small"
+      type="date"
+      variant="outlined"
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      inputProps={{ style: { fontSize: '0.8125rem', padding: '6px 8px' } }}
+      sx={{ width: 116 }}
     />
   )
 }
@@ -149,7 +167,7 @@ function PortfolioNum({ value, onChange }) {
 
 export default function People({
   plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets, onUpdate,
-  onAddObjective, onRemoveObjective,
+  onAddObjective, onRemoveObjective, onSaveLine,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -161,6 +179,8 @@ export default function People({
   // The project KEY whose cost dialog is open, re-looked-up every render so an
   // edit inside the dialog is visible in the dialog itself.
   const [costKey, setCostKey] = useState(null)
+  // { personId, line } — line null when adding
+  const [editLine, setEditLine] = useState(null)
   const costProject = costKey == null ? null : plan.projects.find((x) => x.key === costKey) || null
   const p = people.find((x) => x.id === who) || people[0]
   if (!p) return null
@@ -379,13 +399,29 @@ export default function People({
                               variant="body2"
                               sx={{ fontWeight: 600, lineHeight: 1.35, textDecoration: active ? 'underline' : 'none' }}
                             >
-                              {o ? `Obj ${o.no} — ${o.name}` : l.label}
-                              {l.manual && (
+                              {l.custom ? l.label : (o ? `Obj ${o.no} — ${o.name}` : l.label)}
+                              {l.custom && (
+                                <Tooltip title="Edit this KPI line">
+                                  <IconButton
+                                    size="small"
+                                    sx={{ ml: 0.25, p: 0.25 }}
+                                    onClick={(e) => { e.stopPropagation(); setEditLine({ personId: p.id, line: l }) }}
+                                  >
+                                    <EditOutlinedIcon sx={{ fontSize: 14 }} />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+                              {(l.manual || l.custom) && (
                                 <Typography component="span" variant="caption" sx={{ ml: 0.75, color: 'primary.main', fontWeight: 700 }}>
                                   added
                                 </Typography>
                               )}
                             </Typography>
+                            {l.custom && o && (
+                              <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                                under Obj {o.no} — {o.name}
+                              </Typography>
+                            )}
                             {selectable && (
                               <Typography variant="caption" sx={{ color: active ? 'primary.main' : 'text.disabled' }}>
                                 {active ? 'filtering the portfolio — click to clear' : 'click to filter the portfolio'}
@@ -398,10 +434,17 @@ export default function People({
                           cells must not pass their clicks up to it */}
                       <TableCell sx={{ verticalAlign: 'top', pt: 1.25 }} onClick={(e) => e.stopPropagation()}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          {l.targetKind === 'hours' || l.targetKind === 'thb' ? (
+                          {/* The line states how it is measured, so the editor
+                              follows it rather than inferring from the objective. */}
+                          {isNumericKind(l.targetKind) ? (
                             <HoursTargetCell
                               value={l.target}
                               unit={targetUnit(l, settings.savingBasis, sym)}
+                              onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
+                            />
+                          ) : l.targetKind === 'date' ? (
+                            <DateTargetCell
+                              value={l.target}
                               onChange={(v) => onPersonKpi(p.id, l.id, { target: v })}
                             />
                           ) : (
@@ -464,6 +507,26 @@ export default function People({
                 </TableRow>
               </TableBody>
             </Table>
+            </Box>
+
+            {/* ---------- a KPI line written by hand ---------- */}
+            <Box sx={{ px: 2.5, py: 1.5, borderTop: 1, borderColor: 'divider' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                  ADD A KPI LINE
+                </Typography>
+                <Button
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => setEditLine({ personId: p.id, line: null })}
+                >
+                  New KPI
+                </Button>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  anything the project register cannot count — measured in hours, money, a number, a date or a
+                  sentence, and tied to an objective if it belongs to one
+                </Typography>
+              </Box>
             </Box>
 
             {/* ---------- objectives added by hand ---------- */}
@@ -788,6 +851,15 @@ export default function People({
           </Paper>
         </Grid>
       </Grid>
+
+      <KpiLineDialog
+        open={!!editLine}
+        key={editLine?.line?.id || 'new'}
+        line={editLine?.line || null}
+        symbol={sym}
+        onClose={() => setEditLine(null)}
+        onSave={(line) => { onSaveLine(editLine.personId, line); setEditLine(null) }}
+      />
 
       {/* The same component the Projects tab opens, on the same update path. */}
       <ProjectCostDialog

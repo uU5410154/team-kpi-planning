@@ -113,8 +113,14 @@ function writeTarget(cell, line, basis, currency) {
   } else if (line.targetKind === 'hours') {
     cell.value = Number(line.target || 0)
     cell.numFmt = basis === 'monthly' ? '#,##0" hrs/mth"' : '#,##0" hrs/yr"'
+  } else if (line.targetKind === 'number') {
+    // A hand-written KPI in its own unit. Still a NUMBER in the cell, with the
+    // unit in the format, so it can be summed, sorted and charted like the
+    // rest — a pre-formatted string could not.
+    cell.value = Number(line.target || 0)
+    cell.numFmt = line.unit ? `#,##0.##" ${String(line.unit).replace(/"/g, '')}"` : '#,##0.##'
   } else {
-    cell.value = String(line.target ?? '—')
+    cell.value = String(line.target ?? '—') || '—'
   }
   cell.alignment = { horizontal: 'center' }
 }
@@ -541,7 +547,12 @@ export async function buildWorkbook(plan, state) {
       const o = l.objective ? OBJ_BY_ID[l.objective] : null
       const row = ws.getRow(r++)
       row.getCell(1).value = l.block
-      row.getCell(2).value = o ? `Obj ${o.no} — ${o.name}` : l.label
+      // A hand-written line keeps ITS OWN name even when it is tied to an
+      // objective. Naming it after the objective threw away the only thing
+      // that said what the KPI actually was.
+      row.getCell(2).value = l.custom
+        ? (o ? `${l.label} (Obj ${o.no})` : l.label)
+        : (o ? `Obj ${o.no} — ${o.name}` : l.label)
       writeTarget(row.getCell(3), l, settings.savingBasis, cur)
       // Spelled out beside the number as well as inside its format, so the unit
       // survives a copy-paste into a deck.

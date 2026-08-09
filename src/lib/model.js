@@ -387,6 +387,64 @@ export const targetKindFor = (objectiveId) => {
   }
 }
 
+/**
+ * How a KPI target is expressed.
+ *
+ * The four objectives measure themselves in hours, baht or a milestone date,
+ * but a scorecard also has to carry the things the register cannot count — a
+ * number of somethings, a percentage, a date, a sentence. A line states its own
+ * kind, so the editor, the unit label and the workbook cell all agree without
+ * anyone inferring it from the objective.
+ */
+export const TARGET_KINDS = [
+  { id: 'hours', label: 'Saving hours', numeric: true, help: 'A number of hours a month, the same measure the register uses' },
+  { id: 'thb', label: 'Money', numeric: true, help: 'A figure in baht a year' },
+  { id: 'number', label: 'A number', numeric: true, help: 'A count, a score, a percentage — anything with a unit you name' },
+  { id: 'date', label: 'A date', numeric: false, help: 'Delivered by a date' },
+  { id: 'text', label: 'Anything else', numeric: false, help: 'A milestone or a sentence a number cannot express' },
+]
+
+export const isNumericKind = (kind) => !!TARGET_KINDS.find((k) => k.id === kind)?.numeric
+
+/** A blank line for the "add a KPI" action. */
+export const newCustomLine = (seq = 1) => ({
+  id: `custom-${Date.now().toString(36)}-${seq}`,
+  label: '',
+  objective: null,
+  targetKind: 'text',
+  target: '',
+  unit: '',
+})
+
+/**
+ * Sanitise the hand-added KPI lines.
+ *
+ * Same discipline as the tasks and the OPEX lines: anything that arrives
+ * malformed — from an old scenario file, a hand-edited export, a half-finished
+ * form — is normalised here rather than guarded at twenty call sites.
+ */
+export function normalizeCustomLines(lines) {
+  if (!Array.isArray(lines)) return []
+  return lines
+    .filter((l) => l && typeof l === 'object')
+    .map((l, i) => {
+      const kind = TARGET_KINDS.find((k) => k.id === l.targetKind) ? l.targetKind : 'text'
+      const numeric = isNumericKind(kind)
+      const raw = l.target
+      const n = Number(raw)
+      return {
+        id: String(l.id || `custom-${i}`),
+        label: String(l.label || '').trim() || 'Untitled KPI',
+        // A line may hang off an objective or stand on its own. Tied, it
+        // filters the portfolio to that objective like any other line.
+        objective: OBJ_BY_ID[l.objective] ? l.objective : null,
+        targetKind: kind,
+        target: numeric ? (Number.isFinite(n) ? n : 0) : String(raw ?? ''),
+        unit: String(l.unit || '').trim(),
+      }
+    })
+}
+
 export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
@@ -426,6 +484,32 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
     lines.push({ id: 'obj-none', block: 'Delivery', objective: 'process_automation', weight: 1, targetKind: 'hours', target: 0 })
   }
 
+  /*
+   * Lines added by hand.
+   *
+   * They join the same pool as the derived ones and are weighted the same way:
+   * one hand-added KPI is worth one objective before anybody types a weight,
+   * and from then on a typed weight is honoured exactly and the rest flex —
+   * exactly as they do for a derived line. They are NOT a separate block with
+   * its own share, because a card that splits 100% two different ways is a card
+   * nobody can check.
+   */
+  const custom = normalizeCustomLines(person.customLines)
+  const each = 1 / Math.max(1, lines.length)
+  for (const c of custom) {
+    lines.push({
+      id: c.id,
+      block: 'Delivery',
+      objective: c.objective,
+      weight: each,
+      targetKind: c.targetKind,
+      target: c.target,
+      unit: c.unit,
+      label: c.label,
+      custom: true,
+    })
+  }
+
   const ov = person.kpi || {}
   const hidden = new Set(person.kpiHidden || [])
 
@@ -436,7 +520,7 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
   const resolved = (kept.length ? kept : lines.slice(0, 1))
     .map((l) => {
       const o = ov[l.id] || {}
-      const numeric = l.targetKind === 'hours' || l.targetKind === 'thb'
+      const numeric = isNumericKind(l.targetKind)
       const hasTargetOverride = numeric
         ? typeof o.target === 'number'
         : o.target != null && o.target !== ''
@@ -453,14 +537,17 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
         // The live figure straight from current project assignments. Reassign a
         // project on the Projects tab and this moves immediately.
         defaultTarget: l.target,
-        creditedHours: l.objective ? (credited[l.objective] || 0) : null,
-        creditedMoney: l.objective ? (creditedMoney[l.objective] || 0) : null,
+        creditedHours: l.objective && !l.custom ? (credited[l.objective] || 0) : null,
+        creditedMoney: l.objective && !l.custom ? (creditedMoney[l.objective] || 0) : null,
         // A manual target that no longer matches what the person actually
         // carries — surfaced so it can be re-synced rather than silently drift.
         // Compared numerically where the target is a number: baht figures are
         // large enough that a strict !== would flag a rounding difference of
         // one satang as a drifted target.
-        drifted: !!l.objective && (numeric
+        // A hand-added line has nothing to drift FROM: its target is
+        // whatever the user set, not a figure derived from the register, so
+        // offering to "re-sync" it would overwrite the very thing they typed.
+        drifted: !l.custom && !!l.objective && (numeric
           ? Math.abs(Number(target) - Number(l.target)) > 0.5
           : target !== l.target),
         overridden: typeof o.weight === 'number' || hasTargetOverride,
@@ -558,10 +645,12 @@ export const snapWeight = (pct, step = WEIGHT_STEP) =>
   Math.min(100, Math.max(0, Math.round(pct / step) * step))
 
 /** The unit a numeric KPI target is quoted in. */
-export const targetUnit = (line, basis = 'monthly', symbol = '฿') =>
-  line.targetKind === 'thb'
-    ? `${symbol}/year`
-    : basis === 'monthly' ? 'hrs/month' : 'hrs/year'
+export const targetUnit = (line, basis = 'monthly', symbol = '฿') => {
+  if (line.targetKind === 'thb') return `${symbol}/year`
+  // A hand-added number is quoted in whatever the user called it.
+  if (line.targetKind === 'number') return line.unit || ''
+  return basis === 'monthly' ? 'hrs/month' : 'hrs/year'
+}
 
 /**
  * Render a KPI target for display or export. Objective 1 is money, everything
@@ -574,7 +663,11 @@ export const fmtTarget = (line, basis = 'monthly', symbol = '฿') => {
   if (line.targetKind === 'hours') {
     return `${Number(line.target || 0).toLocaleString()} ${basis === 'monthly' ? 'hrs/month' : 'hrs/year'}`
   }
-  return String(line.target ?? '—')
+  if (line.targetKind === 'number') {
+    const n = Number(line.target || 0).toLocaleString()
+    return line.unit ? `${n} ${line.unit}` : n
+  }
+  return String(line.target ?? '—') || '—'
 }
 
 /** Lines removed from a scorecard, so they can be listed and restored. */
