@@ -178,13 +178,128 @@ export const gateAsPaybackMonths = (rates) =>
   rates.roiGate + 1 > 0 ? rates.horizonMonths / (1 + rates.roiGate) : null
 
 /**
- * Months for a project's monthly benefit to repay its build cost.
- * Null when either side is unknown — an unknown payback is not a fast one.
+ * Months for a project's NET monthly benefit to repay what was invested in it.
+ *
+ * Both arguments moved when operating cost entered the model: the numerator is
+ * the whole investment (build + CAPEX) and the denominator is the benefit NET
+ * of the monthly OPEX run-rate.
+ *
+ * Null when either side is unknown — an unknown payback is not a fast one — and
+ * null when the net monthly figure is zero or negative, because OPEX at or
+ * above the benefit means the project never pays back at all. Rendering that as
+ * a fast payback, or as a negative number of months, would be a lie.
  */
-export function paybackMonths(buildCost, monthlyBenefit) {
-  if (buildCost == null || monthlyBenefit == null || monthlyBenefit <= 0) return null
-  return buildCost / monthlyBenefit
+export function paybackMonths(investment, netMonthly) {
+  // `investment <= 0` matches the ROI guard. A known-zero investment returned a
+  // payback of 0.0 months beside a null ROI, so the two cells disagreed about
+  // whether the project had a cost at all.
+  if (investment == null || investment <= 0 || netMonthly == null || netMonthly <= 0) return null
+  return investment / netMonthly
 }
+
+/* ------------------------------------------------------------------ */
+/* capital and operating cost                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The twelve columns of the plan year, in the order the source budget sheet
+ * (BG 2026, columns G..R) writes them. Used by the cost grid, the cost dialog
+ * and the exported Costs sheet, so all three are laid out identically.
+ */
+export const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+export const MONTHS_IN_YEAR = MONTH_LABELS.length
+
+/** A blank OPEX line, for the "add line" action in the cost dialog. */
+export const newOpexLine = (seq = 1) => ({
+  id: `opex-${Date.now().toString(36)}-${seq}`,
+  label: '',
+  monthly: null,
+  startMonth: 1,
+  endMonth: 12,
+})
+
+/**
+ * Sanitise the stored OPEX lines.
+ *
+ * Same discipline as the saving hours and the mandays: a line whose monthly
+ * amount is not a finite positive number carries no cost, and a start or end
+ * month that is missing or out of range falls back to the whole year rather
+ * than silently dropping the line out of the grid. A hand-edited scenario file
+ * or a bad row in the database can hold anything at all, and one NaN here would
+ * poison every monthly total, every ROI and the exported workbook.
+ *
+ * An end month before the start month is pulled UP to the start month rather
+ * than swapped, so a half-typed range shows one month instead of a row of zeros
+ * whose FY total disagrees with the run-rate.
+ */
+export function normalizeOpex(lines) {
+  if (!Array.isArray(lines)) return []
+  return lines.map((raw, i) => {
+    const num = (v) => {
+      const x = Number(v)
+      return v == null || v === '' || !Number.isFinite(x) ? null : x
+    }
+    const month = (v, fallback) => {
+      const x = num(v)
+      return x == null ? fallback : Math.min(MONTHS_IN_YEAR, Math.max(1, Math.round(x)))
+    }
+    const monthly = num(raw?.monthly)
+    const startMonth = month(raw?.startMonth, 1)
+    return {
+      id: typeof raw?.id === 'string' && raw.id ? raw.id : `opex-${i + 1}`,
+      label: typeof raw?.label === 'string' && raw.label.trim() ? raw.label.trim() : `OPEX line ${i + 1}`,
+      monthly: monthly != null && monthly > 0 ? monthly : 0,
+      startMonth,
+      endMonth: Math.max(startMonth, month(raw?.endMonth, MONTHS_IN_YEAR)),
+    }
+  })
+}
+
+/**
+ * A project's capital and operating cost, sanitised and spread over the year.
+ *
+ *   capex        one-off investment, NULL when none is entered — unknown and
+ *                zero are different things everywhere else in this file too
+ *   opexByMonth  each line's monthly amount in the months it is actually live,
+ *                twelve numbers, exactly the shape of BG 2026's G..R
+ *   opexYear     the sum of that grid — the 2026 budget figure
+ *   opexRunRate  every line's monthly amount with start/end IGNORED, i.e. the
+ *                steady-state monthly cost. This is what the forward-looking
+ *                ROI uses: a line that starts in October still costs that much
+ *                a month for as long as the automation runs, and charging the
+ *                horizon only three months of it would flatter the return.
+ *
+ * No depreciation anywhere: CAPEX is a one-off row, never spread across the
+ * months. That is a deliberate decision of the team, not an omission.
+ */
+export function projectCosts(p) {
+  const capexRaw = Number(p?.capex)
+  const capex = p?.capex != null && Number.isFinite(capexRaw) && capexRaw > 0 ? capexRaw : null
+  const opex = normalizeOpex(p?.opex)
+  const opexByMonth = new Array(MONTHS_IN_YEAR).fill(0)
+  for (const l of opex) {
+    for (let m = l.startMonth; m <= l.endMonth; m++) opexByMonth[m - 1] += l.monthly
+  }
+  return {
+    capex,
+    capexNote: typeof p?.capexNote === 'string' ? p.capexNote : '',
+    opex,
+    opexByMonth,
+    opexYear: opexByMonth.reduce((a, b) => a + b, 0),
+    opexRunRate: opex.reduce((a, l) => a + l.monthly, 0),
+  }
+}
+
+/**
+ * Build cost and CAPEX added, where either side may be unknown.
+ *
+ * Both null -> null, because a project with neither an effort estimate nor a
+ * capital figure has an UNKNOWN cost, not a cost of nothing. Either one present
+ * -> the sum of what is actually known, so a project that carries a CAPEX but
+ * no mandays does have a cost and therefore does get a return.
+ */
+export const totalInvestment = (buildCost, capex) =>
+  buildCost == null && capex == null ? null : (buildCost ?? 0) + (capex ?? 0)
 
 export const DEFAULT_SETTINGS = {
   targetHours: 3000,
@@ -513,6 +628,12 @@ export function newProject(seq) {
     savingEstimated: true,
     manday: 0,
     mandayEstimated: true,
+    // Capital and operating cost. Null, not zero: nothing has been entered yet.
+    // Present on every new row so a project added in the app carries the same
+    // shape as one loaded from a scenario file.
+    capex: null,
+    capexNote: '',
+    opex: [],
     status: 'Not Start',
     srcStatus: null,
     start: null,
@@ -680,22 +801,31 @@ export const monthlyHours = (p, basis = 'monthly') => {
 /**
  * The business case for one project, in money.
  *
- *   build cost      = mandays x the developer day rate            (one-off)
- *   monthly benefit = saved hours/month x the accountant hour rate (recurring)
- *   net benefit     = monthly benefit x horizon - build cost      (over the horizon)
- *   ROI             = net benefit / build cost
+ *   build cost      = mandays x the developer day rate             (one-off)
+ *   CAPEX           = infrastructure, licences, hardware           (one-off)
+ *   investment      = build cost + CAPEX                           (one-off)
+ *   monthly benefit = saved hours/month x the accountant hour rate  (recurring)
+ *   OPEX run-rate   = every operating cost line, per month          (recurring)
+ *   net monthly     = monthly benefit - OPEX run-rate     (may be NEGATIVE)
+ *   net benefit     = net monthly x horizon - investment  (over the horizon)
+ *   ROI             = net benefit / investment
  *
- * Cost is NULL, never zero, when no mandays have been estimated. A project
- * whose effort is unknown does not have a cost of nothing — it has an unknown
- * cost, and everything downstream of it must stay blank rather than report an
- * infinite return. That distinction is the whole reason this file has so many
- * null checks: the source workbook carries no effort data at all.
+ * Cost is NULL, never zero, when neither mandays nor CAPEX have been entered. A
+ * project whose effort is unknown does not have a cost of nothing — it has an
+ * unknown cost, and everything downstream of it must stay blank rather than
+ * report an infinite return. That distinction is the whole reason this file has
+ * so many null checks: the source workbook carries no effort data at all.
  *
- * `breakEvenMandays` is the one figure that survives that gap. It needs only
- * the saving hours, so it can be shown for every quantified project on day one:
- * spend more than this many mandays and the project loses money over the
- * horizon. `affordableMandays` is the same thing at the gate rather than at
- * zero return — the effort budget a project has to stay inside to be worth
+ * A project that carries a CAPEX but no mandays DOES have a known cost, so it
+ * does get a return.
+ *
+ * `breakEvenMandays` is the one figure that survives a missing effort estimate.
+ * It needs only the saving hours and whatever cost IS known, so it can be shown
+ * for every quantified project on day one: spend more than this many mandays
+ * and the project loses money over the horizon. It is net of OPEX and of any
+ * CAPEX already committed, so it can never claim room a running cost has
+ * already eaten. `affordableMandays` is the same thing at the gate rather than
+ * at zero return — the effort budget a project has to stay inside to be worth
  * committing.
  */
 export function projectFinance(p, settings) {
@@ -716,16 +846,31 @@ export function projectFinance(p, settings) {
   const md = Number.isFinite(mdRaw) && mdRaw > 0 ? mdRaw : null
   const buildCost = md == null ? null : md * r.devDayRate
 
-  const netBenefit = horizonBenefit == null || buildCost == null ? null : horizonBenefit - buildCost
-  const roi = buildCost == null || buildCost <= 0 || horizonBenefit == null
-    ? null
-    : (horizonBenefit - buildCost) / buildCost
-  const payback = paybackMonths(buildCost, monthlyBenefit)
+  const { capex, opexYear, opexRunRate } = projectCosts(p)
+  const investment = totalInvestment(buildCost, capex)
 
-  const breakEvenMandays = horizonBenefit == null || r.devDayRate <= 0
+  // The recurring side, net of the recurring cost. Deliberately allowed to go
+  // negative: an automation whose licence costs more per month than the hours
+  // it hands back is a real outcome and must read as one.
+  const netMonthly = monthlyBenefit == null ? null : monthlyBenefit - opexRunRate
+  const netHorizonBenefit = netMonthly == null ? null : netMonthly * horizon
+
+  const netBenefit = netHorizonBenefit == null || investment == null
     ? null
-    : horizonBenefit / r.devDayRate
-  const affordableMandays = breakEvenMandays == null ? null : breakEvenMandays / (1 + gate)
+    : netHorizonBenefit - investment
+  const roi = investment == null || investment <= 0 || netHorizonBenefit == null
+    ? null
+    : (netHorizonBenefit - investment) / investment
+  const payback = paybackMonths(investment, netMonthly)
+
+  // Floored at zero: when the CAPEX alone already exceeds what the project ever
+  // gives back, the honest answer is "no mandays at all clear it", not a
+  // negative effort budget.
+  const roomFor = (money) => (netHorizonBenefit == null || r.devDayRate <= 0
+    ? null
+    : Math.max(0, (money - (capex ?? 0)) / r.devDayRate))
+  const breakEvenMandays = roomFor(netHorizonBenefit)
+  const affordableMandays = netHorizonBenefit == null ? null : roomFor(netHorizonBenefit / (1 + gate))
 
   return {
     monthlyBenefit,
@@ -733,6 +878,12 @@ export function projectFinance(p, settings) {
     horizonBenefit,
     fteReleased,
     buildCost,
+    capex,
+    investment,
+    opexYear,
+    opexRunRate,
+    netMonthly,
+    netHorizonBenefit,
     netBenefit,
     roi,
     paybackMonths: payback,
@@ -791,11 +942,20 @@ export function computePlan(state) {
      * because every comparison against NaN is false.
      */
     const num = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v))
-    const p = { ...raw, savingHours: num(raw.savingHours), manday: num(raw.manday) ?? 0 }
+    const p = { ...raw, savingHours: num(raw.savingHours), manday: num(raw.manday) ?? 0, capex: num(raw.capex) }
     const { shares, partnerShare, fellBack } = projectShares(p, s.roleWeights, s.creditPartners, shareOpts)
     const fin = projectFinance(p, s)
+    // The month grid lives here rather than in projectFinance so that every
+    // value that function returns stays a scalar — the suites assert that each
+    // one is null or finite, and an array would sail through that check.
+    const costs = projectCosts(p)
     return {
       ...p,
+      // Sanitised on the way out too, so the dialog, the export and the tables
+      // all read the same normalised lines rather than whatever was stored.
+      capexNote: costs.capexNote,
+      opex: costs.opex,
+      opexByMonth: costs.opexByMonth,
       shares,
       partnerShare,
       fellBack,
@@ -879,13 +1039,38 @@ export function computePlan(state) {
   const horizonBenefit = monthlyBenefit * rates.horizonMonths
   const fteReleased = inPlan.reduce((a, p) => a + (p.fteReleased || 0), 0)
 
-  const costed = inPlan.filter((p) => p.buildCost != null && p.monthlyBenefit != null)
-  const buildCost = costed.reduce((a, p) => a + p.buildCost, 0)
-  const costedHorizonBenefit = costed.reduce((a, p) => a + p.horizonBenefit, 0)
+  /*
+   * `costed` is THE set that decides what enters the return, and it now keys on
+   * the whole INVESTMENT rather than on mandays alone — a project bought
+   * outright with CAPEX and no build effort has a perfectly well-known cost and
+   * must earn a return like any other.
+   *
+   * Every figure below that feeds the ROI is summed over exactly this set, on
+   * both sides. The `plan*` figures underneath it are the 2026 budget view —
+   * every in-plan project's money whether or not it can be returned — and are
+   * deliberately named apart so the two can never be confused for each other.
+   */
+  const costed = inPlan.filter((p) => p.investment != null && p.monthlyBenefit != null)
+  const buildCost = costed.reduce((a, p) => a + (p.buildCost ?? 0), 0)
+  const capex = costed.reduce((a, p) => a + (p.capex ?? 0), 0)
+  const investment = costed.reduce((a, p) => a + p.investment, 0)
+  const opexRunRate = costed.reduce((a, p) => a + p.opexRunRate, 0)
+  const opexYear = costed.reduce((a, p) => a + p.opexYear, 0)
   const costedMonthlyBenefit = costed.reduce((a, p) => a + p.monthlyBenefit, 0)
-  const netBenefit = costed.length ? costedHorizonBenefit - buildCost : null
-  const portfolioRoi = buildCost > 0 ? (costedHorizonBenefit - buildCost) / buildCost : null
-  const portfolioPayback = paybackMonths(costed.length ? buildCost : null, costedMonthlyBenefit)
+  const costedNetMonthly = costedMonthlyBenefit - opexRunRate
+  const costedNetHorizon = costedNetMonthly * rates.horizonMonths
+  const netBenefit = costed.length ? costedNetHorizon - investment : null
+  const portfolioRoi = investment > 0 ? (costedNetHorizon - investment) / investment : null
+  const portfolioPayback = paybackMonths(costed.length ? investment : null, costedNetMonthly)
+
+  // The budget view: what the plan spends, over everything in it. Summed with
+  // an unknown treated as nothing rather than as null, because "the plan's
+  // known CAPEX" is a meaningful figure while "the plan's CAPEX including the
+  // ones nobody has entered" is not.
+  const planMonthGrid = new Array(MONTHS_IN_YEAR).fill(0)
+  for (const p of inPlan) {
+    for (let m = 0; m < MONTHS_IN_YEAR; m++) planMonthGrid[m] += p.opexByMonth?.[m] || 0
+  }
   const finance = {
     ...rates,
     monthlyBenefit,
@@ -893,21 +1078,33 @@ export function computePlan(state) {
     horizonBenefit,
     fteReleased,
     buildCost: costed.length ? buildCost : null,
+    capex: costed.length ? capex : null,
+    investment: costed.length ? investment : null,
+    opexRunRate,
+    opexYear,
+    netMonthly: costed.length ? costedNetMonthly : null,
     netBenefit,
     roi: portfolioRoi,
     paybackMonths: portfolioPayback,
     costedCount: costed.length,
-    // Share of the book's benefit that has an effort estimate behind it.
+    // Whole-plan money, for the budget tables rather than for the return.
+    planBuildCost: inPlan.reduce((a, p) => a + (p.buildCost ?? 0), 0),
+    planCapex: inPlan.reduce((a, p) => a + (p.capex ?? 0), 0),
+    planInvestment: inPlan.reduce((a, p) => a + (p.investment ?? 0), 0),
+    planOpexYear: inPlan.reduce((a, p) => a + (p.opexYear || 0), 0),
+    planOpexRunRate: inPlan.reduce((a, p) => a + (p.opexRunRate || 0), 0),
+    planOpexByMonth: planMonthGrid,
+    // Share of the book's benefit that has a cost estimate behind it.
     roiCoverage: monthlyBenefit > 0 ? costedMonthlyBenefit / monthlyBenefit : 0,
-    uncostedCount: inPlan.filter((p) => p.buildCost == null && p.savingHours != null).length,
-    // Effort that IS estimated on projects whose benefit is still TBC. It
-    // cannot enter a return — there is no benefit to divide — but it is real
-    // money and silently dropping it would make the Summary disagree with the
-    // Projects sheet, which prints the cost of every row.
+    uncostedCount: inPlan.filter((p) => p.investment == null && p.savingHours != null).length,
+    // Money that IS committed on projects whose benefit is still TBC. It cannot
+    // enter a return — there is no benefit to divide — but it is real money and
+    // silently dropping it would make the Summary disagree with the Projects
+    // sheet, which prints the cost of every row.
     unreturnedCost: inPlan
-      .filter((p) => p.buildCost != null && p.monthlyBenefit == null)
-      .reduce((a, p) => a + p.buildCost, 0),
-    unreturnedCount: inPlan.filter((p) => p.buildCost != null && p.monthlyBenefit == null).length,
+      .filter((p) => p.investment != null && p.monthlyBenefit == null)
+      .reduce((a, p) => a + p.investment, 0),
+    unreturnedCount: inPlan.filter((p) => p.investment != null && p.monthlyBenefit == null).length,
   }
 
   // ---- per-person --------------------------------------------------
@@ -936,8 +1133,17 @@ export function computePlan(state) {
     // Cost is only ever summed over rows that carry BOTH a cost and a benefit.
     // Coercing an unknown cost to zero would divide a full portfolio benefit by
     // a partial cost and report a return nobody earned.
-    const costedRows = counted.filter((r) => countsToPool(r.p) && r.p.buildCost != null && r.p.monthlyBenefit != null)
-    const buildCost = costedRows.reduce((a, r) => a + r.p.buildCost * r.share, 0)
+    //
+    // Every one of these is credited on the SAME `r.share` and over the SAME
+    // rows as the hours above, so a person's investment is their share of the
+    // projects their hours were credited from — never a whole project's CAPEX
+    // landing on one of five contributors.
+    const costedRows = counted.filter((r) => countsToPool(r.p) && r.p.investment != null && r.p.monthlyBenefit != null)
+    const buildCost = costedRows.reduce((a, r) => a + (r.p.buildCost ?? 0) * r.share, 0)
+    const capex = costedRows.reduce((a, r) => a + (r.p.capex ?? 0) * r.share, 0)
+    const investment = costedRows.reduce((a, r) => a + r.p.investment * r.share, 0)
+    const opexRunRate = costedRows.reduce((a, r) => a + r.p.opexRunRate * r.share, 0)
+    const opexYear = costedRows.reduce((a, r) => a + r.p.opexYear * r.share, 0)
     const costedBenefit = costedRows.reduce((a, r) => a + r.p.horizonBenefit * r.share, 0)
 
     const byObjective = {}
@@ -964,7 +1170,13 @@ export function computePlan(state) {
       benefitByObjective,
       monthlyBenefit,
       buildCost: costedRows.length ? buildCost : null,
+      capex: costedRows.length ? capex : null,
+      investment: costedRows.length ? investment : null,
+      opexRunRate,
+      opexYear,
       costedBenefit: costedRows.length ? costedBenefit : null,
+      // The benefit those rows actually give back, after their running cost.
+      costedNetBenefit: costedRows.length ? costedBenefit - opexRunRate * rates.horizonMonths : null,
       costedCount: costedRows.length,
       rows,
     }
@@ -979,6 +1191,10 @@ export function computePlan(state) {
   const teamManday = byPerson.reduce((a, p) => a + p.manday, 0)
   const teamMonthlyBenefit = byPerson.reduce((a, p) => a + p.monthlyBenefit, 0)
   const teamBuildCost = byPerson.reduce((a, p) => a + (p.buildCost || 0), 0)
+  const teamCapex = byPerson.reduce((a, p) => a + (p.capex || 0), 0)
+  const teamInvestment = byPerson.reduce((a, p) => a + (p.investment || 0), 0)
+  const teamOpexRunRate = byPerson.reduce((a, p) => a + (p.opexRunRate || 0), 0)
+  const teamOpexYear = byPerson.reduce((a, p) => a + (p.opexYear || 0), 0)
   const teamCostedBenefit = byPerson.reduce((a, p) => a + (p.costedBenefit || 0), 0)
   const teamCostedCount = byPerson.reduce((a, p) => a + p.costedCount, 0)
   const teamByObjective = {}
@@ -1010,7 +1226,17 @@ export function computePlan(state) {
     const scMonthlyBenefit = aggregates ? teamMonthlyBenefit : p.monthlyBenefit
     const scCostedCount = aggregates ? teamCostedCount : p.costedCount
     const scBuildCost = scCostedCount > 0 ? (aggregates ? teamBuildCost : p.buildCost) : null
+    const scCapex = scCostedCount > 0 ? (aggregates ? teamCapex : p.capex) : null
+    const scInvestment = scCostedCount > 0 ? (aggregates ? teamInvestment : p.investment) : null
+    const scOpexRunRate = aggregates ? teamOpexRunRate : p.opexRunRate
+    const scOpexYear = aggregates ? teamOpexYear : p.opexYear
     const scCostedBenefit = scCostedCount > 0 ? (aggregates ? teamCostedBenefit : p.costedBenefit) : null
+    // The monthly benefit of the costed rows alone, so netMonthly can subtract
+    // OPEX from a benefit measured over the same projects.
+    const scCostedMonthlyBenefit = scCostedBenefit == null ? null : scCostedBenefit / rates.horizonMonths
+    // The credited benefit net of the credited running cost — the same shape as
+    // the portfolio figure, over this person's share of the same rows.
+    const scCostedNet = scCostedBenefit == null ? null : scCostedBenefit - scOpexRunRate * rates.horizonMonths
     const scFinance = {
       monthlyBenefit: scMonthlyBenefit,
       annualBenefit: scMonthlyBenefit * 12,
@@ -1020,8 +1246,21 @@ export function computePlan(state) {
       // divisor reported twelve times the FTE on the annual basis.
       fteReleased: rates.acctMonthRate > 0 ? (scMonthlyBenefit / rates.acctMonthRate) : null,
       buildCost: scBuildCost,
-      netBenefit: scCostedBenefit == null ? null : scCostedBenefit - scBuildCost,
-      roi: scBuildCost > 0 ? (scCostedBenefit - scBuildCost) / scBuildCost : null,
+      capex: scCapex,
+      investment: scInvestment,
+      opexRunRate: scOpexRunRate,
+      opexYear: scOpexYear,
+      // Both sides over the SAME rows. scMonthlyBenefit spans every counted
+      // pool row while scOpexRunRate spans the costed subset, so subtracting
+      // one from the other mixed populations — the exact hazard the portfolio
+      // figure avoids. Reported over the costed rows, or null when there are
+      // none, rather than quietly blending the two.
+      netMonthly: scCostedCount > 0 && scCostedMonthlyBenefit != null
+        ? scCostedMonthlyBenefit - scOpexRunRate
+        : null,
+      netBenefit: scCostedNet == null ? null : scCostedNet - scInvestment,
+      roi: scInvestment > 0 ? (scCostedNet - scInvestment) / scInvestment : null,
+      paybackMonths: paybackMonths(scInvestment, scCostedCount > 0 && scCostedMonthlyBenefit != null ? scCostedMonthlyBenefit - scOpexRunRate : null),
       costedCount: scCostedCount,
     }
 
@@ -1071,8 +1310,10 @@ export function computePlan(state) {
     missingPic: projects.filter((p) => !p.pic).length,
     estimatedManday: projects.filter((p) => p.mandayEstimated).length,
     // What actually blocks the money view: a project can be marked "not an
-    // estimate" and still carry no effort at all, which the flag alone misses.
-    uncosted: perProject.filter((p) => isInPlan(p) && p.savingHours != null && !(p.manday > 0)).length,
+    // estimate" and still carry no cost at all, which the flag alone misses.
+    // Keyed on the whole investment, so a project bought with CAPEX and no
+    // build effort counts as costed — it is, and it gets a return.
+    uncosted: perProject.filter((p) => isInPlan(p) && p.savingHours != null && p.investment == null).length,
     deleted: projects.filter((p) => p.deleted).length,
     pastDue: perProject.filter((p) => p.pastDue).length,
     pastDueHours: perProject

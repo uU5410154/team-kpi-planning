@@ -17,6 +17,7 @@ import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
 } from '../lib/model.js'
+import ProjectCostDialog, { rowOpenHandler } from '../components/ProjectCostDialog.jsx'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_COLOR = {
@@ -115,6 +116,10 @@ export default function Projects({
   const [sort, setSort] = useState({ by: 'savingHours', dir: 'desc' })
   const [sel, setSel] = useState(() => new Set())
   const [bulkEl, setBulkEl] = useState(null)
+  // The KEY, never the project object: the dialog's ROI has to move the instant
+  // a CAPEX is typed, and a stored object would still be the pre-edit one.
+  const [costKey, setCostKey] = useState(null)
+  const costProject = costKey == null ? null : projects.find((x) => x.key === costKey) || null
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -245,9 +250,15 @@ export default function Projects({
     // shows a cost and a return the Dashboard says do not exist.
     const inPlanRows = rows.filter((p) => !OUT_OF_PLAN.has(p.commitLevel))
     const annualBenefit = inPlanRows.reduce((a, p) => a + (p.annualBenefit || 0), 0)
-    const costedRows = inPlanRows.filter((p) => p.buildCost != null && p.horizonBenefit != null)
-    const buildCost = costedRows.reduce((a, p) => a + p.buildCost, 0)
-    const costedBenefit = costedRows.reduce((a, p) => a + p.horizonBenefit, 0)
+    // Same set rule as computePlan: a row enters the return only when its whole
+    // investment AND its benefit are known, and it enters BOTH sides.
+    const costedRows = inPlanRows.filter((p) => p.investment != null && p.horizonBenefit != null)
+    const investment = costedRows.reduce((a, p) => a + p.investment, 0)
+    // Plan-wide, like opexYear on the next line and like every other tile in
+    // this strip. Summing the run-rate over the costed subset put two different
+    // populations on the two lines of one card.
+    const opexRunRate = inPlanRows.reduce((a, p) => a + (p.opexRunRate || 0), 0)
+    const costedNetHorizon = costedRows.reduce((a, p) => a + p.netHorizonBenefit, 0)
 
     return {
       count: rows.length,
@@ -255,8 +266,16 @@ export default function Projects({
       hc,
       manday,
       annualBenefit,
-      buildCost: costedRows.length ? buildCost : null,
-      roi: buildCost > 0 ? (costedBenefit - buildCost) / buildCost : null,
+      // The budget view, across every in-plan row on screen — these are known
+      // costs whether or not the row can carry a return.
+      buildCost: inPlanRows.some((p) => p.buildCost != null)
+        ? inPlanRows.reduce((a, p) => a + (p.buildCost || 0), 0) : null,
+      capex: inPlanRows.some((p) => p.capex != null)
+        ? inPlanRows.reduce((a, p) => a + (p.capex || 0), 0) : null,
+      opexYear: inPlanRows.reduce((a, p) => a + (p.opexYear || 0), 0),
+      opexRunRate,
+      investment: costedRows.length ? investment : null,
+      roi: investment > 0 ? (costedNetHorizon - investment) / investment : null,
       roiRows: costedRows.length,
       inPlanCount: inPlanRows.length,
       done: rows.filter((p) => p.status === 'Done').reduce((a, p) => a + (p.savingHours ?? 0), 0),
@@ -278,7 +297,9 @@ export default function Projects({
         recalculates the dashboard, the scorecards and the export live. <strong>FTE</strong> is the exception: it is
         computed from the saving hours at the ratio on the Model tab, exactly as the source workbook computes its own
         column. Use <strong>Add project</strong> for anything not yet in the source file, and the bin icon to remove a
-        row. Saving hours are <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.
+        row. Saving hours are <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.{' '}
+        <strong>Click any row</strong> (away from its editable cells) to open its cost sheet — infrastructure{' '}
+        <strong>CAPEX</strong>, monthly <strong>OPEX</strong> and the Jan–Dec grid behind the Investment column.
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -477,16 +498,34 @@ export default function Projects({
               label: 'Build cost',
               value: fmtMoneyShort(agg.buildCost, sym),
               sub: agg.buildCost == null ? 'no mandays in view' : `${fmtMoney(fin.devDayRate, sym)} per manday`,
-              help: 'Mandays x the developer rate, across the rows in view that carry an effort estimate.',
+              help: 'Mandays x the developer rate, across the in-plan rows in view that carry an effort estimate.',
+            },
+            {
+              label: 'CAPEX',
+              value: fmtMoneyShort(agg.capex, sym),
+              sub: agg.capex == null ? 'none entered' : 'one-off, not depreciated',
+              help: 'Infrastructure, licences and hardware bought once, across the in-plan rows in view. Click any project row to enter or edit it. No depreciation is applied — the whole amount is charged against the project.',
+            },
+            {
+              label: 'OPEX / year',
+              value: agg.opexYear > 0 ? fmtMoneyShort(agg.opexYear, sym) : '—',
+              sub: agg.opexRunRate > 0 ? `${fmtMoneyShort(agg.opexRunRate, sym)}/month run-rate` : 'none entered',
+              help: 'The 2026 monthly-cost grid added up: each running-cost line counted only in the months it is live. The run-rate underneath ignores start and end months — that is the steady-state monthly cost the ROI is measured against.',
+            },
+            {
+              label: 'Investment',
+              value: fmtMoneyShort(agg.investment, sym),
+              sub: agg.investment == null ? 'nothing costed in view' : 'build + CAPEX, returnable rows',
+              help: 'Build cost plus CAPEX, across only the rows in view that carry BOTH a known cost and a known benefit — the same set the ROI beside it divides. It is deliberately not the same as Build cost + CAPEX above, which cover every in-plan row on screen.',
             },
             {
               label: 'ROI',
               value: fmtRoi(agg.roi),
               sub: agg.roi == null
-                ? 'needs mandays'
+                ? 'needs mandays or CAPEX'
                 : `${agg.roiRows} of ${agg.inPlanCount} in-plan rows · gate ${fmtRoi(fin.roiGate)}`,
               tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? STATUS.good : STATUS.critical,
-              help: `Return over ${horizon} months on what it cost to build, across only the rows in view that carry an effort estimate. Rows without mandays are excluded from BOTH sides, so this is never a whole-book benefit divided by a partial cost.`,
+              help: `Return over ${horizon} months on the whole investment — build cost plus CAPEX — against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are in EITHER side, so this is never a whole-book benefit divided by a partial cost.`,
             },
           ].map((t, i) => (
             <Box
@@ -542,7 +581,10 @@ export default function Projects({
               {head('savingHours', 'Saving hrs/mth', 'right')}
               {head('fte', 'FTE', 'right')}
               {head('manday', 'Mandays', 'right')}
-              {head('buildCost', 'Build cost', 'right', 78)}
+              {/* One column, not three: the table already runs to the edge of
+                  its container, so the build/CAPEX/OPEX split lives in the
+                  tooltip and in the dialog a row-click opens. */}
+              {head('investment', 'Investment', 'right', 84)}
               {head('roi', 'ROI', 'right', 78)}
               {head('paybackMonths', 'Payback', 'right', 74)}
               <TableCell sx={{ minWidth: 104 }}>Commit</TableCell>
@@ -558,7 +600,11 @@ export default function Projects({
                   key={p.key}
                   hover
                   selected={sel.has(p.key)}
-                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) ? 0.55 : 1 }}
+                  // Opens the cost dialog — except on the editable cells, the
+                  // dropdowns, the checkbox and the delete button, which every
+                  // row carries and which must keep doing their own job.
+                  onClick={rowOpenHandler(() => setCostKey(p.key))}
+                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) ? 0.55 : 1, cursor: 'pointer' }}
                 >
                   <TableCell padding="checkbox">
                     <Checkbox
@@ -693,23 +739,29 @@ export default function Projects({
                     />
                   </TableCell>
                   <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
-                    {p.buildCost == null ? (
-                      <Tooltip title={`No effort estimate yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate.`}>
+                    {p.investment == null ? (
+                      <Tooltip title={`No mandays and no CAPEX yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate. Click the row to add CAPEX or a monthly operating cost.`}>
                         <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
                       </Tooltip>
-                    ) : fmtMoneyShort(p.buildCost, sym)}
+                    ) : (
+                      <Tooltip title={`Build ${fmtMoney(p.buildCost ?? 0, sym)} + CAPEX ${fmtMoney(p.capex ?? 0, sym)} = ${fmtMoney(p.investment, sym)} one-off${p.opexRunRate > 0 ? `, plus ${fmtMoney(p.opexRunRate, sym)} a month of OPEX (${fmtMoney(p.opexYear, sym)} in 2026)` : ', with no monthly operating cost'}. Click the row for the month-by-month table.`}>
+                        <Typography variant="body2" sx={{ fontSize: '0.8125rem', fontVariantNumeric: 'tabular-nums', cursor: 'help' }}>
+                          {fmtMoneyShort(p.investment, sym)}
+                        </Typography>
+                      </Tooltip>
+                    )}
                   </TableCell>
                   <TableCell align="right">
                     {p.roi == null ? (
                       <Tooltip title={
                         p.savingHours == null
                           ? 'Saving hours are still TBC, so there is no benefit to return.'
-                          : `Worth ${fmtMoneyShort(p.annualBenefit, sym)} a year. Enter mandays to get a return — break-even is ${Math.round(p.breakEvenMandays).toLocaleString()} mandays, and ${Math.round(p.affordableMandays).toLocaleString()} clears the gate.`
+                          : `Worth ${fmtMoneyShort(p.annualBenefit, sym)} a year. Enter mandays or a CAPEX to get a return — break-even is ${Math.round(p.breakEvenMandays).toLocaleString()} mandays, and ${Math.round(p.affordableMandays).toLocaleString()} clears the gate.`
                       }>
                         <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
                       </Tooltip>
                     ) : (
-                      <Tooltip title={`${fmtMoney(p.horizonBenefit, sym)} over ${horizon} months against ${fmtMoney(p.buildCost, sym)} to build — net ${fmtMoney(p.netBenefit, sym)}, paying back in ${fmtMonths(p.paybackMonths)}. Gate is ${fmtRoi(fin.roiGate)}.`}>
+                      <Tooltip title={`${fmtMoney(p.monthlyBenefit, sym)} a month less ${fmtMoney(p.opexRunRate, sym)} of OPEX = ${fmtMoney(p.netMonthly, sym)} net; ${fmtMoney(p.netHorizonBenefit, sym)} over ${horizon} months against ${fmtMoney(p.investment, sym)} invested — net ${fmtMoney(p.netBenefit, sym)}, ${p.paybackMonths == null ? 'and it never pays back' : `paying back in ${fmtMonths(p.paybackMonths)}`}. Gate is ${fmtRoi(fin.roiGate)}.`}>
                         {/* Benefit per project lives in this tooltip, the totals
                             strip, the scorecard portfolio and the workbook — a
                             column for it as well pushed Commit off the table. */}
@@ -728,13 +780,17 @@ export default function Projects({
                     {p.paybackMonths == null ? (
                       <Tooltip title={
                         p.savingHours == null
-                          ? 'Saving hours are still TBC, so there is nothing to pay the build back.'
-                          : 'Enter mandays to get a payback period.'
+                          ? 'Saving hours are still TBC, so there is nothing to pay the investment back.'
+                          : p.netMonthly != null && p.netMonthly <= 0
+                            ? `The ${fmtMoney(p.opexRunRate, sym)} a month of OPEX is at or above the ${fmtMoney(p.monthlyBenefit, sym)} a month this returns, so it never pays back. Blank, deliberately — not a fast payback and not a negative one.`
+                            : 'Enter mandays or a CAPEX to get a payback period.'
                       }>
-                        <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
+                        <Typography variant="caption" sx={{ color: p.netMonthly != null && p.netMonthly <= 0 ? STATUS.critical : 'text.disabled', cursor: 'help' }}>
+                          {p.netMonthly != null && p.netMonthly <= 0 && p.investment != null ? 'never' : '—'}
+                        </Typography>
                       </Tooltip>
                     ) : (
-                      <Tooltip title={`${fmtMoney(p.buildCost, sym)} to build, returning ${fmtMoney(p.monthlyBenefit, sym)} a month — repaid in ${fmtMonths(p.paybackMonths)}. The gate is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}.`}>
+                      <Tooltip title={`${fmtMoney(p.investment, sym)} invested, returning ${fmtMoney(p.netMonthly, sym)} a month after OPEX — repaid in ${fmtMonths(p.paybackMonths)}. The gate is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}.`}>
                         <Typography
                           variant="body2"
                           sx={{
@@ -812,7 +868,7 @@ export default function Projects({
             })}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={12} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={14} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   No projects match these filters.
                 </TableCell>
               </TableRow>
@@ -820,6 +876,15 @@ export default function Projects({
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Looked up by key on every render, so a CAPEX typed inside it moves the
+          ROI in the header of the very same dialog. */}
+      <ProjectCostDialog
+        project={costProject}
+        plan={plan}
+        onUpdate={onUpdate}
+        onClose={() => setCostKey(null)}
+      />
     </Box>
   )
 }

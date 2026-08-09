@@ -211,7 +211,7 @@ try {
   // EVERY line, leaving nothing free to take up the difference.
   await page.evaluate(() => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
-    const rows = [...document.querySelectorAll('tbody tr')].filter((r) => /^Delivery/i.test(r.innerText))
+    const rows = [...document.querySelectorAll('tbody tr')].filter((r) => /^Obj \d+ —/.test(r.innerText))
     for (const row of rows) {
       const inp = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right').pop()
       if (!inp) continue
@@ -258,7 +258,7 @@ try {
   // input sits before it and is also right-aligned when it holds hours.
   const weightsOf = () => page.evaluate(() =>
     [...document.querySelectorAll('tbody tr')]
-      .filter((r) => /^Delivery/i.test(r.innerText))
+      .filter((r) => /^Obj \d+ —/.test(r.innerText))
       .map((r) => {
         const i = [...r.querySelectorAll('input')].filter((x) => x.style.textAlign === 'right').pop()
         return i ? Number(i.value) : null
@@ -270,10 +270,16 @@ try {
   check('they total 100%', w.reduce((a, b) => a + b, 0) === 100, String(w.reduce((a, b) => a + b, 0)))
 
   /* ---------- 2026 card: objectives only ---------- */
+  // The card is objectives and nothing else, so there is no block column left
+  // to inspect — assert the shape directly instead.
   const blocks = await page.evaluate(() =>
-    [...new Set([...document.querySelectorAll('tbody tr td:first-child')]
-      .map((c) => c.innerText.trim()).filter((t) => /^(Corporate|Delivery|Capability)$/i.test(t)))])
-  check('the card carries only Delivery lines', blocks.length === 1 && blocks[0] === 'Delivery', blocks.join(', '))
+    [...document.querySelectorAll('tbody tr')]
+      .map((r) => r.innerText.split(/\n/)[0].trim())
+      .filter((t) => /^Obj \d+ —/.test(t)))
+  check('the card carries only objective lines',
+    blocks.length >= 1 && blocks.every((t) => /^Obj \d+ —/.test(t)), blocks.join(' | '))
+  check('and no block column survives the corporate/capability removal',
+    await page.evaluate(() => !/(?:Corporate|Capability)/.test(document.body.innerText)))
   check('CP AXTRA and capability lines are gone',
     await page.evaluate(() => !/CP AXTRA|GuRu|capability/i.test(document.body.innerText)))
 
@@ -318,7 +324,10 @@ try {
 
   await page.evaluate(() => {
     const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
-    row.querySelector('td:nth-child(2)').click()
+    // The KPI-line cell, found by content rather than by index — dropping the
+    // Block column shifted every position by one, and nth-child(2) then landed
+    // on the Target cell, which deliberately stops the click.
+    ;[...row.querySelectorAll('td')].find((c) => /^Obj \d+/.test(c.innerText.trim())).click()
   })
   await new Promise((r) => setTimeout(r, 600))
 
@@ -337,7 +346,10 @@ try {
   // clicking again clears it
   await page.evaluate(() => {
     const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
-    row.querySelector('td:nth-child(2)').click()
+    // The KPI-line cell, found by content rather than by index — dropping the
+    // Block column shifted every position by one, and nth-child(2) then landed
+    // on the Target cell, which deliberately stops the click.
+    ;[...row.querySelectorAll('td')].find((c) => /^Obj \d+/.test(c.innerText.trim())).click()
   })
   await new Promise((r) => setTimeout(r, 600))
   check('clicking again clears the filter', (await portfolioCount()) === allRows)
@@ -388,11 +400,15 @@ try {
   }, label)
 
   const roiCol = await colIndex('roi')
-  const costCol = await colIndex('build cost')
+  // Renamed from "Build cost": the column now carries the whole investment,
+  // mandays plus CAPEX, and calling it build cost would misstate it.
+  const costCol = await colIndex('investment')
   check('the Projects table has an ROI column', roiCol > 0, `index ${roiCol}`)
-  check('and a build cost column beside it', costCol > 0 && costCol < roiCol, `cost ${costCol} / roi ${roiCol}`)
+  check('and an investment column beside it', costCol > 0 && costCol < roiCol, `cost ${costCol} / roi ${roiCol}`)
   const paybackCol = await colIndex('payback')
   check('and a payback column after it', paybackCol === roiCol + 1, `payback ${paybackCol} / roi ${roiCol}`)
+  check('the money strip carries CAPEX and OPEX beside the build cost',
+    await page.evaluate(() => /\nCAPEX\n/.test(document.body.innerText) && /OPEX \/ YEAR/i.test(document.body.innerText)))
 
   /* ---------- the source column reads as FTE, not HC ---------- */
   const fteCol = await colIndex('fte')
@@ -443,11 +459,128 @@ try {
     payback: document.querySelector('tbody tr').children[r + 1]?.innerText.trim(),
     strip: document.body.innerText.match(/BENEFIT \/ YEAR\s*\n\s*([^\n]+)/)?.[1]?.trim(),
   }), costCol, roiCol)
-  check('entering mandays fills in the build cost', /\d/.test(money.cost) && money.cost !== '—', money.cost)
+  check('entering mandays fills in the investment', /\d/.test(money.cost) && money.cost !== '—', money.cost)
   check('and shows an ROI for that project', /%/.test(money.roi), money.roi)
   check('and a payback period', /mo|yr/.test(money.payback || ''), money.payback)
   check('the benefit was already known without any effort estimate',
     /\d/.test(money.strip || ''), String(money.strip))
+
+  /* ---------- the cost dialog: CAPEX and OPEX per project ---------- */
+  // The user journey this exists for: click a project, add the infrastructure
+  // it needs, and watch the return move on the table behind it.
+  const dialogOpen = () => page.evaluate(() => !!document.querySelector('[role="dialog"]'))
+  const dialogText = () => page.evaluate(() => document.querySelector('[role="dialog"]')?.innerText || '')
+  const closeDialog = async () => {
+    await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"]')
+      const btn = d && [...d.querySelectorAll('button')].find((b) => /^close$/i.test(b.innerText.trim()))
+      if (btn) btn.click()
+    })
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  /** Click a derived (non-editable) cell of the first row, by column index. */
+  const clickRowCell = (ix) => page.evaluate((c) => {
+    const cell = document.querySelector('tbody tr').children[c]
+    cell.click()
+  }, ix)
+
+  // A click on an INPUT must not open it — every row is full of editable cells.
+  await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const mdCol = heads.findIndex((h) => h.startsWith('manday'))
+    document.querySelector('tbody tr').children[mdCol].querySelector('input').click()
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  check('clicking an input on the Projects tab does NOT open the dialog', (await dialogOpen()) === false)
+
+  await page.evaluate(() => {
+    const row = document.querySelector('tbody tr')
+    const combo = row.querySelector('[role="combobox"]')
+    if (combo) combo.click()
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  check('nor does clicking a dropdown', (await dialogOpen()) === false)
+  await page.keyboard.press('Escape')
+  await new Promise((r) => setTimeout(r, 300))
+
+  const roiBeforeCapex = await page.evaluate((r) => document.querySelector('tbody tr').children[r]?.innerText.trim(), roiCol)
+  await clickRowCell(roiCol)
+  await new Promise((r) => setTimeout(r, 600))
+  check('clicking a project row on the Projects tab opens the cost dialog', await dialogOpen())
+  const dlg = await dialogText()
+  check('the dialog offers CAPEX, OPEX and a monthly table',
+    /CAPEX/.test(dlg) && /OPEX/.test(dlg) && /Monthly cost/i.test(dlg) && /FY2026/.test(dlg),
+    dlg.slice(0, 120).replace(/\n/g, ' / '))
+  // Table headers are uppercased by the theme, so match case-insensitively.
+  check('the monthly table carries all twelve months',
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      .every((m) => dlg.toLowerCase().includes(m.toLowerCase())))
+
+  // Type a CAPEX. The dialog's own header must move, and so must the table.
+  const dialogRoi = () => page.evaluate(() =>
+    document.querySelector('[role="dialog"]')?.innerText.match(/ROI\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null)
+  const roiInDialogBefore = await dialogRoi()
+  const capexTyped = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const d = document.querySelector('[role="dialog"]')
+    const label = [...d.querySelectorAll('label')].find((l) => /^CAPEX/.test(l.innerText))
+    const input = label.closest('.MuiFormControl-root').querySelector('input')
+    input.focus(); setter.call(input, '500000'); input.dispatchEvent(new Event('input', { bubbles: true })); input.blur()
+    return input.value
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  check('the CAPEX field accepts an edit', capexTyped === '500000', capexTyped)
+  check("the dialog's own ROI moves as the CAPEX is typed",
+    (await dialogRoi()) !== roiInDialogBefore, `${roiInDialogBefore} -> ${await dialogRoi()}`)
+
+  // Add an OPEX line while we are here — the grid must gain a row.
+  await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    const btn = [...d.querySelectorAll('button')].find((b) => /add opex line/i.test(b.innerText))
+    btn.click()
+  })
+  await new Promise((r) => setTimeout(r, 600))
+  check('an OPEX line can be added', /2026 total/i.test(await dialogText()))
+
+  await closeDialog()
+  check('the dialog closes', (await dialogOpen()) === false)
+  const roiAfterCapex = await page.evaluate((r) => document.querySelector('tbody tr').children[r]?.innerText.trim(), roiCol)
+  check('EDITING CAPEX IN THE DIALOG MOVED THE ROI ON THE PROJECTS TAB',
+    roiAfterCapex !== roiBeforeCapex && /%/.test(roiAfterCapex || ''),
+    `${roiBeforeCapex} -> ${roiAfterCapex}`)
+  const stripAfter = await page.evaluate(() => document.body.innerText.match(/\nCAPEX\s*\n\s*([^\n]+)/)?.[1]?.trim())
+  check('and the CAPEX tile in the totals strip picked it up',
+    /\d/.test(stripAfter || ''), String(stripAfter))
+
+  /* ---------- the same dialog opens from a scorecard ---------- */
+  await page.goto(`${base}/?cost=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  check('the scorecard opens with no dialog', (await dialogOpen()) === false)
+  await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    const table = heads[heads.length - 1].closest('table')
+    const row = table.querySelector('tbody tr')
+    // The Jira cell — text, not an editable widget.
+    row.children[0].click()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  check('CLICKING A PROJECT ON THE SCORECARD OPENS THE SAME DIALOG', await dialogOpen())
+  const dlg2 = await dialogText()
+  check('and it is the same component — CAPEX, OPEX and the FY grid',
+    /CAPEX/.test(dlg2) && /OPEX/.test(dlg2) && /FY2026/.test(dlg2),
+    dlg2.slice(0, 120).replace(/\n/g, ' / '))
+  await closeDialog()
+
+  await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    const table = heads[heads.length - 1].closest('table')
+    const row = table.querySelector('tbody tr')
+    row.querySelector('input').click()
+  })
+  await new Promise((r) => setTimeout(r, 500))
+  check('clicking an input on the scorecard portfolio does NOT open it',
+    (await dialogOpen()) === false)
+  await page.evaluate(() => localStorage.clear())
 
   /* ---------- the rates are live from the Model tab ---------- */
   const annualTile = () => page.evaluate(() =>
@@ -458,7 +591,7 @@ try {
   const benefitBefore = await annualTile()
   check('the dashboard leads with the value of the hours released', !!benefitBefore, String(benefitBefore))
   check('a return tile is present too',
-    await page.evaluate(() => /RETURN ON BUILD COST/i.test(document.body.innerText)))
+    await page.evaluate(() => /RETURN ON INVESTMENT/i.test(document.body.innerText)))
 
   await page.goto(`${base}/?money=3#settings`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 1200))

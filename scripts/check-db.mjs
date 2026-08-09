@@ -80,6 +80,40 @@ try {
   check('nested KPI overrides survive', k.kpi['obj-financial'].weight === 0.2 && k.kpi['obj-financial'].target === '5% growth',
     JSON.stringify(k.kpi))
 
+  // ---- CAPEX and OPEX (a number, a null and a nested array) ----
+  // These are stored fields, so they have to survive Mongo untouched: a null
+  // CAPEX must not come back as 0, and an OPEX line's start/end months must not
+  // come back as strings, or every cost in the app moves on the next load.
+  const withCosts = {
+    ...payload,
+    projects: payload.projects.map((p, i) => (i === 0
+      ? {
+        ...p,
+        capex: 250000,
+        capexNote: 'servers, licences',
+        opex: [
+          { id: 'o1', label: 'Cloud hosting', monthly: 12000, startMonth: 3, endMonth: 9 },
+          { id: 'o2', label: 'Support', monthly: 4500, startMonth: 1, endMonth: 12 },
+        ],
+      }
+      : { ...p, capex: null, capexNote: '', opex: [] })),
+  }
+  await store.saveScenario('Baseline', withCosts, 'Gun')
+  const costed = (await store.getScenario('Baseline')).payload.projects
+  check('CAPEX survives the round trip as a number',
+    costed[0].capex === 250000 && costed[0].capexNote === 'servers, licences', JSON.stringify(costed[0].capex))
+  check('an unset CAPEX stays null rather than becoming 0',
+    costed[1].capex === null, JSON.stringify(costed[1].capex))
+  check('the OPEX lines survive with their months intact',
+    costed[0].opex.length === 2
+    && costed[0].opex[0].monthly === 12000
+    && costed[0].opex[0].startMonth === 3 && costed[0].opex[0].endMonth === 9
+    && costed[0].opex[1].label === 'Support',
+    JSON.stringify(costed[0].opex))
+  check('an empty OPEX list stays an empty array',
+    Array.isArray(costed[1].opex) && costed[1].opex.length === 0)
+  await store.saveScenario('Baseline', payload, 'Gun')
+
   // ---- update in place, not duplicate ----
   check('re-saving the same name updates rather than duplicates', (await store.listScenarios()).length === 1)
 

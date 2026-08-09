@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Box, Grid, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Chip, Divider,
+  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Chip, Divider, Tooltip,
 } from '@mui/material'
 import StatTile from '../components/StatTile.jsx'
 import { HBar, StackedHBar, GateScatter, Meter } from '../components/Charts.jsx'
@@ -43,16 +43,19 @@ export default function Dashboard({ plan, onGoTo }) {
   // double-count everyone else.
   const ranked = [...people].sort((a, b) => b.ownHours - a.ownHours)
 
-  // x = what it cost to build, y = what it returns over the horizon. The gate
-  // line is y = (1 + roiGate) * x, so anything under it fails Objective 1.
+  // x = the whole investment (build + CAPEX), y = what it returns over the
+  // horizon NET of the monthly OPEX. The gate line is y = (1 + roiGate) * x, so
+  // anything under it fails Objective 1 — and because both axes are exactly the
+  // two sides of p.roi, a dot can never sit above the line while its own gate
+  // chip reads "below".
   const gatePoints = projects
-    .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch') && p.buildCost != null && p.horizonBenefit != null)
+    .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch') && p.investment != null && p.netHorizonBenefit != null)
     .map((p) => ({
       key: p.key,
       summary: p.summary,
-      x: p.buildCost,
-      y: p.horizonBenefit,
-      note: `${fmtMoney(p.buildCost, sym)} to build · ${fmtMoney(p.horizonBenefit, sym)} back over ${fin.horizonMonths} months · ROI ${fmtRoi(p.roi)}`,
+      x: p.investment,
+      y: p.netHorizonBenefit,
+      note: `${fmtMoney(p.investment, sym)} invested · ${fmtMoney(p.netHorizonBenefit, sym)} back over ${fin.horizonMonths} months after OPEX · ROI ${fmtRoi(p.roi)}`,
     }))
 
   const series = OBJECTIVES.map((o, i) => ({
@@ -89,16 +92,16 @@ export default function Dashboard({ plan, onGoTo }) {
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
           <StatTile
-            label="Return on build cost"
+            label="Return on investment"
             value={fmtRoi(fin.roi)}
             unit={`over ${fin.horizonMonths} months`}
             tone={fin.roi == null ? undefined : fin.roi >= fin.roiGate ? 'good' : 'critical'}
             context={
               fin.roi == null
-                ? `No effort estimated yet on ${quality.uncosted} of ${quality.total} projects`
-                : `${fmtMoneyShort(fin.buildCost, sym)} to build · gate ${fmtRoi(fin.roiGate)} · covers ${fmtPct(fin.roiCoverage)} of the benefit`
+                ? `No cost estimated yet on ${quality.uncosted} of ${quality.total} projects`
+                : `${fmtMoneyShort(fin.investment, sym)} invested${fin.opexRunRate > 0 ? ` + ${fmtMoneyShort(fin.opexRunRate, sym)}/mo` : ''} · gate ${fmtRoi(fin.roiGate)} · covers ${fmtPct(fin.roiCoverage)} of the benefit`
             }
-            help={`Objective 1's gate. Benefit over ${fin.horizonMonths} months against what it cost to build, at ${fmtMoney(fin.devDayRate, sym)} a manday. Only projects carrying an effort estimate are in EITHER side of this, so it is never a whole-book benefit divided by a partial cost. The gate of ${fmtRoi(fin.roiGate)} is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}, equivalent to ${gateAsHoursPerManday(fin)?.toFixed(2)} saving hours per manday.`}
+            help={`Objective 1's gate. The benefit over ${fin.horizonMonths} months, NET of ${fmtMoney(fin.opexRunRate, sym)} a month of operating cost, against the whole investment: ${fmtMoney(fin.buildCost ?? 0, sym)} of build at ${fmtMoney(fin.devDayRate, sym)} a manday plus ${fmtMoney(fin.capex ?? 0, sym)} of CAPEX. No depreciation is applied — CAPEX is charged whole. Only projects carrying a cost are in EITHER side of this, so it is never a whole-book benefit divided by a partial cost. The gate of ${fmtRoi(fin.roiGate)} is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}, equivalent to ${gateAsHoursPerManday(fin)?.toFixed(2)} saving hours per manday on a project with no CAPEX or OPEX.`}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
@@ -131,11 +134,11 @@ export default function Dashboard({ plan, onGoTo }) {
               : `Objective 1 covers ${fmtPct(fin.roiCoverage)} of the benefit`}
           </AlertTitle>
           The source workbook records saving hours and an FTE column but no build effort, so{' '}
-          {quality.uncosted} of {quality.total} projects still carry no mandays. The benefit side is live —{' '}
-          <strong>{fmtMoneyShort(fin.annualBenefit, sym)} a year</strong> — but ROI, payback and net benefit stay
-          blank on those, because a project with unknown effort has an unknown cost, not a cost of nothing. They are
-          left out of both sides of the return rather than counted as free. Each one still shows the mandays it could
-          absorb and still clear the gate.{' '}
+          {quality.uncosted} of {quality.total} projects still carry neither mandays nor a CAPEX. The benefit side is
+          live — <strong>{fmtMoneyShort(fin.annualBenefit, sym)} a year</strong> — but ROI, payback and net benefit
+          stay blank on those, because a project with unknown effort has an unknown cost, not a cost of nothing. They
+          are left out of both sides of the return rather than counted as free. Each one still shows the mandays it
+          could absorb and still clear the gate, and clicking its row opens its CAPEX and monthly-cost sheet.{' '}
           <Link component="button" onClick={() => onGoTo('projects')} sx={{ fontWeight: 600 }}>
             Estimate effort →
           </Link>
@@ -313,7 +316,7 @@ export default function Dashboard({ plan, onGoTo }) {
                     <TableCell align="right">Credited hrs</TableCell>
                     <TableCell align="right">Benefit / yr</TableCell>
                     <TableCell align="right">Mandays</TableCell>
-                    <TableCell align="right">Build cost</TableCell>
+                    <TableCell align="right">Investment</TableCell>
                     <TableCell align="right">ROI</TableCell>
                     <TableCell align="right">Missing data</TableCell>
                   </TableRow>
@@ -326,12 +329,18 @@ export default function Dashboard({ plan, onGoTo }) {
                       <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(p.ownHours)}</TableCell>
                       <TableCell align="right">{fmtMoneyShort(p.monthlyBenefit * 12, sym)}</TableCell>
                       <TableCell align="right">{fmtHours(p.manday)}</TableCell>
-                      <TableCell align="right">{fmtMoneyShort(p.buildCost, sym)}</TableCell>
+                      <TableCell align="right">
+                        <Tooltip title={`Build ${fmtMoneyShort(p.buildCost, sym)} + CAPEX ${fmtMoneyShort(p.capex, sym)}${p.opexRunRate > 0 ? `, and ${fmtMoneyShort(p.opexRunRate, sym)} a month of OPEX` : ''} — all at ${p.nick}'s share of each project.`}>
+                          <span>{fmtMoneyShort(p.investment, sym)}</span>
+                        </Tooltip>
+                      </TableCell>
                       {/* Personal, like every other cell in this row — p.finance
                           is the SCORECARD view, which for the lead is the whole
-                          team and would not belong beside their own hours. */}
+                          team and would not belong beside their own hours. Net
+                          of OPEX and over the whole investment, exactly like the
+                          portfolio figure above. */}
                       {(() => {
-                        const roi = p.buildCost > 0 ? (p.costedBenefit - p.buildCost) / p.buildCost : null
+                        const roi = p.investment > 0 ? (p.costedNetBenefit - p.investment) / p.investment : null
                         return (
                           <TableCell align="right" sx={{ color: roi != null && roi < fin.roiGate ? STATUS.critical : 'text.primary' }}>
                             {fmtRoi(roi)}
@@ -364,15 +373,15 @@ export default function Dashboard({ plan, onGoTo }) {
         <Grid item xs={12}>
           <Section
             title="Objective 1 — is the build worth it"
-            subtitle={`Each dot is a project: what it cost to build against what it gives back over ${fin.horizonMonths} months, both in ${fin.currency}. The dashed line is the gate — a return of ${fmtRoi(fin.roiGate)}, or a payback of ${fmtMonths(gateAsPaybackMonths(fin))}. Anything below it costs more than it is worth.`}
+            subtitle={`Each dot is a project: everything invested in it — mandays plus CAPEX — against what it gives back over ${fin.horizonMonths} months after its monthly operating cost, both in ${fin.currency}. The dashed line is the gate — a return of ${fmtRoi(fin.roiGate)}, or a payback of ${fmtMonths(gateAsPaybackMonths(fin))}. Anything below it costs more than it is worth.`}
           >
             <GateScatter
               points={gatePoints}
               gate={1 + fin.roiGate}
-              xLabel={`Build cost (${fin.currency})`}
-              yLabel={`Benefit over ${fin.horizonMonths} months (${fin.currency})`}
+              xLabel={`Investment — build + CAPEX (${fin.currency})`}
+              yLabel={`Net benefit over ${fin.horizonMonths} months, after OPEX (${fin.currency})`}
               fmt={(v) => fmtMoneyShort(v, sym)}
-              emptyMessage={`No build effort has been estimated yet, so there is nothing to plot. The benefit side is already known — ${fmtMoneyShort(fin.annualBenefit, sym)} a year — but a return needs a cost. Use "Estimate effort" on the Projects tab, or type mandays in, and every project appears here against the gate.`}
+              emptyMessage={`No cost has been entered yet, so there is nothing to plot. The benefit side is already known — ${fmtMoneyShort(fin.annualBenefit, sym)} a year — but a return needs a cost. Use "Estimate effort" on the Projects tab, type mandays in, or click a project row to add its CAPEX, and every project appears here against the gate.`}
             />
           </Section>
         </Grid>

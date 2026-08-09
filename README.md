@@ -60,6 +60,33 @@ Role weights default to the model recommended in the KPI plan (dev 10 / lead 6 /
 assignee 3 / qa 2 / support 2, on a 0–1 scale). Under it the app reproduces the plan's
 independently-computed per-person figures: P'Phen 472, Kade 455, James 71, Pol 37, Thapanee 5.
 
+**What a project costs.** Three separate things, and the app keeps them separate:
+
+- **Build cost** — mandays × the developer day rate. One-off.
+- **CAPEX** — infrastructure, licences, hardware. One-off, entered per project with a free-text
+  note. **No depreciation is applied anywhere**: the whole amount is charged against the project,
+  by decision, unlike the source `BG 2026` sheet's `D/120` straight-line rows.
+- **OPEX** — a list of monthly running-cost lines, each with a start and end month. The Jan–Dec
+  grid and its FY total mirror `BG 2026` columns G..R and S.
+
+**Investment** = build cost + CAPEX, where either side may be unknown. Both unknown is `null`, not
+zero — a project with no estimate has an *unknown* cost, not a cost of nothing — but either one
+present makes the project costed, so a project bought outright with CAPEX and no build effort does
+get a return.
+
+The return is then **net monthly** = monthly benefit − the OPEX *run-rate*, over the horizon, less
+the investment. The run-rate deliberately ignores each line's start and end months: a licence that
+starts in October still costs that much every month for as long as the automation runs, and
+charging the horizon only three months of it would flatter the return. The month grid exists for
+the 2026 budget, which is why its total and twelve times the run-rate can differ.
+
+When the OPEX is at or above the benefit, **payback is `null`, not a number** — the project never
+repays, and rendering that as a fast or negative payback would be a lie.
+
+Click any project row — on the Projects tab or on any scorecard's portfolio — to open its cost
+sheet and edit all of it. Cost and benefit are always summed over the *same* set of projects, and
+credited to a person on the *same* share as their hours.
+
 **Commit levels.** `commit` is bankable and counts toward the headline; `stretch` is upside shown
 separately; `watch` is at-risk and excluded; `excluded` is out of scope. Nothing without a saving-hours
 figure is seeded as `commit`.
@@ -88,10 +115,14 @@ To regenerate the seed from a fresh Jira export, re-run the extraction that prod
 
 | Sheet | Contents |
 |---|---|
-| `Summary` | Target bridge, efficiency gate, concentration risk, data-quality open items |
+| `Summary` | Target bridge, the money gate (build / CAPEX / OPEX / investment / ROI), concentration risk, data-quality open items |
 | `Overall_Objectives` | Per-person column blocks with a weight-total check row |
-| `Breakdown Objectives` | All 101 projects with PIC, hours, mandays, ratio, gate, commit level |
-| `Obj-<Name>` | One sheet per person: KPI weights, portfolio, contribution shares |
+| `Projects` | Every project with PIC, hours, FTE, mandays, build cost, CAPEX, investment, OPEX, benefit, net, ROI, payback, gate, commit level |
+| `Costs` | The monthly cost grid: months in G..R and the FY total in S, as in `BG 2026`, with CAPEX and build cost on their own one-off rows |
+| `Obj-<Name>` | One sheet per person: KPI weights, portfolio, contribution shares, credited investment and OPEX |
+
+Every figure is written as a **number with a number format**, never a pre-formatted string, so the
+workbook can still be sorted, summed and charted.
 
 ## Stack
 

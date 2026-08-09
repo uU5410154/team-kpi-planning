@@ -106,21 +106,42 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
               Objective 1 gate — {fmtRoi(fin.roiGate)} return within {fin.horizonMonths} months
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-              A project must return at least this much on top of what it cost to build, inside the horizon. That is a
+              A project must return at least this much on top of everything invested in it — mandays plus any
+              infrastructure CAPEX — inside the horizon, counting the benefit net of its monthly OPEX. That is a
               payback of <strong>{fmtMonths(gateAsPaybackMonths(fin))}</strong>, which at the rates below is{' '}
-              <strong>{gateAsHoursPerManday(fin)?.toFixed(2) ?? '—'} saving hours per manday</strong> — the same
-              standard as the 4.0 hrs/manday gate this replaced. Change a salary and this equivalence moves with it.
+              <strong>{gateAsHoursPerManday(fin)?.toFixed(2) ?? '—'} saving hours per manday</strong> on a project
+              carrying no CAPEX or OPEX — the same standard as the 4.0 hrs/manday gate this replaced. Change a salary
+              and this equivalence moves with it.
             </Typography>
-            <Slider
-              value={fin.roiGate}
-              min={0}
-              max={5}
-              step={0.25}
-              marks={[{ value: 0, label: '0%' }, { value: 1, label: '100%' }, { value: 2, label: '200%' }, { value: 5, label: '500%' }]}
-              valueLabelDisplay="auto"
-              valueLabelFormat={(v) => fmtRoi(v)}
-              onChange={(_e, v) => setFinance({ roiGate: v })}
-            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
+              <Slider
+                value={fin.roiGate}
+                min={0}
+                max={5}
+                step={0.25}
+                marks={[{ value: 0, label: '0%' }, { value: 1, label: '100%' }, { value: 2, label: '200%' }, { value: 5, label: '500%' }]}
+                valueLabelDisplay="auto"
+                valueLabelFormat={(v) => fmtRoi(v)}
+                onChange={(_e, v) => setFinance({ roiGate: v })}
+                sx={{ flex: 1 }}
+              />
+              {/* Typed entry beside the slider: the slider moves in 25% steps
+                  and stops at 500%, which is fine for a rough setting and no
+                  use at all for entering an exact standard. */}
+              <TextField
+                size="small"
+                type="number"
+                label="Exact"
+                value={Math.round(fin.roiGate * 100)}
+                onChange={(e) => {
+                  const pct = Number(e.target.value)
+                  if (Number.isFinite(pct)) setFinance({ roiGate: Math.max(0, pct) / 100 })
+                }}
+                InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                inputProps={{ step: 5, min: 0, style: { textAlign: 'right', width: 64, fontVariantNumeric: 'tabular-nums' } }}
+                sx={{ flexShrink: 0 }}
+              />
+            </Box>
             <Box sx={{ display: 'flex', gap: 1, mt: 1.5, flexWrap: 'wrap' }}>
               <Chip size="small" variant="outlined" label={`Portfolio ROI ${fmtRoi(fin.roi)}`} />
               <Chip
@@ -130,7 +151,13 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
                 label={`${totals.failingGate} project(s) below the gate`}
               />
               {fin.uncostedCount > 0 && (
-                <Chip size="small" variant="outlined" color="warning" label={`${fin.uncostedCount} without an effort estimate`} />
+                <Chip size="small" variant="outlined" color="warning" label={`${fin.uncostedCount} with no cost at all`} />
+              )}
+              {fin.planOpexYear > 0 && (
+                <Chip size="small" variant="outlined" label={`OPEX ${fmtMoney(fin.planOpexYear, fin.symbol)} in 2026`} />
+              )}
+              {fin.planCapex > 0 && (
+                <Chip size="small" variant="outlined" label={`CAPEX ${fmtMoney(fin.planCapex, fin.symbol)}`} />
               )}
             </Box>
 

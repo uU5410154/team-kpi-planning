@@ -141,18 +141,23 @@ console.log('\n--- the export credits nothing for it either ---')
   await back.xlsx.readFile(file)
 
   const ws = back.getWorksheet(`Obj-${b4.nick}`.replace(/[:\\/?*[\]]/g, '').slice(0, 31))
+  // Columns are located by their header, not counted: the portfolio gained
+  // CAPEX, Investment and OPEX columns and anything hardcoded would have
+  // silently started reading the wrong one.
+  const head = []
+  ws.eachRow((row) => { if (row.getCell(1).value === 'Jira') row.eachCell((c, n) => { head[n] = String(c.value || '') }) })
+  const col = (label) => head.findIndex((h) => h && h.startsWith(label))
   let projectHrs = null
   let creditedHrs = 'unset'
   let level = null
   let totalCredited = null
   ws.eachRow((row) => {
     if (String(row.getCell(2).value || '') === biggest.summary) {
-      projectHrs = row.getCell(6).value
-      creditedHrs = row.getCell(7).value
-      // 9-11 are build cost / benefit / ROI, so Commit sits at 12.
-      level = row.getCell(12).value
+      projectHrs = row.getCell(col('Project ')).value
+      creditedHrs = row.getCell(col('Credited')).value
+      level = row.getCell(col('Commit')).value
     }
-    if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(7).value
+    if (String(row.getCell(2).value || '') === 'TOTAL CREDITED') totalCredited = row.getCell(col('Credited')).value
   })
   check('the deferred project is still listed in the export', projectHrs === biggest.savingHours,
     String(projectHrs))

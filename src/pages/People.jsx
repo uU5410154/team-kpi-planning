@@ -12,10 +12,12 @@ import SyncIcon from '@mui/icons-material/Sync'
 import SyncProblemIcon from '@mui/icons-material/SyncProblem'
 import UndoIcon from '@mui/icons-material/Undo'
 import StatTile from '../components/StatTile.jsx'
+import ProjectCostDialog, { rowOpenHandler } from '../components/ProjectCostDialog.jsx'
 import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS, OUT_OF_PLAN } from '../lib/palette.js'
 import {
-  fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, targetUnit,
+  fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, targetUnit,
   weightSum, weightsValid, snapWeight, WEIGHT_STEP,
+  fmtMonthsShort, gateAsPaybackMonths,
 } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -86,7 +88,7 @@ function HoursTargetCell({ value, onChange, unit }) {
       inputProps={{
         style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.8125rem', padding: '6px 2px 6px 8px' },
       }}
-      sx={{ width: 158 }}
+      sx={{ width: 132 }}
     />
   )
 }
@@ -154,6 +156,10 @@ export default function People({
   const [who, setWho] = useState(people[0]?.id)
   // Which KPI line is currently filtering the portfolio, by objective id.
   const [focus, setFocus] = useState(null)
+  // The project KEY whose cost dialog is open, re-looked-up every render so an
+  // edit inside the dialog is visible in the dialog itself.
+  const [costKey, setCostKey] = useState(null)
+  const costProject = costKey == null ? null : plan.projects.find((x) => x.key === costKey) || null
   const p = people.find((x) => x.id === who) || people[0]
   if (!p) return null
 
@@ -233,10 +239,10 @@ export default function People({
             tone={p.finance.roi == null ? undefined : p.finance.roi >= fin.roiGate ? 'good' : 'critical'}
             context={
               p.finance.roi == null
-                ? `${p.finance.fteReleased.toFixed(1)} FTE · no effort estimated yet, so no return`
-                : `ROI ${fmtRoi(p.finance.roi)} on ${fmtMoneyShort(p.finance.buildCost, sym)} to build · gate ${fmtRoi(fin.roiGate)}`
+                ? `${p.finance.fteReleased.toFixed(1)} FTE · no cost estimated yet, so no return`
+                : `ROI ${fmtRoi(p.finance.roi)} on ${fmtMoneyShort(p.finance.investment, sym)} invested · gate ${fmtRoi(fin.roiGate)}`
             }
-            help={`Objective 1. ${fmtHours(p.scorecardHours)} saving hrs/month at ${fmtMoney(fin.acctHourRate, sym)} an hour, annualised. The return underneath compares that against ${fmtHours(p.scorecardManday)} credited mandays at ${fmtMoney(fin.devDayRate, sym)} each, over ${fin.horizonMonths} months, counting only the projects that carry an effort estimate.`}
+            help={`Objective 1. ${fmtHours(p.scorecardHours)} saving hrs/month at ${fmtMoney(fin.acctHourRate, sym)} an hour, annualised. The return underneath compares that — net of ${fmtMoney(p.finance.opexRunRate, sym)} a month of credited OPEX — against ${fmtMoney(p.finance.buildCost ?? 0, sym)} of build (${fmtHours(p.scorecardManday)} credited mandays at ${fmtMoney(fin.devDayRate, sym)} each) plus ${fmtMoney(p.finance.capex ?? 0, sym)} of CAPEX, over ${fin.horizonMonths} months. Cost and benefit are credited on the same share and over the same projects, counting only the ones that carry a cost estimate.`}
           />
         </Grid>
         <Grid item xs={6} md={3}>
@@ -271,7 +277,7 @@ export default function People({
 
       <Grid container spacing={2.5}>
         {/* ---------- weight table ---------- */}
-        <Grid item xs={12} md={5}>
+        <Grid item xs={12} md={4}>
           <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
             <Box sx={{ px: 2.5, py: 2, bgcolor: 'action.hover', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
@@ -329,9 +335,8 @@ export default function People({
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: 96 }}>Block</TableCell>
                   <TableCell>KPI line</TableCell>
-                  <TableCell sx={{ minWidth: 190 }}>Target</TableCell>
+                  <TableCell sx={{ minWidth: 168 }}>Target</TableCell>
                   <TableCell align="right" sx={{ width: 110 }}>Weight</TableCell>
                   <TableCell padding="checkbox" />
                 </TableRow>
@@ -350,11 +355,6 @@ export default function People({
                       onClick={selectable ? () => setFocus(active ? null : l.objective) : undefined}
                       sx={{ cursor: selectable ? 'pointer' : 'default' }}
                     >
-                      <TableCell sx={{ verticalAlign: 'top', pt: 1.75 }}>
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, letterSpacing: '0.03em' }}>
-                          {l.block}
-                        </Typography>
-                      </TableCell>
                       <TableCell sx={{ verticalAlign: 'top', pt: 1.5 }}>
                         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
                           {idx >= 0 && (
@@ -431,7 +431,8 @@ export default function People({
                   )
                 })}
                 <TableRow>
-                  <TableCell colSpan={2} sx={{ borderTop: 2, borderColor: 'divider' }} />
+                  {/* one fewer column since Block was dropped */}
+                  <TableCell sx={{ borderTop: 2, borderColor: 'divider' }} />
                   <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
                     TOTAL
                   </TableCell>
@@ -494,7 +495,7 @@ export default function People({
         </Grid>
 
         {/* ---------- portfolio ---------- */}
-        <Grid item xs={12} md={7}>
+        <Grid item xs={12} md={8}>
           {/* overflow hidden on the card + scroll on the table, so a wide
               editable table scrolls inside its own panel instead of pushing
               the page sideways */}
@@ -517,8 +518,8 @@ export default function People({
               {focusObj
                 ? `Showing ${visibleRows.length} of ${p.scorecardRows.length} projects. Click the KPI line again to clear.`
                 : p.aggregatesTeam
-                  ? 'Every in-plan project across the team, at full value — this is what the team figure above adds up to. Edit any of it here; the numbers everywhere follow.'
-                  : "Contribution % is this person's normalised share. Credited hours = project hours × share. Edit any of it here."}
+                  ? 'Every in-plan project across the team, at full value — this is what the team figure above adds up to. Edit any of it here; the numbers everywhere follow. Click a row for its CAPEX, monthly OPEX and cost grid.'
+                  : "Contribution % is this person's normalised share. Credited hours = project hours × share. Edit any of it here, and click a row for its CAPEX, monthly OPEX and cost grid."}
             </Typography>
             <Box sx={{ overflowX: 'auto', mx: -2.5, px: 2.5 }}>
             {/* Ten columns in a half-width panel: the default 16px of cell
@@ -528,7 +529,7 @@ export default function People({
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ minWidth: 66 }}>Jira</TableCell>
-                  <TableCell sx={{ minWidth: 128 }}>Project</TableCell>
+                  <TableCell sx={{ minWidth: 118 }}>Project</TableCell>
                   <TableCell sx={{ minWidth: 78 }}>{p.aggregatesTeam ? 'Owner' : 'Role'}</TableCell>
                   {/* On the team card every row is credited whole, so Share and
                       Credited are constants — dropping them is what leaves room
@@ -537,8 +538,9 @@ export default function People({
                   <TableCell align="right" sx={{ minWidth: 76 }}>Project hrs</TableCell>
                   {!p.aggregatesTeam && <TableCell align="right" sx={{ minWidth: 62 }}>Cred.</TableCell>}
                   <TableCell align="right" sx={{ minWidth: 68 }}>Mandays</TableCell>
-                  <TableCell align="right" sx={{ minWidth: 76 }}>Benefit / yr</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 68 }}>Benefit / yr</TableCell>
                   <TableCell align="right" sx={{ minWidth: 76 }}>ROI</TableCell>
+                  <TableCell align="right" sx={{ minWidth: 62 }}>Payback</TableCell>
                   <TableCell sx={{ minWidth: 96 }}>Level</TableCell>
                 </TableRow>
               </TableHead>
@@ -560,7 +562,15 @@ export default function People({
                     // its share here would contradict the totals above it.
                     const credited = counted ? (pr.savingHours ?? 0) * share : 0
                     return (
-                      <TableRow key={pr.key} hover sx={{ opacity: counted ? 1 : 0.5 }}>
+                      // Opens the SAME cost dialog as the Projects tab. The
+                      // guard skips the owner and level dropdowns and the two
+                      // editable number cells, which keep their own behaviour.
+                      <TableRow
+                        key={pr.key}
+                        hover
+                        onClick={rowOpenHandler(() => setCostKey(pr.key))}
+                        sx={{ opacity: counted ? 1 : 0.5, cursor: 'pointer' }}
+                      >
                         <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{pr.key}</TableCell>
                         <TableCell>
                           <Typography variant="body2" sx={{ lineHeight: 1.3 }}>{pr.summary}</Typography>
@@ -625,17 +635,35 @@ export default function People({
                                 ? 'Saving hours are still TBC'
                                 : !counted
                                   ? 'Out of plan — credits nothing this year'
-                                  : `No effort estimate. This project can absorb ${Math.round(pr.affordableMandays).toLocaleString()} mandays and still clear the gate.`
+                                  : `No cost entered. This project can absorb ${Math.round(pr.affordableMandays).toLocaleString()} mandays and still clear the gate — click the row to add CAPEX or a monthly cost instead.`
                             }>
                               <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
                             </Tooltip>
                           ) : (
-                            <Tooltip title={`${fmtMoney(pr.horizonBenefit, sym)} back over ${fin.horizonMonths} months against ${fmtMoney(pr.buildCost, sym)} to build. Gate ${fmtRoi(fin.roiGate)}.`}>
+                            <Tooltip title={`${fmtMoney(pr.netHorizonBenefit, sym)} back over ${fin.horizonMonths} months, after ${fmtMoney(pr.opexRunRate, sym)} a month of OPEX, against ${fmtMoney(pr.investment, sym)} invested (build ${fmtMoney(pr.buildCost ?? 0, sym)} + CAPEX ${fmtMoney(pr.capex ?? 0, sym)}). ${pr.paybackMonths == null ? 'It never pays back.' : `Pays back in ${fmtMonths(pr.paybackMonths)}.`} Gate ${fmtRoi(fin.roiGate)}. Click the row for the month-by-month costs.`}>
                               <Typography
                                 variant="body2"
                                 sx={{ fontWeight: 600, fontSize: '0.75rem', cursor: 'help', color: pr.gate === 'pass' ? STATUS.good : STATUS.critical }}
                               >
                                 {fmtRoi(pr.roi)}
+                              </Typography>
+                            </Tooltip>
+                          )}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
+                          {!counted || pr.investment == null ? (
+                            <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+                          ) : pr.paybackMonths == null ? (
+                            <Tooltip title={`The ${fmtMoney(pr.opexRunRate, sym)} a month of OPEX is at or above the ${fmtMoney(pr.monthlyBenefit ?? 0, sym)} a month this returns, so it never pays back.`}>
+                              <Typography variant="caption" sx={{ color: STATUS.critical, fontWeight: 600, cursor: 'help' }}>never</Typography>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title={`${fmtMoney(pr.investment, sym)} invested against ${fmtMoney(pr.netMonthly, sym)} a month net of OPEX — repaid in ${fmtMonths(pr.paybackMonths)}. The gate is ${fmtMonths(gateAsPaybackMonths(fin))}.`}>
+                              <Typography
+                                variant="body2"
+                                sx={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', cursor: 'help', color: pr.gate === 'pass' ? 'text.primary' : STATUS.critical }}
+                              >
+                                {fmtMonthsShort(pr.paybackMonths)}
                               </Typography>
                             </Tooltip>
                           )}
@@ -670,6 +698,14 @@ export default function People({
           </Paper>
         </Grid>
       </Grid>
+
+      {/* The same component the Projects tab opens, on the same update path. */}
+      <ProjectCostDialog
+        project={costProject}
+        plan={plan}
+        onUpdate={onUpdate}
+        onClose={() => setCostKey(null)}
+      />
     </Box>
   )
 }

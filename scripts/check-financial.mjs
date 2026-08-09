@@ -495,10 +495,10 @@ console.log('\n--- the exported workbook carries the same figures ---')
     kv['Value of hours released (per year)'] === Math.round(p2.finance.annualBenefit),
     `${kv['Value of hours released (per year)']} vs ${Math.round(p2.finance.annualBenefit)}`)
   check('Summary ROI matches the app',
-    Math.abs(kv['RETURN ON BUILD COST'] - p2.finance.roi) < 1e-4,
-    `${kv['RETURN ON BUILD COST']} vs ${p2.finance.roi}`)
+    Math.abs(kv['RETURN ON INVESTMENT'] - p2.finance.roi) < 1e-4,
+    `${kv['RETURN ON INVESTMENT']} vs ${p2.finance.roi}`)
   check('Summary ROI is exported as a NUMBER, not a string',
-    typeof kv['RETURN ON BUILD COST'] === 'number', typeof kv['RETURN ON BUILD COST'])
+    typeof kv['RETURN ON INVESTMENT'] === 'number', typeof kv['RETURN ON INVESTMENT'])
 
   // Projects sheet
   const ps = back.getWorksheet('Projects')
@@ -531,7 +531,7 @@ console.log('\n--- the exported workbook carries the same figures ---')
     ws.eachRow((r) => {
       const a = String(r.getCell(1).value || '')
       if (a.startsWith('Value of hours released')) annual = r.getCell(3).value
-      if (a === 'Return on build cost') roi = r.getCell(3).value
+      if (a === 'Return on investment') roi = r.getCell(3).value
       if (String(r.getCell(2).value || '').includes('Obj 1')) objOneTarget = r.getCell(3).value
     })
     check(`${p.nick}: exported annual benefit matches the app`,
