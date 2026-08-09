@@ -59,11 +59,18 @@ export const SAVING_BASIS = {
  * Both are entered as a monthly salary, because that is the number anyone in
  * the business can sanity-check, and converted to a day/hour rate here.
  *
- * `hoursPerFteMonth` is not a guess. The source workbook carries its own HC
- * column beside the saving hours, and across the book 4,146.4 saving hrs/month
- * sit against 23.9 HC — 173.5 hours per HC per month. That is 2,080/12, the
- * standard full-time month, and it means this app divides the same way
- * management already does.
+ * `hoursPerFteMonth` is the FTE ratio, and it is neither a guess nor a
+ * textbook constant — the source workbook states it literally. Every one of
+ * the 86 rows of the Project sheet computes its FTE column as
+ *
+ *   =IF([Saving hrs/mth]="TBC", 0, ROUND([Saving hrs/mth]/(22*8), 1))
+ *
+ * 22 working days x 8 hours = 176 hours per FTE per month, written as an
+ * expression rather than a literal, with no row-level variants. The FA and
+ * FA (rev) sheets divide the same way (=E/(22*8)), so 176 is the workbook's
+ * constant wherever it appears. Reproducing it makes this app divide exactly
+ * as management already does — see scripts/check-source-reconciliation.mjs,
+ * which reads the workbook itself and proves it row by row.
  */
 export const DEFAULT_FINANCE = {
   currency: 'THB',
@@ -78,10 +85,17 @@ export const DEFAULT_FINANCE = {
   // every magnitude and leaves every ROI exactly unchanged — the Settings card
   // has to say so, or it reads as a broken knob.
   loadFactor: 1.0,
-  // Hours in a full-time month (2,080/12). Not a guess: the source workbook's
-  // own HC column implies 173.5 (4,146.4 saving hrs against 23.9 HC), so this
-  // is management's own divisor.
-  hoursPerFteMonth: 173.3,
+  // The FTE ratio: hours in one full-time month. 176 = 22 working days x 8
+  // hours, which is the divisor the source workbook writes into every row of
+  // its own FTE column. Reproducing it reproduces that column exactly — 84 of
+  // 84 quantified rows match to the sheet's 1-decimal rounding, where the
+  // 2,080/12 = 173.3 this used to carry matches only 82.
+  //
+  // Adjustable on the Model tab, and it is load-bearing in two directions: it
+  // converts saving hours into FTE released AND it divides the accountant's
+  // monthly salary into an hourly rate. Changing it therefore moves every THB
+  // figure in the app, not just the FTE column.
+  hoursPerFteMonth: 176,
   // Hours in a manday. The ONLY bridge between a day of build and an hour of
   // saving, so working days per month is derived from it rather than being a
   // second, independently editable calendar — two calendars silently put the
@@ -590,7 +604,7 @@ export const isCounted = (p) => p.commitLevel === 'commit' || p.commitLevel === 
 /**
  * Is this project part of THIS year's plan at all? "Next year" and "Excluded"
  * stay in the register but contribute nothing to the team total, the objective
- * mix, headcount or any scorecard.
+ * mix, the FTE column or any scorecard.
  */
 export const isInPlan = (p) => !OUT_OF_PLAN.has(p.commitLevel)
 
@@ -623,6 +637,33 @@ export function workingDaysBetween(start, due) {
     if (d !== 0 && d !== 6) out++
   }
   return out
+}
+
+/**
+ * FTE released by a project, DERIVED from its saving hours exactly the way the
+ * source workbook derives its own column:
+ *
+ *   =IF([Saving hrs/mth]="TBC", 0, ROUND([Saving hrs/mth] / (22*8), 1))
+ *
+ * So this is not a second opinion about the workbook's number — it is the same
+ * formula, with (22*8) exposed as the adjustable `hoursPerFteMonth`. Entering
+ * saving hours produces the FTE, and moving the ratio moves every FTE at once.
+ *
+ * Rounded to one decimal per row, like the workbook. That rounding is why the
+ * per-row figures sum to 23.9 while dividing the book total once gives 24.02 —
+ * the app reports the first, because that is the number in the source.
+ *
+ * Unquantified saving hours give 0, not null: the workbook's IF does the same,
+ * and a blank would not add up.
+ */
+export function fteFor(p, settings) {
+  const rates = financeRates(settings)
+  const hrs = monthlyHours(p, settings?.savingBasis)
+  if (hrs == null || !(rates.hoursPerFteMonth > 0)) return 0
+  // Excel ROUND is half-away-from-zero; JS Math.round is half-up, which differs
+  // only on negatives. Saving hours are never negative, but be explicit.
+  const v = hrs / rates.hoursPerFteMonth
+  return Math.sign(v) * Math.round(Math.abs(v) * 10) / 10
 }
 
 /** Saving hours expressed per month, whatever basis the column is stated in. */
@@ -759,6 +800,10 @@ export function computePlan(state) {
       partnerShare,
       fellBack,
       ...fin,
+      // Derived from the saving hours, not stored. `hc` below is the value the
+      // import read out of the workbook and is kept only so the reconciliation
+      // suite can prove the derivation reproduces it row for row.
+      fte: fteFor(p, s),
       // Kept as a secondary diagnostic. The gate is now financial, but hours
       // per manday is still the quickest read on whether an estimate is sane.
       ratio: projectRatio(p),
@@ -781,9 +826,19 @@ export function computePlan(state) {
   const watchHours = sumHours(watch)
   const headlineHours = committedHours + (s.includeStretchInHeadline ? stretchHours : 0)
 
-  const sumHC = (arr) => arr.reduce((a, p) => a + (p.hc || 0), 0)
-  const committedHC = sumHC(commit)
-  const totalHC = sumHC(perProject.filter(isInPlan))
+  // NAMING, deliberately: everything the user reads calls this column FTE,
+  // because that is what it is — the workbook derives it as saving hours / 176
+  // and it measures capacity released, not people employed. The STORED field
+  // stays `hc`, here and in seed.json, and so do these totals keys. Renaming
+  // the persisted field would invalidate every scenario already saved in
+  // MongoDB — documents are stored as-is, with no migration step — and buy
+  // nothing visible, since no user ever sees the field name.
+  // Round per row, THEN add — the order the workbook uses. Dividing the book
+  // total once instead gives 24.02 against the workbook's 23.9, and the whole
+  // point of this column is that it ties out to the source.
+  const sumFte = (arr) => Math.round(arr.reduce((a, p) => a + (p.fte || 0), 0) * 10) / 10
+  const committedHC = sumFte(commit)
+  const totalHC = sumFte(perProject.filter(isInPlan))
 
   // The book total — every project's saving hours, with no objective or
   // commit-level filtering applied. This must always reconcile to the source
@@ -962,7 +1017,7 @@ export function computePlan(state) {
       horizonBenefit: scMonthlyBenefit * rates.horizonMonths,
       // Derived from the benefit, not from scHours: scHours is in whatever
       // unit savingBasis names, and dividing a per-YEAR figure by a per-MONTH
-      // divisor reported twelve times the headcount on the annual basis.
+      // divisor reported twelve times the FTE on the annual basis.
       fteReleased: rates.acctMonthRate > 0 ? (scMonthlyBenefit / rates.acctMonthRate) : null,
       buildCost: scBuildCost,
       netBenefit: scCostedBenefit == null ? null : scCostedBenefit - scBuildCost,

@@ -167,7 +167,7 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
             {money(
               'Accountant — monthly salary',
               'acctMonthlySalary',
-              `The person whose manual hours are handed back. Becomes ${fmtMoney(fin.acctHourRate, sym)} per saved hour at ${fin.hoursPerFteMonth} hours a month.`,
+              `The person whose manual hours are handed back. Becomes ${fmtMoney(fin.acctHourRate, sym)} per saved hour at the FTE ratio of ${fin.hoursPerFteMonth} hours a month, set below.`,
             )}
 
             <Box sx={{ p: 1.75, bgcolor: 'action.hover', borderRadius: 1, mb: 2.5 }}>
@@ -180,8 +180,10 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
                 <strong>{fmtMoneyShort(fin.monthlyBenefit, sym)}/month</strong> ·{' '}
                 <strong>{fmtMoneyShort(fin.annualBenefit, sym)}/year</strong>
                 <br />
-                The source workbook's own HC column sums to 23.9, which is the same division — so this app values the
-                book the way management already counts it.
+                The source workbook's own FTE column sums to <strong>{totals.totalHC.toFixed(1)}</strong>.{' '}
+                {fin.hoursPerFteMonth === 176
+                  ? `At the workbook's own ratio of 176 that is the same division, project by project; the ${Math.abs(fin.fteReleased - totals.totalHC).toFixed(1)} difference is rounding alone — the workbook rounds each row to one decimal before adding them up.`
+                  : `That column was built at the workbook's ratio of 176 hours; you are dividing by ${fin.hoursPerFteMonth}, so this app and the source will not agree until you put it back.`}
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
                 This is the value of capacity released, not cash removed from the payroll. Treating it as a headcount
@@ -207,11 +209,20 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
             />
 
             <Divider sx={{ my: 2.5 }} />
-            <Typography variant="body2" sx={{ fontWeight: 600, mb: 1.5 }}>Conversion assumptions</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Conversion assumptions — the FTE ratio
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+              <strong>Hours per FTE / month</strong> is the FTE ratio, and it does two jobs at once. It turns saving
+              hours into <strong>FTE released</strong>, and it divides the accountant's monthly salary into the{' '}
+              <strong>hourly rate</strong> behind every baht figure in the app — so changing it moves both. The default
+              of <strong>176</strong> is the source workbook's own divisor: it computes its FTE column as{' '}
+              <code>saving hrs ÷ (22 × 8)</code>, 22 working days of 8 hours.
+            </Typography>
             <Grid container spacing={1.5}>
               <Grid item xs={4}>
                 <TextField
-                  fullWidth size="small" type="number" label="Hrs / month"
+                  fullWidth size="small" type="number" label="Hours per FTE / month"
                   value={settings.finance.hoursPerFteMonth}
                   onChange={(e) => setFinance({ hoursPerFteMonth: Math.max(1, Number(e.target.value) || 1) })}
                   inputProps={{ step: 0.1, min: 1 }}

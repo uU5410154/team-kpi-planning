@@ -173,7 +173,7 @@ export async function buildWorkbook(plan, state) {
         Math.round(totals.nextYearHours), N0, MUTED)
     }
     kv('Already delivered (status Done)', Math.round(totals.doneHours), N0)
-    kv('Headcount equivalent committed', totals.committedHC, N1)
+    kv('FTE committed (from the FTE column)', totals.committedHC, N1)
     styleBody(ws, bridgeStart, r - 1, 3)
 
     r++
@@ -184,11 +184,11 @@ export async function buildWorkbook(plan, state) {
     kv('Accountant salary (per month)', fin.acctMonthlySalary, MONEY)
     kv('  = value of one saved hour', Math.round(fin.acctHourRate), MONEY)
     kv('On-cost multiplier applied to both', fin.loadFactor, N1)
-    kv('Hours per full-time month', fin.hoursPerFteMonth, N1)
+    kv('Hours per FTE / month (the FTE ratio)', fin.hoursPerFteMonth, N1)
     kv('Hours per manday', fin.hoursPerManday, N1)
     kv('Saving-hours basis', basis.label)
     r++
-    kv('Headcount released (FTE)', Number(fin.fteReleased.toFixed(2)), N1, NAVY)
+    kv('FTE released (saving hours ÷ the ratio)', Number(fin.fteReleased.toFixed(2)), N1, NAVY)
     kv('Value of hours released (per month)', Math.round(fin.monthlyBenefit), MONEY)
     kv('Value of hours released (per year)', Math.round(fin.annualBenefit), MONEY, NAVY)
     kv(`Benefit over the ${fin.horizonMonths}-month horizon`, Math.round(fin.horizonBenefit), MONEY)
@@ -364,7 +364,9 @@ export async function buildWorkbook(plan, state) {
   {
     const cols = [
       ['Jira', 12], ['Project', 44], ['Programme', 26], ['Team', 13], ['Sub team', 18],
-      ['Objective', 24], ['PIC', 12], [`Saving ${unit}`, 13], ['HC', 8], ['Mandays', 10],
+      // Column 9 is headed FTE to match the app and the source workbook's own
+      // meaning; the value behind it is still the stored `hc` field.
+      ['Objective', 24], ['PIC', 12], [`Saving ${unit}`, 13], ['FTE', 8], ['Mandays', 10],
       [`Build cost (${cur})`, 14], [`Benefit/yr (${cur})`, 15], [`Benefit ${fin.horizonMonths}mo (${cur})`, 16],
       [`Net (${cur})`, 14], ['ROI', 10], ['Payback (mo)', 12], ['Break-even mandays', 15],
       ['Gate', 9], ['Commit', 11], ['Status', 12], ['Start', 11], ['Due', 11], ['Remark', 40],
@@ -395,7 +397,7 @@ export async function buildWorkbook(plan, state) {
         OBJ_BY_ID[p.objective] ? `${OBJ_BY_ID[p.objective].no}. ${OBJ_BY_ID[p.objective].name}` : '',
         person ? person.nick : 'TBC',
         p.savingHours ?? null,
-        p.hc ?? null,
+        p.fte ?? null,
         p.manday || null,
         p.buildCost == null ? null : Math.round(p.buildCost),
         p.annualBenefit == null ? null : Math.round(p.annualBenefit),
@@ -412,7 +414,7 @@ export async function buildWorkbook(plan, state) {
         p.notes || '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
-      // 8 saving · 9 HC · 10 mandays · 11-14 money · 15 ROI · 16 payback · 17 break-even
+      // 8 saving · 9 FTE · 10 mandays · 11-14 money · 15 ROI · 16 payback · 17 break-even
       ;[8, 9, 10, 11, 12, 13, 14, 15, 16, 17].forEach((c) => {
         row.getCell(c).numFmt = c === 9 || c === 16 ? N1 : c === 15 ? ROI : c >= 11 && c <= 14 ? MONEY : N0
         row.getCell(c).alignment = { horizontal: 'right' }
@@ -480,7 +482,7 @@ export async function buildWorkbook(plan, state) {
     kv(p.aggregatesTeam ? `Team saving hours (${unit}) — whole team` : `Credited saving hours (${unit})`, Math.round(p.scorecardHours), N0, NAVY)
     kv('Committed only', Math.round(p.commitHours), N0)
     kv('Mandays credited', Math.round(p.scorecardManday), N0)
-    kv(`Headcount released (FTE)`, Number(p.finance.fteReleased.toFixed(2)), N1)
+    kv(`FTE released`, Number(p.finance.fteReleased.toFixed(2)), N1)
     kv(`Value of hours released (${cur}/year)`, Math.round(p.finance.annualBenefit), MONEY, NAVY)
     kv(`Build cost (${cur})`,
       p.finance.buildCost == null ? 'no effort estimated' : Math.round(p.finance.buildCost),

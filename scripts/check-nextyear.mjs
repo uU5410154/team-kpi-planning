@@ -1,7 +1,7 @@
 /**
  * Locks the "Next year" commit level: a project marked next-year stays in the
  * register but contributes nothing to this year's team total, objective mix,
- * headcount or anyone's scorecard.
+ * the FTE column or anyone's scorecard.
  *
  * Run with: node scripts/check-nextyear.mjs
  */
@@ -35,7 +35,7 @@ console.log('\n--- deferring a project removes it from the total ---')
 const before = computePlan(base)
 // pick the biggest project so the effect is unmistakable
 const biggest = [...base.projects].sort((a, b) => (b.savingHours ?? 0) - (a.savingHours ?? 0))[0]
-console.log(`  deferring ${biggest.key} — ${biggest.summary} (${biggest.savingHours} hrs, ${biggest.hc} HC)`)
+console.log(`  deferring ${biggest.key} — ${biggest.summary} (${biggest.savingHours} hrs, ${biggest.hc} FTE)`)
 
 const after = computePlan({
   ...base,
@@ -48,7 +48,7 @@ check('the team total drops by exactly its hours',
 check('coverage drops with it',
   after.totals.totalCoverage < before.totals.totalCoverage,
   `${(before.totals.totalCoverage * 100).toFixed(1)}% -> ${(after.totals.totalCoverage * 100).toFixed(1)}%`)
-check('headcount drops by its HC',
+check('the FTE total drops by its FTE',
   Math.abs(before.totals.totalHC - after.totals.totalHC - (biggest.hc || 0)) < 1e-9,
   `${before.totals.totalHC.toFixed(1)} -> ${after.totals.totalHC.toFixed(1)}`)
 check('it is reported as deferred, not lost',

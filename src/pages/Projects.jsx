@@ -132,10 +132,10 @@ export default function Projects({
       if (fGap === 'nokey' && p.jiraKey) return false
       if (fTeam !== 'all' && (p.team || '') !== fTeam) return false
       if (fHc !== 'all') {
-        const hc = p.hc || 0
-        if (fHc === 'some' && hc <= 0) return false
-        if (fHc === 'none' && hc > 0) return false
-        if (fHc.startsWith('gte') && hc < Number(fHc.slice(3))) return false
+        const fte = p.fte || 0
+        if (fHc === 'some' && fte <= 0) return false
+        if (fHc === 'none' && fte > 0) return false
+        if (fHc.startsWith('gte') && fte < Number(fHc.slice(3))) return false
       }
       return true
     })
@@ -233,7 +233,7 @@ export default function Projects({
   const agg = useMemo(() => {
     const savingRows = rows.filter((p) => p.savingHours != null)
     const hours = savingRows.reduce((a, p) => a + p.savingHours, 0)
-    const hc = rows.reduce((a, p) => a + (p.hc || 0), 0)
+    const hc = Math.round(rows.reduce((a, p) => a + (p.fte || 0), 0) * 10) / 10
     const manday = rows.reduce((a, p) => a + (p.manday || 0), 0)
 
     // Money for whatever is on screen. Benefit covers every quantified row;
@@ -274,10 +274,11 @@ export default function Projects({
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Alert severity="info" variant="outlined">
         Every cell is editable — name, team, programme, <strong>PIC</strong>, <strong>saving hrs/month</strong>,{' '}
-        <strong>HC</strong>, <strong>mandays</strong>, <strong>objective</strong> and <strong>commit level</strong> —
-        and each edit recalculates the dashboard, the scorecards and the export live. Use <strong>Add project</strong>{' '}
-        for anything not yet in the source file, and the bin icon to remove a row. Saving hours are{' '}
-        <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.
+        <strong>mandays</strong>, <strong>objective</strong> and <strong>commit level</strong> — and each edit
+        recalculates the dashboard, the scorecards and the export live. <strong>FTE</strong> is the exception: it is
+        computed from the saving hours at the ratio on the Model tab, exactly as the source workbook computes its own
+        column. Use <strong>Add project</strong> for anything not yet in the source file, and the bin icon to remove a
+        row. Saving hours are <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -313,14 +314,14 @@ export default function Projects({
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 158 }}>
-            <InputLabel>Headcount</InputLabel>
-            <Select label="Headcount" value={fHc} onChange={(e) => setFHc(e.target.value)}>
-              <MenuItem value="all">Any headcount</MenuItem>
-              <MenuItem value="some">Has headcount (&gt; 0)</MenuItem>
-              <MenuItem value="none">No headcount</MenuItem>
-              <MenuItem value="gte0.5">0.5 HC or more</MenuItem>
-              <MenuItem value="gte1">1 HC or more</MenuItem>
-              <MenuItem value="gte3">3 HC or more</MenuItem>
+            <InputLabel>FTE</InputLabel>
+            <Select label="FTE" value={fHc} onChange={(e) => setFHc(e.target.value)}>
+              <MenuItem value="all">Any FTE</MenuItem>
+              <MenuItem value="some">Has FTE (&gt; 0)</MenuItem>
+              <MenuItem value="none">No FTE</MenuItem>
+              <MenuItem value="gte0.5">0.5 FTE or more</MenuItem>
+              <MenuItem value="gte1">1 FTE or more</MenuItem>
+              <MenuItem value="gte3">3 FTE or more</MenuItem>
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 130 }}>
@@ -459,7 +460,12 @@ export default function Projects({
               tone: agg.deferred > 0 ? STATUS.warning : undefined,
             },
             { label: 'Of which delivered', value: fmtHours(agg.done), sub: 'status Done' },
-            { label: 'Headcount', value: agg.hc ? agg.hc.toFixed(1) : '—', sub: 'HC released' },
+            {
+              label: 'FTE',
+              value: agg.hc ? agg.hc.toFixed(1) : '—',
+              sub: 'FTE released',
+              help: `The source workbook's own FTE column, editable per row: saving hours ÷ ${fin.hoursPerFteMonth} hours per FTE month, rounded to one decimal on each project. Change the ratio on the Model tab — it drives this column's arithmetic and the accountant hourly rate together. Capacity released, not people removed from the payroll.`,
+            },
             { label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
             {
               label: 'Benefit / year',
@@ -534,7 +540,7 @@ export default function Projects({
               <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
               <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>
               {head('savingHours', 'Saving hrs/mth', 'right')}
-              {head('hc', 'HC', 'right')}
+              {head('fte', 'FTE', 'right')}
               {head('manday', 'Mandays', 'right')}
               {head('buildCost', 'Build cost', 'right', 78)}
               {head('roi', 'ROI', 'right', 78)}
@@ -657,11 +663,26 @@ export default function Projects({
                     />
                   </TableCell>
                   <TableCell align="right">
-                    <NumCell
-                      value={p.hc}
-                      width={48}
-                      onChange={(v) => onUpdate(p.key, { hc: v })}
-                    />
+                    {/* Derived, not typed. The source workbook computes its
+                        own column the same way — ROUND(saving/(22*8), 1) — so
+                        this reads as a formula result, not an input. */}
+                    <Tooltip title={
+                      p.savingHours == null
+                        ? 'Saving hours are still TBC, so there is no FTE to release yet.'
+                        : `${fmtHours(p.savingHours)} hrs/month ÷ ${fin.hoursPerFteMonth} = ${(p.fte ?? 0).toFixed(1)} FTE. Enter saving hours and this follows; change the FTE ratio on the Model tab and every row moves at once.`
+                    }>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontSize: '0.8125rem',
+                          fontVariantNumeric: 'tabular-nums',
+                          cursor: 'help',
+                          color: p.fte > 0 ? 'text.primary' : 'text.disabled',
+                        }}
+                      >
+                        {p.savingHours == null ? '—' : (p.fte ?? 0).toFixed(1)}
+                      </Typography>
+                    </Tooltip>
                   </TableCell>
                   <TableCell align="right">
                     <NumCell

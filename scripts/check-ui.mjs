@@ -58,7 +58,8 @@ const savingInput = async (jiraKey) =>
     const rows = [...document.querySelectorAll('tbody tr')]
     const row = rows.find((r) => [...r.querySelectorAll('input')].some((i) => i.value === key))
     if (!row) return null
-    // column order: jira, project(3 inputs), objective, pic, saving, hc, manday
+    // column order: jira, project(3 inputs), objective, pic, saving, manday
+    // (FTE sits between them but is derived, so it is text, not an input)
     const nums = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right')
     return nums[0] || null
   }, jiraKey)
@@ -393,6 +394,26 @@ try {
   const paybackCol = await colIndex('payback')
   check('and a payback column after it', paybackCol === roiCol + 1, `payback ${paybackCol} / roi ${roiCol}`)
 
+  /* ---------- the source column reads as FTE, not HC ---------- */
+  const fteCol = await colIndex('fte')
+  check('the Projects table heads the source column FTE', fteCol > 0, `index ${fteCol}`)
+  const hcLeftovers = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('table thead th')].map((h) => h.innerText.trim())
+    const labels = [...document.querySelectorAll('label')].map((l) => l.innerText.trim())
+    return {
+      heads: heads.filter((h) => /^hc$/i.test(h)),
+      labels: labels.filter((l) => /headcount/i.test(l)),
+      strip: /HC RELEASED/i.test(document.body.innerText),
+      fteStrip: /FTE RELEASED/i.test(document.body.innerText),
+      fteFilter: labels.some((l) => l === 'FTE'),
+    }
+  })
+  check('no HC column header survives', hcLeftovers.heads.length === 0, hcLeftovers.heads.join(' | '))
+  check('the headcount filter is relabelled FTE',
+    hcLeftovers.fteFilter && hcLeftovers.labels.length === 0, hcLeftovers.labels.join(' | ') || 'no "headcount" label left')
+  check('and the totals strip says FTE released',
+    hcLeftovers.fteStrip && !hcLeftovers.strip, JSON.stringify({ fte: hcLeftovers.fteStrip, hc: hcLeftovers.strip }))
+
   // No effort in the seed, so ROI starts blank by design rather than as zero.
   const roiBefore = await page.evaluate((ix) => {
     const rows = [...document.querySelectorAll('tbody tr')]
@@ -405,8 +426,11 @@ try {
   const filled = await page.evaluate(() => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
     const row = document.querySelector('tbody tr')
-    const nums = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right')
-    const md = nums[2] // saving hrs, HC, mandays
+    // Located by its column, not by position among the inputs: FTE became a
+    // derived cell and stopped being an input, which silently shifted the index.
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const mdCol = heads.findIndex((h) => h.startsWith('manday'))
+    const md = row.children[mdCol]?.querySelector('input')
     md.focus(); setter.call(md, '25'); md.dispatchEvent(new Event('input', { bubbles: true })); md.blur()
     return md.value
   })
@@ -479,6 +503,61 @@ try {
       const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 1 — Financial'))
       return row ? /฿|THB/.test(row.innerText) : false
     }))
+
+  /* ---------- the FTE ratio is adjustable, and drives both sides ---------- */
+  // The whole point of the ratio being a setting: it converts saving hours into
+  // FTE AND divides the accountant salary into an hour rate. Halving it must
+  // double the FTE released and double the money, in one edit.
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?ratio=0#dashboard`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1200))
+  const fteTile = () => page.evaluate(() => {
+    const t = document.body.innerText
+    return {
+      fte: Number(t.match(/VALUE OF HOURS RELEASED[\s\S]*?([\d.]+)\s*FTE/)?.[1] ?? 0),
+      money: t.match(/VALUE OF HOURS RELEASED\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null,
+    }
+  })
+  const ratioBefore = await fteTile()
+  check('the dashboard states the FTE released at the default ratio',
+    Math.abs(ratioBefore.fte - 24.0) < 0.2, `${ratioBefore.fte} FTE (4,227.4 / 176 = 24.0)`)
+
+  await page.goto(`${base}/?ratio=1#settings`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1200))
+  const ratioField = await page.evaluate(() => {
+    const label = [...document.querySelectorAll('label')].find((l) => /hours per fte/i.test(l.innerText))
+    if (!label) return null
+    const input = label.closest('.MuiFormControl-root').querySelector('input')
+    return { label: label.innerText.trim(), value: input.value }
+  })
+  check('the Model tab carries an FTE-ratio input, labelled as such',
+    !!ratioField, ratioField ? `${ratioField.label} = ${ratioField.value}` : 'not found')
+  check('and it defaults to the workbook divisor', ratioField?.value === '176', String(ratioField?.value))
+  check('its help text says it drives the FTE figures AND the hourly rate',
+    await page.evaluate(() => {
+      const t = document.body.innerText
+      return /FTE ratio/i.test(t) && /FTE released/i.test(t) && /hourly rate/i.test(t)
+    }))
+
+  const halved = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const label = [...document.querySelectorAll('label')].find((l) => /hours per fte/i.test(l.innerText))
+    const input = label.closest('.MuiFormControl-root').querySelector('input')
+    input.focus(); setter.call(input, '88'); input.dispatchEvent(new Event('input', { bubbles: true })); input.blur()
+    return input.value
+  })
+  await new Promise((r) => setTimeout(r, 900))
+  check('the FTE ratio accepts an edit', halved === '88', halved)
+
+  await page.goto(`${base}/?ratio=2#dashboard`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1200))
+  const ratioAfter = await fteTile()
+  check('halving the ratio doubles the FTE released',
+    Math.abs(ratioAfter.fte - ratioBefore.fte * 2) < 0.3,
+    `${ratioBefore.fte} -> ${ratioAfter.fte} FTE`)
+  check('and moves the money with it, because it sets the hourly rate too',
+    ratioAfter.money !== ratioBefore.money, `${ratioBefore.money} -> ${ratioAfter.money}`)
+  await page.evaluate(() => localStorage.clear())
 
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {

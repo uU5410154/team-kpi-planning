@@ -40,15 +40,15 @@ const slices = [
   ['Team = Finance', plan.projects.filter((p) => p.team === 'Finance')],
   ['Status = Done', plan.projects.filter((p) => p.status === 'Done')],
   ['Objective 2', plan.projects.filter((p) => p.objective === 'process_automation')],
-  ['HC > 0', plan.projects.filter((p) => (p.hc || 0) > 0)],
-  ['HC = 0 / blank', plan.projects.filter((p) => !(p.hc > 0))],
-  ['HC >= 0.5', hcAtLeast(0.5)],
-  ['HC >= 1', hcAtLeast(1)],
-  ['HC >= 3', hcAtLeast(3)],
+  ['FTE > 0', plan.projects.filter((p) => (p.hc || 0) > 0)],
+  ['FTE = 0 / blank', plan.projects.filter((p) => !(p.hc > 0))],
+  ['FTE >= 0.5', hcAtLeast(0.5)],
+  ['FTE >= 1', hcAtLeast(1)],
+  ['FTE >= 3', hcAtLeast(3)],
 ]
 for (const [label, rows] of slices) {
   const a = agg(rows)
-  console.log(`  ${label.padEnd(20)} n=${String(a.count).padStart(3)}  hrs=${a.hours.toFixed(1).padStart(8)}  hc=${a.hc.toFixed(1).padStart(5)}  ratio=${a.ratio == null ? '  n/a' : a.ratio.toFixed(2)}`)
+  console.log(`  ${label.padEnd(20)} n=${String(a.count).padStart(3)}  hrs=${a.hours.toFixed(1).padStart(8)}  fte=${a.hc.toFixed(1).padStart(5)}  ratio=${a.ratio == null ? '  n/a' : a.ratio.toFixed(2)}`)
 }
 
 // the team slices must re-add to the whole book
@@ -57,20 +57,20 @@ const fin = agg(plan.projects.filter((p) => p.team === 'Finance'))
 check('team slices re-add to the book', Math.abs(acc.hours + fin.hours - all.hours) < 0.01,
   `${acc.hours.toFixed(1)} + ${fin.hours.toFixed(1)} = ${(acc.hours + fin.hours).toFixed(1)} vs ${all.hours.toFixed(1)}`)
 
-// the headcount split is exhaustive and its HC re-adds
+// the FTE split is exhaustive and its FTE re-adds
 const some = agg(plan.projects.filter((p) => (p.hc || 0) > 0))
 const none = agg(plan.projects.filter((p) => !(p.hc > 0)))
-check('headcount split covers every project', some.count + none.count === all.count,
+check('FTE split covers every project', some.count + none.count === all.count,
   `${some.count} + ${none.count} = ${some.count + none.count} vs ${all.count}`)
-check('headcount split re-adds to total HC', Math.abs(some.hc + none.hc - all.hc) < 0.01,
+check('FTE split re-adds to the total FTE', Math.abs(some.hc + none.hc - all.hc) < 0.01,
   `${some.hc.toFixed(1)} + ${none.hc.toFixed(1)} vs ${all.hc.toFixed(1)}`)
-check('rows with no headcount contribute no HC', none.hc === 0, `${none.hc}`)
+check('rows with no FTE contribute no FTE', none.hc === 0, `${none.hc}`)
 
-// HC thresholds must nest: >=3 is a subset of >=1 is a subset of >=0.5
+// FTE thresholds must nest: >=3 is a subset of >=1 is a subset of >=0.5
 const k3 = hcAtLeast(3).map((p) => p.key)
 const k1 = new Set(hcAtLeast(1).map((p) => p.key))
 const k05 = new Set(hcAtLeast(0.5).map((p) => p.key))
-check('HC thresholds nest correctly',
+check('FTE thresholds nest correctly',
   k3.every((k) => k1.has(k)) && [...k1].every((k) => k05.has(k)),
   `>=3:${k3.length} >=1:${k1.size} >=0.5:${k05.size}`)
 

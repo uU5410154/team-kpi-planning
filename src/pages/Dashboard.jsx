@@ -84,7 +84,7 @@ export default function Dashboard({ plan, onGoTo }) {
             value={fmtMoneyShort(fin.annualBenefit, sym)}
             unit="per year"
             context={`${fin.fteReleased.toFixed(1)} FTE at ${fmtMoney(fin.acctHourRate, sym)} an hour · ${fmtMoneyShort(fin.monthlyBenefit, sym)}/month`}
-            help={`Objective 1. The saving hours valued at the accountant rate set on the Model tab: ${fmtHours(totals.totalHours)} hrs/month ÷ ${fin.hoursPerFteMonth} hrs = ${fin.fteReleased.toFixed(1)} FTE. This is capacity released, not cash taken off the payroll.`}
+            help={`Objective 1. The saving hours valued at the accountant rate set on the Model tab: ${fmtHours(totals.totalHours)} hrs/month ÷ the FTE ratio of ${fin.hoursPerFteMonth} hrs = ${fin.fteReleased.toFixed(1)} FTE. This is capacity released, not cash taken off the payroll.`}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={4}>
@@ -130,7 +130,7 @@ export default function Dashboard({ plan, onGoTo }) {
               ? 'Objective 1 has a benefit but no cost yet'
               : `Objective 1 covers ${fmtPct(fin.roiCoverage)} of the benefit`}
           </AlertTitle>
-          The source workbook records saving hours and headcount but no build effort, so{' '}
+          The source workbook records saving hours and an FTE column but no build effort, so{' '}
           {quality.uncosted} of {quality.total} projects still carry no mandays. The benefit side is live —{' '}
           <strong>{fmtMoneyShort(fin.annualBenefit, sym)} a year</strong> — but ROI, payback and net benefit stay
           blank on those, because a project with unknown effort has an unknown cost, not a cost of nothing. They are

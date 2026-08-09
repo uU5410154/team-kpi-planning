@@ -55,12 +55,39 @@ check('so a manday of cost is exactly hoursPerManday of accountant value at equa
 })())
 
 console.log('\n--- the calibration against the source workbook ---')
-// The workbook's own HC column is saving hours / a full-time month. If this
-// app divided differently, its FTE figure would contradict management's.
+// The workbook's own FTE column is saving hours / a full-time month, at the
+// ratio the workbook itself writes into every row: (22*8) = 176. If this app
+// divided differently, its FTE figure would contradict management's.
+// scripts/check-source-reconciliation.mjs opens the workbook and proves the
+// divisor from the formula; this check holds the app side of it.
 const srcHc = seed.projects.reduce((a, p) => a + (p.hc || 0), 0)
-check('FTE released lands on the HC column the source already carries',
-  Math.abs(F.fteReleased - srcHc) / srcHc < 0.05,
-  `${F.fteReleased.toFixed(2)} FTE vs HC ${srcHc.toFixed(1)} in the sheet`)
+check('the default FTE ratio is the workbook\'s own 22 days x 8 hours',
+  DEFAULT_FINANCE.hoursPerFteMonth === 22 * 8,
+  `${DEFAULT_FINANCE.hoursPerFteMonth} vs ${22 * 8}`)
+// Now the divisor is exact, the seed's own FTE column can be REGENERATED from
+// the saving hours rather than merely landing nearby. Excel's ROUND is half
+// away from zero, and the sheet rounds each project to 1 dp.
+const round1 = (v) => Math.sign(v) * Math.round(Math.abs(v) * 10) / 10
+const regenerated = seed.projects.reduce(
+  (a, p) => a + (p.savingHours == null ? 0 : round1(p.savingHours / DEFAULT_FINANCE.hoursPerFteMonth)), 0)
+check('the ratio regenerates the source FTE column exactly, project by project',
+  seed.projects.every((p) => Math.abs(
+    (p.savingHours == null ? 0 : round1(p.savingHours / DEFAULT_FINANCE.hoursPerFteMonth)) - (p.hc || 0),
+  ) < 1e-9),
+  `regenerated ${regenerated.toFixed(1)} vs stored ${srcHc.toFixed(1)}`)
+// fteReleased divides the book total ONCE and does not round, so it sits a
+// rounding residual above the column. That residual is the sum of the
+// workbook's own per-row roundings — an identity, not a tolerance.
+const residual = seed.projects.reduce((a, p) => {
+  const exact = p.savingHours == null ? 0 : p.savingHours / DEFAULT_FINANCE.hoursPerFteMonth
+  return a + (exact - (p.hc || 0))
+}, 0)
+check('FTE released differs from the source FTE column by exactly its rounding',
+  near(F.fteReleased - srcHc, residual, 1e-9),
+  `${F.fteReleased.toFixed(4)} - ${srcHc.toFixed(1)} = ${(F.fteReleased - srcHc).toFixed(4)}, rounding residual ${residual.toFixed(4)}`)
+check('so FTE released lands on the FTE column the source already carries',
+  Math.abs(F.fteReleased - srcHc) < 0.2,
+  `${F.fteReleased.toFixed(2)} FTE vs ${srcHc.toFixed(1)} in the sheet`)
 
 console.log('\n--- the gate is restated, not silently changed ---')
 check('the gate as a payback period is horizon / (1 + roi)',
@@ -190,7 +217,7 @@ console.log('\n--- the horizon is a real setting, not a constant ---')
 console.log('\n--- the annual basis does not multiply anything by twelve ---')
 {
   // 1,200 hrs/YEAR and 100 hrs/MONTH describe the same team, so every derived
-  // figure must match. Getting this wrong reported 12x the headcount on a
+  // figure must match. Getting this wrong reported 12x the FTE on a
   // scorecard while the dashboard beside it reported the right one.
   const asMonthly = computePlan({ ...base, projects: base.projects.map((p) => ({ ...p, manday: 5 })) })
   const asAnnual = computePlan({
@@ -201,7 +228,7 @@ console.log('\n--- the annual basis does not multiply anything by twelve ---')
   check('the same book stated per year gives the same monthly benefit',
     near(asAnnual.finance.monthlyBenefit, asMonthly.finance.monthlyBenefit, 1e-6),
     `${Math.round(asAnnual.finance.monthlyBenefit)} vs ${Math.round(asMonthly.finance.monthlyBenefit)}`)
-  check('and the same headcount released',
+  check('and the same FTE released',
     near(asAnnual.finance.fteReleased, asMonthly.finance.fteReleased, 1e-6),
     `${asAnnual.finance.fteReleased.toFixed(3)} vs ${asMonthly.finance.fteReleased.toFixed(3)}`)
   check('and the same return', near(asAnnual.finance.roi, asMonthly.finance.roi, 1e-9))
