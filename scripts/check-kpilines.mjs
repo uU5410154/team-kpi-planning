@@ -328,8 +328,13 @@ console.log('\n--- the card states the saving hours it carries ---')
     Math.abs(james.kpiTotals.savingHours
       - (james.kpiLines.find((l) => l.targetKind === 'hours' && !l.custom)?.creditedHours || 0)) < 1e-9,
     `${james.kpiTotals.savingHours.toFixed(1)}`)
-  check('and the money-typed targets are reported separately',
-    james.kpiTotals.money > 0, String(Math.round(james.kpiTotals.money)))
+  // Objective 1 states a percentage floor now, so no derived line is typed in
+  // baht at all — the money it is built from is reported beside the ratio.
+  check('and no derived line states a bare money amount',
+    james.kpiLines.filter((l) => l.targetKind === 'thb' && !l.custom).length === 0)
+  check('while the return line still reports the money behind it',
+    james.kpiLines.find((l) => l.targetKind === 'percent')?.creditedMoney > 0,
+    String(Math.round(james.kpiLines.find((l) => l.targetKind === 'percent')?.creditedMoney || 0)))
 
   // A hand-added line carries no hours of its own, so it cannot inflate it.
   const withCustom = computePlan({

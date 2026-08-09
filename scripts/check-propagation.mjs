@@ -7,7 +7,9 @@
  */
 import { readFileSync, unlinkSync, existsSync } from 'node:fs'
 import ExcelJS from 'exceljs'
-import { computePlan, DEFAULT_SETTINGS, fmtTarget, weightsValid, financeRates } from '../src/lib/model.js'
+import {
+  computePlan, DEFAULT_SETTINGS, fmtTarget, weightsValid, financeRates, HOURS_OBJECTIVE,
+} from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
@@ -110,33 +112,39 @@ const exportedTarget = async (plan, state, personId, objective) => {
 /* ------------------------------------------------------------------ */
 console.log('--- FNP-1431 Sales Forecast: 32 -> 33 (the reported bug) ---')
 const KEY = 'FNP-1431'
+// The KPI line every saving hour lands on, whatever a project is tagged to.
+const HOURS_LINE = `obj-${HOURS_OBJECTIVE}`
+
 const proj0 = base.projects.find((p) => p.key === KEY)
-check('the project exists and is Gun\'s objective 1', !!proj0 && proj0.pic === 'gun' && proj0.objective === 'financial',
+check('the project exists and belongs to Gun', !!proj0 && proj0.pic === 'gun',
   `${proj0?.pic} / ${proj0?.objective} / ${proj0?.savingHours}h`)
 
 let state = base
 let plan = computePlan(state)
-const before = lineFor(plan, 'gun', 'financial')
+const before = lineFor(plan, 'gun', HOURS_OBJECTIVE)
 // Gun is the team lead, so his objective-1 line carries the TEAM's objective-1
 // total, not just his own project. Assert the delta, not a hardcoded constant.
 const start = before.target
 const hoursBefore = before.creditedHours
 check('scorecard starts at a live figure', typeof start === 'number' && start > 0, String(start))
-check('objective 1 is now measured in money', before.targetKind === 'thb', before.targetKind)
+// The hours objective carries every saving hour in the plan, so this is the
+// line an edit on the Projects tab has to reach.
+check('the line that carries the hours is measured in hours',
+  before.targetKind === 'hours', before.targetKind)
 
 // user edits the project on the Projects tab
 state = setSaving(state, KEY, 33)
 plan = computePlan(state)
-const after = lineFor(plan, 'gun', 'financial')
+const after = lineFor(plan, 'gun', HOURS_OBJECTIVE)
 const expected = start + step(before, 1)
 check('scorecard target follows the edit', near(after.target, expected),
   `${start} -> ${after.target} (expected ~${Math.round(expected)})`)
 check('it is not flagged as drifted', after.drifted === false)
 check('credited hours follow too', near(after.creditedHours, hoursBefore + 1), String(after.creditedHours))
 check('rendered in the unit its objective is measured in',
-  fmtTarget(after).includes(RATES.symbol) && fmtTarget(after).endsWith('/year'), fmtTarget(after))
+  /hrs\/month$/.test(fmtTarget(after)), fmtTarget(after))
 
-let xl = await exportedTarget(plan, state, 'gun', 'financial')
+let xl = await exportedTarget(plan, state, 'gun', HOURS_OBJECTIVE)
 check('Excel per-person sheet follows', near(Number(xl.perPerson), after.target), String(xl.perPerson))
 check('Excel Overall_Objectives follows', near(Number(xl.overall), after.target), String(xl.overall))
 check('both Excel sheets agree', xl.agree)
@@ -148,15 +156,15 @@ console.log('\n--- focusing a target and leaving it unchanged must not pin it --
 let s2 = setSaving(base, KEY, 32)
 let p2 = computePlan(s2)
 // simulate blurring the field with the value it already displayed
-const shown = lineFor(p2, 'gun', 'financial').target
-s2 = applyKpiEdit(s2, p2, 'gun', 'obj-financial', { target: shown })
-check('no override was stored', !(s2.people.find((p) => p.id === 'gun').kpi || {})['obj-financial'],
-  JSON.stringify((s2.people.find((p) => p.id === 'gun').kpi || {})['obj-financial']))
+const shown = lineFor(p2, 'gun', HOURS_OBJECTIVE).target
+s2 = applyKpiEdit(s2, p2, 'gun', HOURS_LINE, { target: shown })
+check('no override was stored', !(s2.people.find((p) => p.id === 'gun').kpi || {})[HOURS_LINE],
+  JSON.stringify((s2.people.find((p) => p.id === 'gun').kpi || {})[HOURS_LINE]))
 s2 = setSaving(s2, KEY, 33)
 p2 = computePlan(s2)
 check('the later project edit still reaches the scorecard',
-  near(lineFor(p2, 'gun', 'financial').target, shown + step(before, 1)),
-  `${shown} -> ${lineFor(p2, 'gun', 'financial').target}`)
+  near(lineFor(p2, 'gun', HOURS_OBJECTIVE).target, shown + step(before, 1)),
+  `${shown} -> ${lineFor(p2, 'gun', HOURS_OBJECTIVE).target}`)
 
 /* ------------------------------------------------------------------ */
 /* 3. a deliberate override still pins, and can be released           */
@@ -164,24 +172,24 @@ check('the later project edit still reaches the scorecard',
 console.log('\n--- a deliberate override pins, and syncing releases it ---')
 let s3 = computePlan(base) && base
 let p3 = computePlan(s3)
-s3 = applyKpiEdit(s3, p3, 'gun', 'obj-financial', { target: 500 })
+s3 = applyKpiEdit(s3, p3, 'gun', HOURS_LINE, { target: 500 })
 p3 = computePlan(s3)
-check('deliberate override applies', lineFor(p3, 'gun', 'financial').target === 500)
+check('deliberate override applies', lineFor(p3, 'gun', HOURS_OBJECTIVE).target === 500)
 s3 = setSaving(s3, KEY, 33)
 p3 = computePlan(s3)
-const pinned = lineFor(p3, 'gun', 'financial')
+const pinned = lineFor(p3, 'gun', HOURS_OBJECTIVE)
 check('pinned target holds against a project edit', pinned.target === 500, String(pinned.target))
 check('and is flagged as drifted', pinned.drifted === true)
 check('while exposing the live figure', near(pinned.defaultTarget, start + step(before, 1)), String(pinned.defaultTarget))
-xl = await exportedTarget(p3, s3, 'gun', 'financial')
+xl = await exportedTarget(p3, s3, 'gun', HOURS_OBJECTIVE)
 check('Excel exports the pinned value in both sheets', Number(xl.perPerson) === 500 && xl.agree, JSON.stringify(xl))
 
 // clearing it returns to live
-s3 = applyKpiEdit(s3, p3, 'gun', 'obj-financial', { target: null })
+s3 = applyKpiEdit(s3, p3, 'gun', HOURS_LINE, { target: null })
 p3 = computePlan(s3)
-const cleared = lineFor(p3, 'gun', 'financial')
+const cleared = lineFor(p3, 'gun', HOURS_OBJECTIVE)
 check('clearing the override returns to live', near(cleared.target, start + step(before, 1)), String(cleared.target))
-xl = await exportedTarget(p3, s3, 'gun', 'financial')
+xl = await exportedTarget(p3, s3, 'gun', HOURS_OBJECTIVE)
 check('Excel follows back to live in both sheets', near(Number(xl.perPerson), cleared.target) && xl.agree, JSON.stringify(xl))
 
 /* ------------------------------------------------------------------ */
@@ -225,25 +233,25 @@ console.log('\n--- structural edits propagate ---')
 // unchanged — it is the receiving member's card that has to move.
 const reassigned = { ...base, projects: base.projects.map((p) => (p.key === KEY ? { ...p, pic: 'james', contributors: [{ person: 'james', roles: ['dev'] }] } : p)) }
 const rp = computePlan(reassigned)
-const jamesBefore = lineFor(computePlan(base), 'james', 'financial')?.target ?? 0
+const jamesBefore = lineFor(computePlan(base), 'james', HOURS_OBJECTIVE)?.target ?? 0
 check('the team figure is unchanged by an internal transfer',
-  (lineFor(rp, 'gun', 'financial')?.target ?? 0) === start, String(lineFor(rp, 'gun', 'financial')?.target))
+  (lineFor(rp, 'gun', HOURS_OBJECTIVE)?.target ?? 0) === start, String(lineFor(rp, 'gun', HOURS_OBJECTIVE)?.target))
 check('the receiving member gains the hours',
-  near(lineFor(rp, 'james', 'financial')?.target ?? 0, jamesBefore + step(before, 32)),
-  `${jamesBefore} -> ${lineFor(rp, 'james', 'financial')?.target}`)
+  near(lineFor(rp, 'james', HOURS_OBJECTIVE)?.target ?? 0, jamesBefore + step(before, 32)),
+  `${jamesBefore} -> ${lineFor(rp, 'james', HOURS_OBJECTIVE)?.target}`)
 
 const removed = { ...base, projects: base.projects.filter((p) => p.key !== KEY) }
 check('deleting a project removes its hours',
-  near(lineFor(computePlan(removed), 'gun', 'financial')?.target ?? 0, start - step(before, 32)),
-  String(lineFor(computePlan(removed), 'gun', 'financial')?.target))
+  near(lineFor(computePlan(removed), 'gun', HOURS_OBJECTIVE)?.target ?? 0, start - step(before, 32)),
+  String(lineFor(computePlan(removed), 'gun', HOURS_OBJECTIVE)?.target))
 
 const added = {
   ...base,
   projects: [{ ...proj0, key: 'NEW-TEST', jiraKey: null, savingHours: 100 }, ...base.projects],
 }
 check('adding a project adds its hours',
-  near(lineFor(computePlan(added), 'gun', 'financial').target, start + step(before, 100)),
-  String(lineFor(computePlan(added), 'gun', 'financial').target))
+  near(lineFor(computePlan(added), 'gun', HOURS_OBJECTIVE).target, start + step(before, 100)),
+  String(lineFor(computePlan(added), 'gun', HOURS_OBJECTIVE).target))
 
 /* ------------------------------------------------------------------ */
 /* 6. team totals and scorecards stay reconciled                       */

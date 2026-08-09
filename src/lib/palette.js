@@ -69,11 +69,19 @@ export const OBJECTIVES = [
     name: 'Financial',
     short: 'Financial',
     detail: 'Activities which improve PL, BS, Cash flow',
-    target: 'Value of every hour released',
-    // Money, not a ratio of hours to mandays. The guideline target below asks
-    // whether the man-hours invested are worth the benefit returned, which is
-    // a cost-benefit question and is answered in baht.
-    measure: 'money',
+    target: 'Overall ROI at or above the gate',
+    /*
+     * A floor, not an amount.
+     *
+     * The guideline asks whether the man-hours invested are worth the benefit
+     * returned. That is answered by a RATIO, and a ratio is the only form of
+     * this target that cannot be met by simply doing more work: doubling the
+     * plan doubles a baht target and leaves a ratio exactly where it was.
+     *
+     * The money it is built from — every released hour priced, plus cash
+     * stated outright — is still reported beside it.
+     */
+    measure: 'ratio',
     countsToPool: true,
     guidelineName: 'Financial',
     guidelineDetail: 'Activities which improve PL, BS, Cash flow',

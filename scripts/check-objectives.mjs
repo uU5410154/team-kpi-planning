@@ -48,8 +48,12 @@ console.log('--- each objective is measured in its own unit ---')
     OBJECTIVES.filter((o) => targetKindFor(o.id) === 'hours').length === 1,
     OBJECTIVES.map((o) => `${o.no}:${targetKindFor(o.id)}`).join(' '))
   check('and it is the one the engine uses', HOURS_OBJECTIVE === 'process_automation', String(HOURS_OBJECTIVE))
-  check('exactly one is measured in money',
-    OBJECTIVES.filter((o) => targetKindFor(o.id) === 'thb').length === 1 && MONEY_OBJECTIVE === 'financial')
+  check('exactly one is a ratio — a floor the plan has to clear',
+    OBJECTIVES.filter((o) => targetKindFor(o.id) === 'percent').length === 1
+    && MONEY_OBJECTIVE === 'financial',
+    OBJECTIVES.map((o) => `${o.no}:${targetKindFor(o.id)}`).join(' '))
+  check('and no objective states a bare money amount as its target',
+    OBJECTIVES.every((o) => targetKindFor(o.id) !== 'thb'))
   check('two are counted', COUNT_OBJECTIVES.join(',') === 'efficiency,ai_automation', COUNT_OBJECTIVES.join(','))
   check('and each counted one says what it counts',
     COUNT_OBJECTIVES.every((id) => !!OBJ_BY_ID[id].countUnit),
@@ -112,8 +116,31 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
   check('and it is the hours priced, at the rate the model states',
     Math.abs(money - (lead.scorecardHours * plain.finance.acctHourRate * 12)) < 1,
     `${Math.round(money)} vs ${Math.round(lead.scorecardHours * plain.finance.acctHourRate * 12)}`)
-  check('THE MONEY LINE CARRIES NO HOURS',
-    lead.kpiLines.find((l) => l.objective === MONEY_OBJECTIVE)?.creditedHours == null)
+  const roiLine = lead.kpiLines.find((l) => l.objective === MONEY_OBJECTIVE)
+  check('THE RETURN LINE CARRIES NO HOURS', roiLine?.creditedHours == null)
+  check('its target is the gate, stated as a percentage',
+    roiLine.targetKind === 'percent'
+    && Math.abs(roiLine.target - plain.finance.roiGate * 100) < 1e-9,
+    `${roiLine.target}% vs gate ${plain.finance.roiGate * 100}%`)
+  check('and its ACTUAL is the return the plan is carrying',
+    roiLine.creditedRatio === lead.finance.roi,
+    `${roiLine.creditedRatio} vs ${lead.finance.roi}`)
+  check('with the money it is built from stated beside it',
+    Math.abs(roiLine.creditedMoney - lead.finance.annualBenefit) < 1e-6)
+  check('AND IT RECALCULATES WHEN A COST CHANGES', (() => {
+    const heavier = computePlan({
+      ...base,
+      projects: base.projects.map((p) => (p.savingHours > 0 ? { ...p, manday: 200 } : p)),
+    }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
+    return heavier.creditedRatio !== roiLine.creditedRatio && heavier.meetsTarget === false
+  })())
+  check('and the target follows the gate when the gate is changed', (() => {
+    const strict = computePlan({
+      ...base,
+      settings: { ...DEFAULT_SETTINGS, finance: { ...DEFAULT_SETTINGS.finance, roiGate: 5 } },
+    }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
+    return strict.target === 500
+  })())
   check('so the card total is the hours ONCE, not twice',
     Math.abs(lead.kpiTotals.savingHours - lead.registerHours) < 1e-6,
     `${Math.round(lead.kpiTotals.savingHours)} vs ${Math.round(lead.registerHours)}`)

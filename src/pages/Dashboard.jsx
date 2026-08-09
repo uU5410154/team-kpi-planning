@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import {
   Box, Grid, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Chip, Divider, Tooltip,
+  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Divider, Tooltip,
 } from '@mui/material'
 import StatTile from '../components/StatTile.jsx'
 import { HBar, StackedHBar, GateScatter, Meter } from '../components/Charts.jsx'
 import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtRatio, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths,
-  gateAsHoursPerManday, gateAsPaybackMonths,
+  gateAsHoursPerManday, gateAsPaybackMonths, servesObjective as serves,
 } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -38,6 +38,39 @@ export default function Dashboard({ plan, onGoTo }) {
   // which is the project's own objective. byObjective is the KPI map, and
   // every saving hour sits on the hours objective there.
   const { totals, people, projects, quality, mixByObjective: byObjective, settings, finance: fin } = plan
+
+  /*
+   * What each objective is aiming at, and where it stands — each in its own
+   * unit. The hours column beside these says where the WORK sits; these two
+   * say whether the objective is being met, which is a different question for
+   * every one of them.
+   */
+  const objTarget = (o) => {
+    if (o.measure === 'ratio') return fmtRoi(fin.roiGate)
+    if (o.measure === 'hours') return fmtHours(settings.teamTarget ?? totals.guidelineTarget ?? 3000)
+    // The goal for the year, not a readout of where we are.
+    if (o.measure === 'count') return String(fin.objectiveTargets?.[o.id] ?? plan.countByObjective?.[o.id] ?? 0)
+    return o.target
+  }
+  const objActual = (o) => {
+    if (o.measure === 'ratio') return fin.roi == null ? '—' : fmtRoi(fin.roi)
+    if (o.measure === 'hours') return fmtHours(totals.headlineHours)
+    if (o.measure === 'count') return String(plan.countByObjective?.[o.id] ?? 0)
+    return o.target
+  }
+  const objTone = (o) => {
+    if (o.measure === 'ratio') return fin.roi == null ? 'text.disabled' : fin.roi >= fin.roiGate ? STATUS.good : STATUS.critical
+    if (o.measure === 'hours') {
+      const target = settings.teamTarget ?? totals.guidelineTarget ?? 3000
+      return totals.headlineHours >= target ? STATUS.good : STATUS.warning
+    }
+    if (o.measure === 'count') {
+      const target = fin.objectiveTargets?.[o.id]
+      if (!target) return 'text.primary'
+      return (plan.countByObjective?.[o.id] ?? 0) >= target ? STATUS.good : STATUS.warning
+    }
+    return 'text.primary'
+  }
   const sym = fin.symbol
   const [byPersonView, setByPersonView] = useState('chart')
 
@@ -404,12 +437,16 @@ export default function Dashboard({ plan, onGoTo }) {
                     <TableCell sx={{ minWidth: 260 }}>F&amp;A Tech</TableCell>
                     <TableCell align="right">Projects</TableCell>
                     <TableCell align="right">Hours</TableCell>
-                    <TableCell align="right">Measured by</TableCell>
+                    <TableCell align="right" sx={{ minWidth: 120 }}>Target</TableCell>
+                    <TableCell align="right" sx={{ minWidth: 120 }}>Where we are</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {OBJECTIVES.map((o, i) => {
-                    const n = projects.filter((p) => p.objective === o.id).length
+                    // Every project that SERVES the objective, not only the
+                    // ones whose primary tag it is — a dashboard that removes
+                    // manual work belongs to both.
+                    const n = projects.filter((p) => serves(p, o.id)).length
                     const h = byObjective[o.id] || 0
                     return (
                       <TableRow key={o.id} hover>
@@ -444,13 +481,29 @@ export default function Dashboard({ plan, onGoTo }) {
                         </TableCell>
                         <TableCell align="right" sx={{ verticalAlign: 'top' }}>{n}</TableCell>
                         <TableCell align="right" sx={{ verticalAlign: 'top', fontWeight: 600 }}>{fmtHours(h)}</TableCell>
+                        {/* The target in the unit the objective is actually
+                            measured in, and the live reading beside it. The
+                            Hours column above says where the work sits; these
+                            two say whether the objective is being met. */}
                         <TableCell align="right" sx={{ verticalAlign: 'top' }}>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            label={o.measure === 'milestone' ? 'Date' : o.measure === 'ratio' ? 'Ratio' : 'Hours'}
-                            color={o.measure === 'hours' ? 'default' : 'info'}
-                          />
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {objTarget(o)}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            {o.measure === 'ratio' ? 'or better'
+                              : o.measure === 'count' ? o.countUnit
+                                : o.measure === 'hours' ? 'hrs/month' : 'milestone'}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: objTone(o) }}>
+                            {objActual(o)}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            {o.measure === 'ratio' ? `on ${fmtMoneyShort(fin.annualBenefit, fin.symbol)}/yr`
+                              : o.measure === 'count' ? 'delivered'
+                                : o.measure === 'hours' ? 'committed' : 'as planned'}
+                          </Typography>
                         </TableCell>
                       </TableRow>
                     )

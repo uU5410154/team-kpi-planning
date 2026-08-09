@@ -115,6 +115,15 @@ export const DEFAULT_FINANCE = {
   // acctHourRate), and g = 2.0 lands that on 4.0. Change the salaries and the
   // equivalent hours-per-manday moves with them — which is the point.
   roiGate: 2.0,
+  /*
+   * What the counted objectives are aiming at for the year.
+   *
+   * A target has to be a decision, not a readout: defaulted to the count in
+   * the 2026 register so it starts honest, and adjustable from there. Left
+   * equal to the live count it would always read "met", which tells nobody
+   * anything.
+   */
+  objectiveTargets: { efficiency: 45, ai_automation: 9 },
   // How the accountant rate was arrived at. Stated rather than derived: the
   // blend behind it is a management assumption, not something the register
   // knows, and it belongs beside the number it produced.
@@ -154,6 +163,7 @@ export function financeRates(settings) {
     horizonMonths,
     roiGate: Number.isFinite(f.roiGate) && f.roiGate >= 0 ? f.roiGate : DEFAULT_FINANCE.roiGate,
     acctRateNote: String(f.acctRateNote ?? DEFAULT_FINANCE.acctRateNote ?? ''),
+    objectiveTargets: { ...DEFAULT_FINANCE.objectiveTargets, ...(f.objectiveTargets || {}) },
     daysPerFteMonth,
     /** Cost of one manday of build. */
     devDayRate,
@@ -413,6 +423,7 @@ export const targetKindFor = (objectiveId) => {
   switch (OBJ_BY_ID[objectiveId]?.measure) {
     case 'milestone': return 'text'
     case 'money': return 'thb'
+    case 'ratio': return 'percent'
     case 'count': return 'number'
     default: return 'hours'
   }
@@ -441,7 +452,9 @@ export function projectObjectives(p) {
  */
 export const HOURS_OBJECTIVE = (OBJECTIVES.find((o) => o.accrues === 'allHours')
   || OBJECTIVES.find((o) => o.measure === 'hours') || {}).id || null
-export const MONEY_OBJECTIVE = (OBJECTIVES.find((o) => o.measure === 'money') || {}).id || null
+export const MONEY_OBJECTIVE = (OBJECTIVES.find((o) => o.measure === 'money'
+  || o.measure === 'ratio') || {}).id || null
+export const RATIO_OBJECTIVE = (OBJECTIVES.find((o) => o.measure === 'ratio') || {}).id || null
 export const COUNT_OBJECTIVES = OBJECTIVES.filter((o) => o.measure === 'count').map((o) => o.id)
 
 /** Does this project's work count toward that objective? */
@@ -459,7 +472,8 @@ export const servesObjective = (p, id) => projectObjectives(p).includes(id)
 export const TARGET_KINDS = [
   { id: 'hours', label: 'Saving hours', numeric: true, help: 'A number of hours a month, the same measure the register uses' },
   { id: 'thb', label: 'Money', numeric: true, help: 'A figure in baht a year' },
-  { id: 'number', label: 'A number', numeric: true, help: 'A count, a score, a percentage — anything with a unit you name' },
+  { id: 'number', label: 'A number', numeric: true, help: 'A count, a score — anything with a unit you name' },
+  { id: 'percent', label: 'A percentage', numeric: true, help: 'A rate or a floor, stated in per cent' },
   { id: 'date', label: 'A date', numeric: false, help: 'Delivered by a date' },
   { id: 'text', label: 'Anything else', numeric: false, help: 'A milestone or a sentence a number cannot express' },
 ]
@@ -692,8 +706,12 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
       // How the TARGET is expressed, which is separate from whether the hours
       // count: objective 3 is measured by a date but still contributes hours.
       const kind = targetKindFor(id)
-      const live = kind === 'thb'
-        ? Math.round(creditedMoney[id] || 0)
+      const live = kind === 'percent'
+        // The gate itself: the plan's own floor, so changing it on the Model
+        // tab moves every card that has not been typed over.
+        ? Math.round((settings?.finance?.roiGate ?? DEFAULT_FINANCE.roiGate) * 100)
+        : kind === 'thb'
+          ? Math.round(creditedMoney[id] || 0)
         : kind === 'hours'
           ? Math.round(credited[id] || 0)
           // A counted objective starts at what the person is actually
@@ -896,6 +914,7 @@ export const snapWeight = (pct, step = WEIGHT_STEP) =>
 /** The unit a numeric KPI target is quoted in. */
 export const targetUnit = (line, basis = 'monthly', symbol = '฿') => {
   if (line.targetKind === 'thb') return `${symbol}/year`
+  if (line.targetKind === 'percent') return '%'
   // A hand-added number is quoted in whatever the user called it.
   if (line.targetKind === 'number') return line.unit || ''
   return basis === 'monthly' ? 'hrs/month' : 'hrs/year'
@@ -911,6 +930,10 @@ export const fmtTarget = (line, basis = 'monthly', symbol = '฿') => {
   }
   if (line.targetKind === 'hours') {
     return `${Number(line.target || 0).toLocaleString()} ${basis === 'monthly' ? 'hrs/month' : 'hrs/year'}`
+  }
+  if (line.targetKind === 'percent') {
+    // A floor: the ROI has to be AT LEAST this, so it reads as one.
+    return `${Math.round(Number(line.target) || 0).toLocaleString()}% or better`
   }
   if (line.targetKind === 'number') {
     const n = Number(line.target || 0).toLocaleString()
@@ -2010,7 +2033,24 @@ export function computePlan(state) {
       costedCount: scCostedCount,
     }
 
-    const lines = card.lines
+    /*
+     * The ROI line's ACTUAL is the return this person is carrying right now.
+     *
+     * It is attached here rather than inside scorecardWeights because the
+     * return is not known until the costs and benefits have been rolled up —
+     * and being attached from the rolled-up figure is exactly what makes it
+     * recalculate the moment a manday, a CAPEX or a saving hour changes.
+     */
+    const lines = card.lines.map((l) => (l.targetKind === 'percent' && !l.custom
+      ? {
+        ...l,
+        creditedRatio: scFinance.roi,
+        creditedMoney: scFinance.annualBenefit,
+        meetsTarget: scFinance.roi == null
+          ? null
+          : scFinance.roi * 100 >= Number(l.target) - 1e-9,
+      }
+      : l))
 
     return {
       ...withObjectives,

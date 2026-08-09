@@ -495,6 +495,24 @@ export default function People({
                         {/* Under the field, not beside it: beside it this
                             widened the column and pushed the delete button
                             back outside the card. */}
+                        {/* A floor needs its current reading beside it, or
+                            nobody can tell whether it is being met. */}
+                        {l.targetKind === 'percent' && (
+                          <Typography variant="caption" sx={{
+                            display: 'block', mt: 0.25, fontWeight: 700,
+                            color: l.creditedRatio == null ? 'text.disabled'
+                              : l.meetsTarget ? STATUS.good : STATUS.critical,
+                          }}>
+                            {l.creditedRatio == null
+                              ? 'no ROI yet — no costed project'
+                              : `now ${fmtRoi(l.creditedRatio)}${l.meetsTarget ? '' : ' — below'}`}
+                          </Typography>
+                        )}
+                        {l.targetKind === 'percent' && l.creditedMoney > 0 && (
+                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', lineHeight: 1.2 }}>
+                            on {fmtMoneyShort(l.creditedMoney, sym)}/yr of benefit
+                          </Typography>
+                        )}
                         {l.creditedHours > 0 && l.targetKind !== 'hours' && (
                           <Tooltip title="The saving hours behind this line. Its target is stated in another unit, but the hours still count toward the total below.">
                             <Typography variant="caption" sx={{ color: 'text.secondary', cursor: 'help', display: 'block', mt: 0.25 }}>

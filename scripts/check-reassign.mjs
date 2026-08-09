@@ -174,9 +174,11 @@ console.log('\n--- changing the PIC moves the project off the old owner ---')
     Math.abs(Object.values(pr.shares).reduce((a, b) => a + b, 0) - 1) < 1e-9)
   check('every scorecard still totals 100%', after.people.every((p) => weightsValid(p.kpiLines))
     && after.invalid.length === 0)
-  check('the old owner\'s objective target drops with it', (() => {
-    const b = jBefore.kpiLines.find((l) => l.objective === one.objective)
-    const a = jAfter.kpiLines.find((l) => l.objective === one.objective)
+  // The hours objective, not the project's own tag: that is where every saving
+  // hour lands, so that is the target a reassignment moves.
+  check('the old owner\'s hours target drops with it', (() => {
+    const b = jBefore.kpiLines.find((x) => x.objective === HOURS_OBJECTIVE)
+    const a = jAfter.kpiLines.find((x) => x.objective === HOURS_OBJECTIVE)
     return !a || Number(a.target) < Number(b.target)
   })())
 

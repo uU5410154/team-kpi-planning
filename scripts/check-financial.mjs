@@ -371,7 +371,10 @@ console.log('\n--- money is credited on the same share as the hours ---')
 }
 
 console.log('\n--- objective 1 reads as money on every card ---')
-check('objective 1 maps to a thb target kind', targetKindFor('financial') === 'thb')
+// Objective 1 states a FLOOR the plan has to clear, not an amount it has to
+// reach: doubling the plan doubles a baht target and leaves a ratio where it
+// was, which is the whole point of asking whether the effort was worth it.
+check('objective 1 maps to a percentage target kind', targetKindFor('financial') === 'percent')
 // One objective in hours, one in money, one a date, two counted. That split
 // is what lets a project answer to several at once without being counted
 // twice, so it is asserted rather than assumed.
@@ -386,8 +389,10 @@ check('objective 3 is still a milestone', targetKindFor('datawarehouse') === 'te
 for (const p of plan.people) {
   const l = p.kpiLines.find((x) => x.objective === 'financial')
   if (!l) continue
-  check(`${p.nick}: objective 1 target is the annual benefit they carry`,
-    l.targetKind === 'thb' && Math.abs(l.target - (p.benefitByObjective.financial || 0)) <= 1,
+  check(`${p.nick}: objective 1 target is the gate, and its reading is their ROI`,
+    l.targetKind === 'percent'
+    && Math.abs(l.target - plan.finance.roiGate * 100) < 1e-9
+    && l.creditedRatio === p.finance.roi,
     fmtMoney(l.target))
 }
 check('every scorecard still totals 100% under the money model',
@@ -566,9 +571,11 @@ console.log('\n--- the exported workbook carries the same figures ---')
       sheetText.filter(Boolean).slice(0, 3).join(' / '))
     if (objOneTarget != null) {
       const line = p.kpiLines.find((l) => l.objective === 'financial')
-      check(`${p.nick}: objective 1 target exports as a number in baht`,
-        typeof objOneTarget === 'number' && Math.abs(objOneTarget - line.target) <= 1,
-        `${objOneTarget} vs ${line.target}`)
+      // A real Excel percentage, so the cell can be compared with the reading
+      // beside it rather than being a string that only looks like one.
+      check(`${p.nick}: objective 1 target exports as a real percentage`,
+        typeof objOneTarget === 'number' && Math.abs(objOneTarget * 100 - line.target) < 1e-6,
+        `${objOneTarget} vs ${line.target}%`)
     }
   }
   unlinkSync(file)

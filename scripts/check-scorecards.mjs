@@ -249,11 +249,18 @@ ov.eachRow((row) => { if (String(row.getCell(3).value || '').includes(`[Obj ${ob
 const gunIx = plan1.people.findIndex((p) => p.id === 'gun')
 // Targets export as NUMBERS with the unit in the number format, so the column
 // stays sortable and summable.
-check('export carries the edited target as a number', editedRow?.getCell(4 + gunIx * 3).value === 5,
-  `${editedRow?.getCell(4 + gunIx * 3).value} (${typeof editedRow?.getCell(4 + gunIx * 3).value})`)
+// A NUMBER with the unit in the format, so the column stays sortable and
+// summable. A percentage line writes a real percentage — 5% is 0.05 — which is
+// the same discipline applied to a different unit.
+const editedCell = editedRow?.getCell(4 + gunIx * 3)
+const editedIsPct = pinnedA.targetKind === 'percent'
+check('export carries the edited target as a number',
+  typeof editedCell?.value === 'number'
+  && Math.abs((editedIsPct ? editedCell.value * 100 : editedCell.value) - 5) < 1e-9,
+  `${editedCell?.value} (${typeof editedCell?.value}, ${pinnedA.targetKind})`)
 check('and carries its unit in the number format',
-  /hrs|THB/.test(String(editedRow?.getCell(4 + gunIx * 3).numFmt || '')),
-  String(editedRow?.getCell(4 + gunIx * 3).numFmt))
+  /hrs|THB|%/.test(String(editedCell?.numFmt || '')),
+  String(editedCell?.numFmt))
 check('export carries the edited weight', Math.abs(editedRow?.getCell(4 + gunIx * 3 + 1).value - 0.2) < 1e-9,
   String(editedRow?.getCell(4 + gunIx * 3 + 1).value))
 

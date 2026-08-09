@@ -113,6 +113,11 @@ function writeTarget(cell, line, basis, currency) {
   } else if (line.targetKind === 'hours') {
     cell.value = Number(line.target || 0)
     cell.numFmt = basis === 'monthly' ? '#,##0" hrs/mth"' : '#,##0" hrs/yr"'
+  } else if (line.targetKind === 'percent') {
+    // Stored as a percentage number, written as a real percentage so the cell
+    // sorts and compares against the Actual beside it.
+    cell.value = (Number(line.target) || 0) / 100
+    cell.numFmt = '+0%;-0%;0%'
   } else if (line.targetKind === 'number') {
     // A hand-written KPI in its own unit. Still a NUMBER in the cell, with the
     // unit in the format, so it can be summed, sorted and charted like the
@@ -372,13 +377,22 @@ export async function buildWorkbook(plan, state) {
             // their hours to objective 2 — so printing hours here would state
             // the same saving twice.
             const kind = line.targetKind
-            const actual = kind === 'thb'
-              ? (p.benefitByObjective[spec.objective] || 0)
-              : kind === 'number'
-                ? (p.countByObjective?.[spec.objective] || 0)
-                : (p.byObjective[spec.objective] || 0)
-            row.getCell(c0 + 2).value = Math.round(actual)
-            row.getCell(c0 + 2).numFmt = kind === 'thb' ? MONEY : N0
+            if (kind === 'percent') {
+              // A floor: the Actual is the return being carried, as a real
+              // percentage so the cell can be compared with the target above it.
+              const cell = row.getCell(c0 + 2)
+              cell.value = line.creditedRatio == null ? null : Number(line.creditedRatio.toFixed(4))
+              cell.numFmt = ROI
+              if (line.creditedRatio != null) tone(cell, line.meetsTarget ? GOOD : BAD, false)
+            } else {
+              const actual = kind === 'thb'
+                ? (p.benefitByObjective[spec.objective] || 0)
+                : kind === 'number'
+                  ? (p.countByObjective?.[spec.objective] || 0)
+                  : (p.byObjective[spec.objective] || 0)
+              row.getCell(c0 + 2).value = Math.round(actual)
+              row.getCell(c0 + 2).numFmt = kind === 'thb' ? MONEY : N0
+            }
           }
           if (line.overridden) tone(row.getCell(c0), NAVY_MID, false)
         }
