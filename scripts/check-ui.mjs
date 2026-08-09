@@ -1728,6 +1728,74 @@ try {
   check('THE SCORECARD SHOWS THE CASH BENEFIT TOO', cashOnCard.ix > 0 && /\d/.test(cashOnCard.value || ''),
     JSON.stringify(cashOnCard))
 
+
+  /* ---------- a typed target moves the card total AND the headline ---------- */
+  // The reported case: 2,100 typed into a line, and the total underneath went
+  // on stating the register's figure.
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?tgt=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const tgtTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  const goPerson = async (nick) => {
+    await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+      tgtTabs.findIndex((t) => new RegExp(nick).test(t)))
+    await new Promise((r) => setTimeout(r, 1300))
+  }
+  const readCard = () => page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const c = head.closest('.MuiPaper-root')
+    const total = [...c.querySelectorAll('tbody tr')].find((r) => /^TOTAL/.test(r.innerText.trim()))
+    const tileHead = [...document.querySelectorAll('*')]
+      .find((e) => e.children.length === 0 && /saving hours$/i.test(e.textContent.trim()))
+    const tile = tileHead?.closest('.MuiPaper-root')
+    // the first hours target on the card
+    const rows = [...c.querySelectorAll('tbody tr')]
+    const hoursRow = rows.find((r) => [...r.querySelectorAll('.MuiInputBase-root')]
+      .some((f) => /hrs\/month/.test(f.innerText)))
+    return {
+      total: total ? total.innerText.match(/([\d,]+(?:\.\d+)?)/)?.[1] ?? null : null,
+      tile: tile ? tile.innerText.split(String.fromCharCode(10))[1] : null,
+      typed: hoursRow
+        ? [...hoursRow.querySelectorAll('.MuiInputBase-root')]
+          .find((f) => /hrs\/month/.test(f.innerText))?.querySelector('input')?.value ?? null
+        : null,
+    }
+  })
+
+  await goPerson('Gun')
+  const tgtBefore = await readCard()
+  check('the card and the headline start in step',
+    tgtBefore.total === tgtBefore.tile, JSON.stringify(tgtBefore))
+
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const c = head.closest('.MuiPaper-root')
+    const row = [...c.querySelectorAll('tbody tr')].find((r) => [...r.querySelectorAll('.MuiInputBase-root')]
+      .some((f) => /hrs\/month/.test(f.innerText)))
+    const inp = [...row.querySelectorAll('.MuiInputBase-root')]
+      .find((f) => /hrs\/month/.test(f.innerText)).querySelector('input')
+    inp.focus(); setter.call(inp, '2100'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+  })
+  await new Promise((r) => setTimeout(r, 1200))
+  const tgtAfter = await readCard()
+  check('the typed figure stuck', String(tgtAfter.typed).replace(/,/g, '') === '2100', JSON.stringify(tgtAfter))
+  check('THE CARD TOTAL MOVED WITH IT', tgtAfter.total !== tgtBefore.total,
+    `${tgtBefore.total} -> ${tgtAfter.total}`)
+  check('AND SO DID THE HEADLINE ABOVE IT', tgtAfter.tile === tgtAfter.total,
+    `tile ${tgtAfter.tile} vs total ${tgtAfter.total}`)
+  const tgtSaysRegister = await page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    return /register/i.test(head.closest('.MuiPaper-root').innerText)
+  })
+  check('and the card says what the register still credits', tgtSaysRegister)
+
+  const tgtHeadline = await page.evaluate(() =>
+    document.body.innerText.match(/([\d,]+)\s*\/\s*3,000/)?.[1] ?? null)
+  check('the project book in the app bar does not move', tgtHeadline === '4,227',
+    String(tgtHeadline))
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

@@ -258,9 +258,11 @@ export default function People({
               onChange: (v) => onOverride(p.id, { hours: v }),
             }}
             context={
-              p.aggregatesTeam
-                ? `Whole team · ${fmtHours(p.ownHours)} hrs from ${p.nick}'s own projects, IT and unassigned`
-                : `${fmtPct(shareOfTeam)} of the team commitment`
+              Math.abs(p.scorecardHours - p.registerHours) > 0.5
+                ? `Targets on the card add to this. The project register credits ${fmtHours(p.registerHours)} hrs.`
+                : p.aggregatesTeam
+                  ? `Whole team · ${fmtHours(p.ownHours)} hrs from ${p.nick}'s own projects, IT and unassigned`
+                  : `${fmtPct(shareOfTeam)} of the team commitment`
             }
             help={
               p.aggregatesTeam
@@ -535,7 +537,7 @@ export default function People({
                       the hours-typed targets alone would report well short of
                       what this person actually holds. */}
                   <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider' }}>
-                    <Tooltip title={`The saving hours behind every line on this card, added up${p.aggregatesTeam ? ' — the whole team' : ''}. Objective 1 is stated in baht and objective 3 as a date, but both still carry hours, so this is the total of what is behind the targets rather than of the targets themselves.`}>
+                    <Tooltip title={`What this card STATES, added up${p.aggregatesTeam ? ' — the whole team' : ''}: a target typed in hours counts as typed, and a line stated in baht or as a date contributes the hours behind it. Untouched, it equals the project register exactly; edit a target and this and the figure above both follow.`}>
                       <Box>
                         <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', fontVariantNumeric: 'tabular-nums', cursor: 'help' }}>
                           {fmtHours(p.kpiTotals.savingHours)}
@@ -543,6 +545,11 @@ export default function People({
                         <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', lineHeight: 1.2 }}>
                           {unit}{p.hoursOverridden ? ' · manual' : ''}
                         </Typography>
+                        {Math.abs(p.kpiTotals.savingHours - p.registerHours) > 0.5 && (
+                          <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', lineHeight: 1.2, fontWeight: 600 }}>
+                            register: {fmtHours(p.registerHours)}
+                          </Typography>
+                        )}
                       </Box>
                     </Tooltip>
                   </TableCell>

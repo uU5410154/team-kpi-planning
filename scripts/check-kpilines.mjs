@@ -329,9 +329,28 @@ console.log('\n--- the card states the saving hours it carries ---')
       ? { ...p, customLines: [{ id: 'c1', label: 'x', objective: 'process_automation', targetKind: 'hours', target: 9999 }] }
       : p)),
   }).people.find((p) => p.id === 'james')
-  check('A HAND-WRITTEN LINE DOES NOT INFLATE THE TOTAL',
-    Math.abs(withCustom.kpiTotals.savingHours - james.kpiTotals.savingHours) < 1e-9,
-    `${withCustom.kpiTotals.savingHours.toFixed(1)} vs ${james.kpiTotals.savingHours.toFixed(1)}`)
+  // The total is what the card STATES, so a line stating hours states them —
+  // hand-written or not. What it must not do is touch the register.
+  check('A HAND-WRITTEN LINE IN HOURS COUNTS TOWARD THE STATED TOTAL',
+    Math.abs(withCustom.kpiTotals.savingHours - (james.kpiTotals.savingHours + 9999)) < 1e-6,
+    `${withCustom.kpiTotals.savingHours.toFixed(1)} vs ${james.kpiTotals.savingHours.toFixed(1)} + 9999`)
+  check('but the register behind the card is untouched by it',
+    Math.abs(withCustom.kpiTotals.creditedHours - james.kpiTotals.creditedHours) < 1e-9,
+    `${withCustom.kpiTotals.creditedHours.toFixed(1)} vs ${james.kpiTotals.creditedHours.toFixed(1)}`)
+  check('and neither is the committed book',
+    Math.abs(computePlan({
+      ...base,
+      people: base.people.map((p) => (p.id === 'james'
+        ? { ...p, customLines: [{ id: 'c1', label: 'x', objective: 'process_automation', targetKind: 'hours', target: 9999 }] }
+        : p)),
+    }).totals.committedHours - computePlan(base).totals.committedHours) < 1e-9)
+  check('a hand-written line NOT in hours states no hours at all',
+    Math.abs(computePlan({
+      ...base,
+      people: base.people.map((p) => (p.id === 'james'
+        ? { ...p, customLines: [{ id: 'c1', label: 'x', objective: null, targetKind: 'text', target: 'done' }] }
+        : p)),
+    }).people.find((p) => p.id === 'james').kpiTotals.savingHours - james.kpiTotals.savingHours) < 1e-9)
 
   // A typed TARGET is a target, not hours carried: the total stays the truth.
   const typed = computePlan({
@@ -339,9 +358,29 @@ console.log('\n--- the card states the saving hours it carries ---')
     people: base.people.map((p) => (p.id === 'james'
       ? { ...p, kpi: { 'obj-efficiency': { target: 5000 } } } : p)),
   }).people.find((p) => p.id === 'james')
-  check('typing a target over does not change what the card carries',
-    Math.abs(typed.kpiTotals.savingHours - james.kpiTotals.savingHours) < 1e-9,
-    `${typed.kpiTotals.savingHours.toFixed(1)} vs ${james.kpiTotals.savingHours.toFixed(1)}`)
+  // A typed target IS the commitment, so the total under the rows moves with
+  // it — a card whose total ignored its own rows could not be added up.
+  const typedLine = james.kpiLines.find((l) => l.id === 'obj-efficiency')
+  // Against the EXACT credited figure, not the rounded one shown in the box:
+  // an untouched line contributes the register's own number, so that is what
+  // the typed figure replaces.
+  check('TYPING A TARGET MOVES THE TOTAL BY EXACTLY THE DIFFERENCE',
+    Math.abs((typed.kpiTotals.savingHours - james.kpiTotals.savingHours)
+      - (5000 - typedLine.creditedHours)) < 1e-6,
+    `${james.kpiTotals.savingHours.toFixed(1)} -> ${typed.kpiTotals.savingHours.toFixed(1)}`
+    + ` (line was ${typedLine.creditedHours}, shown as ${typedLine.target})`)
+  check('and the headline above it moves with the card',
+    Math.abs(typed.scorecardHours - typed.kpiTotals.savingHours) < 1e-6,
+    `${typed.scorecardHours.toFixed(1)} vs ${typed.kpiTotals.savingHours.toFixed(1)}`)
+  check('while the register figure behind it stays put',
+    Math.abs(typed.registerHours - james.registerHours) < 1e-9,
+    `${typed.registerHours.toFixed(1)} vs ${james.registerHours.toFixed(1)}`)
+  check('and the committed book does not move at all',
+    Math.abs(computePlan({
+      ...base,
+      people: base.people.map((p) => (p.id === 'james'
+        ? { ...p, kpi: { 'obj-efficiency': { target: 5000 } } } : p)),
+    }).totals.committedHours - computePlan(base).totals.committedHours) < 1e-9)
 
   // An override does move it — that is the whole point of an override.
   const over = computePlan({

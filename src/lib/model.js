@@ -561,6 +561,53 @@ export function applyPersonOverride(person, figures) {
  * Only the hours lines are added. A money target, a date and a sentence are
  * not hours, and a total that quietly mixed them would be worse than no total.
  */
+/**
+ * The saving hours a card STATES.
+ *
+ * Not the hours behind it: the hours written on it. A target typed over is a
+ * commitment, and a card whose total ignored what its own rows say is a card
+ * nobody can add up — you type 2,100 into a line and the total underneath does
+ * not move.
+ *
+ * A line stated in hours contributes what it says. A line stated in baht or as
+ * a date still carries hours, so it contributes those — otherwise objective 1
+ * and objective 3 would silently drop out of the total. Both are shown on the
+ * line itself, so the column adds up on screen.
+ *
+ * With nothing typed, every hours target defaults to the credited figure, so
+ * this equals the register exactly. It only diverges once somebody edits, and
+ * then it diverges because they meant it to.
+ */
+export function lineStatedHours(l) {
+  const asTyped = () => {
+    const n = Number(l.target)
+    return Number.isFinite(n) && n > 0 ? n : 0
+  }
+  // A hand-written line has no register figure behind it; what it says is all
+  // there is.
+  if (l.custom) return l.targetKind === 'hours' ? asTyped() : 0
+  // A typed hours target is a commitment and counts as typed. An untouched one
+  // is the credited figure ROUNDED for display, so the exact figure is used
+  // instead — otherwise an untouched card drifts from the register by the
+  // rounding on each line.
+  if (l.targetKind === 'hours' && l.targetPinned) return asTyped()
+  return l.creditedHours ?? (l.targetKind === 'hours' ? asTyped() : 0)
+}
+
+export function statedHours(lines) {
+  return (Array.isArray(lines) ? lines : []).reduce((a, l) => a + lineStatedHours(l), 0)
+}
+
+/** The same, split by objective, so a team figure can be built out of them. */
+export function statedByObjective(lines) {
+  const out = {}
+  for (const l of Array.isArray(lines) ? lines : []) {
+    if (!l.objective) continue
+    out[l.objective] = (out[l.objective] || 0) + lineStatedHours(l)
+  }
+  return out
+}
+
 export function kpiTargetTotals(lines) {
   const list = Array.isArray(lines) ? lines : []
   const sumOf = (kind) => list
@@ -577,11 +624,13 @@ export function kpiTargetTotals(lines) {
    * carries — a number that looks like the headline, is not, and would be
    * taken for it.
    */
-  const savingHours = list.reduce((a, l) => a + (l.creditedHours ?? 0), 0)
+  const savingHours = statedHours(list)
 
   return {
-    // What the person carries across every line on the card.
+    // What the card STATES across its lines — the number the rows add up to.
     savingHours,
+    // And what the register puts behind them, for comparison.
+    creditedHours: list.reduce((a, l) => a + (l.creditedHours ?? 0), 0),
     // What is literally typed in the Target column, by unit.
     hours: sumOf('hours'),
     money: sumOf('thb'),
@@ -677,6 +726,11 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
         // by hand in a scenario file — cannot leave the card off the grid.
         weight: typeof o.weight === 'number' ? snapWeight(o.weight * 100) / 100 : l.weight,
         weightPinned: typeof o.weight === 'number',
+        // Specifically the target, not "something on this line was edited":
+        // the total below the card uses the typed figure where there is one
+        // and the exact credited figure where there is not, so an untouched
+        // card still totals what the register says to the last decimal.
+        targetPinned: hasTargetOverride,
         target,
         defaultWeight: l.weight,
         // The live figure straight from current project assignments. Reassign a
@@ -1721,7 +1775,40 @@ export function computePlan(state) {
   // not just their own slice. Their figures are built by summing the others'
   // rather than re-deriving from projects, so the lead's number is provably
   // the sum of the team's and the two can never disagree.
-  const teamHours = byPersonShown.reduce((a, p) => a + p.hours, 0)
+  /*
+   * Every member's card is built BEFORE the team is summed.
+   *
+   * The lead's figure is the sum of the cards it aggregates, and those cards
+   * state whatever their targets say. Summing the register instead would leave
+   * the lead disagreeing with the people underneath it the moment one of them
+   * typed a target.
+   */
+  const cardOf = (person, byObj, benefitByObj, rows) => {
+    const derived = OBJECTIVE_ORDER.filter((id) => (byObj[id] || 0) > 0
+      || rows.some((r) => r.p.objective === id))
+    const added = (Array.isArray(person.extraObjectives) ? person.extraObjectives : [])
+      .filter((id) => OBJ_BY_ID[id] && !derived.includes(id))
+    const objectives = OBJECTIVE_ORDER.filter((id) => derived.includes(id) || added.includes(id))
+    const withObjectives = { ...person, objectives }
+    const lines = scorecardWeights(withObjectives, s, byObj, benefitByObj)
+      .map((l) => ({ ...l, manual: !!l.objective && added.includes(l.objective) }))
+    return {
+      derived, added, objectives, withObjectives, lines,
+      stated: statedHours(lines),
+      statedByObjective: statedByObjective(lines),
+    }
+  }
+
+  const memberCards = new Map()
+  for (const p of byPersonShown) {
+    if (p.aggregatesTeam === true) continue
+    memberCards.set(p.id, cardOf(p, p.byObjective, p.benefitByObjective, p.rows))
+  }
+
+  // The lead's own personal share has no card of its own, so it enters the
+  // team figure as the register states it.
+  const teamHours = byPersonShown.reduce(
+    (a, p) => a + (p.aggregatesTeam === true ? p.hours : memberCards.get(p.id).stated), 0)
   const teamManday = byPersonShown.reduce((a, p) => a + p.manday, 0)
   const teamMonthlyBenefit = byPersonShown.reduce((a, p) => a + p.monthlyBenefit, 0)
   const teamHoursMonthlyBenefit = byPersonShown.reduce((a, p) => a + (p.hoursMonthlyBenefit || 0), 0)
@@ -1736,7 +1823,14 @@ export function computePlan(state) {
   const teamByObjective = {}
   const teamBenefitByObjective = {}
   for (const p of byPersonShown) {
-    for (const [k, v] of Object.entries(p.byObjective)) teamByObjective[k] = (teamByObjective[k] || 0) + v
+    // A member contributes what their CARD states; the lead's own personal
+    // share has no card of its own, so it contributes what the register says.
+    // Without this the lead's card ignored a target a member had typed and the
+    // two disagreed by exactly that edit.
+    const contributes = p.aggregatesTeam === true
+      ? p.byObjective
+      : memberCards.get(p.id).statedByObjective
+    for (const [k, v] of Object.entries(contributes)) teamByObjective[k] = (teamByObjective[k] || 0) + v
     for (const [k, v] of Object.entries(p.benefitByObjective)) {
       teamBenefitByObjective[k] = (teamBenefitByObjective[k] || 0) + v
     }
@@ -1774,13 +1868,13 @@ export function computePlan(state) {
      * does mean the card stops being purely a reflection of the project book —
      * so the two kinds are kept apart and every line says which it is.
      */
-    const derivedObjectives = OBJECTIVE_ORDER.filter((id) => (scByObjective[id] || 0) > 0
-      || scRows.some((r) => r.p.objective === id))
-    const addedObjectives = (Array.isArray(p.extraObjectives) ? p.extraObjectives : [])
-      .filter((id) => OBJ_BY_ID[id] && !derivedObjectives.includes(id))
-    const objectives = OBJECTIVE_ORDER.filter(
-      (id) => derivedObjectives.includes(id) || addedObjectives.includes(id))
-    const withObjectives = { ...p, objectives, aggregatesTeam: aggregates }
+    const card = aggregates
+      ? cardOf(p, scByObjective, scBenefitByObjective, scRows)
+      : memberCards.get(p.id)
+    const derivedObjectives = card.derived
+    const addedObjectives = card.added
+    const objectives = card.objectives
+    const withObjectives = { ...card.withObjectives, aggregatesTeam: aggregates }
 
     // Money on the same aggregation rule as the hours: the lead carries the
     // team's, everyone else carries their own.
@@ -1831,12 +1925,21 @@ export function computePlan(state) {
       costedCount: scCostedCount,
     }
 
-    const lines = scorecardWeights(withObjectives, s, scByObjective, scBenefitByObjective)
-      .map((l) => ({ ...l, manual: !!l.objective && addedObjectives.includes(l.objective) }))
+    const lines = card.lines
 
     return {
       ...withObjectives,
-      scorecardHours: scHours,
+      /*
+       * The headline is what the card states, so editing a target moves both
+       * the total under the rows and the figure above them. With nothing typed
+       * the two are identical, because every hours target starts at the
+       * credited figure — this only diverges once somebody edits it.
+       *
+       * An explicit override still wins: that is a figure typed over the whole
+       * card, not over one line of it.
+       */
+      scorecardHours: (aggregates ? led.hoursOverridden : p.hoursOverridden) ? scHours : card.stated,
+      registerHours: scHours,
       // What the register says, kept beside what the card claims: "revert" is
       // then a stored fact rather than a re-derivation that might not match.
       calcScorecardHours: aggregates ? led.calcHours : p.calcHours,
