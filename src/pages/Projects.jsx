@@ -15,7 +15,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
 import {
-  fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, workingDaysBetween,
+  fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
 } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -523,7 +523,7 @@ export default function Projects({
       </Paper>
 
       <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '72vh' }}>
-        <Table size="small" stickyHeader>
+        <Table size="small" stickyHeader sx={{ '& th, & td': { px: 1.25 } }}>
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }}>
@@ -538,6 +538,7 @@ export default function Projects({
               {head('manday', 'Mandays', 'right')}
               {head('buildCost', 'Build cost', 'right', 78)}
               {head('roi', 'ROI', 'right', 78)}
+              {head('paybackMonths', 'Payback', 'right', 74)}
               <TableCell sx={{ minWidth: 104 }}>Commit</TableCell>
               <TableCell sx={{ minWidth: 92, maxWidth: 104, width: 104 }}>Status</TableCell>
               <TableCell padding="checkbox" />
@@ -699,6 +700,31 @@ export default function Projects({
                             {fmtRoi(p.roi)}
                           </Typography>
                         </Box>
+                      </Tooltip>
+                    )}
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
+                    {p.paybackMonths == null ? (
+                      <Tooltip title={
+                        p.savingHours == null
+                          ? 'Saving hours are still TBC, so there is nothing to pay the build back.'
+                          : 'Enter mandays to get a payback period.'
+                      }>
+                        <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title={`${fmtMoney(p.buildCost, sym)} to build, returning ${fmtMoney(p.monthlyBenefit, sym)} a month — repaid in ${fmtMonths(p.paybackMonths)}. The gate is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}.`}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            fontSize: '0.8125rem',
+                            fontVariantNumeric: 'tabular-nums',
+                            cursor: 'help',
+                            color: p.gate === 'pass' ? 'text.primary' : STATUS.critical,
+                          }}
+                        >
+                          {fmtMonthsShort(p.paybackMonths)}
+                        </Typography>
                       </Tooltip>
                     )}
                   </TableCell>

@@ -436,6 +436,16 @@ export const fmtMoneyShort = (n, symbol = '฿') => {
 /** ROI as a percentage. Negative is a loss, so the sign is always shown. */
 export const fmtRoi = (n) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${Math.round(n * 100)}%`)
 
+/**
+ * A payback period narrow enough for a table column. The long form below reads
+ * better in a sentence; this one has to fit beside eleven other columns.
+ */
+export const fmtMonthsShort = (n) => {
+  if (n == null || !Number.isFinite(n)) return '—'
+  if (n < 24) return `${n.toFixed(1)} mo`
+  return `${(n / 12).toFixed(1)} yr`
+}
+
 /** A payback period in the unit that reads best at its own magnitude. */
 export const fmtMonths = (n) => {
   if (n == null || !Number.isFinite(n)) return '—'

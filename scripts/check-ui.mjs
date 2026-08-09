@@ -390,6 +390,8 @@ try {
   const costCol = await colIndex('build cost')
   check('the Projects table has an ROI column', roiCol > 0, `index ${roiCol}`)
   check('and a build cost column beside it', costCol > 0 && costCol < roiCol, `cost ${costCol} / roi ${roiCol}`)
+  const paybackCol = await colIndex('payback')
+  check('and a payback column after it', paybackCol === roiCol + 1, `payback ${paybackCol} / roi ${roiCol}`)
 
   // No effort in the seed, so ROI starts blank by design rather than as zero.
   const roiBefore = await page.evaluate((ix) => {
@@ -414,10 +416,12 @@ try {
   const money = await page.evaluate((c, r) => ({
     cost: document.querySelector('tbody tr').children[c]?.innerText.trim(),
     roi: document.querySelector('tbody tr').children[r]?.innerText.trim(),
+    payback: document.querySelector('tbody tr').children[r + 1]?.innerText.trim(),
     strip: document.body.innerText.match(/BENEFIT \/ YEAR\s*\n\s*([^\n]+)/)?.[1]?.trim(),
   }), costCol, roiCol)
   check('entering mandays fills in the build cost', /\d/.test(money.cost) && money.cost !== '—', money.cost)
   check('and shows an ROI for that project', /%/.test(money.roi), money.roi)
+  check('and a payback period', /mo|yr/.test(money.payback || ''), money.payback)
   check('the benefit was already known without any effort estimate',
     /\d/.test(money.strip || ''), String(money.strip))
 
