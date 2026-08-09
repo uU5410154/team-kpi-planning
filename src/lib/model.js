@@ -713,6 +713,85 @@ export const ROLE_LABEL = {
  * Returns the patch to apply, so the UI, the tests and any bulk edit all
  * reassign roles the same way.
  */
+/**
+ * Repair state written before a PIC change moved the project.
+ *
+ * Changing the PIC used to write only the `pic` field. Credit comes from the
+ * contributor list, so the previous owner stayed on it at dev weight (1.0)
+ * against the new owner's bare assignee weight (0.3) — the project kept 77% of
+ * its hours on the scorecard it had just been taken off. reassignPatch fixed
+ * the write; it cannot fix what was already saved, and dropping the cache to
+ * clear it would throw away the user's whole plan.
+ *
+ * The damage has a signature: the PIC holds a scorecard, is NOT in the
+ * contributor list, and somebody else who holds a scorecard IS. Before roles
+ * could be set by hand there was no way to reach that state deliberately, so
+ * it is repaired by moving the stranded owner's entry — and their roles — to
+ * the PIC.
+ *
+ * It runs ONCE, stamped, never on every load. With the role editor that state
+ * is now reachable on purpose: clearing the PIC's roles leaves them the bare
+ * assignee while a colleague does the work. Repairing that on every render
+ * would make it impossible to set.
+ *
+ * Anything owned by IT or another partner team is left alone — a partner
+ * owning delivery while a team member develops is a real arrangement, not
+ * damage.
+ */
+export function repairOwnership(projects, people, roleWeights = DEFAULT_ROLE_WEIGHTS) {
+  // The SAME definition of an owner computePlan uses. Taking the whole roster
+  // would move hours onto IT, who is assignable as PIC but carries no KPI —
+  // the hours would leave the team's numbers without appearing anywhere else.
+  const owners = new Set((people || []).filter((p) => p.scorecard !== false).map((p) => p.id))
+  const weightOf = (c) => Math.max(...(c.roles || []).map((r) => roleWeights[r] ?? 0), 0)
+  let repaired = 0
+
+  const out = (projects || []).map((p) => {
+    const list = Array.isArray(p.contributors) ? p.contributors : []
+    if (!p.pic || !owners.has(p.pic) || !list.length) return p
+    if (list.some((c) => c.person === p.pic)) return p
+
+    const stranded = list
+      .filter((c) => owners.has(c.person))
+      .sort((a, b) => weightOf(b) - weightOf(a))[0]
+    if (!stranded) return p
+
+    repaired++
+    return {
+      ...p,
+      contributors: list.map((c) => (c === stranded ? { ...c, person: p.pic } : c)),
+    }
+  })
+  return { projects: out, repaired }
+}
+
+/**
+ * One-off data repairs, stamped so each runs exactly once.
+ *
+ * Deliberately NOT the storage VERSION: bumping that DISCARDS the cache, which
+ * would cost the user every edit they have made. A repair fixes the damage in
+ * place and leaves the rest of the plan alone.
+ *
+ * 1: a PIC change used to write only `pic`, leaving the project on the old
+ *    owner's scorecard at 77%.
+ */
+export const REPAIR_VERSION = 1
+
+/**
+ * Apply any repair this state has not had yet, and stamp it.
+ *
+ * Lives here rather than in storage so it can be tested directly — and so the
+ * browser cache, a scenario file and a scenario read back out of the database
+ * all go through the one path.
+ */
+export function repairState(s) {
+  if (!s || !Array.isArray(s.projects) || s.repair === REPAIR_VERSION) {
+    return { ...s, repair: REPAIR_VERSION }
+  }
+  const { projects } = repairOwnership(s.projects, s.people)
+  return { ...s, projects, repair: REPAIR_VERSION }
+}
+
 export function setRolesPatch(project, person, roles) {
   const list = Array.isArray(project.contributors) ? project.contributors : []
   const clean = ROLE_ORDER.filter((r) => (roles || []).includes(r))

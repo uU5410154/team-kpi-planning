@@ -17,7 +17,7 @@ import ScenarioDialog from './components/ScenarioDialog.jsx'
 import { buildTheme } from './theme.js'
 import { computePlan, newProject, rebalanceWeights, reassignPatch } from './lib/model.js'
 import * as api from './lib/api.js'
-import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset } from './lib/storage.js'
+import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
 import Dashboard from './pages/Dashboard.jsx'
@@ -99,7 +99,7 @@ export default function App() {
     try {
       const r = await api.saveScenario(
         name,
-        { people: state.people, projects: state.projects, settings: state.settings },
+        { people: state.people, projects: state.projects, settings: state.settings, repair: state.repair },
         localStorage.getItem('fa-kpi-author') || '',
       )
       setDirty(false)
@@ -484,11 +484,14 @@ export default function App() {
           state={state}
           onToast={setToast}
           onLoad={(payload, name) => {
-            setState((s) => ({
+            // A scenario saved before the reassignment fix carries the same
+            // damage as a stale browser, so it gets the same repair.
+            setState((s) => repairState({
               ...s,
               people: payload.people,
               projects: payload.projects,
               settings: { ...s.settings, ...payload.settings },
+              repair: payload.repair,
               scenarioName: name,
             }))
             // a freshly loaded scenario matches the database

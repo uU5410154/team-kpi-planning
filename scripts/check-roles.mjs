@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs'
 import ExcelJS from 'exceljs'
 import {
   computePlan, DEFAULT_SETTINGS, DEFAULT_ROLE_WEIGHTS, ROLE_ORDER, ROLE_LABEL,
-  setRolesPatch, creditRows, creditSummary, projectShares, weightsValid,
+  setRolesPatch, creditRows, creditSummary, projectShares, weightsValid, repairOwnership,
 } from '../src/lib/model.js'
 import { buildWorkbook } from '../src/lib/exportXlsx.js'
 
@@ -261,6 +261,80 @@ console.log('\n--- the workbook says the same thing ---')
     Math.abs(committed - computePlan(base).totals.committedHours) < 0.51,
     `${committed} vs ${computePlan(base).totals.committedHours.toFixed(1)}`)
 }
+
+/* ---------------- 7. repairing what the old bug already saved ---------------- */
+console.log('\n--- repairing state the old PIC write already damaged ---')
+{
+  const KEY = 'FNP-379'
+  // The exact damage: the PIC was moved to Gun, the contributor list was not.
+  const damaged = base.projects.map((p) => (p.key === KEY ? { ...p, pic: 'gun' } : p))
+  const before = computePlan({ ...base, projects: damaged })
+  const bp = before.projects.find((p) => p.key === KEY)
+  check('the damaged state really is damaged',
+    bp.shares.james > 0.5, `${Math.round((bp.shares.james || 0) * 100)}% still James`)
+
+  const { projects, repaired } = repairOwnership(damaged, base.people)
+  const after = computePlan({ ...base, projects })
+  const ap = after.projects.find((p) => p.key === KEY)
+  check('REPAIR GIVES THE PROJECT TO THE PIC', Math.abs((ap.shares.gun || 0) - 1) < 1e-9,
+    JSON.stringify(ap.shares))
+  check('it reports what it touched', repaired === 1, String(repaired))
+  check('THE OLD OWNER NO LONGER CARRIES IT',
+    !after.people.find((p) => p.id === 'james').rows.some((r) => r.p.key === KEY))
+  check('the stranded owner\'s roles move with the project',
+    projects.find((p) => p.key === KEY).contributors.find((c) => c.person === 'gun').roles.join('/') === 'dev')
+  check('the team total does not move',
+    Math.abs(before.totals.totalHours - after.totals.totalHours) < 1e-9)
+  check('every scorecard still totals 100%',
+    after.people.every((p) => weightsValid(p.kpiLines)) && after.invalid.length === 0)
+  check('running it twice changes nothing',
+    JSON.stringify(repairOwnership(projects, base.people).projects) === JSON.stringify(projects)
+    && repairOwnership(projects, base.people).repaired === 0)
+
+  // What it must NOT touch.
+  const untouched = (label, proj) => {
+    const one = [{ ...base.projects[0], ...proj, key: 'T-1' }]
+    const out = repairOwnership(one, base.people)
+    check(label, out.repaired === 0 && JSON.stringify(out.projects) === JSON.stringify(one),
+      JSON.stringify(out.projects[0].contributors))
+  }
+  untouched('a PIC already in the list is left alone',
+    { pic: 'gun', contributors: [{ person: 'gun', roles: ['dev'] }, { person: 'kade', roles: ['qa'] }] })
+  untouched('a project with no contributors is left alone',
+    { pic: 'gun', contributors: [] })
+  untouched('a project with no PIC is left alone',
+    { pic: null, contributors: [{ person: 'kade', roles: ['dev'] }] })
+  untouched('a PARTNER-OWNED project is left alone',
+    { pic: 'it', contributors: [{ person: 'kade', roles: ['dev'] }] })
+  untouched('a list of only partner people is left alone',
+    { pic: 'gun', contributors: [{ person: 'it', roles: ['dev'] }] })
+
+  // With two stranded owners the strongest role is the displaced owner.
+  const two = [{
+    ...base.projects[0],
+    key: 'T-2',
+    pic: 'gun',
+    contributors: [{ person: 'kade', roles: ['qa'] }, { person: 'james', roles: ['dev'] }],
+  }]
+  const fixed = repairOwnership(two, base.people).projects[0]
+  check('the strongest stranded owner is the one displaced',
+    fixed.contributors.some((c) => c.person === 'gun' && c.roles.join('/') === 'dev')
+    && fixed.contributors.some((c) => c.person === 'kade')
+    && !fixed.contributors.some((c) => c.person === 'james'),
+    JSON.stringify(fixed.contributors))
+  check('and the collaborator keeps their place in the list',
+    fixed.contributors[0].person === 'kade', JSON.stringify(fixed.contributors.map((c) => c.person)))
+
+  // A deliberate setup made with the role editor survives — the PIC can hold
+  // no role at all while a colleague does the work. That is the same SHAPE the
+  // repair looks for, which is why it is stamped and runs once.
+  const deliberate = { ...base.projects[0], key: 'T-3', pic: 'gun', contributors: [{ person: 'kade', roles: ['dev'] }] }
+  const asSet = projectShares(deliberate).shares
+  check('the shape the repair looks for is a legitimate one to set by hand',
+    Math.abs(asSet.gun - 0.3 / 1.3) < 1e-9 && Math.abs(asSet.kade - 1 / 1.3) < 1e-9,
+    JSON.stringify(asSet))
+}
+
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

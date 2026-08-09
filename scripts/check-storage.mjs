@@ -72,5 +72,69 @@ check('accepts state from the current seed',
   !isStale({ version, seedStamp: stamp, projects: seed.projects }))
 
 console.log(`\nstamp: ${stamp}`)
+/* ---------------- the one-off ownership repair ---------------- */
+console.log('\n--- repairing state the old PIC write already saved ---')
+{
+  const { repairState, REPAIR_VERSION, computePlan, DEFAULT_SETTINGS } = await import('../src/lib/model.js')
+
+  check('a repair is stamped separately from the cache VERSION',
+    Number.isFinite(REPAIR_VERSION), `r${REPAIR_VERSION}`)
+  check('BUMPING A REPAIR DOES NOT DISCARD THE PLAN',
+    !src.includes('parsed.repair !== REPAIR') && !src.includes('repair !== REPAIR ||'),
+    'a repair must fix state in place, not throw the user\'s edits away')
+  check('a fresh state carries the stamp', src.includes('repair: REPAIR'))
+  check('the cache runs it on load', /return repairState\(/.test(src))
+  check('and a scenario file goes through the same path', /resolve\(repairState\(/.test(src))
+  // The stamp must come from what was STORED. freshState carries the current
+  // one, so merging first handed old state a stamp it never earned and the
+  // repair skipped the very state it exists for.
+  check('THE STAMP IS READ FROM THE STORED STATE, NOT THE MERGE',
+    (src.match(/repair: parsed\.repair/g) || []).length === 2,
+    `${(src.match(/repair: parsed\.repair/g) || []).length} of 2 entry points`)
+
+  // Damaged exactly as the old build left it: the PIC was moved, the
+  // contributor list was not. Version and seed stamp are current, so this
+  // state is NOT stale — it loads, and it is wrong.
+  const damaged = {
+    version, seedStamp: stamp, meta: seed.meta, people: seed.people,
+    projects: seed.projects.map((p) => (p.key === 'FNP-379' ? { ...p, pic: 'gun' } : p)),
+    settings: DEFAULT_SETTINGS,
+  }
+  const asLoaded = computePlan(damaged)
+  check('the damaged state is not stale, so it really would load',
+    !(damaged.version !== version || damaged.seedStamp !== stamp))
+  check('and it really is wrong before the repair',
+    asLoaded.projects.find((p) => p.key === 'FNP-379').shares.james > 0.5,
+    `${Math.round(asLoaded.projects.find((p) => p.key === 'FNP-379').shares.james * 100)}% still James`)
+
+  const fixed = repairState(damaged)
+  const after = computePlan(fixed)
+  const one = after.projects.find((p) => p.key === 'FNP-379')
+  check('LOADING REPAIRS IT', Math.abs((one.shares.gun || 0) - 1) < 1e-9, JSON.stringify(one.shares))
+  check('the old owner no longer carries it',
+    !after.people.find((p) => p.id === 'james').rows.some((r) => r.p.key === 'FNP-379'))
+  check('and it stamps the state so it never runs twice', fixed.repair === REPAIR_VERSION)
+  check('the rest of the plan survives untouched',
+    fixed.projects.length === damaged.projects.length && fixed.people.length === damaged.people.length)
+  check('the team total does not move',
+    Math.abs(asLoaded.totals.totalHours - after.totals.totalHours) < 1e-9)
+
+  // Already stamped: a deliberate hand-set arrangement must survive. This is
+  // the same SHAPE the repair looks for, which is why it is stamped and runs
+  // once rather than on every load.
+  const deliberate = repairState({
+    ...damaged,
+    repair: REPAIR_VERSION,
+    projects: seed.projects.map((p) => (p.key === 'FNP-379'
+      ? { ...p, pic: 'gun', contributors: [{ person: 'kade', roles: ['dev'] }] } : p)),
+  })
+  const kept = deliberate.projects.find((p) => p.key === 'FNP-379')
+  check('A STAMPED STATE IS LEFT EXACTLY AS THE USER SET IT',
+    kept.contributors.length === 1 && kept.contributors[0].person === 'kade',
+    JSON.stringify(kept.contributors))
+  check('repairing an already-repaired state is a no-op',
+    JSON.stringify(repairState(fixed)) === JSON.stringify(fixed))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

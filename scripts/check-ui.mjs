@@ -1117,6 +1117,62 @@ try {
   check('THE PROJECT IS ON THE QA\'S SCORECARD', !!kadeRow, String(kadeRow))
   check('and his row names the role he holds on it', /qa/i.test(kadeRow || ''), String(kadeRow))
 
+
+  /* ---------- a browser already holding the damaged state ---------- */
+  // The reported case: the PIC had been changed with the old build, so the
+  // browser holds pic=gun with the contributor list still naming James. The
+  // fix only guards new edits; this state has to be repaired on load or the
+  // project stays on his scorecard forever.
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?dmg=0#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+
+  const headlineBefore = await page.evaluate(() =>
+    document.body.innerText.match(/([\d,]+)\s*\/\s*3,000/)?.[1] ?? null)
+  const damage = await page.evaluate(() => {
+    const KEY = 'fa-tech-kpi-2026'
+    const st = JSON.parse(localStorage.getItem(KEY))
+    if (!st) return { ok: false, why: 'the app saved nothing to load back' }
+    const before = st.projects.find((p) => p.key === 'FNP-379')
+    // exactly what the old write did: move the pic, leave the list behind
+    st.projects = st.projects.map((p) => (p.key === 'FNP-379' ? { ...p, pic: 'gun' } : p))
+    delete st.repair
+    localStorage.setItem(KEY, JSON.stringify(st))
+    return { ok: true, contributors: JSON.stringify(before.contributors), pic: before.pic }
+  })
+  check('the browser can be put into the damaged state', damage.ok, JSON.stringify(damage))
+  check('and that state is the one that was reported',
+    /james/.test(damage.contributors || ''), `${damage.pic} / ${damage.contributors}`)
+
+  await page.goto(`${base}/?dmg=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const repaired = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    const p = st.projects.find((x) => x.key === 'FNP-379')
+    return { repair: st.repair, pic: p.pic, contributors: JSON.stringify(p.contributors) }
+  })
+  check('LOADING THE APP REPAIRS THE STORED STATE',
+    !/james/.test(repaired.contributors) && /gun/.test(repaired.contributors),
+    JSON.stringify(repaired))
+  check('and stamps it so it never runs again', repaired.repair === 1, String(repaired.repair))
+
+  await page.goto(`${base}/?dmg=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const dmgTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+    dmgTabs.findIndex((t) => /James/.test(t)))
+  await new Promise((r) => setTimeout(r, 1400))
+  const jamesNow = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    const t = heads[heads.length - 1].closest('table')
+    return [...t.querySelectorAll('tbody tr')].some((r) => /FNP-379/.test(r.innerText))
+  })
+  check('SO PL FORECAST IS GONE FROM JAMES\'S SCORECARD', jamesNow === false)
+  const dmgHeadline = await page.evaluate(() => document.body.innerText.match(/([\d,]+)\s*\/\s*3,000/)?.[1] ?? null)
+  check('and the team headline is untouched by the repair', dmgHeadline === headlineBefore,
+    `${headlineBefore} -> ${dmgHeadline}`)
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

@@ -1,11 +1,17 @@
 import seed from '../data/seed.json'
-import { DEFAULT_SETTINGS } from './model.js'
+import { DEFAULT_SETTINGS, repairState, REPAIR_VERSION } from './model.js'
 
 const KEY = 'fa-tech-kpi-2026'
 // 5: the corporate and capability KPI lines were dropped, and typed weights are
 // now held rather than rescaled — cached state pinned by the old rescale would
 // come back off the grid and block the save.
 const VERSION = 5
+
+// The repair stamp and the repairs themselves live in the model, so they can
+// be tested without a bundler and so every way state arrives — this cache, a
+// scenario file, a scenario read out of the database — goes through one path.
+const REPAIR = REPAIR_VERSION
+export { repairState }
 
 /** FNV-1a. Cheap, stable, and enough to tell two seed files apart. */
 function hash(str) {
@@ -31,6 +37,7 @@ const seedStamp = () =>
 
 export const freshState = () => ({
   version: VERSION,
+  repair: REPAIR,
   seedStamp: seedStamp(),
   meta: seed.meta,
   people: seed.people.map((p) => ({ ...p })),
@@ -55,8 +62,18 @@ export function loadState() {
     if (!raw) return freshState()
     const parsed = JSON.parse(raw)
     if (isStale(parsed)) return freshState()
-    // Merge forward so a settings key added in a later build is never undefined.
-    return { ...freshState(), ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } }
+    // Merge forward so a settings key added in a later build is never undefined,
+    // then apply any repair this state predates.
+    //
+    // The stamp is taken from what was STORED, not from the merge: freshState
+    // carries the current stamp, so merging first handed old state a stamp it
+    // never earned and the repair skipped the very state it exists for.
+    return repairState({
+      ...freshState(),
+      ...parsed,
+      repair: parsed.repair,
+      settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
+    })
   } catch {
     return freshState()
   }
@@ -109,7 +126,12 @@ export function readScenarioFile(file) {
           reject(new Error('Not a valid scenario file — missing projects or people.'))
           return
         }
-        resolve({ ...freshState(), ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } })
+        resolve(repairState({
+          ...freshState(),
+          ...parsed,
+          repair: parsed.repair,
+          settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
+        }))
       } catch (e) {
         reject(new Error(`Could not parse the file: ${e.message}`))
       }
