@@ -897,6 +897,104 @@ try {
     objRowsBack.join('|') === objRowsBefore.join('|') && objWBack.join('+') === objWBefore.join('+'),
     `${objWBack.join('+')} vs ${objWBefore.join('+')}`)
 
+
+  /* ---------- reassigning a project really moves it ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?pic=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  // Dismiss anything an earlier step left mounted — a stray backdrop swallows
+  // the clicks below and the failure looks like a broken feature.
+  await page.keyboard.press('Escape')
+  await new Promise((r) => setTimeout(r, 300))
+  await page.type('input[placeholder="Search key, project, team, assignee…"]', 'FNP-379')
+  await new Promise((r) => setTimeout(r, 1000))
+
+  // What James's scorecard looks like before the move, so "it left him" is a
+  // measured drop and not just an absence.
+  const portfolio = async (who) => {
+    await page.goto(`${base}/?pf=${who}#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await new Promise((r) => setTimeout(r, 1500))
+    const tabs = await page.evaluate(() =>
+      [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+    const ix = tabs.findIndex((t) => new RegExp(who, 'i').test(t))
+    await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(), ix)
+    await new Promise((r) => setTimeout(r, 1200))
+    return page.evaluate(() => {
+      const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+      const t = heads[heads.length - 1].closest('table')
+      const rows = [...t.querySelectorAll('tbody tr')]
+      return { count: rows.length, has379: rows.some((r) => /FNP-379/.test(r.innerText)) }
+    })
+  }
+  const jamesBefore = await portfolio('James')
+  check('James starts with FNP-379 in his portfolio', jamesBefore.has379, JSON.stringify(jamesBefore))
+
+  await page.goto(`${base}/?pic=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  await page.type('input[placeholder="Search key, project, team, assignee…"]', 'FNP-379')
+  await new Promise((r) => setTimeout(r, 700))
+
+  const picOf = () => page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.indexOf('pic')
+    return document.querySelector('tbody tr').children[ix]?.innerText.trim()
+  })
+  check('found FNP-379 on the Projects tab', (await picOf()) === 'James', String(await picOf()))
+
+  // Change the PIC the way a user does: the dropdown in the row.
+  await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.indexOf('pic')
+    const combo = document.querySelector('tbody tr').children[ix].querySelector('[role="combobox"]')
+    combo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  })
+  // Find the option and take its coordinates in the SAME evaluate that proves
+  // it is mounted — a second round trip came back empty even though the menu
+  // was open before it and still open after it.
+  let optBox = null
+  for (let i = 0; i < 40 && !optBox; i++) {
+    optBox = await page.evaluate(() => {
+      const opt = [...document.querySelectorAll('[role="option"]')]
+        .find((o) => /^Gun/.test((o.textContent || '').trim()))
+      if (!opt) return null
+      const r = opt.getBoundingClientRect()
+      if (!r.width || !r.height) return null
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })
+    if (!optBox) await new Promise((r) => setTimeout(r, 250))
+  }
+  check('the Gun option is on screen', !!optBox, JSON.stringify(optBox))
+  if (optBox) await page.mouse.click(optBox.x, optBox.y)
+  await new Promise((r) => setTimeout(r, 1400))
+  const picDiag = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.indexOf('pic')
+    const rows = document.querySelectorAll('tbody tr').length
+    const listboxes = document.querySelectorAll('[role="listbox"]').length
+    const opts = [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()).slice(0, 4)
+    return {
+      ix, rows, listboxes, opts,
+      dialogs: document.querySelectorAll('[role="dialog"]').length,
+      backdrops: document.querySelectorAll('.MuiBackdrop-root').length,
+      cell: document.querySelector('tbody tr')?.children[ix]?.innerText.trim(),
+    }
+  })
+  check('the PIC changed to Gun', (await picOf()) === 'Gun', JSON.stringify(picDiag))
+
+  // James's scorecard must no longer carry it — one row fewer, and that row is
+  // the one that moved.
+  const jamesAfter = await portfolio('James')
+  check('REASSIGNED PROJECT IS GONE FROM THE OLD OWNER SCORECARD',
+    jamesAfter.has379 === false, JSON.stringify(jamesAfter))
+  check('and his portfolio is exactly one row shorter',
+    jamesAfter.count === jamesBefore.count - 1, `${jamesBefore.count} -> ${jamesAfter.count}`)
+
+  // The new owner is the team lead, whose portfolio is the whole book either
+  // way, so presence there proves nothing. What proves it is the Projects tab
+  // reading Gun (checked above) and the hours landing on him.
+  const gunAfter = await portfolio('Gun')
+  check('and it is on the new owner scorecard', gunAfter.has379 === true, JSON.stringify(gunAfter))
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

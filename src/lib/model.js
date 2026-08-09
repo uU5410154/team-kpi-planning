@@ -652,6 +652,39 @@ export const invalidScorecards = (people) =>
     sum: weightSum(p.kpiLines),
   }))
 
+/**
+ * Move a project to a new owner.
+ *
+ * Setting `pic` alone is not a reassignment. Credit is worked out from
+ * `contributors` — a role-weighted list — and the PIC only counts as a bare
+ * assignee when nobody is listed. So changing the PIC on its own left the
+ * previous owner in the contributor list at dev weight (1.0) against the new
+ * owner's assignee weight (0.3), and the project stayed 77% with the person it
+ * had just been taken off.
+ *
+ * The previous owner's entry MOVES to the new one, carrying its roles. Anyone
+ * else listed is a genuine collaborator and is left exactly as they are.
+ *
+ * Returns the patch to apply, so the UI and the tests reassign the same way.
+ */
+export function reassignPatch(project, nextPic) {
+  const prev = project.pic ?? null
+  const next = nextPic || null
+  if (prev === next) return { pic: next }
+
+  const list = Array.isArray(project.contributors) ? project.contributors : []
+  const moving = list.find((c) => c.person === prev)
+  const rest = list.filter((c) => c.person !== prev && c.person !== next)
+
+  if (!next) {
+    // Unassigned. The hours fall to whoever absorbs unowned work.
+    return { pic: null, contributors: rest }
+  }
+  const already = list.find((c) => c.person === next)
+  const roles = (already && already.roles) || (moving && moving.roles) || ['dev']
+  return { pic: next, contributors: [...rest, { person: next, roles }] }
+}
+
 export const ROLE_ORDER = ['pm', 'lead', 'dev', 'support', 'qa', 'assignee']
 
 /** Blank row for the "add project" action. */

@@ -15,7 +15,7 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import ScenarioDialog from './components/ScenarioDialog.jsx'
 
 import { buildTheme } from './theme.js'
-import { computePlan, newProject, rebalanceWeights } from './lib/model.js'
+import { computePlan, newProject, rebalanceWeights, reassignPatch } from './lib/model.js'
 import * as api from './lib/api.js'
 import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
@@ -122,11 +122,21 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  /** Patch one project by Jira key. */
+  /**
+    * Patch one project by Jira key.
+    *
+    * A PIC change is special: credit comes from the contributor list, not from
+    * the `pic` field, so writing `pic` alone leaves the previous owner holding
+    * the project. reassignPatch moves their entry across.
+    */
   const updateProject = useCallback((key, patch) => {
     setState((s) => ({
       ...s,
-      projects: s.projects.map((p) => (p.key === key ? { ...p, ...patch } : p)),
+      projects: s.projects.map((p) => {
+        if (p.key !== key) return p
+        const full = 'pic' in patch ? { ...patch, ...reassignPatch(p, patch.pic) } : patch
+        return { ...p, ...full }
+      }),
     }))
   }, [])
 
@@ -292,7 +302,13 @@ export default function App() {
     const set = new Set(keys)
     setState((s) => ({
       ...s,
-      projects: s.projects.map((p) => (set.has(p.key) ? { ...p, ...patch } : p)),
+      // Same rule as a single edit: assigning a PIC in bulk has to move the
+      // contributor record too, or every project stays with its old owner.
+      projects: s.projects.map((p) => {
+        if (!set.has(p.key)) return p
+        const full = 'pic' in patch ? { ...patch, ...reassignPatch(p, patch.pic) } : patch
+        return { ...p, ...full }
+      }),
     }))
     setToast({ severity: 'success', msg: `Updated ${keys.length} project${keys.length === 1 ? '' : 's'}.` })
   }, [])

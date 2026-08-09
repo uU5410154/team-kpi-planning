@@ -7,7 +7,10 @@
  * Run with: node scripts/check-reassign.mjs
  */
 import { readFileSync } from 'node:fs'
-import { computePlan, DEFAULT_SETTINGS, weightSum, weightsValid, rebalanceWeights } from '../src/lib/model.js'
+import {
+ computePlan, DEFAULT_SETTINGS, weightSum, weightsValid, rebalanceWeights,
+  reassignPatch,
+} from '../src/lib/model.js'
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
 const base = { meta: seed.meta, people: seed.people, projects: seed.projects, settings: DEFAULT_SETTINGS }
@@ -116,6 +119,95 @@ const bad = computePlan({
 check('typing every weight over 100% is still blocked',
   bad.invalid.some((x) => x.id === 'pol'),
   bad.invalid.map((x) => `${x.nick} ${(x.sum * 100).toFixed(0)}%`).join(', '))
+
+
+/* ================= reassigning actually reassigns ================= */
+console.log('\n--- changing the PIC moves the project off the old owner ---')
+{
+  // The reported bug: the PIC was changed from James to Gun and James kept 77%
+  // of the project, because credit comes from the contributor list and only the
+  // `pic` field had been written.
+  const one = base.projects.find((p) => p.key === 'FNP-379')
+  check('the fixture is the reported project, owned by James',
+    !!one && one.pic === 'james' && one.savingHours > 0, `${one && one.pic} / ${one && one.savingHours}h`)
+
+  const before = computePlan(base)
+  const jBefore = before.people.find((p) => p.id === 'james')
+  const gBefore = before.people.find((p) => p.id === 'gun')
+
+  // Writing pic alone is what the UI used to do — prove it was broken, so this
+  // check fails loudly if the reassign path is ever bypassed again.
+  const naive = computePlan({
+    ...base,
+    projects: base.projects.map((p) => (p.key === one.key ? { ...p, pic: 'gun' } : p)),
+  }).projects.find((p) => p.key === one.key)
+  check('writing pic alone would leave the old owner holding it',
+    (naive.shares.james || 0) > 0.5, `${Math.round((naive.shares.james || 0) * 100)}% still James`)
+
+  // The real path.
+  const patch = reassignPatch(one, 'gun')
+  const after = computePlan({
+    ...base,
+    projects: base.projects.map((p) => (p.key === one.key ? { ...p, ...patch } : p)),
+  })
+  const pr = after.projects.find((p) => p.key === one.key)
+  const jAfter = after.people.find((p) => p.id === 'james')
+  const gAfter = after.people.find((p) => p.id === 'gun')
+
+  check('REASSIGNING GIVES THE WHOLE PROJECT TO THE NEW OWNER',
+    Math.abs((pr.shares.gun || 0) - 1) < 1e-9 && !(pr.shares.james > 0),
+    JSON.stringify(pr.shares))
+  check('the old owner loses exactly the project hours',
+    Math.abs(jBefore.hours - jAfter.hours - one.savingHours) < 1e-9,
+    `${Math.round(jBefore.hours)} -> ${Math.round(jAfter.hours)}`)
+  check('the new owner gains exactly them',
+    Math.abs(gAfter.ownHours - gBefore.ownHours - one.savingHours) < 1e-9,
+    `${Math.round(gBefore.ownHours)} -> ${Math.round(gAfter.ownHours)}`)
+  check('it leaves the old owner\'s portfolio', !jAfter.rows.some((r) => r.p.key === one.key))
+  check('and appears in the new owner\'s', gAfter.rows.some((r) => r.p.key === one.key))
+  check('the team total does not move', Math.abs(before.totals.totalHours - after.totals.totalHours) < 1e-9)
+  check('the shares on the project still sum to exactly 1',
+    Math.abs(Object.values(pr.shares).reduce((a, b) => a + b, 0) - 1) < 1e-9)
+  check('every scorecard still totals 100%', after.people.every((p) => weightsValid(p.kpiLines))
+    && after.invalid.length === 0)
+  check('the old owner\'s objective target drops with it', (() => {
+    const b = jBefore.kpiLines.find((l) => l.objective === one.objective)
+    const a = jAfter.kpiLines.find((l) => l.objective === one.objective)
+    return !a || Number(a.target) < Number(b.target)
+  })())
+
+  // Unassigning: the hours fall to whoever absorbs unowned work, not to nobody.
+  const un = reassignPatch(one, null)
+  const unassigned = computePlan({
+    ...base,
+    projects: base.projects.map((p) => (p.key === one.key ? { ...p, ...un } : p)),
+  })
+  const unPr = unassigned.projects.find((p) => p.key === one.key)
+  check('unassigning takes it off the old owner',
+    !(unPr.shares.james > 0), JSON.stringify(unPr.shares))
+  check('and it falls to whoever carries unowned work', unPr.fellBack === true)
+  check('the team total still does not move',
+    Math.abs(before.totals.totalHours - unassigned.totals.totalHours) < 1e-9)
+
+  // A genuine collaborator is not collateral damage.
+  const shared = { ...one, pic: 'james', contributors: [{ person: 'james', roles: ['dev'] }, { person: 'kade', roles: ['qa'] }] }
+  const keep = reassignPatch(shared, 'gun')
+  check('a second contributor survives the reassignment',
+    keep.contributors.some((c) => c.person === 'kade' && c.roles[0] === 'qa')
+    && keep.contributors.some((c) => c.person === 'gun')
+    && !keep.contributors.some((c) => c.person === 'james'),
+    JSON.stringify(keep.contributors))
+  check('the new owner inherits the roles the old one held',
+    keep.contributors.find((c) => c.person === 'gun').roles.join('/') === 'dev')
+
+  check('reassigning to the same person changes nothing',
+    JSON.stringify(reassignPatch(one, 'james')) === JSON.stringify({ pic: 'james' }))
+  check('assigning an unowned project just adds the owner', (() => {
+    const orphan = { ...one, pic: null, contributors: [] }
+    const p2 = reassignPatch(orphan, 'kade')
+    return p2.pic === 'kade' && p2.contributors.length === 1 && p2.contributors[0].person === 'kade'
+  })())
+}
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
