@@ -995,6 +995,128 @@ try {
   const gunAfter = await portfolio('Gun')
   check('and it is on the new owner scorecard', gunAfter.has379 === true, JSON.stringify(gunAfter))
 
+
+  /* ---------- roles are set by hand, and the split follows ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?roles=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  await page.type('input[placeholder="Search key, project, team, assignee…"]', 'FNP-379')
+  await new Promise((r) => setTimeout(r, 800))
+  await page.evaluate(() => document.querySelector('tbody tr button[aria-label="open cost breakdown"]').click())
+  await new Promise((r) => setTimeout(r, 900))
+
+  const teamText = () => page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    const t = [...d.querySelectorAll('table')].find((x) => /person/i.test(x.innerText) && /share/i.test(x.innerText))
+    return t ? t.innerText : ''
+  })
+  check('the dialog carries a team-and-roles table', /person/i.test(await teamText()),
+    (await teamText()).slice(0, 60).replace(/\n/g, ' / '))
+  check('the owner starts with the whole project', /100%/.test(await teamText()),
+    (await teamText()).replace(/\n/g, ' / ').slice(0, 120))
+
+  // Dismiss only the menu. Escape would bubble to the Dialog behind it and
+  // close the whole panel, and every later step then reads a null dialog.
+  const closeMenu = async () => {
+    await page.evaluate(() => {
+      // Only if a menu is actually open — a single-select closes itself on the
+      // pick, and the last backdrop is then the DIALOG's own.
+      if (!document.querySelector('[role="listbox"]')) return
+      const backs = [...document.querySelectorAll('.MuiBackdrop-root')]
+      const b = backs[backs.length - 1]
+      if (b) b.click()
+    })
+    await new Promise((r) => setTimeout(r, 600))
+  }
+
+  /*
+   * Click a menu option, once it has stopped moving.
+   *
+   * The menu animates open, so a position measured on the first frame is stale
+   * by the time the click lands — it went to the neighbouring role and the
+   * project ended up with three of them. Measure twice, click only when the
+   * two agree. Finding and clicking must also share one round trip: split
+   * across two, the second came back empty with the menu still open.
+   */
+  const clickOption = async (want) => {
+    let prev = null
+    for (let i = 0; i < 40; i++) {
+      const box = await page.evaluate((w) => {
+        const opt = [...document.querySelectorAll('[role="option"]')]
+          .find((o) => new RegExp(w).test((o.textContent || '').trim()))
+        if (!opt) return null
+        const r = opt.getBoundingClientRect()
+        if (!r.width || !r.height) return null
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+      }, want)
+      if (box && prev && box.x === prev.x && box.y === prev.y) {
+        await page.mouse.click(box.x, box.y)
+        await new Promise((r) => setTimeout(r, 500))
+        return true
+      }
+      prev = box
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    return false
+  }
+
+  const openCombo = async (which) => {
+    await page.evaluate((where) => {
+      const d = document.querySelector('[role="dialog"]')
+      const combos = [...d.querySelectorAll('[role="combobox"]')]
+      const combo = where === 'add' ? combos[combos.length - 1] : combos[0]
+      combo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    }, which)
+    await new Promise((r) => setTimeout(r, 400))
+  }
+
+  await openCombo('add')
+  check('the add-a-person menu offers the rest of the team', await clickOption('^Kade'))
+  await closeMenu()
+  const withKade = await teamText()
+  check('ADDING A PERSON SPLITS THE PROJECT', /Kade/.test(withKade) && /50%/.test(withKade),
+    withKade.replace(/\n/g, ' / '))
+
+  // Demote the new dev to QA: 83/17, the role weights the plan document sets.
+  await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    const row = [...d.querySelectorAll('tbody tr')].find((r) => /Kade/.test(r.innerText))
+    row.querySelector('[role="combobox"]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  })
+  await new Promise((r) => setTimeout(r, 400))
+  check('the role menu lists the roles by name', await clickOption('^QA'))
+  check('and a role can be taken off again', await clickOption('^Developer'))
+  await closeMenu()
+
+  const asQa = await teamText()
+  check('CHANGING THE ROLE RE-SPLITS THE HOURS 83/17',
+    /83%/.test(asQa) && /17%/.test(asQa), asQa.replace(/\n/g, ' / '))
+  check('and the credited hours are shown beside the share',
+    /26\.7|27/.test(asQa) && /5\.3|5/.test(asQa), asQa.replace(/\n/g, ' / '))
+
+  await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    ;[...d.querySelectorAll('button')].find((b) => /^Close$/i.test(b.innerText.trim())).click()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+
+  // The scorecard must carry the same split.
+  await page.goto(`${base}/?roles=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1500))
+  const roleTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+    roleTabs.findIndex((t) => /Kade/.test(t)))
+  await new Promise((r) => setTimeout(r, 1200))
+  const kadeRow = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
+    const t = heads[heads.length - 1].closest('table')
+    const row = [...t.querySelectorAll('tbody tr')].find((r) => /FNP-379/.test(r.innerText))
+    return row ? row.innerText.replace(/\n/g, ' | ') : null
+  })
+  check('THE PROJECT IS ON THE QA\'S SCORECARD', !!kadeRow, String(kadeRow))
+  check('and his row names the role he holds on it', /qa/i.test(kadeRow || ''), String(kadeRow))
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

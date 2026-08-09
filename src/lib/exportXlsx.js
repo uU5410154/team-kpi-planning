@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs'
 import { OBJECTIVES, OBJ_BY_ID, OUT_OF_PLAN } from './palette.js'
 import {
   SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths,
-  MONTH_LABELS, MONTHS_IN_YEAR, countsToPool,
+  MONTH_LABELS, MONTHS_IN_YEAR, countsToPool, creditSummary,
 } from './model.js'
 
 /* ------------------------------------------------------------------ */
@@ -640,6 +640,10 @@ export async function buildWorkbook(plan, state) {
       { label: 'Sub team', width: 18, align: 'left' },
       { label: 'Objective', width: 24, align: 'left' },
       { label: 'PIC', width: 12, align: 'center' },
+      // The split behind every credited figure on the per-person sheets. It is
+      // written here, once, so a reader can check a scorecard against it
+      // instead of taking the hours on trust.
+      { label: 'Team (roles, share)', width: 42, align: 'left' },
       { label: `Saving ${unit}`, width: 13, fmt: N0 },
       // Headed FTE to match the app and the source workbook's own meaning; the
       // value behind it is still the stored `hc` field.
@@ -687,6 +691,7 @@ export async function buildWorkbook(plan, state) {
         p.subTeam || '',
         OBJ_BY_ID[p.objective] ? `${OBJ_BY_ID[p.objective].no}. ${OBJ_BY_ID[p.objective].name}` : '',
         person ? person.nick : 'TBC',
+        creditSummary(p, p.shares, (id) => people.find((x) => x.id === id)?.nick || id),
         p.savingHours ?? null,
         p.fte ?? null,
         p.commitLevel,

@@ -59,7 +59,12 @@ check('column widths set', projSheet.getColumn(2).width > 20)
 
 // totals formula
 const totalRow = projSheet.getRow(projSheet.rowCount)
-check('totals row carries a SUM formula', typeof totalRow.getCell(8).value === 'object' && !!totalRow.getCell(8).value?.formula)
+// By header name, not by position — a column inserted into the register must
+// not be able to make this check pass against the wrong cell.
+const savingCol = projSheet.getRow(4).values.findIndex((v) => /^Saving/.test(String(v || '')))
+check('the saving column is found by name', savingCol > 0, String(savingCol))
+check('totals row carries a SUM formula',
+  typeof totalRow.getCell(savingCol).value === 'object' && !!totalRow.getCell(savingCol).value?.formula)
 
 // weights
 const ov = back.getWorksheet('Overall_Objectives')

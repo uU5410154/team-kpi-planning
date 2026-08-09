@@ -687,6 +687,77 @@ export function reassignPatch(project, nextPic) {
 
 export const ROLE_ORDER = ['pm', 'lead', 'dev', 'support', 'qa', 'assignee']
 
+/** What each role is called on screen and in the workbook. */
+export const ROLE_LABEL = {
+  pm: 'PM',
+  lead: 'Lead',
+  dev: 'Developer',
+  support: 'Support',
+  qa: 'QA',
+  assignee: 'Assignee',
+}
+
+/**
+ * Set one person's roles on a project, by hand.
+ *
+ * Credit is role-weighted, so this is the dial that decides how a shared
+ * project splits. Rules:
+ *   - unknown role names are dropped, duplicates collapse, and the order is
+ *     always ROLE_ORDER, so two people holding the same roles read the same;
+ *   - clearing every role removes the person from the contributor list. If
+ *     they are the PIC they keep the project at the bare `assignee` weight,
+ *     which is exactly what an unlabelled owner has always been worth;
+ *   - the row keeps its position, so editing a role does not reshuffle the
+ *     table under the user's cursor.
+ *
+ * Returns the patch to apply, so the UI, the tests and any bulk edit all
+ * reassign roles the same way.
+ */
+export function setRolesPatch(project, person, roles) {
+  const list = Array.isArray(project.contributors) ? project.contributors : []
+  const clean = ROLE_ORDER.filter((r) => (roles || []).includes(r))
+  const at = list.findIndex((c) => c.person === person)
+
+  if (!clean.length) return { contributors: list.filter((c) => c.person !== person) }
+  const next = { ...(at >= 0 ? list[at] : {}), person, roles: clean }
+  if (at < 0) return { contributors: [...list, next] }
+  const out = [...list]
+  out[at] = next
+  return { contributors: out }
+}
+
+/**
+ * Everyone who can be credited on a project, with the roles behind their share.
+ *
+ * A PIC who is not in the contributor list is shown holding `assignee`,
+ * because that is the weight projectShares gives them — the panel would
+ * otherwise show an owner with no role and a share out of nowhere.
+ *
+ * One source for the split, so the dialog, the scorecard and the workbook
+ * cannot describe the same project differently.
+ */
+export function creditRows(project, shares) {
+  const list = Array.isArray(project.contributors) ? project.contributors : []
+  const rows = list.map((c) => ({
+    person: c.person,
+    roles: ROLE_ORDER.filter((r) => (c.roles || []).includes(r)),
+    implied: false,
+  }))
+  if (project.pic && !rows.some((r) => r.person === project.pic)) {
+    rows.push({ person: project.pic, roles: ['assignee'], implied: true })
+  }
+  return rows
+    .map((r) => ({ ...r, share: (shares && shares[r.person]) || 0 }))
+    .sort((a, b) => b.share - a.share || a.person.localeCompare(b.person))
+}
+
+/** "Gun dev 77% · Kade qa 23%" — the same line on screen and in the workbook. */
+export function creditSummary(project, shares, nameOf = (id) => id) {
+  return creditRows(project, shares)
+    .map((r) => `${nameOf(r.person)} ${r.roles.join('/') || '—'} ${Math.round(r.share * 100)}%`)
+    .join(' · ')
+}
+
 /** Blank row for the "add project" action. */
 export function newProject(seq) {
   return {

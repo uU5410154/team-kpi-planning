@@ -192,7 +192,14 @@ console.log('\n--- the exported workbook matches the app ---')
   // the edited project's hours in the Projects sheet
   const ps = back.getWorksheet('Projects')
   let exportedHours = null
-  ps.eachRow((row) => { if (String(row.getCell(2).value || '') === target.summary) exportedHours = row.getCell(8).value })
+  // By header name. Read positionally, this pointed at whatever column had been
+  // inserted before it and compared hours against a text cell.
+  let savingCol = -1
+  ps.eachRow((row) => {
+    const vals = row.values.map((v) => String(v || '').trim())
+    if (savingCol < 0) savingCol = vals.findIndex((v) => /^Saving/.test(v))
+    if (savingCol > 0 && String(row.getCell(2).value || '') === target.summary) exportedHours = row.getCell(savingCol).value
+  })
   check('the edited project exports its new hours',
     exportedHours === target.savingHours + 50, `${exportedHours} vs ${target.savingHours + 50}`)
 

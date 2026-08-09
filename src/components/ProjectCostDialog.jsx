@@ -11,6 +11,7 @@ import { STATUS } from '../lib/palette.js'
 import {
   MONTH_LABELS, MONTHS_IN_YEAR, newOpexLine, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtHours,
   normalizeTasks, mandayToMoney, moneyToManday,
+  ROLE_ORDER, ROLE_LABEL, setRolesPatch, creditRows, reassignPatch,
 } from '../lib/model.js'
 
 /**
@@ -183,6 +184,149 @@ const MonthSelect = ({ value, onChange, label }) => (
  * computed plan on every render by the caller — holding onto the object would
  * leave the ROI in this header stale the moment a CAPEX is typed.
  */
+
+/**
+ * Who is credited on a project, and for what.
+ *
+ * Saving hours are split by role weight, so this table is where a shared
+ * project's numbers are actually decided. It shows the resulting share and the
+ * hours it carries next to each role, because a weight the user cannot see the
+ * effect of is a weight they will set wrong.
+ *
+ * The PIC is shown even with no roles typed: they are worth the bare
+ * `assignee` weight, and an owner with a share and no visible reason for it
+ * looks like a bug.
+ */
+function TeamRoles({ p, people, onUpdate }) {
+  const rows = creditRows(p, p.shares)
+  const listed = new Set(rows.map((r) => r.person))
+  const nameOf = (id) => people.find((x) => x.id === id)?.nick || id
+  const spare = people.filter((x) => !listed.has(x.id))
+  const hours = p.savingHours ?? 0
+  const counted = p.commitLevel === 'commit' || p.commitLevel === 'stretch'
+
+  const setRoles = (person, roles) => onUpdate(p.key, setRolesPatch(p, person, roles))
+
+  return (
+    <>
+      <Divider sx={{ my: 3 }} />
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.5 }}>
+        <Typography variant="h4">Team and roles</Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          the split of this project&rsquo;s hours
+        </Typography>
+      </Box>
+      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+        Each person counts at their strongest role, not the sum of them — holding both PM and dev does not
+        double a claim. Shares always add to 100%, so giving someone more takes it from the others. Clear
+        every role to drop a person; the PIC keeps the project at the assignee weight.
+      </Typography>
+
+      <Table size="small" sx={{ mb: 1 }}>
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ width: 150 }}>Person</TableCell>
+            <TableCell sx={{ minWidth: 260 }}>Roles</TableCell>
+            <TableCell align="right" sx={{ width: 90 }}>Share</TableCell>
+            <TableCell align="right" sx={{ width: 120 }}>Credited</TableCell>
+            <TableCell align="center" sx={{ width: 90 }}>PIC</TableCell>
+            <TableCell sx={{ width: 44 }} />
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={r.person} hover>
+              <TableCell>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>{nameOf(r.person)}</Typography>
+                {r.implied ? (
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>no role set</Typography>
+                ) : null}
+              </TableCell>
+              <TableCell>
+                <Select
+                  multiple
+                  size="small"
+                  fullWidth
+                  displayEmpty
+                  value={r.implied ? [] : r.roles}
+                  onChange={(e) => setRoles(r.person, e.target.value)}
+                  renderValue={(sel) => (sel.length
+                    ? (
+                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        {sel.map((v) => <Chip key={v} size="small" label={ROLE_LABEL[v] || v} />)}
+                      </Box>
+                    )
+                    : <Typography variant="caption" sx={{ color: 'text.secondary' }}>assignee (implied)</Typography>)}
+                >
+                  {ROLE_ORDER.map((role) => (
+                    <MenuItem key={role} value={role}>{ROLE_LABEL[role] || role}</MenuItem>
+                  ))}
+                </Select>
+              </TableCell>
+              <TableCell align="right">
+                <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.round(r.share * 100)}%
+                </Typography>
+              </TableCell>
+              <TableCell align="right">
+                <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', color: counted ? 'text.primary' : 'text.disabled' }}>
+                  {counted ? `${fmtHours(hours * r.share)}/mth` : '—'}
+                </Typography>
+              </TableCell>
+              <TableCell align="center">
+                {p.pic === r.person
+                  ? <Chip size="small" label="PIC" color="primary" variant="outlined" />
+                  : (
+                    <Tooltip title="Make this person the PIC">
+                      <Button size="small" onClick={() => onUpdate(p.key, reassignPatch(p, r.person))}>set</Button>
+                    </Tooltip>
+                  )}
+              </TableCell>
+              <TableCell>
+                <Tooltip title="Remove from this project">
+                  <span>
+                    <IconButton size="small" disabled={r.implied} onClick={() => setRoles(r.person, [])}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </TableCell>
+            </TableRow>
+          ))}
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Nobody is credited. The hours fall to the team lead, who is accountable for them.
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ) : null}
+        </TableBody>
+      </Table>
+
+      {spare.length ? (
+        <Select
+          size="small"
+          displayEmpty
+          value=""
+          onChange={(e) => setRoles(e.target.value, ['dev'])}
+          sx={{ minWidth: 240 }}
+          renderValue={() => <Typography variant="body2" sx={{ color: 'text.secondary' }}>Add a person…</Typography>}
+        >
+          {spare.map((x) => <MenuItem key={x.id} value={x.id}>{x.nick} — {x.name}</MenuItem>)}
+        </Select>
+      ) : null}
+
+      {p.fellBack ? (
+        <Alert severity="info" sx={{ mt: 1.5 }}>
+          Nobody on the team holds a role here, so these hours sit with the team lead rather than vanishing.
+        </Alert>
+      ) : null}
+    </>
+  )
+}
+
 export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) {
   // No hooks in this component, so an early return is safe — and the caller
   // holds only a key, so there is nothing to keep mounted between openings.
@@ -564,6 +708,9 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
             2026 budget view, which is why its total can differ from twelve times the run-rate.
           </Typography>
         </Alert>
+        {/* ---------- who is credited, and for what ---------- */}
+        <TeamRoles p={p} people={plan.people} onUpdate={onUpdate} />
+
         {/* ---------- comments ---------- */}
         <Divider sx={{ my: 3 }} />
         <Typography variant="h4" sx={{ mb: 0.5 }}>Notes and links</Typography>
