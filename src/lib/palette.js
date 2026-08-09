@@ -135,12 +135,12 @@ export const OBJECTIVES = [
     name: 'Efficiency and integration',
     short: 'Efficiency',
     detail: 'Developing reporting to enhance efficiency and productivity',
-    target: 'Dashboards and reports delivered',
+    target: 'Dashboards, reports and portals delivered',
     // Counted, not weighed in hours. The work is dashboards delivered; the
     // hours they save are real but they belong to objective 2, and reporting
     // them here as well would state the same saving twice.
     measure: 'count',
-    countUnit: 'dashboards/reports',
+    countUnit: 'dashboards/reports/portals',
     countsToPool: true,
     guidelineName: 'Efficiency and integration',
     guidelineDetail: 'Developing reporting to enhance efficiency and productivity',
