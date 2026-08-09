@@ -1830,6 +1830,19 @@ export function computePlan(state) {
     // projects their hours were credited from — never a whole project's CAPEX
     // landing on one of five contributors.
     const costedRows = counted.filter((r) => countsToPool(r.p) && r.p.investment != null && r.p.monthlyBenefit != null)
+    /*
+     * The plain mean of the returns on the projects credited to this person.
+     *
+     * Every project counts once, whatever its size, which is what makes it a
+     * reading on how well the work is chosen rather than on how big it is. The
+     * portfolio return — total net benefit over total investment — is reported
+     * beside it, because the two answer different questions and a small
+     * project with a spectacular ratio moves this one a long way.
+     */
+    const roiRows = costedRows.filter((r) => r.p.roi != null)
+    const avgProjectRoi = roiRows.length
+      ? roiRows.reduce((a, r) => a + r.p.roi, 0) / roiRows.length
+      : null
     const buildCost = costedRows.reduce((a, r) => a + (r.p.buildCost ?? 0) * r.share, 0)
     const capex = costedRows.reduce((a, r) => a + (r.p.capex ?? 0) * r.share, 0)
     const investment = costedRows.reduce((a, r) => a + r.p.investment * r.share, 0)
@@ -1886,6 +1899,8 @@ export function computePlan(state) {
       byObjective,
       benefitByObjective,
       countByObjective,
+      avgProjectRoi,
+      roiRowCount: roiRows.length,
       monthlyBenefit,
       hoursMonthlyBenefit,
       monetaryAnnualBenefit,
@@ -1993,6 +2008,12 @@ export function computePlan(state) {
   }
   const teamCounted = perProject.filter((p) => isCounted(p) && Object.keys(p.shares).length > 0)
 
+  // The lead's average is over the whole book, each project once.
+  const teamRoiRows = teamCounted.filter((pr) => pr.roi != null && countsToPool(pr))
+  const teamAvgRoi = teamRoiRows.length
+    ? teamRoiRows.reduce((a, pr) => a + pr.roi, 0) / teamRoiRows.length
+    : null
+
   const withScorecards = byPersonShown.map((p) => {
     const aggregates = p.aggregatesTeam === true
     // The lead's override lands on the AGGREGATE, which is what their card
@@ -2089,14 +2110,21 @@ export function computePlan(state) {
      * and being attached from the rolled-up figure is exactly what makes it
      * recalculate the moment a manday, a CAPEX or a saving hour changes.
      */
+    const avgRoi = aggregates ? teamAvgRoi : (p.avgProjectRoi ?? null)
     const lines = card.lines.map((l) => (l.targetKind === 'percent' && !l.custom
       ? {
         ...l,
-        creditedRatio: scFinance.roi,
+        // The average of the project returns, as asked for: every project
+        // counts once. The portfolio return is kept beside it, because a
+        // ฿5k project at 900% moves an average a long way and moves the
+        // portfolio hardly at all.
+        creditedRatio: avgRoi,
+        portfolioRatio: scFinance.roi,
+        roiRowCount: aggregates ? teamRoiRows.length : (p.roiRowCount || 0),
         creditedMoney: scFinance.annualBenefit,
-        meetsTarget: scFinance.roi == null
+        meetsTarget: avgRoi == null
           ? null
-          : scFinance.roi * 100 >= Number(l.target) - 1e-9,
+          : avgRoi * 100 >= Number(l.target) - 1e-9,
       }
       : l))
 

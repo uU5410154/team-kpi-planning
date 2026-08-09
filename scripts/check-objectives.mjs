@@ -122,9 +122,28 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
     roiLine.targetKind === 'percent'
     && Math.abs(roiLine.target - plain.finance.roiGate * 100) < 1e-9,
     `${roiLine.target}% vs gate ${plain.finance.roiGate * 100}%`)
-  check('and its ACTUAL is the return the plan is carrying',
-    roiLine.creditedRatio === lead.finance.roi,
-    `${roiLine.creditedRatio} vs ${lead.finance.roi}`)
+  // The average of the project returns, as asked for: every project once.
+  check('its ACTUAL is the average of the project returns',
+    roiLine.creditedRatio === lead.avgProjectRoi,
+    `${roiLine.creditedRatio} vs ${lead.avgProjectRoi}`)
+  check('with the portfolio return kept beside it',
+    roiLine.portfolioRatio === lead.finance.roi,
+    `${roiLine.portfolioRatio} vs ${lead.finance.roi}`)
+  check('and it says how many projects it averaged',
+    typeof roiLine.roiRowCount === 'number', String(roiLine.roiRowCount))
+  check('EVERY SCORECARD CARRIES OBJECTIVE 1, TAGGED OR NOT',
+    plain.people.every((x) => x.kpiLines.some((l) => l.targetKind === 'percent' && !l.custom)),
+    plain.people.filter((x) => !x.kpiLines.some((l) => l.targetKind === 'percent')).map((x) => x.nick).join(','))
+  check('the average counts each project once, whatever its size', (() => {
+    const priced = computePlan({
+      ...base,
+      projects: base.projects.map((p, i) => (p.savingHours > 0 ? { ...p, manday: 5 + (i % 40) } : p)),
+    }).people.find((x) => x.id === 'kade')
+    const rows = priced.rows.filter((r) => r.p.roi != null
+      && (r.p.commitLevel === 'commit' || r.p.commitLevel === 'stretch'))
+    const mean = rows.reduce((a, r) => a + r.p.roi, 0) / rows.length
+    return Math.abs(priced.avgProjectRoi - mean) < 1e-9
+  })())
   check('with the money it is built from stated beside it',
     Math.abs(roiLine.creditedMoney - lead.finance.annualBenefit) < 1e-6)
   check('AND IT RECALCULATES WHEN A COST CHANGES', (() => {

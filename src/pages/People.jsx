@@ -530,6 +530,12 @@ export default function People({
                               : `now ${fmtRoi(l.creditedRatio)}${l.meetsTarget ? '' : ' — below'}`}
                           </Typography>
                         )}
+                        {l.targetKind === 'percent' && l.creditedRatio != null && (
+                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', lineHeight: 1.2 }}>
+                            average of {l.roiRowCount} project{l.roiRowCount === 1 ? '' : 's'}
+                            {l.portfolioRatio != null && ` · portfolio ${fmtRoi(l.portfolioRatio)}`}
+                          </Typography>
+                        )}
                         {l.targetKind === 'percent' && l.creditedMoney > 0 && (
                           <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', lineHeight: 1.2 }}>
                             on {fmtMoneyShort(l.creditedMoney, sym)}/yr of benefit
