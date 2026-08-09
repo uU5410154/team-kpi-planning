@@ -16,6 +16,7 @@ import ScenarioDialog from './components/ScenarioDialog.jsx'
 
 import { buildTheme } from './theme.js'
 import { computePlan, newProject, rebalanceWeights, reassignPatch } from './lib/model.js'
+import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
@@ -120,6 +121,16 @@ export default function App() {
     const onHash = () => setTab(tabFromHash())
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  /**
+    * Apply an approved import: many projects, each with its own patch.
+    *
+    * Projects the import did not name come back as the SAME object, so a row
+    * the file never mentioned cannot be re-created or quietly rebuilt.
+    */
+  const applyProjectImport = useCallback((result) => {
+    setState((s) => ({ ...s, projects: applyImport(s.projects, result) }))
   }, [])
 
   /**
@@ -440,7 +451,8 @@ export default function App() {
               plan={plan}
               onUpdate={updateProject}
               onBulk={bulkUpdate}
-              onAdd={addProject}
+              onImport={applyProjectImport}
+            onAdd={addProject}
               onDelete={deleteProjects}
               onSave={saveToDb}
               dirty={dirty}

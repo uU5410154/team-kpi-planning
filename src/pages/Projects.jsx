@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
@@ -18,7 +18,11 @@ import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
 } from '../lib/model.js'
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
+import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
+import ImportDialog from '../components/ImportDialog.jsx'
+import { exportFiltered, readProjectsFile, planImport } from '../lib/projectIO.js'
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_COLOR = {
@@ -95,7 +99,7 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
 }
 
 export default function Projects({
-  plan, onUpdate, onBulk, onAdd, onDelete,
+  plan, onUpdate, onBulk, onAdd, onDelete, onImport,
   onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo,
 }) {
   const theme = useTheme()
@@ -120,6 +124,9 @@ export default function Projects({
   // The KEY, never the project object: the dialog's ROI has to move the instant
   // a CAPEX is typed, and a stored object would still be the pre-edit one.
   const [costKey, setCostKey] = useState(null)
+  const [importing, setImporting] = useState(null)   // { result, fileName }
+  const [busy, setBusy] = useState(false)
+  const fileRef = useRef(null)
   const costProject = costKey == null ? null : projects.find((x) => x.key === costKey) || null
 
   const rows = useMemo(() => {
@@ -156,6 +163,20 @@ export default function Projects({
     })
     return out
   }, [projects, q, fObj, fPic, fCommit, fGap, fTeam, fHc, sort])
+
+  // What the exported file says it is. A working file with no idea which
+  // slice of the register it holds is one nobody can check.
+  const describeFilter = useMemo(() => {
+    const bits = []
+    if (q.trim()) bits.push(`search "${q.trim()}"`)
+    if (fObj !== 'all') bits.push(`objective ${OBJ_BY_ID[fObj]?.name || fObj}`)
+    if (fPic !== 'all') bits.push(`PIC ${fPic === 'none' ? 'unassigned' : (assignees.find((x) => x.id === fPic)?.nick || fPic)}`)
+    if (fCommit !== 'all') bits.push(`commit ${fCommit}`)
+    if (fTeam !== 'all') bits.push(`team ${fTeam}`)
+    if (fGap !== 'all') bits.push(`gap ${fGap}`)
+    if (fHc !== 'all') bits.push(`FTE ${fHc}`)
+    return bits.length ? bits.join(', ') : 'the whole register'
+  }, [q, fObj, fPic, fCommit, fTeam, fGap, fHc, assignees])
 
   const teams = useMemo(
     () => [...new Set(projects.map((p) => p.team).filter(Boolean))].sort(),
@@ -568,6 +589,70 @@ export default function Projects({
         </Box>
       </Paper>
 
+
+      {/*
+        * Export what is on screen, and import it back.
+        *
+        * The whole-plan export in the header is a different thing: it is the
+        * eleven-sheet book of record. This one is the working file — the rows
+        * you have filtered to, in a shape that can be edited and imported.
+        */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<FileDownloadOutlinedIcon />}
+          disabled={!rows.length || busy}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              await exportFiltered(rows, assignees, describeFilter)
+            } finally { setBusy(false) }
+          }}
+        >
+          Export {rows.length === projects.length ? 'all' : 'filtered'} ({rows.length})
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<FileUploadOutlinedIcon />}
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+        >
+          Import
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx"
+          aria-label="import projects"
+          style={{ display: 'none' }}
+          onChange={async (e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ''            // so the same file can be picked twice
+            if (!file) return
+            setBusy(true)
+            try {
+              const parsed = await readProjectsFile(await file.arrayBuffer())
+              setImporting({
+                fileName: file.name,
+                result: parsed.error
+                  ? { error: parsed.error, changes: [] }
+                  : planImport(parsed, { projects, people: assignees }, plan),
+              })
+            } catch (err) {
+              setImporting({ fileName: file.name, result: { error: `Could not read the file: ${err.message}`, changes: [] } })
+            } finally { setBusy(false) }
+          }}
+        />
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {rows.length === projects.length
+            ? 'exports every project; filter the table first to export a subset'
+            : `exports the ${rows.length} row${rows.length === 1 ? '' : 's'} shown, not all ${projects.length}`}
+          {' · an import only touches the rows named in the file'}
+        </Typography>
+      </Box>
+
       <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '72vh' }}>
         <Table size="small" stickyHeader sx={{ '& th, & td': { px: 1.25 } }}>
           <TableHead>
@@ -906,6 +991,13 @@ export default function Projects({
 
       {/* Looked up by key on every render, so a CAPEX typed inside it moves the
           ROI in the header of the very same dialog. */}
+      <ImportDialog
+        result={importing?.result}
+        fileName={importing?.fileName}
+        onClose={() => setImporting(null)}
+        onApply={() => { onImport(importing.result); setImporting(null) }}
+      />
+
       <ProjectCostDialog
         project={costProject}
         plan={plan}

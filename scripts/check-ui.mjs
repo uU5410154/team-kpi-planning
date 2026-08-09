@@ -7,7 +7,11 @@
  */
 import puppeteer from 'puppeteer-core'
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import ExcelJS from 'exceljs'
+import { columnFor } from '../src/lib/projectSheet.js'
 import { financeRates, DEFAULT_SETTINGS } from '../src/lib/model.js'
 
 // Objective 1 is measured in baht, so one extra saving hour per month moves its
@@ -1172,6 +1176,136 @@ try {
   const dmgHeadline = await page.evaluate(() => document.body.innerText.match(/([\d,]+)\s*\/\s*3,000/)?.[1] ?? null)
   check('and the team headline is untouched by the repair', dmgHeadline === headlineBefore,
     `${headlineBefore} -> ${dmgHeadline}`)
+
+
+  /* ---------- export what is filtered, edit it, import it back ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?io=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+
+  // Let the browser write downloads where this test can read them.
+  const dlDir = mkdtempSync(join(tmpdir(), 'kpi-io-'))
+  const cdp = await page.createCDPSession()
+  await cdp.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir })
+
+  const ioRowCount = () => page.evaluate(() => document.querySelectorAll('tbody tr').length)
+  const ioAllRows = await ioRowCount()
+  await page.type('input[placeholder="Search key, project, team, assignee…"]', 'forecast')
+  await new Promise((r) => setTimeout(r, 900))
+  const ioFilteredRows = await ioRowCount()
+  check('the filter narrows the table', ioFilteredRows > 0 && ioFilteredRows < ioAllRows,
+    `${ioFilteredRows} of ${ioAllRows}`)
+
+  const exportLabel = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /^Export (filtered|all)/.test(x.innerText.trim()))
+    return b ? b.innerText.trim() : null
+  })
+  check('THERE IS AN EXPORT BUTTON ABOVE THE TABLE', !!exportLabel, String(exportLabel))
+  check('and it says how many rows it will write',
+    exportLabel === `Export filtered (${ioFilteredRows})`, `${exportLabel} vs ${ioFilteredRows} rows`)
+
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find((x) => /^Export (filtered|all)/.test(x.innerText.trim())).click()
+  })
+  let ioDownloaded = null
+  for (let i = 0; i < 60 && !ioDownloaded; i++) {
+    const files = readdirSync(dlDir).filter((f) => f.endsWith('.xlsx'))
+    if (files.length) ioDownloaded = join(dlDir, files[0])
+    else await new Promise((r) => setTimeout(r, 250))
+  }
+  check('CLICKING IT DOWNLOADS A FILE', !!ioDownloaded, String(ioDownloaded && ioDownloaded.split(/[\\/]/).pop()))
+
+  const wbIn = new ExcelJS.Workbook()
+  await wbIn.xlsx.readFile(ioDownloaded)
+  const wsIn = wbIn.getWorksheet('Projects')
+  const headIx = {}
+  wsIn.getRow(4).eachCell((cell, ix) => { const c = columnFor(cell.value); if (c) headIx[c.key] = ix })
+  const ioWritten = []
+  wsIn.eachRow((r, n) => {
+    if (n <= 4) return
+    const k = String(r.getCell(headIx.jira).value || '')
+    if (k && !/^total$/i.test(k)) ioWritten.push(k)
+  })
+  check('THE FILE HOLDS ONLY THE FILTERED ROWS', ioWritten.length === ioFilteredRows,
+    `${ioWritten.length} in the file vs ${ioFilteredRows} on screen`)
+
+  // What the table shows for the first row, so the import can be checked
+  // against a number the user can see.
+  const ioFirstKey = ioWritten[0]
+  // The file is written in the table's own order, so row 1 of the file is row 1
+  // of the table.
+  const savingOf = (n) => page.evaluate((i) => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.findIndex((h) => h.startsWith('saving'))
+    const row = document.querySelectorAll('tbody tr')[i]
+    if (!row) return null
+    const cell = row.children[ix]
+    return {
+      value: cell.querySelector('input')?.value ?? cell.innerText.trim(),
+      text: row.innerText.split(String.fromCharCode(10)).join(' ').slice(0, 50),
+    }
+  }, n)
+  const beforeHours = await savingOf(0)
+  // Correspondence, proved by the value rather than by the rendered text: the
+  // Jira cell is a link and does not show up in innerText.
+  const fileFirstHours = wsIn.getRow(5).getCell(headIx.savingHours).value
+  check('THE FIRST ROW IN THE FILE IS THE FIRST ROW ON SCREEN',
+    Number(String(beforeHours?.value).replace(/,/g, '')) === Number(fileFirstHours),
+    `file ${fileFirstHours} vs screen ${beforeHours?.value} (${ioFirstKey})`)
+
+  // Edit ONE cell and hand the file back.
+  wsIn.getRow(5).getCell(headIx.savingHours).value = 456
+  const editedPath = join(dlDir, 'edited.xlsx')
+  await wbIn.xlsx.writeFile(editedPath)
+
+  const fileInput = await page.$('input[aria-label="import projects"]')
+  check('there is an import control', !!fileInput)
+  await fileInput.uploadFile(editedPath)
+  await new Promise((r) => setTimeout(r, 2000))
+
+  const ioPreview = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    return d ? d.innerText.replace(/\n/g, ' | ') : null
+  })
+  check('IMPORTING SHOWS WHAT IT WOULD CHANGE, BEFORE CHANGING IT',
+    !!ioPreview && /1 project to update/.test(ioPreview), String(ioPreview).slice(0, 160))
+  check('and the rest of the file is reported as already matching',
+    new RegExp(`${ioWritten.length - 1} already the same`).test(ioPreview || ''), String(ioPreview).slice(0, 200))
+  check('the ioPreview names the field and both values',
+    /Saving/.test(ioPreview || '') && /456/.test(ioPreview || ''), String(ioPreview).slice(0, 200))
+
+  await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    ;[...d.querySelectorAll('button')].find((b) => /^Apply /.test(b.innerText.trim())).click()
+  })
+  await new Promise((r) => setTimeout(r, 1200))
+
+  const afterHours = await savingOf(0)
+  check('APPLYING IT UPDATES THE ROW IN THE TABLE',
+    String(afterHours?.value).replace(/,/g, '') === '456',
+    `${beforeHours?.value} -> ${afterHours?.value}`)
+
+  // and nothing else moved: the other filtered rows are as they were
+  const ioOthers = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.findIndex((h) => h.startsWith('saving'))
+    return [...document.querySelectorAll('tbody tr')].slice(1)
+      .map((r) => r.children[ix].querySelector('input')?.value ?? '')
+  })
+  check('and the other rows on screen are untouched',
+    ioOthers.every((v) => v !== '456'), ioOthers.join(','))
+
+  const headlineAfterImport = await page.evaluate(() =>
+    document.body.innerText.match(/([\d,]+)\s*\/\s*3,000/)?.[1] ?? null)
+  const expectHeadline = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    return st.projects.filter((p) => p.commitLevel === 'commit' || p.commitLevel === 'stretch').length > 0
+  })
+  check('the plan was ioWritten to the browser, not just the screen', expectHeadline)
+  check('and the team headline moved with it', headlineAfterImport !== '4,227',
+    `now ${headlineAfterImport}`)
+
+  rmSync(dlDir, { recursive: true, force: true })
 
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
