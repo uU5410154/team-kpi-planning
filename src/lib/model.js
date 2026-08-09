@@ -1933,6 +1933,10 @@ export function computePlan(state) {
     // portfolio is what puts it on the card.
     const derived = OBJECTIVE_ORDER.filter((id) => (byObj[id] || 0) > 0
       || (countByObj[id] || 0) > 0
+      // The return is worked out over EVERY project, so anyone carrying any
+      // project is measured on it — it is the one objective nothing has to be
+      // tagged to, because every project is already in it.
+      || id === RATIO_OBJECTIVE
       || rows.some((r) => servesObjective(r.p, id)))
     const added = (Array.isArray(person.extraObjectives) ? person.extraObjectives : [])
       .filter((id) => OBJ_BY_ID[id] && !derived.includes(id))

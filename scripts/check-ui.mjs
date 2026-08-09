@@ -328,7 +328,7 @@ try {
   check('the portfolio lists the whole book to start', allRows > 20, String(allRows))
 
   await page.evaluate(() => {
-    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 4 — Efficiency'))
     // The KPI-line cell, found by content rather than by index — dropping the
     // Block column shifted every position by one, and nth-child(2) then landed
     // on the Target cell, which deliberately stops the click.
@@ -337,20 +337,21 @@ try {
   await new Promise((r) => setTimeout(r, 600))
 
   const filtered = await portfolioCount()
-  check('clicking a KPI line filters the portfolio', filtered > 0 && filtered < allRows,
+  check('clicking a counted KPI line filters the portfolio', filtered > 0 && filtered < allRows,
     `${allRows} -> ${filtered}`)
   check('the filter chip appears',
-    await page.evaluate(() => document.body.innerText.includes('Process automation')))
-  check('every remaining row belongs to that objective',
+    await page.evaluate(() => document.body.innerText.includes('Efficiency')))
+  check('every remaining row serves that objective',
     await page.evaluate(() => {
       const heads = [...document.querySelectorAll('th')].filter((h) => h.innerText.trim().toLowerCase() === 'jira')
       const table = heads[heads.length - 1].closest('table')
-      return [...table.querySelectorAll('tbody tr')].every((r) => r.innerText.includes('Obj 2'))
+      return [...table.querySelectorAll('tbody tr')].every((r) => /Obj [14]/.test(r.innerText))
     }))
+
 
   // clicking again clears it
   await page.evaluate(() => {
-    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 4 — Efficiency'))
     // The KPI-line cell, found by content rather than by index — dropping the
     // Block column shifted every position by one, and nth-child(2) then landed
     // on the Target cell, which deliberately stops the click.
@@ -359,9 +360,35 @@ try {
   await new Promise((r) => setTimeout(r, 600))
   check('clicking again clears the filter', (await portfolioCount()) === allRows)
 
+  /* ---------- a line calculated over everything shows everything ---------- */
+  // Objective 1 is a return worked out over every project and objective 2
+  // collects every saving hour, so clicking either has to show the whole
+  // portfolio. Showing five tagged projects under a figure derived from
+  // eighty-six reads as a wrong number.
+  for (const [label, chip] of [['Obj 1 — Financial', 'Financial'], ['Obj 2 — F&A process automation', 'Process automation']]) {
+    await page.evaluate((lbl) => {
+      const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes(lbl))
+      ;[...row.querySelectorAll('td')].find((c) => /^Obj \d+/.test(c.innerText.trim())).click()
+    }, label)
+    await new Promise((r) => setTimeout(r, 700))
+    const shown = await portfolioCount()
+    check(`${label.split(' —')[0]} SHOWS EVERY PROJECT BEHIND IT`, shown === allRows,
+      `${shown} of ${allRows}`)
+    check(`  and says so`,
+      await page.evaluate(() => /every project/i.test(document.body.innerText)))
+    await page.evaluate((lbl) => {
+      const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes(lbl))
+      ;[...row.querySelectorAll('td')].find((c) => /^Obj \d+/.test(c.innerText.trim())).click()
+    }, label)
+    await new Promise((r) => setTimeout(r, 500))
+    void chip
+  }
+
   // editing a weight must not toggle the filter
   await page.evaluate(() => {
-    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+
+
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 4 — Efficiency'))
     const inp = [...row.querySelectorAll('input')].find((x) => x.style.textAlign === 'right' && x.value.length <= 3)
     inp.focus(); inp.blur()
   })

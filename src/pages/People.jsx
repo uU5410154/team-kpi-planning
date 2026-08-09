@@ -21,7 +21,7 @@ import { OBJ_BY_ID, OBJECTIVES, CHART, STATUS, COMMIT_LEVELS, OUT_OF_PLAN } from
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, targetUnit,
   weightSum, weightsValid, snapWeight, WEIGHT_STEP,
-  fmtMonthsShort, gateAsPaybackMonths, isNumericKind,
+  fmtMonthsShort, gateAsPaybackMonths, isNumericKind, servesObjective as serves,
 } from '../lib/model.js'
 import { useTheme } from '@mui/material/styles'
 
@@ -186,7 +186,25 @@ export default function People({
   if (!p) return null
 
   const focusObj = focus ? OBJ_BY_ID[focus] : null
-  const visibleRows = focus ? p.scorecardRows.filter((r) => r.p.objective === focus) : p.scorecardRows
+  /*
+   * What a KPI line shows when you click it, which follows how that objective
+   * accrues rather than which projects happen to carry its tag.
+   *
+   * Objective 1 is a return calculated over EVERY project, and objective 2
+   * collects every saving hour in the plan, so both show the whole portfolio.
+   * Showing five tagged projects under a figure derived from eighty-six would
+   * invite anyone checking it to conclude the number was wrong.
+   *
+   * A counted objective and the milestone show what is tagged to them, which
+   * IS what they measure — and by servesObjective, so a project tagged to
+   * several appears under each.
+   */
+  const wholeBook = !!focusObj && (focusObj.measure === 'ratio' || focusObj.measure === 'hours')
+  const visibleRows = !focus
+    ? p.scorecardRows
+    : wholeBook
+      ? p.scorecardRows
+      : p.scorecardRows.filter((r) => serves(r.p, focus))
 
   const sum = weightSum(p.kpiLines)
   const weightOk = weightsValid(p.kpiLines)
@@ -450,7 +468,11 @@ export default function People({
                             )}
                             {selectable && (
                               <Typography variant="caption" sx={{ color: active ? 'primary.main' : 'text.disabled' }}>
-                                {active ? 'filtering the portfolio — click to clear' : 'click to filter the portfolio'}
+                                {active
+                                  ? 'filtering the portfolio — click to clear'
+                                  : (o && (o.measure === 'ratio' || o.measure === 'hours')
+                                    ? 'click to see every project behind it'
+                                    : 'click to filter the portfolio')}
                               </Typography>
                             )}
                           </Box>
@@ -737,14 +759,16 @@ export default function People({
                   size="small"
                   color="primary"
                   variant="outlined"
-                  label={`Obj ${focusObj.no} — ${focusObj.short}`}
+                  label={`Obj ${focusObj.no} — ${focusObj.short}${wholeBook ? ' · every project' : ''}`}
                   onDelete={() => setFocus(null)}
                 />
               )}
             </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 2 }}>
               {focusObj
-                ? `Showing ${visibleRows.length} of ${p.scorecardRows.length} projects. Click the KPI line again to clear.`
+                ? (wholeBook
+                  ? `All ${visibleRows.length} projects — Obj ${focusObj.no} is calculated over every one of them. Click the KPI line again to clear.`
+                  : `Showing ${visibleRows.length} of ${p.scorecardRows.length} projects. Click the KPI line again to clear.`)
                 : p.aggregatesTeam
                   ? 'Every in-plan project across the team, at full value — this is what the team figure above adds up to. Edit any of it here; the numbers everywhere follow. Click a row for its CAPEX, monthly OPEX and cost grid.'
                   : "Contribution % is this person's normalised share. Credited hours = project hours × share. Edit any of it here, and click a row for its CAPEX, monthly OPEX and cost grid."}
