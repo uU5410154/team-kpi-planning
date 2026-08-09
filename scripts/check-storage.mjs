@@ -136,5 +136,54 @@ console.log('\n--- repairing state the old PIC write already saved ---')
     JSON.stringify(repairState(fixed)) === JSON.stringify(fixed))
 }
 
+/* ---------------- a target typed in a unit that no longer exists ---------------- */
+console.log(String.fromCharCode(10) + '--- a target typed against a unit the objective no longer uses ---')
+{
+  const { repairTargetUnits, repairState, REPAIR_VERSION, computePlan, DEFAULT_SETTINGS, fmtTarget }
+    = await import('../src/lib/model.js')
+
+  // Objectives 4 and 5 were weighed in hours and now count deliverables, so a
+  // stored 400 stopped meaning 400 hours and started reading as 400 dashboards.
+  const damaged = {
+    version, seedStamp: stamp, repair: 1, meta: seed.meta, projects: seed.projects,
+    settings: DEFAULT_SETTINGS,
+    people: seed.people.map((p) => (p.id === 'gun'
+      ? { ...p, kpi: { 'obj-efficiency': { target: 400, weight: 0.2 }, 'obj-ai_automation': { target: 700 } } }
+      : p)),
+  }
+  const before = computePlan(damaged).people.find((p) => p.id === 'gun')
+  check('the damaged state really does read as the wrong unit',
+    /400 dashboards/.test(fmtTarget(before.kpiLines.find((l) => l.id === 'obj-efficiency'))),
+    fmtTarget(before.kpiLines.find((l) => l.id === 'obj-efficiency')))
+
+  const { cleared } = repairTargetUnits(damaged.people)
+  check('the repair reports what it cleared', cleared === 2, String(cleared))
+
+  const fixed = repairState(damaged)
+  const after = computePlan(fixed).people.find((p) => p.id === 'gun')
+  const eff = after.kpiLines.find((l) => l.id === 'obj-efficiency')
+  check('THE STALE TARGET IS GONE, AND THE LINE STATES WHAT IS REAL',
+    eff.target === (after.countByObjective.efficiency || 0) && eff.target !== 400,
+    fmtTarget(eff))
+  check('and so is the other one',
+    after.kpiLines.find((l) => l.id === 'obj-ai_automation').target !== 700)
+  check('A TYPED WEIGHT SURVIVES — a share means the same in any unit',
+    Math.abs(eff.weight - 0.2) < 1e-9, `${Math.round(eff.weight * 100)}%`)
+  check('the card still totals 100%', computePlan(fixed).invalid.length === 0)
+  check('it is stamped so it runs once', fixed.repair === REPAIR_VERSION)
+  check('and a state already stamped is left alone',
+    repairTargetUnits(repairState(fixed).people).cleared === 0)
+
+  // A target typed against an objective whose unit did NOT change must stay.
+  const kept = repairState({
+    ...damaged,
+    repair: 1,
+    people: seed.people.map((p) => (p.id === 'gun'
+      ? { ...p, kpi: { 'obj-process_automation': { target: 3500 } } } : p)),
+  })
+  check('a target on an objective that did not change is untouched',
+    kept.people.find((p) => p.id === 'gun').kpi['obj-process_automation'].target === 3500)
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

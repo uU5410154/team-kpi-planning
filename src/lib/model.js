@@ -1140,7 +1140,50 @@ export function repairOwnership(projects, people, roleWeights = DEFAULT_ROLE_WEI
  * 1: a PIC change used to write only `pic`, leaving the project on the old
  *    owner's scorecard at 77%.
  */
-export const REPAIR_VERSION = 1
+export const REPAIR_VERSION = 2
+
+/**
+ * Objectives whose unit changed, and the repair that follows from it.
+ *
+ * A target typed against one unit is meaningless in another. When objectives 4
+ * and 5 stopped being weighed in hours and started counting deliverables, a
+ * stored "400" stopped meaning 400 hours and started reading as 400 dashboards
+ * — a number nobody chose, on a card somebody will be appraised against.
+ *
+ * The stored value cannot be converted, because there is no conversion: hours
+ * are not dashboards. So it is dropped and the line goes back to stating what
+ * the register actually shows, which is the only figure that is true.
+ *
+ * WEIGHTS are kept. A weight is a share of the card and means the same thing
+ * whatever the line is measured in.
+ */
+export const REUNITED_OBJECTIVES = ['efficiency', 'ai_automation', 'financial']
+
+export function repairTargetUnits(people) {
+  const lineIds = new Set(REUNITED_OBJECTIVES.map((id) => `obj-${id}`))
+  let cleared = 0
+  const out = (people || []).map((p) => {
+    const kpi = p && p.kpi
+    if (!kpi) return p
+    let touched = false
+    const next = {}
+    for (const [lineId, entry] of Object.entries(kpi)) {
+      if (lineIds.has(lineId) && entry && entry.target != null) {
+        const { target, ...rest } = entry
+        void target
+        touched = true
+        cleared++
+        // Keep the weight if there is one; drop the entry entirely if the
+        // target was all it held.
+        if (Object.keys(rest).length) next[lineId] = rest
+      } else {
+        next[lineId] = entry
+      }
+    }
+    return touched ? { ...p, kpi: next } : p
+  })
+  return { people: out, cleared }
+}
 
 /**
  * Apply any repair this state has not had yet, and stamp it.
@@ -1154,7 +1197,8 @@ export function repairState(s) {
     return { ...s, repair: REPAIR_VERSION }
   }
   const { projects } = repairOwnership(s.projects, s.people)
-  return { ...s, projects, repair: REPAIR_VERSION }
+  const { people } = repairTargetUnits(s.people)
+  return { ...s, projects, people, repair: REPAIR_VERSION }
 }
 
 export function setRolesPatch(project, person, roles) {

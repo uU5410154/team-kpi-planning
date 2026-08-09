@@ -12,13 +12,12 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import ExcelJS from 'exceljs'
 import { columnFor } from '../src/lib/projectSheet.js'
-import { financeRates, DEFAULT_SETTINGS } from '../src/lib/model.js'
 
 // Objective 1 is measured in baht, so one extra saving hour per month moves its
 // target by a year of that hour's value. Taken from the model rather than
 // hardcoded, so the test cannot drift away from the app's own arithmetic.
-const RATES = financeRates(DEFAULT_SETTINGS)
-const PER_HOUR = 12 * RATES.acctHourRate
+// (rates are no longer needed here either)
+// (the per-hour value is no longer needed: the checks below are in hours)
 
 const BROWSERS = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -1160,7 +1159,7 @@ try {
   check('LOADING THE APP REPAIRS THE STORED STATE',
     !/james/.test(repaired.contributors) && /gun/.test(repaired.contributors),
     JSON.stringify(repaired))
-  check('and stamps it so it never runs again', repaired.repair === 1, String(repaired.repair))
+  check('and stamps it so it never runs again', repaired.repair >= 1, String(repaired.repair))
 
   await page.goto(`${base}/?dmg=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 1800))
