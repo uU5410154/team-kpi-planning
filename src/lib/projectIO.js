@@ -223,10 +223,16 @@ export async function readProjectsFile(data) {
 const same = (a, b) => {
   if (a == null && b == null) return true
   if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-9
+  // A list has to be compared by value: two identical soft-benefit lists are
+  // different objects, and === would report a change on every single import.
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return JSON.stringify(Array.isArray(a) ? a : []) === JSON.stringify(Array.isArray(b) ? b : [])
+  }
   return a === b
 }
 
 const showValue = (v) => {
+  if (Array.isArray(v)) return v.length ? `${v.length} bullet${v.length === 1 ? '' : 's'}` : '—'
   if (v == null || v === '') return '—'
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100)
   return String(v)

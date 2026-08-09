@@ -522,6 +522,9 @@ export async function buildWorkbook(plan, state) {
       ['Jira', 12], ['Project', 42], ['Objective', 22],
       [`Project ${unit}`, 14], ['Credited', 11],
       [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14], ['Status', 13],
+      // What each project delivers beyond the hours. On the person's own sheet
+      // because a scorecard read on its own has to carry the whole case.
+      ['Soft benefits', 46],
     ]
     // 1-based index by header label, so inserting a column cannot silently
     // re-format its neighbours.
@@ -620,8 +623,15 @@ export async function buildWorkbook(plan, state) {
         !inTotal || pr.buildCost == null ? null : Math.round(pr.buildCost * share),
         !inTotal || pr.investment == null ? null : Math.round(pr.investment * share),
         pr.status || '',
+        // Not shared out: a soft benefit is not divisible. Two people credited
+        // on a project both deliver the whole of it.
+        counted ? (pr.softBenefits || []).map((b) => `• ${b}`).join('\n') : '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
+      if (counted && (pr.softBenefits || []).length) {
+        row.getCell(px('Soft benefits')).alignment = { vertical: 'top', wrapText: true }
+        row.height = Math.min(90, 12 + pr.softBenefits.length * 12)
+      }
       ;[NUM_FIRST, px('Credited')].forEach((c) => { row.getCell(c).numFmt = N0 })
       MONEY_COLS.forEach((c) => { row.getCell(c).numFmt = MONEY })
       for (let c = NUM_FIRST; c <= NUM_LAST; c++) row.getCell(c).alignment = { horizontal: 'right' }
@@ -683,6 +693,10 @@ export async function buildWorkbook(plan, state) {
       // instead of taking the hours on trust.
       { label: 'Team (roles, share)', width: 42, align: 'left' },
       { label: `Saving ${unit}`, width: 13, fmt: N0 },
+      // Beside the hours, as on screen: the other half of the benefit. One
+      // bullet a line inside the cell, so it reads as a list rather than a
+      // paragraph with semicolons in it.
+      { label: 'Soft benefits', width: 46, align: 'left', wrap: true },
       // Headed FTE to match the app and the source workbook's own meaning; the
       // value behind it is still the stored `hc` field.
       { label: 'FTE', width: 8, fmt: N1 },
@@ -731,6 +745,7 @@ export async function buildWorkbook(plan, state) {
         person ? person.nick : 'TBC',
         creditSummary(p, p.shares, (id) => people.find((x) => x.id === id)?.nick || id),
         p.savingHours ?? null,
+        (p.softBenefits || []).map((b) => `• ${b}`).join('\n'),
         p.fte ?? null,
         p.commitLevel,
         p.status || '',
@@ -745,6 +760,10 @@ export async function buildWorkbook(plan, state) {
         else if (c.align === 'center') cell.alignment = { horizontal: 'center' }
       })
       row.getCell(ix('Remark')).alignment = { vertical: 'middle', wrapText: false }
+      if ((p.softBenefits || []).length) {
+        row.getCell(ix('Soft benefits')).alignment = { vertical: 'top', wrapText: true }
+        row.height = Math.min(90, 12 + p.softBenefits.length * 12)
+      }
 
       if (!person) tone(row.getCell(ix('PIC')), BAD)
       if (p.savingHours == null) tone(row.getCell(ix('Saving')), WARN)

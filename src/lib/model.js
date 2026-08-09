@@ -238,6 +238,30 @@ export const newOpexLine = (seq = 1) => ({
  * developer day rate and never stored, so moving the salary re-prices the plan
  * instead of silently changing how much work a task is.
  */
+/**
+ * The benefits a project delivers that no number captures.
+ *
+ * Saving hours are only part of the case: control, an audit trail, risk
+ * removed, a manual reconciliation nobody has to do at month end. They are
+ * recorded as a list of short statements rather than a paragraph, so a
+ * scorecard and a workbook can both show them as bullets instead of prose.
+ *
+ * Accepts either a real list or the newline-separated text a person types, and
+ * always returns a clean list — the editor, the register, the scorecard and the
+ * workbook then cannot disagree about what counts as one bullet.
+ */
+export function normalizeSoftBenefits(v) {
+  const raw = Array.isArray(v) ? v : String(v ?? '').split(/\r?\n/)
+  return raw
+    .map((x) => String(x ?? '').replace(/^\s*[-*\u2022\u00b7]\s*/, '').trim())
+    .filter(Boolean)
+    .map((x) => x.slice(0, 300))
+    .slice(0, 20)
+}
+
+/** The same list as the text a person edits: one per line, no bullet glyphs. */
+export const softBenefitsText = (v) => normalizeSoftBenefits(v).join('\n')
+
 export function normalizeTasks(tasks) {
   if (!Array.isArray(tasks)) return []
   return tasks.map((raw, i) => {
@@ -1389,6 +1413,9 @@ export function computePlan(state) {
     const p = {
       ...raw,
       tasks,
+      // Cleaned once, here, so nothing downstream has to guess whether it is
+      // holding a list, a paragraph, or a paragraph with bullet glyphs in it.
+      softBenefits: normalizeSoftBenefits(raw.softBenefits),
       savingHours: num(raw.savingHours),
       manday: resolveManday(raw),
       capex: num(raw.capex),

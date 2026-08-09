@@ -190,6 +190,14 @@ export default function People({
 
   const sum = weightSum(p.kpiLines)
   const weightOk = weightsValid(p.kpiLines)
+
+  // The soft benefits on the projects this person is credited on. Counted rows
+  // only: a deferred or excluded project delivers nothing this year, and
+  // listing its benefits on a scorecard would claim work that is not happening.
+  const softBenefits = p.scorecardRows
+    .filter(({ p: pr }) => (pr.commitLevel === 'commit' || pr.commitLevel === 'stretch')
+      && (pr.softBenefits || []).length > 0)
+    .map(({ p: pr }) => ({ key: pr.jiraKey || pr.key, summary: pr.summary, list: pr.softBenefits }))
   const shareOfTeam = totals.totalHours > 0 ? p.hours / totals.totalHours : 0
   const edited = p.kpiLines.some((l) => l.overridden) || (p.kpiHiddenLines || []).length > 0
   const drifted = p.kpiLines.filter((l) => l.drifted)
@@ -548,6 +556,31 @@ export default function People({
               </TableBody>
             </Table>
             </Box>
+
+            {/* ---------- what the register cannot count ---------- */}
+            {softBenefits.length > 0 && (
+              <Box sx={{ px: 2.5, py: 1.75, borderTop: 1, borderColor: 'divider' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, display: 'block', mb: 1 }}>
+                  SOFT BENEFITS DELIVERED
+                </Typography>
+                {softBenefits.map((g) => (
+                  <Box key={g.key} sx={{ mb: 1.25 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                      {g.key} · {g.summary}
+                    </Typography>
+                    {g.list.map((b, i) => (
+                      <Typography key={i} variant="caption" sx={{ display: 'block', color: 'text.secondary', pl: 1 }}>
+                        &bull; {b}
+                      </Typography>
+                    ))}
+                  </Box>
+                ))}
+                <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
+                  From the projects credited to {p.nick}. They carry no hours and no weight — they are the part
+                  of the case the saving hours do not capture.
+                </Typography>
+              </Box>
+            )}
 
             {/* ---------- a KPI line written by hand ---------- */}
             <Box sx={{ px: 2.5, py: 1.5, borderTop: 1, borderColor: 'divider' }}>

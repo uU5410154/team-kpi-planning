@@ -15,7 +15,7 @@
  *     number overwrite the number it was copied from.
  */
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS } from './palette.js'
-import { resolveManday, projectCosts } from './model.js'
+import { resolveManday, projectCosts, normalizeSoftBenefits } from './model.js'
 
 export const SHEET_NAME = 'Projects'
 
@@ -129,6 +129,21 @@ export const PROJECT_COLUMNS = [
       if (n === undefined) return undefined
       if (n === 'TBC') return null_hours
       return n == null || n < 0 ? null : n
+    },
+  },
+  {
+    // Beside the hours, as on screen. One bullet a line inside the cell, and
+    // the same on the way back in — a semicolon-separated blob would import as
+    // one very long benefit.
+    key: 'softBenefits', label: 'Soft benefits', width: 46, match: /^soft/i, field: 'softBenefits',
+    read: (p) => (p.softBenefits || []).map((b) => `• ${b}`).join(String.fromCharCode(10)),
+    parse: (raw) => {
+      if (raw == null) return undefined
+      const list = normalizeSoftBenefits(raw)
+      // A cell cleared on purpose empties the list; a cell never touched is
+      // blank too, so an empty one is treated as "leave it alone" — the same
+      // rule every other column follows.
+      return list.length ? list : undefined
     },
   },
   {

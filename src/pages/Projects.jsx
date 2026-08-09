@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
-  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link,
+  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover,
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
@@ -17,6 +17,7 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
+  normalizeSoftBenefits, softBenefitsText,
 } from '../lib/model.js'
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
@@ -95,6 +96,87 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
       }}
       sx={{ width }}
     />
+  )
+}
+
+
+/**
+ * The soft benefits on a project: a short list, edited as one bullet a line.
+ *
+ * A popover rather than a cell-sized text box. The register is already wide,
+ * and a column big enough to write three sentences in would push the columns
+ * that carry numbers off the screen.
+ */
+function SoftBenefitCell({ value, onChange }) {
+  const [anchor, setAnchor] = useState(null)
+  const [draft, setDraft] = useState('')
+  const list = normalizeSoftBenefits(value)
+
+  const open = (e) => { setDraft(softBenefitsText(value)); setAnchor(e.currentTarget) }
+  const close = () => {
+    setAnchor(null)
+    const next = normalizeSoftBenefits(draft)
+    if (JSON.stringify(next) !== JSON.stringify(list)) onChange(next)
+  }
+
+  return (
+    <>
+      <Box
+        role="button"
+        aria-label="edit soft benefits"
+        tabIndex={0}
+        onClick={open}
+        onKeyDown={(e) => { if (e.key === 'Enter') open(e) }}
+        sx={{
+          cursor: 'pointer', minHeight: 28, borderRadius: 1, px: 0.75, py: 0.25,
+          '&:hover': { bgcolor: 'action.hover' },
+        }}
+      >
+        {list.length ? (
+          <>
+            {list.slice(0, 2).map((b, i) => (
+              <Typography key={i} variant="caption" sx={{ display: 'block', lineHeight: 1.35 }}>
+                &bull; {b.length > 34 ? `${b.slice(0, 34)}…` : b}
+              </Typography>
+            ))}
+            {list.length > 2 && (
+              <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>
+                +{list.length - 2} more
+              </Typography>
+            )}
+          </>
+        ) : (
+          <Typography variant="caption" sx={{ color: 'text.disabled' }}>add…</Typography>
+        )}
+      </Box>
+      <Popover
+        open={!!anchor}
+        anchorEl={anchor}
+        onClose={close}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Box sx={{ p: 2, width: 380 }}>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Soft benefits</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+            What this delivers that the saving hours do not capture — control, an audit trail, risk removed.
+            One per line; they show on the scorecard of everyone credited on it, and in the export.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            minRows={4}
+            size="small"
+            value={draft}
+            placeholder={'Removes a manual reconciliation at month end\nFull audit trail on every posting'}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
+            <Button size="small" onClick={close}>Done</Button>
+          </Box>
+        </Box>
+      </Popover>
+    </>
   )
 }
 
@@ -669,6 +751,9 @@ export default function Projects({
               <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
               <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>
               {head('savingHours', 'Saving hrs/mth', 'right')}
+              {/* Beside the hours deliberately: it is the other half of the
+                  benefit, and a case made only of hours is half a case. */}
+              <TableCell sx={{ minWidth: 150, maxWidth: 170, width: 160 }}>Soft benefits</TableCell>
               {head('fte', 'FTE', 'right')}
               {head('manday', 'Mandays', 'right')}
               {/* One column, not three: the table already runs to the edge of
@@ -799,6 +884,12 @@ export default function Projects({
                       value={p.savingHours}
                       estimated={false}
                       onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
+                    />
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <SoftBenefitCell
+                      value={p.softBenefits}
+                      onChange={(v) => onUpdate(p.key, { softBenefits: v })}
                     />
                   </TableCell>
                   <TableCell align="right">
@@ -980,7 +1071,7 @@ export default function Projects({
             })}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={14} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={15} align="center" sx={{ py: 6, color: 'text.secondary' }}>
                   No projects match these filters.
                 </TableCell>
               </TableRow>

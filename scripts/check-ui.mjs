@@ -1633,6 +1633,68 @@ try {
       `${onRow} vs ${seen.tile}`)
   }
 
+
+  /* ---------- soft benefits: softTyped on the register, seen on the card ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?soft=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  await page.type('input[placeholder="Search key, project, team, assignee…"]', 'FNP-379')
+  await new Promise((r) => setTimeout(r, 900))
+
+  const softCol = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    return { ix: heads.indexOf('soft benefits'), saving: heads.findIndex((h) => h.startsWith('saving')) }
+  })
+  check('THERE IS A SOFT BENEFITS COLUMN', softCol.ix > 0, JSON.stringify(softCol))
+  check('and it sits beside the saving hours', softCol.ix === softCol.saving + 1, JSON.stringify(softCol))
+
+  await page.evaluate(() => {
+    document.querySelector('tbody tr [aria-label="edit soft benefits"]').click()
+  })
+  await new Promise((r) => setTimeout(r, 800))
+  const softTyped = await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    const ta = document.querySelector('.MuiPopover-root textarea')
+    if (!ta) return false
+    ta.focus()
+    setter.call(ta, 'Removes a manual reconciliation' + String.fromCharCode(10) + 'Full audit trail')
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })
+  check('clicking the cell opens an editor', softTyped)
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('.MuiPopover-root button')].find((x) => /^Done$/.test(x.innerText.trim()))
+    if (b) b.click()
+  })
+  await new Promise((r) => setTimeout(r, 1000))
+
+  const softCell = await page.evaluate((ix) => {
+    const row = document.querySelector('tbody tr')
+    return row ? row.children[ix].innerText.split(String.fromCharCode(10)).join(' | ') : null
+  }, softCol.ix)
+  check('THE BULLETS SHOW IN THE CELL',
+    /Removes a manual reconciliation/.test(softCell || '') && /Full audit trail/.test(softCell || ''),
+    String(softCell))
+
+  // the scorecard of the person credited on it
+  await page.goto(`${base}/?soft=2#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 1800))
+  const softTabs = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="tab"]')].map((t) => t.innerText.split(String.fromCharCode(10))[0].trim()))
+  await page.evaluate((i) => document.querySelectorAll('[role="tab"]')[i].click(),
+    softTabs.findIndex((t) => /James/.test(t)))
+  await new Promise((r) => setTimeout(r, 1400))
+  const softOnCard = await page.evaluate(() => {
+    const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
+    const c = head.closest('.MuiPaper-root')
+    return c.innerText.split(String.fromCharCode(10)).join(' | ')
+  })
+  check('THE SCORECARD SHOWS THE SOFT BENEFITS',
+    /SOFT BENEFITS DELIVERED/.test(softOnCard) && /Removes a manual reconciliation/.test(softOnCard),
+    softOnCard.slice(-220))
+  check('and names the project they come from', /FNP-379/.test(softOnCard), softOnCard.slice(-160))
+  check('the card total is untouched by them', /100%/.test(softOnCard))
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {
