@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, AppBar, Toolbar, Typography, Tabs, Tab,
   Button, IconButton, Tooltip, Snackbar, Alert, Chip, Divider, Menu, MenuItem,
+  CircularProgress,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import DarkModeIcon from '@mui/icons-material/DarkModeOutlined'
@@ -84,6 +85,19 @@ export default function App() {
    * took the shared one.
    */
   const startedBlank = useRef(!hasStoredState())
+  /*
+   * Nothing is shown until the shared plan has been asked for.
+   *
+   * The app painted the bundled seed first and swapped the real plan in when
+   * the fetch returned. On a cold instance that took fifteen seconds, and for
+   * fifteen seconds every manday, cost and return on screen read zero — which
+   * is exactly what somebody opening it in a new window reports as "all the
+   * data is missing".
+   *
+   * Only a browser that has nothing of its own waits. One that already holds a
+   * plan has something true to show immediately.
+   */
+  const [bootstrapping, setBootstrapping] = useState(startedBlank.current)
   useEffect(() => {
     let cancelled = false
     const blank = startedBlank.current
@@ -107,11 +121,14 @@ export default function App() {
           scenarioName: latest.name,
         }))
         setLastSaved(latest.updatedAt)
+        linkedToDb.current = true
         setTimeout(() => setDirty(false), 0)
         setToast({ severity: 'success', msg: `Loaded "${latest.name}" from the shared database.` })
       } catch {
         // No database reachable. The browser copy stands, which is the point of
         // keeping one.
+      } finally {
+        if (!cancelled) setBootstrapping(false)
       }
     })()
     return () => { cancelled = true }
@@ -163,6 +180,7 @@ export default function App() {
       )
       setDirty(false)
       setLastSaved(r.updatedAt)
+      linkedToDb.current = true
       setToast({ severity: 'success', msg: `Saved "${name}" to the database.` })
     } catch (e) {
       setToast({ severity: 'error', msg: `${e.message} Your work is still safe in this browser.` })
@@ -170,6 +188,55 @@ export default function App() {
       setSaving(false)
     }
   }, [state, plan.invalid])
+
+  /*
+   * Work reaches the database on its own.
+   *
+   * It only ever reached it when somebody pressed Save, and nobody presses
+   * Save every time they type a manday: a browser ended up holding 1,907
+   * mandays against the 1,189 in the database, and the second machine showed
+   * the old figure and looked broken.
+   *
+   * Three conditions, all of them about not making things worse:
+   *   - this browser must already be working ON the shared plan, having loaded
+   *     it or saved it. A browser that has only ever seen the bundled seed must
+   *     never push that over the team's work;
+   *   - the plan must be valid. The same gate the Save button applies: a
+   *     scorecard that does not total 100% must not reach the database, or the
+   *     appraisal built from it is wrong;
+   *   - it waits for the typing to stop. Saving on every keystroke would write
+   *     a document a second and store a half-typed number as though it were a
+   *     decision.
+   */
+  const linkedToDb = useRef(false)
+  const autoSaveTimer = useRef(null)
+  useEffect(() => {
+    if (!dirty || !linkedToDb.current) return undefined
+    if (plan.invalid.length) return undefined
+    const name = (state.scenarioName || '').trim()
+    if (!name) return undefined
+
+    autoSaveTimer.current = setTimeout(async () => {
+      try {
+        const r = await api.saveScenario(
+          name,
+          {
+            people: state.people,
+            projects: state.projects,
+            settings: state.settings,
+            repair: state.repair,
+          },
+          localStorage.getItem('fa-kpi-author') || '',
+        )
+        setDirty(false)
+        setLastSaved(r.updatedAt)
+      } catch {
+        // Offline, or the database is down. The browser copy stands and the
+        // Save button still says there is something to send.
+      }
+    }, 4000)
+    return () => clearTimeout(autoSaveTimer.current)
+  }, [dirty, state, plan.invalid.length])
 
   // Keep the tab in the URL hash so a view can be linked or bookmarked.
   useEffect(() => {
@@ -474,6 +541,30 @@ export default function App() {
   const cov = plan.totals.totalCoverage
   const covTone = cov >= 1 ? 'success' : cov >= 0.9 ? 'warning' : 'error'
 
+  if (bootstrapping) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 2,
+        }}>
+          <CircularProgress size={28} />
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Loading the shared plan…
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+            first open of the day can take a moment while the server wakes
+          </Typography>
+        </Box>
+      </ThemeProvider>
+    )
+  }
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -625,6 +716,7 @@ export default function App() {
               scenarioName: name,
             }))
             // a freshly loaded scenario matches the database
+            linkedToDb.current = true
             setTimeout(() => setDirty(false), 0)
           }}
         />
