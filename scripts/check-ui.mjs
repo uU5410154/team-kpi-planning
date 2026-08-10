@@ -1826,6 +1826,70 @@ try {
   check('the project book in the app bar does not move', tgtHeadline === '4,227',
     String(tgtHeadline))
 
+
+  /* ---------- the PIC filter takes several at once, IT included ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?pics=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 4000))
+
+  const picRows = () => page.evaluate(() => document.querySelectorAll('tbody tr').length)
+  const picAll = await picRows()
+
+  const openPicFilter = async () => {
+    await page.evaluate(() => {
+      const label = [...document.querySelectorAll('label')].find((l) => l.innerText.trim() === 'PIC')
+      const combo = label.closest('.MuiFormControl-root').querySelector('[role="combobox"]')
+      combo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    })
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  const pickOption = async (want) => {
+    let box = null
+    let prev = null
+    for (let i = 0; i < 40 && !box; i++) {
+      const now = await page.evaluate((w) => {
+        const opt = [...document.querySelectorAll('[role="option"]')]
+          .find((o) => new RegExp(`^${w}`).test((o.textContent || '').trim()))
+        if (!opt) return null
+        const r = opt.getBoundingClientRect()
+        if (!r.width || !r.height) return null
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+      }, want)
+      if (now && prev && now.x === prev.x && now.y === prev.y) box = now
+      prev = now
+      if (!box) await new Promise((r) => setTimeout(r, 200))
+    }
+    if (box) await page.mouse.click(box.x, box.y)
+    await new Promise((r) => setTimeout(r, 600))
+    return !!box
+  }
+
+  await openPicFilter()
+  const picOptions = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()))
+  check('IT IS SELECTABLE AS A PIC', picOptions.some((o) => /^IT/.test(o)), picOptions.join(' | '))
+  check('and so is unassigned', picOptions.some((o) => /^Unassigned/.test(o)))
+
+  check('picking one filters the table', await pickOption('Kade'))
+  const oneRows = await picRows()
+  check('one PIC narrows it', oneRows > 0 && oneRows < picAll, `${picAll} -> ${oneRows}`)
+
+  check('a SECOND PIC can be picked without clearing the first', await pickOption('IT'))
+  await page.evaluate(() => {
+    if (!document.querySelector('[role="listbox"]')) return
+    const backs = [...document.querySelectorAll('.MuiBackdrop-root')]
+    if (backs.length) backs[backs.length - 1].click()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  const twoRows = await picRows()
+  check('TWO PICS SHOW MORE THAN ONE', twoRows > oneRows && twoRows < picAll,
+    `${oneRows} -> ${twoRows} of ${picAll}`)
+  const chipText = await page.evaluate(() => {
+    const label = [...document.querySelectorAll('label')].find((l) => l.innerText.trim() === 'PIC')
+    return label.closest('.MuiFormControl-root').innerText.replace(/\n/g, ' ')
+  })
+  check('and the control names both', /Kade/.test(chipText) && /IT/.test(chipText), chipText)
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

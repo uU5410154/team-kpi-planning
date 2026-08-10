@@ -272,7 +272,10 @@ export default function Projects({
 
   const [q, setQ] = useState('')
   const [fObj, setFObj] = useState('all')
-  const [fPic, setFPic] = useState('all')
+  // A LIST, and empty means everyone. Cutting the register by one person at a
+  // time made "these three between them" impossible to look at, which is the
+  // question anyone asks before moving work around.
+  const [fPic, setFPic] = useState([])
   const [fCommit, setFCommit] = useState('all')
   const [fGap, setFGap] = useState('all')
   const [fTeam, setFTeam] = useState('all')
@@ -294,7 +297,7 @@ export default function Projects({
       const hay = `${p.key} ${p.jiraKey ?? ''} ${p.summary} ${p.program ?? ''} ${p.team ?? ''} ${p.subTeam ?? ''} ${p.assignee ?? ''}`
       if (needle && !hay.toLowerCase().includes(needle)) return false
       if (fObj !== 'all' && p.objective !== fObj) return false
-      if (fPic !== 'all' && (fPic === 'none' ? !!p.pic : p.pic !== fPic)) return false
+      if (fPic.length && !fPic.includes(p.pic ?? 'none')) return false
       if (fCommit !== 'all' && p.commitLevel !== fCommit) return false
       if (fGap === 'saving' && p.savingHours != null) return false
       if (fGap === 'pic' && !!p.pic) return false
@@ -335,7 +338,9 @@ export default function Projects({
    */
   const filterParts = useMemo(() => {
     const bits = []
-    if (fPic !== 'all') bits.push(fPic === 'none' ? 'unassigned' : (assignees.find((x) => x.id === fPic)?.nick || fPic))
+    if (fPic.length) {
+      bits.push(fPic.map((id) => (id === 'none' ? 'unassigned' : (assignees.find((x) => x.id === id)?.nick || id))).join('+'))
+    }
     if (fObj !== 'all') bits.push(`Obj ${OBJ_BY_ID[fObj]?.no} ${OBJ_BY_ID[fObj]?.short || fObj}`)
     if (fTeam !== 'all') bits.push(fTeam)
     if (fCommit !== 'all') bits.push(fCommit)
@@ -355,7 +360,7 @@ export default function Projects({
     [projects],
   )
   const filtersOn =
-    q.trim() !== '' || [fObj, fPic, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
+    q.trim() !== '' || fPic.length > 0 || [fObj, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
 
   const head = (id, label, align = 'left', minWidth) => (
     <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined}>
@@ -513,12 +518,32 @@ export default function Projects({
               {OBJECTIVES.map((o) => <MenuItem key={o.id} value={o.id}>{o.no}. {o.short}</MenuItem>)}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 130 }}>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
             <InputLabel>PIC</InputLabel>
-            <Select label="PIC" value={fPic} onChange={(e) => setFPic(e.target.value)}>
-              <MenuItem value="all">All PICs</MenuItem>
+            <Select
+              multiple
+              label="PIC"
+              value={fPic}
+              onChange={(e) => setFPic(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+              displayEmpty
+              renderValue={(sel) => (sel.length === 0
+                ? 'All PICs'
+                : sel.map((id) => (id === 'none' ? 'Unassigned' : (assignees.find((x) => x.id === id)?.nick || id))).join(', '))}
+            >
               <MenuItem value="none">Unassigned</MenuItem>
-              {people.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
+              {/* assignees, not people: IT and any other partner team own
+                  delivery on real projects and have to be filterable, even
+                  though they carry no scorecard. */}
+              {assignees.map((p) => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.nick}
+                  {p.scorecard === false && (
+                    <Typography component="span" variant="caption" sx={{ ml: 0.75, color: 'text.secondary' }}>
+                      no scorecard
+                    </Typography>
+                  )}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 128 }}>
@@ -568,7 +593,7 @@ export default function Projects({
             <Button
               size="small"
               onClick={() => {
-                setQ(''); setFObj('all'); setFPic('all'); setFCommit('all')
+                setQ(''); setFObj('all'); setFPic([]); setFCommit('all')
                 setFGap('all'); setFTeam('all'); setFHc('all')
               }}
             >
