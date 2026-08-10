@@ -129,11 +129,29 @@ export async function buildFilteredWorkbook(rows, people, describe = '') {
   return wb
 }
 
-export const filteredFilename = (n) =>
-  `F&A Tech projects (${n}) — ${new Date().toISOString().slice(0, 10)}.xlsx`
+/**
+ * The filename says which slice of the register is inside it.
+ *
+ * A folder of files all called "F&A Tech projects (4)" is a folder nobody can
+ * tell apart a week later. The PIC comes first because that is what these are
+ * usually cut by — one file per person — so they sort together by owner.
+ *
+ * Anything a file system will not take is stripped rather than escaped: a name
+ * that fails to save is worse than a name that reads a little shorter.
+ */
+export const filteredFilename = (n, parts = []) => {
+  const clean = (parts || [])
+    .map((x) => String(x || '').replace(/[\\:*?"<>|/]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  const slice = clean.length ? clean.join(' · ') : 'all projects'
+  const name = `F&A Tech projects — ${slice} (${n}) — ${new Date().toISOString().slice(0, 10)}.xlsx`
+  // Windows gives up around 255; leave room for the folder it lands in.
+  return name.length <= 150 ? name
+    : `F&A Tech projects — ${clean[0] || 'filtered'} (${n}) — ${new Date().toISOString().slice(0, 10)}.xlsx`
+}
 
 /** Builds and downloads. Browser only. */
-export async function exportFiltered(rows, people, describe) {
+export async function exportFiltered(rows, people, describe, parts = []) {
   const wb = await buildFilteredWorkbook(rows, people, describe)
   const buf = await wb.xlsx.writeBuffer()
   const blob = new Blob([buf], {
@@ -142,7 +160,7 @@ export async function exportFiltered(rows, people, describe) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = filteredFilename(rows.length)
+  a.download = filteredFilename(rows.length, parts)
   a.click()
   URL.revokeObjectURL(url)
 }

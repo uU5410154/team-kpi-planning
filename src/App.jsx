@@ -107,6 +107,13 @@ export default function App() {
     const cap = setTimeout(() => { if (!cancelled) setBootstrapping(false) }, 2500)
     ;(async () => {
       try {
+        // Ask whether there IS a database before waiting on one. Without this
+        // the app sat on the loading screen for its whole timeout on any
+        // deployment that has no store configured, which is every local run.
+        const store = await api.storeStatus()
+        if (cancelled) return
+        if (!store.connected) { setBootstrapping(false); return }
+
         const list = await api.listScenarios()
         if (cancelled || !Array.isArray(list) || !list.length) return
         const latest = [...list].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]

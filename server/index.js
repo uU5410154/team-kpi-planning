@@ -16,7 +16,11 @@ try {
     if (!t || t.startsWith('#') || !t.includes('=')) continue
     const i = t.indexOf('=')
     const k = t.slice(0, i).trim()
-    if (!process.env[k]) process.env[k] = t.slice(i + 1).trim()
+    // Only when the key is genuinely ABSENT. Testing for falsiness let an
+    // explicitly empty value be overwritten by the file — a suite that asked
+    // for no database got the real cluster instead, and spent eight seconds
+    // failing to reach it on every boot.
+    if (!(k in process.env)) process.env[k] = t.slice(i + 1).trim()
   }
 } catch { /* no .env — fine */ }
 

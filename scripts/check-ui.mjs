@@ -257,7 +257,9 @@ try {
   await page.evaluate(() => localStorage.clear())
   // A hash-only change is not a navigation, so goto would hang waiting for one.
   await page.goto(`${base}/?fresh=1#people`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await new Promise((r) => setTimeout(r, 1500))
+  // Past the loader: a browser with nothing of its own waits for the shared
+  // plan before painting, rather than showing an empty register meanwhile.
+  await new Promise((r) => setTimeout(r, 4000))
 
   // The weight input is the LAST right-aligned input in a KPI row; the target
   // input sits before it and is also right-aligned when it holds hours.

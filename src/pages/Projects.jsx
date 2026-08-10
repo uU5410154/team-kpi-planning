@@ -325,17 +325,30 @@ export default function Projects({
 
   // What the exported file says it is. A working file with no idea which
   // slice of the register it holds is one nobody can check.
-  const describeFilter = useMemo(() => {
+  /*
+   * The filters in force, PIC first.
+   *
+   * The same list names the file and describes it inside, so a file and its
+   * banner can never disagree about which slice it holds. PIC leads because
+   * these are usually cut one per person, and a folder of them then sorts by
+   * owner.
+   */
+  const filterParts = useMemo(() => {
     const bits = []
-    if (q.trim()) bits.push(`search "${q.trim()}"`)
-    if (fObj !== 'all') bits.push(`objective ${OBJ_BY_ID[fObj]?.name || fObj}`)
-    if (fPic !== 'all') bits.push(`PIC ${fPic === 'none' ? 'unassigned' : (assignees.find((x) => x.id === fPic)?.nick || fPic)}`)
-    if (fCommit !== 'all') bits.push(`commit ${fCommit}`)
-    if (fTeam !== 'all') bits.push(`team ${fTeam}`)
+    if (fPic !== 'all') bits.push(fPic === 'none' ? 'unassigned' : (assignees.find((x) => x.id === fPic)?.nick || fPic))
+    if (fObj !== 'all') bits.push(`Obj ${OBJ_BY_ID[fObj]?.no} ${OBJ_BY_ID[fObj]?.short || fObj}`)
+    if (fTeam !== 'all') bits.push(fTeam)
+    if (fCommit !== 'all') bits.push(fCommit)
     if (fGap !== 'all') bits.push(`gap ${fGap}`)
     if (fHc !== 'all') bits.push(`FTE ${fHc}`)
-    return bits.length ? bits.join(', ') : 'the whole register'
+    if (q.trim()) bits.push(`"${q.trim()}"`)
+    return bits
   }, [q, fObj, fPic, fCommit, fTeam, fGap, fHc, assignees])
+
+  const describeFilter = useMemo(
+    () => (filterParts.length ? filterParts.join(', ') : 'the whole register'),
+    [filterParts],
+  )
 
   const teams = useMemo(
     () => [...new Set(projects.map((p) => p.team).filter(Boolean))].sort(),
@@ -765,7 +778,7 @@ export default function Projects({
           onClick={async () => {
             setBusy(true)
             try {
-              await exportFiltered(rows, assignees, describeFilter)
+              await exportFiltered(rows, assignees, describeFilter, filterParts)
             } finally { setBusy(false) }
           }}
         >
