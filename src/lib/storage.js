@@ -72,6 +72,38 @@ export function hasStoredState() {
   }
 }
 
+/**
+ * Is what this browser holds just the bundled seed, untouched?
+ *
+ * hasStoredState is not enough on its own. The app mirrors state into local
+ * storage on mount, so a window that has merely OPENED the app is holding a
+ * copy of the seed — and it then looked like somebody's work in progress and
+ * was told a newer plan existed rather than being given it. An incognito
+ * window reported exactly that on its second load.
+ *
+ * Compared against the seed by content: if the register, the roster and the
+ * settings are all still the bundled ones, there is nothing here to protect.
+ */
+export function isUntouchedSeed(parsed) {
+  if (!parsed || !Array.isArray(parsed.projects)) return true
+  const fresh = freshState()
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  return same(parsed.projects, fresh.projects)
+    && same(parsed.people, fresh.people)
+    && same(parsed.settings, fresh.settings)
+}
+
+/** Nothing worth keeping: no stored plan, or the bundled seed as it came. */
+export function hasNothingOfItsOwn() {
+  try {
+    const raw = localStorage.getItem(KEY)
+    if (!raw) return true
+    return isUntouchedSeed(JSON.parse(raw))
+  } catch {
+    return true
+  }
+}
+
 export function loadState() {
   try {
     const raw = localStorage.getItem(KEY)

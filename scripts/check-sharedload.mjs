@@ -121,6 +121,29 @@ try {
   check('the app says where the plan came from', /shared database/i.test(toldSo),
     (toldSo.match(/Loaded[^\n]*/) || [''])[0])
 
+  /* ---------- 1b. a SECOND visit, the seed already mirrored ---------- */
+  // The app writes state to local storage on mount, so a window that has only
+  // opened the app is holding a copy of the seed. It reported that as work in
+  // progress and refused to take the shared plan — which is what an incognito
+  // window did on its second load.
+  await page.evaluate(() => {
+    const raw = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    // put it back to the bundled seed, as a first visit would have left it
+    localStorage.setItem('fa-tech-kpi-2026', JSON.stringify({ ...raw, projects: raw.projects.map((p) => ({ ...p, manday: 0 })) }))
+  })
+  await page.goto(`${base}/?again=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 3000))
+  const second = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    return {
+      withMandays: st.projects.filter((p) => (p.manday || 0) > 0).length,
+      notice: /shared database was saved/i.test(document.body.innerText),
+    }
+  })
+  check('A SECOND VISIT WITH NOTHING OF ITS OWN STILL TAKES THE SHARED PLAN',
+    second.withMandays === withMandays, JSON.stringify(second))
+  check('and is not told to open it by hand', second.notice === false, JSON.stringify(second))
+
   /* ---------- 2. a browser that already holds work ---------- */
   await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
@@ -159,7 +182,9 @@ try {
   await p2.goto(`${noDbBase}/#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await p2.evaluate(() => localStorage.clear())
   await p2.goto(`${noDbBase}/?nodb=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await new Promise((r) => setTimeout(r, 2500))
+  // Past the loader's own cap: with no database the app shows what it has
+  // rather than waiting on a request that is never going to answer.
+  await new Promise((r) => setTimeout(r, 5000))
   const rows = await p2.evaluate(() => document.querySelectorAll('tbody tr').length)
   check('WITH NO DATABASE THE APP STILL OPENS', rows > 10, `${rows} rows`)
   await p2.close()

@@ -21,7 +21,7 @@ import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import {
   loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState,
-  hasStoredState,
+  hasNothingOfItsOwn,
 } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
@@ -84,7 +84,7 @@ export default function App() {
    * the seed it had just written a millisecond earlier — and none of them ever
    * took the shared one.
    */
-  const startedBlank = useRef(!hasStoredState())
+  const startedBlank = useRef(hasNothingOfItsOwn())
   /*
    * Nothing is shown until the shared plan has been asked for.
    *
@@ -101,6 +101,10 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
     const blank = startedBlank.current
+    // Never stuck on the spinner. Whatever happens to the request — a slow
+    // instance, a proxy that swallows it, no database at all — the app shows
+    // what it has after this, and the shared plan still lands when it arrives.
+    const cap = setTimeout(() => { if (!cancelled) setBootstrapping(false) }, 2500)
     ;(async () => {
       try {
         const list = await api.listScenarios()
@@ -128,10 +132,11 @@ export default function App() {
         // No database reachable. The browser copy stands, which is the point of
         // keeping one.
       } finally {
+        clearTimeout(cap)
         if (!cancelled) setBootstrapping(false)
       }
     })()
-    return () => { cancelled = true }
+    return () => { cancelled = true; clearTimeout(cap) }
   }, [])
 
   useEffect(() => {
