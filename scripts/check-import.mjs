@@ -73,10 +73,10 @@ console.log('--- the export holds what you filtered, and says what it holds ---'
   // The filters name the file, PIC first, so a folder of them sorts by owner
   // and nobody has to open one to find out which slice it holds.
   const named = filteredFilename(rows.length, ['Pol', 'Obj 4 Efficiency', 'commit'])
-  check('AND THE FILTERS, WITH THE PIC FIRST',
-    named.startsWith('F&A Tech projects — Pol') && named.includes('Obj 4 Efficiency'), named)
+  check('AND IT STARTS WITH THE PIC, BEFORE THE PRODUCT NAME',
+    named.startsWith('Pol') && named.includes('Obj 4 Efficiency'), named)
   check('an unfiltered export says so rather than looking filtered',
-    /all projects/.test(filteredFilename(rows.length, [])), filteredFilename(rows.length, []))
+    /^F&A Tech projects — all/.test(filteredFilename(rows.length, [])), filteredFilename(rows.length, []))
   check('characters a file system will not take are stripped',
     !/[\\:*?"<>|/]/.test(filteredFilename(1, ['Kade', String.fromCharCode(34) + 'AP/Trade: x?' + String.fromCharCode(34)]).replace('.xlsx', '')),
     filteredFilename(1, ['Kade', '"AP/Trade: x?"']))

@@ -143,11 +143,14 @@ export const filteredFilename = (n, parts = []) => {
   const clean = (parts || [])
     .map((x) => String(x || '').replace(/[\\:*?"<>|/]/g, ' ').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
-  const slice = clean.length ? clean.join(' · ') : 'all projects'
-  const name = `F&A Tech projects — ${slice} (${n}) — ${new Date().toISOString().slice(0, 10)}.xlsx`
+  const day = new Date().toISOString().slice(0, 10)
+  // The filter comes FIRST, before the product name: a folder of these is
+  // read down the left edge, and the owner is what anyone is looking for.
+  const name = clean.length
+    ? `${clean.join(' · ')} — F&A Tech projects (${n}) — ${day}.xlsx`
+    : `F&A Tech projects — all (${n}) — ${day}.xlsx`
   // Windows gives up around 255; leave room for the folder it lands in.
-  return name.length <= 150 ? name
-    : `F&A Tech projects — ${clean[0] || 'filtered'} (${n}) — ${new Date().toISOString().slice(0, 10)}.xlsx`
+  return name.length <= 150 ? name : `${clean[0]} — F&A Tech projects (${n}) — ${day}.xlsx`
 }
 
 /** Builds and downloads. Browser only. */
