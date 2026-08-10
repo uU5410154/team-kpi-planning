@@ -49,7 +49,9 @@ export default [
   // The browser-driving test runs page.evaluate callbacks that execute inside
   // the page, so document/window are legitimately in scope there.
   {
-    files: ['scripts/check-ui.mjs'],
+    // The browser-driving suites evaluate code INSIDE the page, so they
+    // legitimately name document and window alongside the Node globals.
+    files: ['scripts/check-ui.mjs', 'scripts/check-sharedload.mjs'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 ]

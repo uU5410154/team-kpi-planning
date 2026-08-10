@@ -18,7 +18,10 @@ import { buildTheme } from './theme.js'
 import { computePlan, newProject, rebalanceWeights, reassignPatch } from './lib/model.js'
 import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
-import { loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState } from './lib/storage.js'
+import {
+  loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState,
+  hasStoredState,
+} from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
 import Dashboard from './pages/Dashboard.jsx'
@@ -58,6 +61,61 @@ export default function App() {
 
   useEffect(() => { saveState(state) }, [state])
   useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
+
+  /*
+   * A browser that has never held a plan takes the shared one.
+   *
+   * The app boots from this browser, which is right for work in progress and
+   * wrong on a second machine: with nothing in local storage it fell back to
+   * the bundled seed and every manday, cost and return read empty, as though
+   * the database were not connected at all.
+   *
+   * It only ever fills a BLANK browser. Work already here is never replaced —
+   * that would throw away edits nobody had finished — so an existing plan gets
+   * told the database has a newer one and is left alone.
+   */
+  const [dbNotice, setDbNotice] = useState(null)
+  /*
+   * Read during the FIRST RENDER, not inside the effect.
+   *
+   * The effect that mirrors state into local storage runs first, so by the
+   * time this one asked, every browser looked like it already held a plan —
+   * the seed it had just written a millisecond earlier — and none of them ever
+   * took the shared one.
+   */
+  const startedBlank = useRef(!hasStoredState())
+  useEffect(() => {
+    let cancelled = false
+    const blank = startedBlank.current
+    ;(async () => {
+      try {
+        const list = await api.listScenarios()
+        if (cancelled || !Array.isArray(list) || !list.length) return
+        const latest = [...list].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
+        if (!blank) {
+          setDbNotice(latest)
+          return
+        }
+        const doc = await api.loadScenario(latest.name)
+        if (cancelled || !doc?.payload?.projects) return
+        setState((s) => repairState({
+          ...s,
+          people: doc.payload.people,
+          projects: doc.payload.projects,
+          settings: { ...s.settings, ...doc.payload.settings },
+          repair: doc.payload.repair,
+          scenarioName: latest.name,
+        }))
+        setLastSaved(latest.updatedAt)
+        setTimeout(() => setDirty(false), 0)
+        setToast({ severity: 'success', msg: `Loaded "${latest.name}" from the shared database.` })
+      } catch {
+        // No database reachable. The browser copy stands, which is the point of
+        // keeping one.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (wasReset) {
@@ -570,6 +628,33 @@ export default function App() {
             setTimeout(() => setDirty(false), 0)
           }}
         />
+
+        {/* Not loaded automatically: this browser already holds a plan, and
+            replacing it would throw away edits nobody had finished. */}
+        <Snackbar
+          open={!!dbNotice}
+          autoHideDuration={12000}
+          onClose={() => setDbNotice(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert
+            severity="info"
+            onClose={() => setDbNotice(null)}
+            action={(
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => { setScenario('load'); setDbNotice(null) }}
+              >
+                Open
+              </Button>
+            )}
+          >
+            &ldquo;{dbNotice?.name}&rdquo; in the shared database was saved{' '}
+            {dbNotice?.updatedAt ? new Date(dbNotice.updatedAt).toLocaleString() : ''}. This browser is
+            showing its own copy.
+          </Alert>
+        </Snackbar>
 
         <Snackbar
           open={!!toast}

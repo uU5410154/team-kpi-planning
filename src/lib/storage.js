@@ -56,6 +56,22 @@ export function isStale(parsed) {
   )
 }
 
+/**
+ * Has this browser ever held a plan?
+ *
+ * The app boots from this browser, not from the database — which is right for
+ * unsaved work and wrong on a machine that has never opened it, where the
+ * fallback is the bundled seed and every manday reads empty. This is how the
+ * startup path tells "nothing here yet" from "someone's work in progress".
+ */
+export function hasStoredState() {
+  try {
+    return !!localStorage.getItem(KEY)
+  } catch {
+    return false
+  }
+}
+
 export function loadState() {
   try {
     const raw = localStorage.getItem(KEY)
