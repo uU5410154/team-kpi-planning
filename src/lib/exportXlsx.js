@@ -106,6 +106,68 @@ const tone = (cell, argb, bold = true) => {
  * sorted, summed or charted, which is most of the reason to export to Excel.
  * Only a milestone target, which has no number in it, goes in as text.
  */
+/**
+ * Widen every column to what it actually has to show.
+ *
+ * Excel does not shrink a number to fit — it prints ###### and leaves the
+ * reader to drag the column, which on a report that gets forwarded means the
+ * figure is simply not there. A unit baked into a number format costs real
+ * width: "45 dashboards/reports/portals" needs thirty characters in a column
+ * set to twenty.
+ *
+ * Merged cells are skipped. A banner spanning fourteen columns says nothing
+ * about how wide the first one should be, and measuring it would push every
+ * sheet to absurd widths.
+ */
+function fitColumns(ws, { min = 8, max = 46 } = {}) {
+  const merged = new Set()
+  for (const range of ws.model.merges || []) {
+    const m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range)
+    if (!m) continue
+    const toNum = (a) => [...a].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0)
+    for (let r = Number(m[2]); r <= Number(m[4]); r++) {
+      for (let c = toNum(m[1]); c <= toNum(m[3]); c++) merged.add(`${r}:${c}`)
+    }
+  }
+
+  // What a cell will actually take up on screen, near enough to size by.
+  const shown = (cell) => {
+    const v = cell.value
+    if (v == null) return 0
+    if (typeof v === 'object') {
+      if (v instanceof Date) return 10
+      if ('richText' in v) return v.richText.map((t) => t.text).join('').length
+      if ('formula' in v) return String(v.result ?? '').length
+      if ('text' in v) return String(v.text).length
+      return 0
+    }
+    if (typeof v === 'number') {
+      const fmt = String(cell.numFmt || '')
+      // the literal text inside the format is part of what is displayed
+      const literals = (fmt.match(/"[^"]*"/g) || []).join('').replace(/"/g, '').length
+      const decimals = (fmt.split('.')[1] || '').replace(/[^0#]/g, '').length
+      const whole = Math.abs(Math.trunc(v)).toLocaleString('en-US').length
+      const pct = /%/.test(fmt) ? 3 : 0
+      return whole + (decimals ? decimals + 1 : 0) + literals + pct + 1
+    }
+    // a string cell can be long; the wrap and the max below keep it sane
+    return String(v).split('\n').reduce((a, line) => Math.max(a, line.length), 0)
+  }
+
+  const widest = []
+  ws.eachRow({ includeEmpty: false }, (row, r) => {
+    row.eachCell({ includeEmpty: false }, (cell, c) => {
+      if (merged.has(`${r}:${c}`)) return
+      widest[c] = Math.max(widest[c] || 0, shown(cell))
+    })
+  })
+  widest.forEach((w, c) => {
+    if (!c) return
+    const col = ws.getColumn(c)
+    col.width = Math.max(col.width || 0, Math.min(max, Math.max(min, w + 1)))
+  })
+}
+
 function writeTarget(cell, line, basis, currency) {
   if (line.targetKind === 'thb') {
     cell.value = Math.round(Number(line.target || 0))
@@ -122,8 +184,12 @@ function writeTarget(cell, line, basis, currency) {
     // A hand-written KPI in its own unit. Still a NUMBER in the cell, with the
     // unit in the format, so it can be summed, sorted and charted like the
     // rest — a pre-formatted string could not.
-    cell.value = Number(line.target || 0)
-    cell.numFmt = line.unit ? `#,##0.##" ${String(line.unit).replace(/"/g, '')}"` : '#,##0.##'
+    // A whole number stays whole. "#,##0.##" prints the decimal point even
+    // when there is nothing after it, so eight solutions read "8. solutions".
+    const nv = Number(line.target || 0)
+    const digits = Number.isInteger(nv) ? '#,##0' : '#,##0.0'
+    cell.value = nv
+    cell.numFmt = line.unit ? `${digits}" ${String(line.unit).replace(/"/g, '')}"` : digits
   } else {
     cell.value = String(line.target ?? '—') || '—'
   }
@@ -1030,6 +1096,10 @@ export async function buildWorkbook(plan, state) {
     styleBody(ws, gStart, r - 2, cols.length, { zebra: false })
     grand.height = 20
   }
+
+  // Last, once every cell is written: a column can only be sized against what
+  // it actually holds.
+  for (const ws of wb.worksheets) fitColumns(ws)
 
   return wb
 }

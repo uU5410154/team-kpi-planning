@@ -147,5 +147,57 @@ console.log('\n--- reassigning moves the project in the exported workbook ---')
     `${plan2.totals.committedHours} vs ${totalOf(back2)}`)
 }
 
+/* ====== no cell may be too narrow to read ====== */
+console.log(String.fromCharCode(10) + '--- every number fits the column it is in ---')
+{
+  // Excel does not shrink a number to fit: it prints ###### and leaves the
+  // reader to drag the column, which on a forwarded report means the figure is
+  // simply not there. A unit inside a number format costs real width.
+  const tooNarrow = []
+  for (const sheet of back.worksheets) {
+    const merged = new Set()
+    for (const range of sheet.model.merges || []) {
+      const mm = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range)
+      if (!mm) continue
+      const toNum = (a) => [...a].reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0)
+      for (let rr = Number(mm[2]); rr <= Number(mm[4]); rr++) {
+        for (let cc = toNum(mm[1]); cc <= toNum(mm[3]); cc++) merged.add(`${rr}:${cc}`)
+      }
+    }
+    sheet.eachRow({ includeEmpty: false }, (row, rr) => {
+      row.eachCell({ includeEmpty: false }, (cell, cc) => {
+        if (merged.has(`${rr}:${cc}`)) return
+        const v = cell.value
+        const num = typeof v === 'number' ? v
+          : (v && typeof v === 'object' && typeof v.result === 'number' ? v.result : null)
+        if (num == null) return
+        const fmt = String(cell.numFmt || '')
+        const literals = (fmt.match(/"[^"]*"/g) || []).join('').replace(/"/g, '').length
+        const decimals = (fmt.split('.')[1] || '').replace(/[^0#]/g, '').length
+        const pct = /%/.test(fmt) ? 3 : 0
+        const need = Math.abs(Math.trunc(num)).toLocaleString('en-US').length
+          + (decimals ? decimals + 1 : 0) + literals + pct
+        const width = sheet.getColumn(cc).width || 0
+        if (need > width) tooNarrow.push(`${sheet.name} r${rr}c${cc} needs ${need} has ${width}`)
+      })
+    })
+  }
+  check('NO NUMBER IS WIDER THAN ITS COLUMN', tooNarrow.length === 0,
+    tooNarrow.slice(0, 5).join(' | ') || 'every numeric cell fits')
+
+  // and a whole number reads as a whole number
+  const fmts = []
+  for (const sheet of back.worksheets) {
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        if (typeof cell.value === 'number' && cell.numFmt) fmts.push(String(cell.numFmt))
+      })
+    })
+  }
+  check('no format prints a bare decimal point after a whole number',
+    !fmts.some((f) => f.includes('0.##')),
+    [...new Set(fmts)].slice(0, 8).join(' | '))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
