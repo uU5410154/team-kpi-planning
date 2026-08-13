@@ -215,6 +215,10 @@ export async function buildWorkbook(plan, state) {
   /* ============ 1. Summary ============ */
   {
     const ws = wb.addWorksheet('Summary', {
+      // Hidden, not removed: the rates, the bridge and the split between hours
+      // and cash are worked out here, and the sheets that quote them would have
+      // nothing to be checked against. Right-click any tab and Unhide.
+      state: 'hidden',
       properties: { tabColor: { argb: NAVY } },
       pageSetup: { orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
     })
@@ -1100,6 +1104,21 @@ export async function buildWorkbook(plan, state) {
   // Last, once every cell is written: a column can only be sized against what
   // it actually holds.
   for (const ws of wb.worksheets) fitColumns(ws)
+
+  /*
+   * Open on the register.
+   *
+   * A workbook opens on whatever tab is marked active, and the first sheet is
+   * hidden — Excel will not open on a hidden sheet, and left to itself it
+   * lands somewhere arbitrary. The register is what the file is for.
+   */
+  const openOn = wb.worksheets.find((w) => w.name === 'Projects' && w.state !== 'hidden')
+    || wb.worksheets.find((w) => w.state !== 'hidden')
+  if (openOn) {
+    wb.views = [{ activeTab: wb.worksheets.indexOf(openOn), visibility: 'visible' }]
+    for (const w of wb.worksheets) if (w !== openOn && w.state === 'active') w.state = 'visible'
+    openOn.state = 'visible'
+  }
 
   return wb
 }

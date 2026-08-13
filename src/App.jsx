@@ -37,13 +37,24 @@ const TABS = [
   { id: 'settings', label: 'Model' },
 ]
 
+/*
+ * Where the app opens: the register.
+ *
+ * The dashboard summarises what the register says, and nobody arrives wanting
+ * a summary of work they have not entered yet. A link that names a tab still
+ * wins — the hash is what a bookmark carries.
+ */
+const DEFAULT_TAB = 'projects'
+
 const tabFromHash = () => {
   const h = window.location.hash.replace('#', '')
-  return TABS.some((t) => t.id === h) ? h : 'dashboard'
+  return TABS.some((t) => t.id === h) ? h : DEFAULT_TAB
 }
 
 export default function App() {
-  const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode') || 'light')
+  // Dark unless this browser has been told otherwise. A choice already made
+  // here is still honoured — the toggle would be pointless if a reload undid it.
+  const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode') || 'dark')
   const [tab, setTab] = useState(tabFromHash)
   // Evaluate before the first save effect overwrites the cached copy.
   const [wasReset] = useState(loadWasReset)

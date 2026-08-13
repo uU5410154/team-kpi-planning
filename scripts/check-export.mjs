@@ -199,5 +199,24 @@ console.log(String.fromCharCode(10) + '--- every number fits the column it is in
     [...new Set(fmts)].slice(0, 8).join(' | '))
 }
 
+/* ====== the workbook opens where the work is ====== */
+console.log(String.fromCharCode(10) + '--- it opens on the register, with the working hidden ---')
+{
+  const active = back.views && back.views[0] && back.views[0].activeTab
+  const opensOn = typeof active === 'number' ? back.worksheets[active] : null
+  check('IT OPENS ON THE PROJECT REGISTER', opensOn && opensOn.name === 'Projects',
+    opensOn ? opensOn.name : String(active))
+  // Excel will not open on a hidden sheet, so the one it lands on has to be visible.
+  check('and that sheet is visible', opensOn && opensOn.state !== 'hidden', String(opensOn && opensOn.state))
+  const hidden = back.worksheets.filter((w) => w.state === 'hidden').map((w) => w.name)
+  check('the working sheets are hidden, not deleted',
+    hidden.includes('Summary') && hidden.includes('Effort_Return'), hidden.join(', '))
+  check('and everything a reader needs is still visible',
+    ['Overall_Objectives', 'Projects', 'Costs'].every((n) => !hidden.includes(n)),
+    back.worksheets.filter((w) => w.state !== 'hidden').map((w) => w.name).join(', '))
+  check('a hidden sheet still holds its figures',
+    back.getWorksheet('Summary').rowCount > 10, String(back.getWorksheet('Summary').rowCount))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
