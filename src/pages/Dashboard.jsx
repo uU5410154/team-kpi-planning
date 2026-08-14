@@ -261,6 +261,19 @@ export default function Dashboard({ plan, onGoTo }) {
                     {fmtHours(totals.bankableHours)}
                   </TableCell>
                 </TableRow>
+                {totals.outsideHours > 0 && (
+                  <TableRow>
+                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
+                      Owned by IT or the business
+                      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
+                        {totals.outsideCount} project{totals.outsideCount === 1 ? '' : 's'} · on the register, off our book
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.warning, fontWeight: 600 }}>
+                      −{fmtHours(totals.outsideHours)}
+                    </TableCell>
+                  </TableRow>
+                )}
                 {totals.partnerHours > 0 && (
                   <TableRow>
                     <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
@@ -276,7 +289,7 @@ export default function Dashboard({ plan, onGoTo }) {
                     <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
                       Of which absorbed by {people.find((x) => x.id === totals.fallbackPic)?.nick || 'the lead'}
                       <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
-                        {totals.fallbackCount} project{totals.fallbackCount === 1 ? '' : 's'} owned by IT or unassigned
+                        {totals.fallbackCount} unassigned project{totals.fallbackCount === 1 ? '' : 's'}
                       </Typography>
                     </TableCell>
                     <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', fontWeight: 600 }}>
@@ -301,7 +314,9 @@ export default function Dashboard({ plan, onGoTo }) {
                 ? 'Net view — partner devs dilute each person\'s share, so the team cannot personally bank the whole pool. Never add the individual targets together and compare them to the team target.'
                 : 'Gross view — each owner is credited whole projects even where a partner dev builds them. Switch to the net view on the Model tab to see what they can personally bank.'}
               {totals.fallbackHours > 0 &&
-                ` Projects owned by IT or left unassigned are credited to ${people.find((x) => x.id === totals.fallbackPic)?.nick || 'the team lead'}, who carries the team's overall KPI.`}
+                ` Projects left unassigned are credited to ${people.find((x) => x.id === totals.fallbackPic)?.nick || 'the team lead'}, who carries the team's overall KPI.`}
+              {totals.outsideHours > 0 &&
+                ` Projects whose PIC is IT or a business user are not the team's to claim — they stay on the register and in the book total above, but out of the commitment, out of every scorecard and out of the return.`}
             </Typography>
           </Section>
         </Grid>

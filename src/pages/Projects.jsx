@@ -907,7 +907,7 @@ export default function Projects({
                   key={p.key}
                   hover
                   selected={sel.has(p.key)}
-                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) ? 0.55 : 1 }}
+                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam ? 0.55 : 1 }}
                 >
                   <TableCell padding="checkbox">
                     <Checkbox
@@ -1016,11 +1016,21 @@ export default function Projects({
                     </Select>
                   </TableCell>
                   <TableCell align="right">
-                    <NumCell
-                      value={p.savingHours}
-                      estimated={false}
-                      onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
-                    />
+                    {/* Still editable — it is a real figure and worth keeping
+                        on the record. Struck through because it is not ours:
+                        the PIC is IT or the business, so the hours are outside
+                        the team's commitment and outside every scorecard. */}
+                    <Tooltip title={p.outsideTeam
+                      ? `Delivered by ${assignees.find((x) => x.id === p.pic)?.nick || 'a partner'} — kept on the register, but NOT counted in the team's committed saving hours and not on anyone's scorecard.`
+                      : ''}>
+                      <Box sx={{ textDecoration: p.outsideTeam ? 'line-through' : 'none' }}>
+                        <NumCell
+                          value={p.savingHours}
+                          estimated={false}
+                          onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
+                        />
+                      </Box>
+                    </Tooltip>
                   </TableCell>
                   <TableCell align="right">
                     <Tooltip title={p.monetaryAnnualBenefit

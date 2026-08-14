@@ -34,13 +34,21 @@ console.log('\n--- the lead\'s number IS the headline ---')
 // The number on the lead's card and the number in the header must be the same
 // number. They diverged once by exactly the 352 objective-3 hours, which the
 // header counted and the scorecards did not.
-check('the lead figure equals the dashboard headline',
-  Math.abs(lead.scorecardHours - plan.totals.totalHours) < 0.01,
-  `lead ${lead.scorecardHours.toFixed(1)} vs header ${plan.totals.totalHours.toFixed(1)}`)
+// The book counts every row on the register. The lead's card counts what the
+// TEAM committed to, which is the book less whatever IT or a business user
+// owns. The two figures are different questions and the difference has a name.
+const ours = plan.totals.totalHours - plan.totals.outsideHours
+check('the lead figure equals the book less what the team does not own',
+  Math.abs(lead.scorecardHours - ours) < 0.01,
+  `lead ${lead.scorecardHours.toFixed(1)} vs ${plan.totals.totalHours.toFixed(1)} − ${plan.totals.outsideHours.toFixed(1)}`)
+check('and that difference is exactly the outside-owned work',
+  plan.totals.outsideHours > 0
+  && Math.abs((plan.totals.totalHours - lead.scorecardHours) - plan.totals.outsideHours) < 0.01,
+  `${Math.round(plan.totals.outsideHours)} hrs over ${plan.totals.outsideCount} projects`)
 check('and the headline equals the raw source column',
   Math.abs(plan.totals.totalHours - seed.projects.reduce((a, p) => a + (p.savingHours ?? 0), 0)) < 0.01)
 check('every objective contributes its hours, including the date-gated one',
-  Math.abs(Object.values(plan.byObjective).reduce((a, b) => a + b, 0) - plan.totals.totalHours) < 0.01,
+  Math.abs(Object.values(plan.byObjective).reduce((a, b) => a + b, 0) - ours) < 0.01,
   Object.entries(plan.byObjective).map(([k, v]) => `${k}=${Math.round(v)}`).join(' '))
 
 console.log('\n--- the lead\'s number IS the team\'s ---')
@@ -62,7 +70,9 @@ const teamMates = plan.projects.filter((p) => p.pic && p.pic !== 'gun' && p.pic 
 const inPortfolio = (arr) => arr.filter((x) => (x.commitLevel === 'commit' || x.commitLevel === 'stretch'))
   .every((x) => lead.scorecardRows.some((r) => r.p.key === x.key))
 check('projects assigned to the lead are in the portfolio', inPortfolio(own), `${own.length} projects`)
-check('IT-owned projects are in the portfolio', inPortfolio(itOwned), `${itOwned.length} projects`)
+check('IT-OWNED PROJECTS ARE NOT IN THE PORTFOLIO',
+  itOwned.every((x) => !lead.scorecardRows.some((r) => r.p.key === x.key)),
+  `${itOwned.length} projects, ${Math.round(plan.totals.outsideHours)} hrs`)
 check('other members\' projects are in the portfolio', inPortfolio(teamMates), `${teamMates.length} projects`)
 
 console.log('\n--- the portfolio re-adds to the headline ---')
@@ -136,8 +146,9 @@ console.log('\n--- the export agrees ---')
   const sum = back.getWorksheet('Summary')
   let book = null
   sum.eachRow((row) => { if (String(row.getCell(1).value || '').startsWith('Total book')) book = row.getCell(2).value })
-  check('and the Summary book total agrees with it',
-    Math.abs(book - Math.round(lead.scorecardHours)) < 1, `${book} vs ${Math.round(lead.scorecardHours)}`)
+  check('and the Summary book total is the lead figure plus the outside work',
+    Math.abs(book - Math.round(lead.scorecardHours) - Math.round(plan.totals.outsideHours)) < 1,
+    `${book} vs ${Math.round(lead.scorecardHours)} + ${Math.round(plan.totals.outsideHours)}`)
   unlinkSync(file)
 }
 

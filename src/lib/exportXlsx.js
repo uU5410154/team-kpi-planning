@@ -256,6 +256,13 @@ export async function buildWorkbook(plan, state) {
       kv(`Deferred to next year (${totals.nextYearCount} projects, excluded above)`,
         Math.round(totals.nextYearHours), N0, MUTED)
     }
+    // Real work, on the register, delivered by someone else. It is inside the
+    // book total and outside the committed figure, so the difference between
+    // those two rows has to be named or the sheet looks like it cannot add up.
+    if (totals.outsideHours > 0) {
+      kv(`Owned by IT or the business (${totals.outsideCount} projects, in the book, not in the commitment)`,
+        Math.round(totals.outsideHours), N0, MUTED)
+    }
     kv('Already delivered (status Done)', Math.round(totals.doneHours), N0)
     kv('FTE committed (from the FTE column)', totals.committedHC, N1)
     styleBody(ws, bridgeStart, r - 1, 3)
@@ -895,7 +902,11 @@ export async function buildWorkbook(plan, state) {
       pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
     })
     banner(ws, 'PROJECT REGISTER',
-      `${projects.length} projects · ${Math.round(totals.headlineHours).toLocaleString()} ${unit} committed · effort, cost and return are on Effort_Return · source: ${state.meta?.source || 'plan'}`,
+      `${projects.length} projects · ${Math.round(totals.headlineHours).toLocaleString()} ${unit} committed${
+        totals.outsideHours > 0
+          ? ` · ${Math.round(totals.outsideHours).toLocaleString()} ${unit} owned by IT or the business and NOT counted`
+          : ''
+      } · effort, cost and return are on Effort_Return · source: ${state.meta?.source || 'plan'}`,
       cols.length)
     headerRow(ws, 4, cols.map((c) => c.label), cols.map((c) => c.width))
     ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4 + projects.length, column: cols.length } }
@@ -914,7 +925,9 @@ export async function buildWorkbook(plan, state) {
         p.subTeam || '',
         OBJ_BY_ID[p.objective] ? `${OBJ_BY_ID[p.objective].no}. ${OBJ_BY_ID[p.objective].name}` : '',
         person ? person.nick : 'TBC',
-        creditSummary(p, p.shares, (id) => people.find((x) => x.id === id)?.nick || id),
+        p.outsideTeam
+          ? 'not counted — owned outside the team'
+          : creditSummary(p, p.shares, (id) => people.find((x) => x.id === id)?.nick || id),
         p.savingHours ?? null,
         p.monetaryAnnualBenefit ?? null,
         (p.softBenefits || []).map((b) => `• ${b}`).join('\n'),
@@ -938,6 +951,10 @@ export async function buildWorkbook(plan, state) {
       }
 
       if (!person) tone(row.getCell(ix('PIC')), BAD)
+      if (p.outsideTeam) {
+        tone(row.getCell(ix('Team (roles')), MUTED)
+        tone(row.getCell(ix('Saving')), MUTED)
+      }
       if (p.savingHours == null) tone(row.getCell(ix('Saving')), WARN)
       const lvl = { commit: GOOD, stretch: NAVY_MID, watch: WARN, nextyear: 'FF7C5CD6', excluded: MUTED }[p.commitLevel]
       tone(row.getCell(ix('Commit')), lvl)

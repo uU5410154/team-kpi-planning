@@ -171,7 +171,9 @@ console.log('\n--- a counted objective counts deliverables ---')
   const lead = who(plain, 'gun')
   for (const id of COUNT_OBJECTIVES) {
     const line = lead.kpiLines.find((l) => l.objective === id && !l.custom)
-    const counted = plain.projects.filter((p) => servesObjective(p, id)
+    // Not `outsideTeam`: a dashboard IT built is a dashboard, but it is not
+    // one of OUR deliverables, so it cannot sit on our card.
+    const counted = plain.projects.filter((p) => servesObjective(p, id) && !p.outsideTeam
       && (p.commitLevel === 'commit' || p.commitLevel === 'stretch')).length
     check(`${OBJ_BY_ID[id].no}: the target is a number of ${OBJ_BY_ID[id].countUnit}`,
       line?.targetKind === 'number' && line.unit === OBJ_BY_ID[id].countUnit,
@@ -224,9 +226,10 @@ console.log('\n--- tagging a project to more objectives adds no hours ---')
   check('and the lead\'s card still states its own hours once',
     Math.abs(who(all, 'gun').kpiTotals.savingHours - who(plain, 'gun').kpiTotals.savingHours) < 1e-6,
     `${Math.round(who(all, 'gun').kpiTotals.savingHours)}`)
-  check('while every counted objective now counts the whole book',
+  check('while every counted objective now counts the whole of the team\'s book',
     COUNT_OBJECTIVES.every((id) => who(all, 'gun').countByObjective[id]
-      === plain.projects.filter((p) => p.commitLevel === 'commit' || p.commitLevel === 'stretch').length),
+      === plain.projects.filter((p) => !p.outsideTeam
+        && (p.commitLevel === 'commit' || p.commitLevel === 'stretch')).length),
     COUNT_OBJECTIVES.map((id) => `${id}:${who(all, 'gun').countByObjective[id]}`).join(' '))
   check('and nothing is blocked from saving', all.invalid.length === 0)
 }

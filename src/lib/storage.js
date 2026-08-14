@@ -86,10 +86,24 @@ export function hasStoredState() {
  */
 export function isUntouchedSeed(parsed) {
   if (!parsed || !Array.isArray(parsed.projects)) return true
-  const fresh = freshState()
+  /*
+   * Compared against the seed AS THE APP HOLDS IT, not as the file ships.
+   *
+   * The repair runs on the way in, so a browser that has only opened the app
+   * is holding the REPAIRED seed — and comparing that to the raw file made it
+   * look like somebody's work in progress the moment a new repair landed. The
+   * app then refused the shared plan and showed the bundled baseline instead,
+   * which reads on screen as "the database is not connected".
+   *
+   * Both sides go through the same repair, so the comparison asks the only
+   * question that matters: is there anything here that did not come from the
+   * seed.
+   */
+  const fresh = repairState(freshState())
+  const mine = repairState({ ...parsed })
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-  return same(parsed.projects, fresh.projects)
-    && same(parsed.people, fresh.people)
+  return same(mine.projects, fresh.projects)
+    && same(mine.people, fresh.people)
     && same(parsed.settings, fresh.settings)
 }
 

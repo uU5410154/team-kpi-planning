@@ -124,7 +124,11 @@ check('the owner gains the hours', Math.abs(kadeA.ownHours - kadeB.ownHours - 50
 check('the headline gains them', Math.abs(edited.totals.totalHours - plan.totals.totalHours - 50) < 0.01,
   `${plan.totals.totalHours} -> ${edited.totals.totalHours}`)
 check('the lead figure gains them', Math.abs(leadA.scorecardHours - lead.scorecardHours - 50) < 0.01)
-check('lead still equals the headline', Math.abs(leadA.scorecardHours - edited.totals.totalHours) < 0.01)
+// The book, less the rows IT or the business owns — the lead carries the
+// team's commitment, not the register.
+check('lead still equals the book less what the team does not own',
+  Math.abs(leadA.scorecardHours - (edited.totals.totalHours - edited.totals.outsideHours)) < 0.01,
+  `${Math.round(leadA.scorecardHours)} vs ${Math.round(edited.totals.totalHours)} − ${Math.round(edited.totals.outsideHours)}`)
 // The hours objective carries every saving hour, so an edit shows up there
 // rather than under whichever objective the project is tagged to.
 check('the hours objective gains them',

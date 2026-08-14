@@ -1,4 +1,4 @@
-import { OBJ_BY_ID, OBJECTIVES, OUT_OF_PLAN, PEOPLE_ORDER } from './palette.js'
+import { ASSIGNEE_ONLY, OBJ_BY_ID, OBJECTIVES, OUT_OF_PLAN, PEOPLE_ORDER } from './palette.js'
 
 const OBJECTIVE_ORDER = OBJECTIVES.map((o) => o.id)
 
@@ -1152,7 +1152,21 @@ export function repairOwnership(projects, people, roleWeights = DEFAULT_ROLE_WEI
  * 1: a PIC change used to write only `pic`, leaving the project on the old
  *    owner's scorecard at 77%.
  */
-export const REPAIR_VERSION = 2
+export const REPAIR_VERSION = 3
+
+/**
+ * Add any assignable-but-unmeasured entry the stored roster is missing.
+ *
+ * The roster travels with the plan, so a plan saved before "User" existed has
+ * six people and IT in it and no way to reach the new entry — the seed only
+ * applies to a plan that starts empty. Appending is safe: an id that is
+ * already there is left exactly as the user has it.
+ */
+export function repairRoster(people) {
+  const have = new Set((people || []).map((p) => p && p.id))
+  const missing = ASSIGNEE_ONLY.filter((p) => !have.has(p.id))
+  return { people: [...(people || []), ...missing], added: missing.length }
+}
 
 /**
  * Objectives whose unit changed, and the repair that follows from it.
@@ -1209,7 +1223,8 @@ export function repairState(s) {
     return { ...s, repair: REPAIR_VERSION }
   }
   const { projects } = repairOwnership(s.projects, s.people)
-  const { people } = repairTargetUnits(s.people)
+  const { people: retargeted } = repairTargetUnits(s.people)
+  const { people } = repairRoster(retargeted)
   return { ...s, projects, people, repair: REPAIR_VERSION }
 }
 
@@ -1341,11 +1356,20 @@ export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, credi
     raw[project.pic] = roleWeights.assignee ?? 0.6
   }
 
-  // Nothing landed on a scorecard owner — the project is unassigned, or owned
-  // by IT or another partner team. The team lead absorbs it, because they are
-  // accountable for the team's overall KPI and these hours must not vanish.
+  /*
+   * Nothing landed on a scorecard owner. Two different situations, and they
+   * must not be treated alike:
+   *
+   * UNASSIGNED — the team lead absorbs it. They are accountable for the team's
+   * overall KPI and these hours must not vanish.
+   *
+   * OWNED BY A PARTNER (IT, or the business user who built it themselves) —
+   * nobody absorbs it. The team did not deliver it, so claiming its hours on
+   * the lead's card would be claiming somebody else's work.
+   */
+  const outsourced = !!project.pic && !!opts.outside && opts.outside.has(project.pic)
   let fellBack = false
-  if (Object.keys(raw).length === 0 && opts.fallbackPic && isOwner(opts.fallbackPic)) {
+  if (!outsourced && Object.keys(raw).length === 0 && opts.fallbackPic && isOwner(opts.fallbackPic)) {
     raw[opts.fallbackPic] = roleWeights.assignee ?? 0.6
     fellBack = true
   }
@@ -1381,11 +1405,20 @@ export const isCounted = (p) => p.commitLevel === 'commit' || p.commitLevel === 
  */
 export const isInPlan = (p) => !OUT_OF_PLAN.has(p.commitLevel)
 
-/** Does this project's objective contribute hours to the 3,000 pool? */
+/**
+ * Does this project's objective contribute hours to the 3,000 pool?
+ *
+ * `outsideTeam` is stamped in computePlan and answers a prior question: is this
+ * the team's project at all. A row whose PIC is IT or a business user stays in
+ * the register — it is real work and worth tracking — but its hours are not
+ * this team's commitment and cannot be counted toward its target.
+ */
 export const countsToPool = (p) => {
+  if (p.outsideTeam) return false
   const o = OBJ_BY_ID[p.objective]
   return !!o?.countsToPool
 }
+
 
 export function projectRatio(p) {
   if (!p.manday || p.savingHours == null) return null
@@ -1621,8 +1654,11 @@ export function computePlan(state) {
   // assignable as PIC but carry no KPI of their own.
   const people = allPeople.filter((p) => p.scorecard !== false)
   const ownerIds = new Set(people.map((p) => p.id))
+  // IT and the business users: assignable as PIC, measured by nobody here.
+  const outsideIds = new Set(allPeople.filter((p) => p.scorecard === false).map((p) => p.id))
   const shareOpts = {
     owners: ownerIds,
+    outside: outsideIds,
     fallbackPic: ownerIds.has(s.fallbackPic) ? s.fallbackPic : null,
   }
 
@@ -1651,6 +1687,9 @@ export function computePlan(state) {
       capex: num(raw.capex),
       comment: typeof raw.comment === 'string' ? raw.comment : '',
     }
+    // Whose book is this on. Decided by the PIC and by the PIC alone, so the
+    // answer is the same one a reader gets from the register's own column.
+    p.outsideTeam = !!p.pic && outsideIds.has(p.pic)
     const { shares, partnerShare, fellBack } = projectShares(p, s.roleWeights, s.creditPartners, shareOpts)
     const fin = projectFinance(p, s)
     // The month grid lives here rather than in projectFinance so that every
@@ -1724,6 +1763,11 @@ export function computePlan(state) {
   const nextYear = perProject.filter((p) => p.commitLevel === 'nextyear')
   const nextYearHours = nextYear.reduce((a, p) => a + (p.savingHours ?? 0), 0)
 
+  // Delivered by IT or by the business itself: on the register, off our book.
+  // Reported so the difference between the two totals has a name.
+  const outside = perProject.filter((p) => p.outsideTeam && isInPlan(p))
+  const outsideHours = outside.reduce((a, p) => a + (p.savingHours ?? 0), 0)
+
   // Effort and the hours it bought, measured over the SAME projects. This used
   // to divide a commit-only numerator by a commit-plus-stretch denominator,
   // which understated the ratio by however much stretch effort existed.
@@ -1740,6 +1784,16 @@ export function computePlan(state) {
    * team has not earned. `roiCoverage` says how much of the benefit that
    * subset represents, so a flattering ROI over 3% of the book cannot be
    * mistaken for the portfolio's.
+   */
+  /*
+   * The BOOK's money, over every in-plan row including the ones IT or the
+   * business owns. Deliberately: this block reconciles line for line to the
+   * source workbook's own columns, and the workbook counts those rows. The
+   * team's commitment is a narrower thing and is measured in hours above.
+   *
+   * Objective 1 at PERSON level is already narrower without any filtering here
+   * — a project owned outside the team lands on no scorecard, so it enters
+   * nobody's average return.
    */
   const inPlan = perProject.filter(isInPlan)
   const monthlyBenefit = inPlan.reduce((a, p) => a + (p.monthlyBenefit || 0), 0)
@@ -2264,7 +2318,14 @@ export function computePlan(state) {
   const byObjective = {}
   const mixByObjective = {}
   const countByObjective = {}
-  for (const p of perProject.filter(isCounted)) {
+  /*
+   * Both maps are the TEAM's, so both drop what the team does not own. An
+   * objective is a KPI: a dashboard IT built is not our objective-4 delivery,
+   * and hours the business released for itself are not our objective 2. The
+   * book that includes them is `totals.totalHours`, with the difference named
+   * in `totals.outsideHours`.
+   */
+  for (const p of perProject.filter((x) => isCounted(x) && !x.outsideTeam)) {
     const hrs = p.savingHours ?? 0
     if (HOURS_OBJECTIVE) byObjective[HOURS_OBJECTIVE] = (byObjective[HOURS_OBJECTIVE] || 0) + hrs
     mixByObjective[p.objective] = (mixByObjective[p.objective] || 0) + hrs
@@ -2317,6 +2378,8 @@ export function computePlan(state) {
       byStatus,
       nextYearHours,
       nextYearCount: nextYear.length,
+      outsideHours,
+      outsideCount: outside.length,
       doneHours,
       doneCoverage: s.targetHours > 0 ? doneHours / s.targetHours : 0,
     },

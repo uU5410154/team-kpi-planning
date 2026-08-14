@@ -1,8 +1,12 @@
 /**
- * Locks two rules:
- *   - IT is assignable as a PIC but holds no scorecard of its own.
- *   - Saving hours that land on no scorecard owner (IT-owned, or unassigned)
- *     are credited to the team lead, who carries the team's overall KPI.
+ * Locks three rules, and the boundary between them:
+ *   - IT and the business user are assignable as PIC but hold no scorecard.
+ *   - A project THEY own is not the team's: nobody is credited, its hours are
+ *     not in the commitment, and the lead does NOT absorb it. Claiming it
+ *     would be claiming somebody else's work.
+ *   - Saving hours that land on no scorecard owner because the project is
+ *     UNASSIGNED are still credited to the team lead, who carries the team's
+ *     overall KPI. Unowned and owned-by-someone-else are not the same thing.
  *
  * Run with: node scripts/check-fallback.mjs
  */
@@ -39,10 +43,20 @@ const lead = plan.people.find((p) => p.id === DEFAULT_SETTINGS.fallbackPic)
 check('the fallback is the team lead', lead?.band === 'lead', `${lead?.nick} (${lead?.role})`)
 
 const itProjects = plan.projects.filter((p) => p.pic === 'it')
-check('every IT-owned project is credited to the lead',
-  itProjects.every((p) => Math.abs((p.shares[lead.id] || 0) - 1) < 1e-9),
+check('NO IT-OWNED PROJECT IS CREDITED TO ANYONE',
+  itProjects.every((p) => Object.keys(p.shares).length === 0),
   `${itProjects.length} projects`)
-check('every IT-owned project is flagged as a fallback', itProjects.every((p) => p.fellBack === true))
+check('and none of it is treated as a fallback', itProjects.every((p) => p.fellBack !== true))
+check('the lead does not absorb it',
+  itProjects.every((p) => !(lead.id in p.shares)))
+check('it is flagged as outside the team', itProjects.every((p) => p.outsideTeam === true))
+check('and its hours are reported, not silently dropped',
+  Math.abs(plan.totals.outsideHours
+    - itProjects.filter((p) => p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded')
+      .reduce((a, p) => a + (p.savingHours ?? 0), 0)) < 0.01,
+  `${Math.round(plan.totals.outsideHours)} hrs over ${plan.totals.outsideCount} projects`)
+check('none of it reaches the team commitment',
+  itProjects.every((p) => p.poolHours === 0))
 
 const unassigned = plan.projects.filter((p) => !p.pic)
 check('every unassigned project is credited to the lead',
@@ -97,9 +111,16 @@ const moved = computePlan({
   ...base,
   projects: base.projects.map((p) => (p.key === first.key ? { ...p, pic: 'kade', contributors: [{ person: 'kade', roles: ['dev'] }] } : p)),
 })
-check('the lead loses it', moved.people.find((p) => p.id === lead.id).hours < plan.people.find((p) => p.id === lead.id).hours)
+check('the lead is unaffected — it was never on their card',
+  Math.abs(moved.people.find((p) => p.id === lead.id).hours
+    - plan.people.find((p) => p.id === lead.id).hours) < 1e-9)
 check('the new owner gains it', moved.people.find((p) => p.id === 'kade').hours > plan.people.find((p) => p.id === 'kade').hours,
   `${first.key} ${first.savingHours}h`)
+check('and the team commitment grows by exactly that project',
+  Math.abs(moved.totals.committedHours - plan.totals.committedHours - first.savingHours) < 0.01,
+  `${Math.round(plan.totals.committedHours)} -> ${Math.round(moved.totals.committedHours)} (+${first.savingHours})`)
+check('while the book total does not move — the row was always on the register',
+  Math.abs(moved.totals.totalHours - plan.totals.totalHours) < 0.01)
 
 /* ---------------- a configurable fallback ---------------- */
 const toJames = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, fallbackPic: 'james' } })

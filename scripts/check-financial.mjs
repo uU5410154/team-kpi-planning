@@ -235,11 +235,26 @@ console.log('\n--- the annual basis does not multiply anything by twelve ---')
   for (const plan2 of [asMonthly, asAnnual]) {
     const b = plan2.settings.savingBasis
     const lead = plan2.people.find((p) => p.aggregatesTeam)
-    check(`${b}: the lead scorecard FTE matches the portfolio FTE`,
-      near(lead.finance.fteReleased, plan2.finance.fteReleased, 1e-6),
-      `${lead.finance.fteReleased.toFixed(3)} vs ${plan2.finance.fteReleased.toFixed(3)}`)
-    check(`${b}: the per-person benefits sum to the portfolio benefit`,
-      near(plan2.people.reduce((a, p) => a + p.monthlyBenefit, 0), plan2.finance.monthlyBenefit, 1e-6))
+    /*
+     * The portfolio is the BOOK — every in-plan row, including the ones IT or
+     * a business user owns, which is what makes it reconcile to the source
+     * workbook. The scorecards are the TEAM. So the two differ by exactly the
+     * outside-owned work and by nothing else: any other gap is hours falling
+     * through a crack, which is the failure this check exists to catch.
+     */
+    const outside = plan2.projects.filter((x) => x.outsideTeam
+      && x.commitLevel !== 'nextyear' && x.commitLevel !== 'excluded')
+    const outsideFte = outside.reduce((a, x) => a + (x.fteReleased || 0), 0)
+    const outsideBenefit = outside.reduce((a, x) => a + (x.monthlyBenefit || 0), 0)
+    check(`${b}: the lead scorecard FTE is the portfolio FTE less what the team does not own`,
+      near(lead.finance.fteReleased, plan2.finance.fteReleased - outsideFte, 1e-6),
+      `${lead.finance.fteReleased.toFixed(3)} vs ${plan2.finance.fteReleased.toFixed(3)} − ${outsideFte.toFixed(3)}`)
+    check(`${b}: the per-person benefits sum to the portfolio benefit less the same`,
+      near(plan2.people.reduce((a, p) => a + p.monthlyBenefit, 0),
+        plan2.finance.monthlyBenefit - outsideBenefit, 1e-6),
+      `${Math.round(plan2.people.reduce((a, p) => a + p.monthlyBenefit, 0))} vs ${Math.round(plan2.finance.monthlyBenefit)} − ${Math.round(outsideBenefit)}`)
+    check(`${b}: and the gap is real, not zero by accident`, outsideFte > 0 && outsideBenefit > 0,
+      `${outside.length} projects owned outside the team`)
   }
 }
 

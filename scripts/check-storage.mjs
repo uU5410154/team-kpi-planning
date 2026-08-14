@@ -115,7 +115,20 @@ console.log('\n--- repairing state the old PIC write already saved ---')
     !after.people.find((p) => p.id === 'james').rows.some((r) => r.p.key === 'FNP-379'))
   check('and it stamps the state so it never runs twice', fixed.repair === REPAIR_VERSION)
   check('the rest of the plan survives untouched',
-    fixed.projects.length === damaged.projects.length && fixed.people.length === damaged.people.length)
+    fixed.projects.length === damaged.projects.length)
+  /*
+   * The roster may GROW — an assignable-but-unmeasured entry added after this
+   * plan was saved has to be reachable, or the person filling in the register
+   * cannot pick it. It may never shrink, and nobody already on it may be
+   * rewritten: a scorecard is what somebody is appraised against.
+   */
+  check('and the roster only gains, never loses or rewrites',
+    damaged.people.every((p) => JSON.stringify(fixed.people.find((x) => x.id === p.id)) === JSON.stringify(p))
+    && fixed.people.length >= damaged.people.length,
+    `${damaged.people.length} -> ${fixed.people.length}: ${fixed.people.map((p) => p.id).join(',')}`)
+  check('what it gains carries no scorecard',
+    fixed.people.filter((p) => !damaged.people.some((x) => x.id === p.id)).every((p) => p.scorecard === false),
+    fixed.people.filter((p) => !damaged.people.some((x) => x.id === p.id)).map((p) => p.nick).join(',') || 'nothing added')
   check('the team total does not move',
     Math.abs(asLoaded.totals.totalHours - after.totals.totalHours) < 1e-9)
 

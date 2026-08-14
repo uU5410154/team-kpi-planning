@@ -69,7 +69,27 @@ export const STATUS = {
  * a plan already saved should not have to be rewritten to change the order of
  * two columns. Anyone not named keeps their place after those who are.
  */
-export const PEOPLE_ORDER = ['gun', 'pphen', 'kade', 'james', 'tha', 'pol', 'it']
+export const PEOPLE_ORDER = ['gun', 'pphen', 'kade', 'james', 'tha', 'pol', 'it', 'user']
+
+/**
+ * Assignable, but not ours.
+ *
+ * IT and the business users own real projects in the register and have to be
+ * selectable as PIC, but they hold no scorecard — and what they own is not
+ * this team's commitment, so its hours do not enter the team's total.
+ *
+ * Kept here rather than only in seed.json because a plan saved before one of
+ * these existed still has to be able to grow the entry: the roster is stored
+ * with the plan, and nobody should have to retype it.
+ */
+export const ASSIGNEE_ONLY = [
+  {
+    id: 'it', name: 'IT', nick: 'IT', role: 'Partner team', band: 'senior', scorecard: false,
+  },
+  {
+    id: 'user', name: 'Business user', nick: 'User', role: 'Business owner', band: 'analyst', scorecard: false,
+  },
+]
 
 export const OBJECTIVES = [
   {
