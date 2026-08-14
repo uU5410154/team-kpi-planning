@@ -1,0 +1,94 @@
+Dear P'Puu krub,
+
+I have finished structuring the 2026 F&A Tech KPI design and would like to run
+it past you before I circulate it.
+
+HOW IT WORKS
+
+Every initiative is tagged to the guideline objectives it serves. An initiative
+can serve more than one — a dashboard removes manual work and is also a
+dashboard delivered — so it is tagged to both.
+
+The important part is that each objective is measured in a different unit, so
+nothing is ever counted twice:
+
+  Objective 1  Financial              a return, in per cent
+  Objective 2  F&A process automation saving hours
+  Objective 3  F&A Data warehouse     a delivery date
+  Objective 4  Efficiency             number of dashboards delivered
+  Objective 5  Automation E2E, AI     number of E2E / AI solutions delivered
+
+Objective 2 collects the saving hours of every initiative in the plan, whatever
+else that initiative is tagged to. It is the only objective counted in hours.
+Objectives 4 and 5 count what was delivered, not the hours behind it, because
+those hours are already in Objective 2. Objective 1 puts a price on the same
+hours and asks whether the effort was worth it.
+
+That is why a dashboard saving 8 hours a month adds 8 hours to Objective 2 and
+one dashboard to Objective 4, and the team total does not move.
+
+OBJECTIVE 1 — A RETURN, NOT AN AMOUNT
+
+I have set Objective 1 as a floor rather than a baht amount: the overall return
+must be at least 200%. A baht target can be met simply by doing more work,
+which does not answer the question the guideline asks. A return does.
+
+It is calculated per initiative and rolled up:
+
+  Benefit     saving hours x the blended user rate, over a year
+              plus any cash saving stated on the initiative
+  Investment  development mandays x the developer rate
+              plus any hardware or licence cost, plus running cost
+
+  Return      (benefit over 12 months - investment) / investment
+
+The figure recalculates the moment anything behind it changes, so the plan
+always shows where we actually stand rather than a number typed in once.
+
+COST ASSUMPTIONS
+
+From the Man-hour rate_IT_Tech.xlsx you shared:
+
+  Developer, junior/mid   THB 3,200 per manday   development investment
+  Staff                   THB 1,700 per manday   user-side benefit
+  Manager                 THB 6,500 per manday   user-side benefit
+
+Saving hours come from both staff and managers, so I used a blended mix of 20%
+manager and 80% staff over 22 working days a month:
+
+  Manager   20% x 3,200 x 22 = THB 28,600
+  Staff     80% x 1,700 x 22 = THB 29,920
+  Blended                      THB 58,520 a month
+
+An initiative needing 20 development mandays is therefore an investment of THB
+64,000, before any hardware, licence or running cost.
+
+Every rate above is adjustable in the tool, so the whole plan can be repriced
+if you would prefer different assumptions.
+
+TWO OPEN ITEMS
+
+Some initiatives do not have a manday estimate yet, so they carry no return.
+About seven in ten are priced today, covering the large majority of the saving
+hours. I am working through the rest with the team and will send the final
+version by end of day.
+
+A few initiatives, mostly on the Finance side, show a negative return because
+their saving hours are small against the development effort. They often deliver
+benefits a number does not capture — better data accuracy, stronger controls,
+lower operational risk, faster decisions. I have recorded those against each
+initiative so the case can be read in full, and I am reviewing them with the
+owners. Where a benefit is real money rather than time — a licence dropped, a
+penalty avoided — it is recorded as a cash benefit and does count toward the
+return.
+
+Please let me know whether the approach and the assumptions make sense, or if
+there is anything you would like added or changed.
+
+The Excel file is attached, and the live calculation is here: [link]
+
+Best regards krub,
+
+Wisarut Gunjarueg (Gun)
+Division Manager
+Finance & Accounting Tech Solution

@@ -1,0 +1,35 @@
+🟢please help add another feadure, for the man day, i want the popup window that let me add tasks and manday for each tasks for each project as well, after hit save the manday for each tasks should be sum as a whole for the project, and that number must be clickable so user can check what total manday composed of, for the project that currentyl already have the Mandays sum, on the brewakdown page, just have one line item as total
+ have the comment section so I can type in message or paste link fpr each proejct as well, also for the manday entering, give me the option to enter monry amount and let system calculate man day automatically as well and vice-versa
+
+
+🟢for the manday, ROI, payback period, please make it a seprate sheet on the export excel 
+ 
+🟢 please add the feature to the score card, i want to be able to add additional objecttive to each team member as well, for example i would add Finance Datawarehouse objectuve to james
+ make sure all the number thorughout the app will be align, also make sure the number on the exported excel report will align as well, test extensively, make sure it w orks before confirming the solution with me 
+
+
+ 🟢 for the export excel, please remove these coluns from each team member sheet Role, Share, Manday, CAPEX, OPEX, Benefits/yr, ROI, Payback, Commit, also remove these section POSITION																
+ Team saving hours (hrs/month) — whole team		4,246														
+ Committed only		1,712														
+ Mandays credited		1,887														
+ FTE released		24.5														
+ Value of hours released (THB/year)		8,821,143														
+ Build cost (THB)		6,098,474														
+ CAPEX credited (THB)		0														
+ Investment credited (THB) — build + CAPEX		6,098,474														
+ OPEX credited (THB/month)		0														
+ Net benefit over 12 months (THB)		1,233,228														
+ Return on investment		+20%														
+ Projects credited / touched		[TEAM] 65 in plan · 25 their own														
+ Saving hours still TBC		1														
+ 
+
+🔴please add the option on projects page, i want anothe export excel button just on top of the table, after export it should export only the data I filter, and also i want import button, when import the data on the table should be updated as the imported file ( only the row that were updated, DO NOT touch other row or information )
+
+
+fix the fucking interface on the scorecards  the deleted button still exceed the frame on the 2026 KPI scorecard
+ section 
+
+
+------------------------  
+ make sure all the number thorughout the app will be align, also make sure the number on the exported excel report will align as well, test extensively, make sure it w orks before confirming the solution with me 

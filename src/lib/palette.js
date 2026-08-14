@@ -62,6 +62,15 @@ export const STATUS = {
  * `guidelineName` is empty on objective 5 because the source groups it under
  * "Efficiency and integration".
  */
+/**
+ * The order people appear in, left to right.
+ *
+ * A presentation choice, so it lives here rather than in the stored roster —
+ * a plan already saved should not have to be rewritten to change the order of
+ * two columns. Anyone not named keeps their place after those who are.
+ */
+export const PEOPLE_ORDER = ['gun', 'pphen', 'kade', 'james', 'tha', 'pol', 'it']
+
 export const OBJECTIVES = [
   {
     id: 'financial',

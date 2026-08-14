@@ -1934,6 +1934,41 @@ try {
   check('AND STAYS THERE ONCE IT IS BEING FILLED IN',
     /New project/i.test(stillTop?.name || stillTop?.text || ''), String(stillTop?.name))
 
+
+  /* ---------- the Overall team tab mirrors the workbook grid ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?team=1#team`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 4000))
+
+  const teamGrid = await page.evaluate(() => {
+    const table = document.querySelector('table')
+    if (!table) return null
+    const head = [...table.querySelectorAll('thead tr')][0]
+    const people = [...head.querySelectorAll('th')].slice(1).map((c) => c.innerText.split(String.fromCharCode(10))[0].trim())
+    const rows = [...table.querySelectorAll('tbody tr')].map((r) => r.innerText.split(String.fromCharCode(9)).join(' | ').split(String.fromCharCode(10)).join(' '))
+    return { people, rows, text: table.innerText }
+  })
+  check('THERE IS AN OVERALL TEAM TAB', !!teamGrid, String(teamGrid))
+  check('it lists every person as a column', teamGrid.people.length === 6, teamGrid.people.join(' | '))
+  // the theme upper-cases the header, so match without regard to case
+  const teamNames = teamGrid.people.map((x) => x.toLowerCase())
+  check('JAMES SITS IMMEDIATELY LEFT OF THAPANEE',
+    teamNames.indexOf('james') === teamNames.indexOf('thapanee') - 1,
+    teamGrid.people.join(' | '))
+  check('and the lead is still first', /^gun/.test(teamNames[0]), teamGrid.people[0])
+  check('it has a row for every objective',
+    [1, 2, 3, 4, 5].every((n) => new RegExp(`Obj ${n} —`).test(teamGrid.text)),
+    teamGrid.rows.slice(0, 2).join(' // '))
+  check('it carries the saving-hours total', /TOTAL SAVING HRS\/MONTH/.test(teamGrid.text))
+  check('and the weight total', /WEIGHT TOTAL/.test(teamGrid.text) && /100%/.test(teamGrid.text))
+
+  // the figures must be the ones the scorecards show
+  const teamFigures = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    return st.people.length
+  })
+  check('the grid is built from the plan, not a copy', teamFigures > 0, String(teamFigures))
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {

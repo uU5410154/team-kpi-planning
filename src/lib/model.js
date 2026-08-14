@@ -1,4 +1,4 @@
-import { OBJ_BY_ID, OBJECTIVES, OUT_OF_PLAN } from './palette.js'
+import { OBJ_BY_ID, OBJECTIVES, OUT_OF_PLAN, PEOPLE_ORDER } from './palette.js'
 
 const OBJECTIVE_ORDER = OBJECTIVES.map((o) => o.id)
 
@@ -1604,7 +1604,19 @@ export function computePlan(state) {
   }
   const rates = financeRates(s)
   const projects = state.projects || []
-  const allPeople = state.people || []
+  /*
+   * Sorted for display before anything else reads them, so the scorecards, the
+   * grid on screen and every sheet in the workbook present the team in one
+   * order rather than three. The order itself is a presentation choice and
+   * lives in palette.js — a plan already saved should not have to be rewritten
+   * to move two columns.
+   */
+  const byDisplayOrder = (a, b) => {
+    const ia = PEOPLE_ORDER.indexOf(a.id)
+    const ib = PEOPLE_ORDER.indexOf(b.id)
+    return (ia < 0 ? PEOPLE_ORDER.length : ia) - (ib < 0 ? PEOPLE_ORDER.length : ib)
+  }
+  const allPeople = [...(state.people || [])].sort(byDisplayOrder)
   // Only scorecard holders can be credited; IT and other partner teams are
   // assignable as PIC but carry no KPI of their own.
   const people = allPeople.filter((p) => p.scorecard !== false)

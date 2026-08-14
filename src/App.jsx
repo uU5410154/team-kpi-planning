@@ -28,12 +28,16 @@ import { exportWorkbook } from './lib/exportXlsx.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Projects from './pages/Projects.jsx'
 import People from './pages/People.jsx'
+import Team from './pages/Team.jsx'
 import Settings from './pages/Settings.jsx'
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'projects', label: 'Projects' },
   { id: 'people', label: 'Scorecards' },
+  // Beside the individual cards, not instead of them: one answers what a
+  // person is measured on, the other whether the team adds up.
+  { id: 'team', label: 'Overall team' },
   { id: 'settings', label: 'Model' },
 ]
 
@@ -693,6 +697,8 @@ export default function App() {
               onGoTo={setTab}
             />
           )}
+          {tab === 'team' && <Team plan={plan} />}
+
           {tab === 'people' && (
             <People
               plan={plan}
