@@ -1262,6 +1262,11 @@ export function creditSummary(project, shares, nameOf = (id) => id) {
 export function newProject(seq) {
   return {
     key: `NEW-${seq}`,
+    // When it was added, so the register can keep it in front of the person
+    // filling it in. A blank row has no saving hours, and the table sorts by
+    // saving hours — so without this it appears at the bottom of eighty-six
+    // rows, which reads as nothing having happened.
+    addedAt: Date.now(),
     jiraKey: null,
     summary: 'New project',
     program: '',

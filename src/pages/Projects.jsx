@@ -257,6 +257,16 @@ function AlsoServes({ project, onChange }) {
   )
 }
 
+/*
+ * When this window opened.
+ *
+ * A row added in this sitting stays at the top of the register however the
+ * table is sorted, until the page is reloaded. Pinning by "has no Jira key
+ * yet" instead would make the row jump away the moment the key was typed,
+ * which is the first thing anyone does to it.
+ */
+const SESSION_START = Date.now()
+
 export default function Projects({
   plan, onUpdate, onBulk, onAdd, onDelete, onImport,
   onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo,
@@ -315,7 +325,11 @@ export default function Projects({
       return true
     })
     const dir = sort.dir === 'asc' ? 1 : -1
+    const added = (p) => (Number(p.addedAt) >= SESSION_START ? Number(p.addedAt) : 0)
     out = [...out].sort((a, b) => {
+      // Anything added in this sitting comes first, newest at the very top,
+      // whatever the column sort says.
+      if (added(a) || added(b)) return added(b) - added(a)
       const va = a[sort.by], vb = b[sort.by]
       if (va == null && vb == null) return 0
       if (va == null) return 1

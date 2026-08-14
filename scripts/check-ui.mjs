@@ -1890,6 +1890,50 @@ try {
   })
   check('and the control names both', /Kade/.test(chipText) && /IT/.test(chipText), chipText)
 
+
+  /* ---------- a new row lands at the top, and stays there ---------- */
+  await page.evaluate(() => localStorage.clear())
+  await page.goto(`${base}/?add=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 4000))
+
+  const firstRow = () => page.evaluate(() => {
+    const row = document.querySelector('tbody tr')
+    if (!row) return null
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.indexOf('project')
+    return {
+      text: row.innerText.split(String.fromCharCode(10)).join(' ').slice(0, 40),
+      name: row.children[ix]?.querySelector('input')?.value ?? row.children[ix]?.innerText.trim(),
+    }
+  })
+  const beforeAdd = await firstRow()
+  const countBefore = await page.evaluate(() => document.querySelectorAll('tbody tr').length)
+
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find((b) => /^Add project$/i.test(b.innerText.trim())).click()
+  })
+  await new Promise((r) => setTimeout(r, 1200))
+
+  const afterAdd = await firstRow()
+  const countAfter = await page.evaluate(() => document.querySelectorAll('tbody tr').length)
+  check('adding a project adds a row', countAfter === countBefore + 1, `${countBefore} -> ${countAfter}`)
+  check('A NEW ROW LANDS AT THE TOP OF THE REGISTER',
+    /New project/i.test(afterAdd?.name || afterAdd?.text || ''),
+    `was "${beforeAdd?.name}" now "${afterAdd?.name}"`)
+
+  // it must not slide away the moment it is given a name or a number
+  await page.evaluate(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    const heads = [...document.querySelectorAll('thead th')].map((h) => h.innerText.trim().toLowerCase())
+    const ix = heads.findIndex((h) => h.startsWith('saving'))
+    const inp = document.querySelector('tbody tr').children[ix].querySelector('input')
+    inp.focus(); setter.call(inp, '1'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
+  })
+  await new Promise((r) => setTimeout(r, 1000))
+  const stillTop = await firstRow()
+  check('AND STAYS THERE ONCE IT IS BEING FILLED IN',
+    /New project/i.test(stillTop?.name || stillTop?.text || ''), String(stillTop?.name))
+
   /* ---------- nothing may push the page sideways ---------- */
   const overflow = async (label) => {
     const r = await page.evaluate(() => {
