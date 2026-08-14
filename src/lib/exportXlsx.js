@@ -886,6 +886,9 @@ export async function buildWorkbook(plan, state) {
       { label: 'Start', width: 11, align: 'left' },
       { label: 'Due', width: 11, align: 'left' },
       { label: 'Remark', width: 40, align: 'left' },
+      // The description behind the row, as typed in the cost dialog. Last,
+      // because it is the longest thing on the sheet.
+      { label: 'Notes and links', width: 60, align: 'left' },
     ]
     // 1-based column index by header label. Everything below asks for a column
     // by name, so inserting one can never mis-format its neighbours.
@@ -937,6 +940,7 @@ export async function buildWorkbook(plan, state) {
         p.start || '',
         p.due || '',
         p.notes || '',
+        p.comment || '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
       cols.forEach((c, i) => {

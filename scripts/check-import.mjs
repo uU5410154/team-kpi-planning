@@ -450,5 +450,37 @@ console.log('\n--- the contract export and import share ---')
   check('headers are matched whatever their case', columnFor('  saving hrs/month ')?.key === 'savingHours')
 }
 
+/* ====== the description travels with the row ====== */
+console.log(String.fromCharCode(10) + '--- Notes and links survives the round trip ---')
+{
+  const withNote = {
+    ...base,
+    projects: base.projects.map((p, i) => (i === 0
+      ? { ...p, comment: 'Cuts the Tuesday reconciliation.' + String.fromCharCode(10) + 'https://example/ticket' }
+      : p)),
+  }
+  const plan2 = computePlan(withNote)
+  const wb2 = await buildFilteredWorkbook(plan2.projects, plan2.assignees, 'all')
+  const buf2 = await wb2.xlsx.writeBuffer()
+  const parsed2 = await readProjectsFile(buf2)
+  const first = parsed2.rows.find((r) => r.key === plan2.projects[0].key)
+  check('the export carries Notes and links',
+    'comment' in first.values && /Tuesday reconciliation/.test(String(first.values.comment)),
+    String(first.values.comment).split(String.fromCharCode(10))[0])
+  check('and the link with it', /example\/ticket/.test(String(first.values.comment)))
+
+  const res2 = planImport(parsed2, withNote, plan2)
+  check('A CLEAN ROUND TRIP PROPOSES NOTHING', res2.changes.length === 0,
+    `${res2.changes.length} changes over ${res2.matched} rows: ${JSON.stringify(res2.changes[0] || null).slice(0, 160)}`)
+
+  // and an edit to that cell IS picked up
+  const edited = { ...parsed2, rows: parsed2.rows.map((r) => (r.key === first.key
+    ? { ...r, values: { ...r.values, comment: 'Rewritten by hand' } } : r)) }
+  const res3 = planImport(edited, withNote, plan2)
+  check('but an edit to it is', res3.changes.length === 1
+    && res3.changes[0].patch.comment === 'Rewritten by hand',
+    JSON.stringify(res3.changes[0]?.fields || []))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

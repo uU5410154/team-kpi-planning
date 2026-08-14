@@ -219,6 +219,18 @@ export const PROJECT_COLUMNS = [
     read: (p) => p.notes || '',
     parse: (raw) => (raw == null ? undefined : String(raw).trim()),
   },
+  /*
+   * What the cost dialog calls "Notes and links" — the description of the
+   * initiative, in whoever's words wrote it. It was the one field on a project
+   * that could not leave the app, so a register sent to somebody arrived with
+   * the explanation stripped out of it. Read back on import too: the column is
+   * the same column in both directions.
+   */
+  {
+    key: 'comment', label: 'Notes and links', width: 60, match: /^notes( and links)?$/i, field: 'comment',
+    read: (p) => p.comment || '',
+    parse: (raw) => (raw == null ? undefined : String(raw).trim()),
+  },
 ]
 
 /*

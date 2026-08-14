@@ -218,5 +218,24 @@ console.log(String.fromCharCode(10) + '--- it opens on the register, with the wo
     back.getWorksheet('Summary').rowCount > 10, String(back.getWorksheet('Summary').rowCount))
 }
 
+/* ====== the register carries the description ====== */
+console.log(String.fromCharCode(10) + '--- the register sheet carries Notes and links ---')
+{
+  const ws = back.getWorksheet('Projects')
+  let hdr = null
+  ws.eachRow((row, r) => {
+    if (hdr) return
+    const vals = row.values.map((v) => String(v ?? '').trim())
+    if (vals.includes('Project') && vals.includes('PIC')) hdr = { r, vals }
+  })
+  const col = hdr ? hdr.vals.indexOf('Notes and links') : -1
+  check('THE REGISTER SHEET HAS A NOTES AND LINKS COLUMN', col > 0,
+    hdr ? hdr.vals.filter(Boolean).join(' | ') : 'no header row')
+  // It is the longest text on the sheet; a column too narrow to read it is the
+  // same as not exporting it.
+  check('wide enough to be read without dragging it', (ws.getColumn(col).width || 0) >= 40,
+    String(ws.getColumn(col).width))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

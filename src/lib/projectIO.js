@@ -243,6 +243,10 @@ export async function readProjectsFile(data) {
 
 const same = (a, b) => {
   if (a == null && b == null) return true
+  // An empty cell and a field nobody ever filled in are the same absence. Left
+  // alone, every text column proposed "— to —" on a clean round trip, which
+  // buries the changes that are real in a list of eighty that are not.
+  if ((a === '' || a == null) && (b === '' || b == null)) return true
   if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-9
   // A list has to be compared by value: two identical soft-benefit lists are
   // different objects, and === would report a change on every single import.
