@@ -334,5 +334,81 @@ console.log(String.fromCharCode(10) + '--- the Costs sheet explains where the mo
 }
 
 
+/* ====== a return is written as a return, everywhere ====== */
+console.log(String.fromCharCode(10) + '--- every ROI cell is a percentage ---')
+{
+  /*
+   * A ratio in a cell formatted "#,##0" prints as a whole number: 1.4544
+   * becomes "1", which reads as one baht, or as 5.7 months where the column
+   * beside it is a payback. Both happened — one from a blanket format applied
+   * after the specific one, the other from a hard-coded column index that a
+   * later column pushed sideways.
+   */
+  /*
+   * Over a COSTED copy of the plan as well as the plain one. The bundled seed
+   * carries no mandays, so every return in it is null and no ROI cell has a
+   * value to be formatted wrongly — a scan of that workbook alone passed
+   * happily while the real export printed 1.4544 as "1".
+   */
+  const costed = computePlan({
+    ...state,
+    projects: state.projects.map((p, i) => ({ ...p, manday: 4 + (i % 7) })),
+  })
+  const wbc = await buildWorkbook(costed, state)
+  const bufc = await wbc.xlsx.writeBuffer()
+  const backc = new ExcelJS.Workbook()
+  await backc.xlsx.load(bufc)
+
+  const offenders = []
+  for (const ws of [...back.worksheets, ...backc.worksheets]) {
+    const head = new Map()
+    for (let rr = 1; rr <= ws.rowCount; rr++) {
+      for (let cc = 1; cc <= ws.columnCount; cc++) {
+        const v = ws.getRow(rr).getCell(cc).value
+        const t = typeof v === 'object' && v ? String(v.richText ? v.richText.map((x) => x.text).join('') : (v.text ?? '')) : String(v ?? '')
+        if (/^(ROI|Actual|Return)$/i.test(t.trim()) && !head.has(cc)) head.set(cc, { label: t.trim(), row: rr })
+      }
+    }
+    for (const [cc, info] of head) {
+      for (let rr = info.row + 1; rr <= ws.rowCount; rr++) {
+        const cell = ws.getRow(rr).getCell(cc)
+        if (typeof cell.value !== 'number') continue
+        // Only cells that ARE a ratio: an hours or count actual is a plain
+        // number and belongs as one.
+        const label = [1, 2, 3].map((k) => String(ws.getRow(rr).getCell(k).value ?? '')).join(' ')
+        const isRatio = info.label.toUpperCase() === 'ROI' || /financial/i.test(label)
+        if (!isRatio) continue
+        if (!/%/.test(String(cell.numFmt || ''))) {
+          offenders.push(`${ws.name} r${rr}c${cc} ${info.label} = ${cell.value} fmt=${cell.numFmt || 'none'}`)
+        }
+      }
+    }
+  }
+  check('NO RETURN IS WRITTEN AS A PLAIN NUMBER', offenders.length === 0,
+    offenders.slice(0, 4).join(' | ') || 'every ROI cell carries a percentage format')
+
+  const ws = backc.getWorksheet('Overall_Objectives')
+  let fr = null
+  let hr = null
+  for (let rr = 1; rr <= ws.rowCount; rr++) {
+    const line = [1, 2, 3].map((k) => String(ws.getRow(rr).getCell(k).value ?? '')).join(' ')
+    if (/Financial/i.test(line)) fr = fr ?? rr
+    if (/Target/.test(String(ws.getRow(rr).getCell(4).value ?? ''))) hr = hr ?? rr
+  }
+  const wrong = costed.people.map((p, i) => {
+    const cell = ws.getRow(fr).getCell(4 + i * 3 + 2)
+    const want = p.avgProjectRoi
+    if (want == null) return null
+    return Math.abs(Number(cell.value) - want) < 5e-4 ? null : `${p.nick}: sheet ${cell.value} vs ${want.toFixed(4)}`
+  }).filter(Boolean)
+  // A check that compares nothing passes for the wrong reason, so the ratios
+  // have to be real before the comparison means anything.
+  const real = costed.people.filter((p) => p.avgProjectRoi != null && Math.abs(p.avgProjectRoi) > 1e-6)
+  check('the sheet has real returns to check', real.length >= 2,
+    costed.people.map((p) => `${p.nick} ${p.avgProjectRoi == null ? 'null' : `${(p.avgProjectRoi * 100).toFixed(0)}%`}`).join(' · '))
+  check('AND IT IS THE PERSON’S OWN AVERAGE RETURN', wrong.length === 0 && real.length >= 2,
+    wrong.join(' | ') || costed.people.map((p) => `${p.nick} ${((p.avgProjectRoi || 0) * 100).toFixed(0)}%`).join(' · '))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

@@ -485,7 +485,14 @@ export async function buildWorkbook(plan, state) {
         row.getCell(c0).alignment = { horizontal: 'center' }
         row.getCell(c0 + 1).numFmt = PCT
         row.getCell(c0 + 1).alignment = { horizontal: 'center' }
-        row.getCell(c0 + 2).numFmt = N0
+        /*
+         * The Actual column is whole numbers — hours, deliverables — EXCEPT on
+         * the objective measured as a ratio, where the cell already carries a
+         * percentage format put there ten lines above. Setting N0 here landed
+         * after it and won: a return of 1.4544 printed as "1", which reads as
+         * a return of one baht rather than 145%.
+         */
+        if (!/%/.test(String(row.getCell(c0 + 2).numFmt || ''))) row.getCell(c0 + 2).numFmt = N0
         row.getCell(c0 + 2).alignment = { horizontal: 'right' }
       })
     })
@@ -650,20 +657,29 @@ export async function buildWorkbook(plan, state) {
 
     const gr = ws.getRow(r)
     gr.getCell(2).value = `PLAN TOTAL — ${inPlan.length} in-plan projects`
-    gr.getCell(5).value = Math.round(fin.planMandays * 10) / 10
-    gr.getCell(5).numFmt = N1
-    gr.getCell(6).value = fin.planBuildCost == null ? null : Math.round(fin.planBuildCost)
-    gr.getCell(7).value = Math.round(fin.planCapex)
-    gr.getCell(8).value = Math.round(fin.planInvestment)
-    gr.getCell(9).value = Math.round(fin.planOpexRunRate)
-    gr.getCell(10).value = Math.round(fin.planOpexYear)
-    gr.getCell(11).value = Math.round(fin.annualBenefit)
-    gr.getCell(12).value = fin.netBenefit == null ? null : Math.round(fin.netBenefit)
-    for (const c of [6, 7, 8, 9, 10, 11, 12]) gr.getCell(c).numFmt = MONEY
-    gr.getCell(13).value = fin.roi == null ? null : Number(fin.roi.toFixed(4))
-    gr.getCell(13).numFmt = ROI
-    gr.getCell(14).value = fin.paybackMonths == null ? null : Number(fin.paybackMonths.toFixed(1))
-    gr.getCell(14).numFmt = N1
+    /*
+     * BY NAME, not by number. These were hard-coded indexes, and a column
+     * added since pushed every one of them a cell to the left: the plan's
+     * return landed in the payback column carrying a plain number format, so
+     * a 570% return printed as "5.7" — a figure that looks like months.
+     */
+    const put = (label, value, fmt) => {
+      const c = ec(label)
+      if (c <= 0) return
+      gr.getCell(c).value = value
+      gr.getCell(c).numFmt = fmt
+    }
+    put('Mandays', Math.round(fin.planMandays * 10) / 10, N1)
+    put('Cost', fin.planBuildCost == null ? null : Math.round(fin.planBuildCost), MONEY)
+    put('CAPEX', Math.round(fin.planCapex), MONEY)
+    put('Investment', Math.round(fin.planInvestment), MONEY)
+    put('OPEX/mth', Math.round(fin.planOpexRunRate), MONEY)
+    put('OPEX 2026', Math.round(fin.planOpexYear), MONEY)
+    put('Cash/yr', Math.round(fin.monetaryAnnualBenefit || 0), MONEY)
+    put('Benefit/yr', Math.round(fin.annualBenefit), MONEY)
+    put(`Net ${fin.horizonMonths}mo`, fin.netBenefit == null ? null : Math.round(fin.netBenefit), MONEY)
+    put('ROI', fin.roi == null ? null : Number(fin.roi.toFixed(4)), ROI)
+    put('Payback', fin.paybackMonths == null ? null : Number(fin.paybackMonths.toFixed(1)), N1)
     for (let c = 1; c <= cols.length; c++) {
       const cell = gr.getCell(c)
       cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
