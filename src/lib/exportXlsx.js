@@ -1133,104 +1133,136 @@ export async function buildWorkbook(plan, state) {
     styleBody(ws, gStart, r - 2, cols.length, { zebra: false })
     grand.height = 20
 
-    /* ---- how every figure above was arrived at ----
-     * A cost sheet that cannot be argued with is a cost sheet nobody believes.
-     * Every rate here is one number times another; written out, anybody can
-     * check it, and anybody who disagrees can point at the line they disagree
-     * with rather than at the total.
+    /* ---- how cost and benefit are calculated ----
+     *
+     * Prose, in one section at the end, and not a column against every row.
+     * The question this answers — where did 3,250 a day come from, why is a
+     * saved hour worth 338, what counts as investment — is asked once by
+     * somebody reading the sheet for the first time. Answering it eighty times
+     * in a narrow column answers it nowhere.
+     *
+     * Every figure below is read from the model, so the explanation cannot
+     * drift away from the numbers it explains.
      */
     r += 2
-    sectionRow(ws, r++, 'HOW THESE NUMBERS ARE BUILT', cols.length)
-    const mStart = r
+    sectionRow(ws, r++, 'HOW COST AND BENEFIT ARE CALCULATED', cols.length)
 
-    // label in A..B, the figure in E (the yearly column), the working in F
-    const method = (label, value, working, opts = {}) => {
+    const money0 = (n) => Math.round(n || 0).toLocaleString('en-US')
+    const WRAP_AT = 132   // characters that fit across A..F at these widths
+
+    /** One paragraph, across the identifying columns, sized to its own text. */
+    const para = (text, opts = {}) => {
       const row = ws.getRow(r++)
-      row.getCell(1).value = label
-      ws.mergeCells(r - 1, 1, r - 1, 4)
-      if (value != null) {
-        row.getCell(5).value = value
-        row.getCell(5).numFmt = opts.fmt || MONEY
+      row.getCell(1).value = text
+      ws.mergeCells(r - 1, 1, r - 1, 6)
+      row.getCell(1).font = {
+        name: FONT,
+        size: opts.heading ? 10 : 9.5,
+        bold: !!opts.heading,
+        color: { argb: opts.heading ? NAVY : (opts.muted ? MUTED : 'FF1A1A1A') },
       }
-      row.getCell(6).value = working
-      ws.mergeCells(r - 1, 6, r - 1, Math.min(cols.length, 6 + MONTHS_IN_YEAR))
-      row.getCell(1).font = { name: FONT, size: 9.5, bold: !!opts.bold }
-      row.getCell(6).font = { name: FONT, size: 9, color: { argb: MUTED }, italic: true }
-      row.getCell(6).alignment = { horizontal: 'left', vertical: 'middle', wrapText: false }
-      if (opts.tone) tone(row.getCell(5), opts.tone)
+      row.getCell(1).alignment = { vertical: 'top', wrapText: true, indent: opts.heading ? 0 : 1 }
+      const lines = text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / WRAP_AT)), 0)
+      row.height = opts.heading ? 20 : Math.max(14, lines * 12.5 + 2)
       return row
     }
+    const gap = () => { r += 1 }
 
-    method('WHAT ONE PERSON COSTS', null, '', { bold: true })
-    method('Developer salary, per month', Math.round(fin.devMonthlySalary),
-      'the team that builds it — one month of one developer, before the loading below')
-    method('User salary, per month', Math.round(fin.acctMonthlySalary),
-      fin.acctRateNote || 'the blended cost of the people whose time the automation gives back')
-    method('Loading on both', fin.loadFactor,
-      'employer cost on top of salary — pension, insurance, the rest', { fmt: '0.00"x"' })
-    method('A working month', fin.hoursPerFteMonth,
-      `${fin.daysPerFteMonth.toFixed(0)} days of ${fin.hoursPerManday} hours — one calendar for cost and benefit alike`,
-      { fmt: '#,##0" hours"' })
+    para('WHAT THIS SHEET IS MEASURING', { heading: true })
+    para('Every project here spends money to buy back time. The cost is what it takes to build and run; the benefit is the '
+      + 'hours it hands back to the business, priced at what those hours cost to employ, plus any cash it saves outright. '
+      + 'Both sides are converted into the same currency and the same month so that they can be subtracted from one another. '
+      + 'Nothing below is an estimate of market value — it is what this company pays for the time in question.')
 
-    method('THE TWO RATES EVERYTHING USES', null, '', { bold: true })
-    method('Developer day rate', Math.round(fin.devDayRate),
-      `${Math.round(fin.devMonthlySalary).toLocaleString()} x ${fin.loadFactor} / ${fin.daysPerFteMonth.toFixed(0)} days`)
-    method('Value of one user hour released', Math.round(fin.acctHourRate),
-      `${Math.round(fin.acctMonthlySalary).toLocaleString()} x ${fin.loadFactor} / ${fin.hoursPerFteMonth} hours`)
+    gap()
+    para('1. WHAT AN HOUR OF EACH KIND OF PERSON COSTS', { heading: true })
+    para(`Developer — ${cur} ${money0(fin.devMonthlySalary)} a month. The average full monthly salary of the people who build `
+      + 'the automations. This is the cost side: every manday of effort is a day of one of them.')
+    para(`User — ${cur} ${money0(fin.acctMonthlySalary)} a month. The average full monthly cost of the finance and accounting `
+      + 'people whose time the automation gives back. This is the benefit side: every hour saved is an hour of one of them.')
+    para(`The user figure is a BLEND, because the work being automated is not all done by the same grade. `
+      + `${String(fin.acctRateNote).replace(/[.\s]+$/, '')}.`
+      + ` That arithmetic comes to ${cur} ${money0(fin.acctMonthlySalary)} a month, which is the figure used everywhere `
+      + 'in this workbook. It is a management assumption about who actually does the work, not something the project register '
+      + 'can know, so it is written here in full rather than left inside a formula.', { muted: true })
+    para(`Both salaries are then multiplied by a loading of ${fin.loadFactor.toFixed(2)}x, which carries the employer cost on top of `
+      + `salary. At ${fin.loadFactor.toFixed(2)}x the figures above are already the full cost.`)
 
-    method('WHAT A PROJECT COSTS  (investment)', null, '', { bold: true })
-    method('Build', Math.round(fin.planBuildCost),
-      `mandays x ${Math.round(fin.devDayRate).toLocaleString()} a day — the effort to build it, priced`)
-    method('CAPEX', Math.round(fin.planCapex),
-      'licences and hardware bought outright — one-off, never depreciated across the months')
-    method('OPEX', Math.round(fin.planOpexYear),
-      'what it costs to KEEP running for the year — subscriptions, hosting, per-transaction fees')
-    method('Investment', Math.round(fin.planInvestment),
-      'build + CAPEX. OPEX is not investment: it is netted off the benefit below, month by month',
-      { bold: true })
+    gap()
+    para('2. THE WORKING MONTH — ONE CALENDAR FOR BOTH SIDES', { heading: true })
+    para(`A month is ${fin.hoursPerFteMonth} working hours: ${fin.daysPerFteMonth.toFixed(0)} days of ${fin.hoursPerManday} hours. `
+      + 'Cost and benefit are both quoted against this same month, which is the only reason they can be compared at all. '
+      + 'Change it on the Model tab and both sides move together.')
+    para(`Developer day rate  =  ${money0(fin.devMonthlySalary)} x ${fin.loadFactor.toFixed(2)} / ${fin.daysPerFteMonth.toFixed(0)} days  =  `
+      + `${cur} ${money0(fin.devDayRate)} per manday.`)
+    para(`Value of one user hour released  =  ${money0(fin.acctMonthlySalary)} x ${fin.loadFactor.toFixed(2)} / ${fin.hoursPerFteMonth} hours  =  `
+      + `${cur} ${money0(fin.acctHourRate)} per hour.`)
+    para(`Those two rates are the whole of the model. Every cost and every benefit in this workbook is one of them multiplied `
+      + 'by a quantity the register holds.', { muted: true })
 
-    /*
-     * Every figure in this block is PLAN-WIDE, like the ones above it. The
-     * return underneath is not, and cannot be — a project with no cost
-     * estimate has no return — so it is labelled and its coverage stated
-     * rather than left to be read as the same basis.
-     */
-    method('WHAT A PROJECT RETURNS  (benefit)', null, '', { bold: true })
-    method('From hours released, a month', Math.round(fin.hoursAnnualBenefit / 12),
-      `saving hours x ${Math.round(fin.acctHourRate).toLocaleString()} an hour — time handed back to the business, priced`)
-    method('Stated in cash, a month', Math.round((fin.monetaryAnnualBenefit || 0) / 12),
-      `a licence dropped, a penalty avoided — money that is not time, entered directly and never priced from hours (${Math.round(fin.monetaryAnnualBenefit || 0).toLocaleString()} a year)`)
-    method('Benefit, a month', Math.round(fin.monthlyBenefit),
-      'the two halves together — this is the figure the annual benefit is twelve of', { bold: true })
-    method('Less the OPEX run-rate, a month', -Math.round(fin.planOpexRunRate),
-      'a benefit that costs a subscription to keep is worth the subscription less')
-    method('Net benefit, a month', Math.round(fin.monthlyBenefit - fin.planOpexRunRate),
-      'this is what repays the investment', { bold: true })
+    gap()
+    para('3. THE COST SIDE — WHAT A PROJECT TAKES', { heading: true })
+    para(`BUILD COST  =  mandays x ${cur} ${money0(fin.devDayRate)}. The effort estimate on the project, priced at the developer `
+      + `day rate. Across this plan that is ${cur} ${money0(fin.planBuildCost)}. A project with no manday estimate has no build `
+      + 'cost — it is left empty rather than counted as free, and it is reported separately below.')
+    para(`CAPEX  =  licences, hardware and anything bought outright for the project. One-off, entered as a lump. This plan `
+      + `carries ${cur} ${money0(fin.planCapex)}. Deliberately NOT depreciated across the twelve months: the money leaves once, `
+      + 'and spreading it would make each month look cheaper than it was. That was a decision, not an oversight.')
+    para(`OPEX  =  what it costs to KEEP the thing running — subscriptions, hosting, per-transaction fees, support. Entered per `
+      + `month and spread across the months it actually runs, which is why the monthly grid above is not flat. This plan carries `
+      + `${cur} ${money0(fin.planOpexYear)} for the year, a run-rate of ${cur} ${money0(fin.planOpexRunRate)} a month.`)
+    para(`INVESTMENT  =  build cost + CAPEX  =  ${cur} ${money0(fin.planInvestment)}. OPEX is NOT in the investment. It is a `
+      + 'recurring cost, so it is subtracted from the benefit month by month instead. Putting it in both places would charge '
+      + 'the project for it twice.')
 
-    method('AND THE RETURN', null, '', { bold: true })
-    method('Over a horizon of', fin.horizonMonths,
-      'the period the return is measured across — change it on the Model tab and every return moves',
-      { fmt: '#,##0" months"' })
-    method('Investment behind the return', Math.round(fin.investment),
-      `only the ${fin.costedCount} projects carrying BOTH a cost and a benefit — averaging in a project with no cost `
-      + 'would report a return the team has not earned')
-    method('Which is this much of the benefit', fin.roiCoverage,
-      'how much of the book that subset represents — a flattering return over a sliver of it is not the whole portfolio’s',
-      { fmt: '0%' })
-    method('Return on investment', fin.roi,
-      '(net benefit x horizon − investment) / investment, over exactly that subset',
-      { fmt: '+0%;-0%;0%', tone: fin.roi >= fin.roiGate ? GOOD : BAD })
-    method('Must clear', fin.roiGate,
-      'the gate on objective 1 — the plan is judged against this, not against any single project',
-      { fmt: '+0%;-0%;0%' })
+    gap()
+    para('4. THE BENEFIT SIDE — WHAT A PROJECT GIVES BACK', { heading: true })
+    para(`FROM HOURS  =  saving hours per month x ${cur} ${money0(fin.acctHourRate)}. The hours the automation takes off the `
+      + `business, priced at what an hour of that work costs to employ. Across this plan that is ${cur} `
+      + `${money0(fin.hoursAnnualBenefit / 12)} a month.`)
+    para(`IN CASH  =  a benefit stated directly in money, per year: a licence dropped, a penalty avoided, an interest charge that `
+      + `stops. This plan carries ${cur} ${money0(fin.monetaryAnnualBenefit || 0)} a year. It is entered separately because it is `
+      + 'not time and pricing it from hours would be a fiction. Where the hours ARE the saving this is left empty, since nothing '
+      + 'can tell a second benefit apart from the same benefit counted twice.')
+    para(`TOTAL BENEFIT  =  ${cur} ${money0(fin.monthlyBenefit)} a month, ${cur} ${money0(fin.annualBenefit)} a year.`)
+    para(`NET BENEFIT  =  benefit − the OPEX run-rate  =  ${cur} ${money0(fin.monthlyBenefit)} − ${money0(fin.planOpexRunRate)}  =  `
+      + `${cur} ${money0(fin.monthlyBenefit - fin.planOpexRunRate)} a month. This is the figure that repays the investment. It is `
+      + 'allowed to come out negative: an automation whose subscription costs more each month than the hours it hands back is a '
+      + 'real outcome and has to read as one.')
+    para(`FTE RELEASED  =  saving hours / ${fin.hoursPerFteMonth} hours a month  =  ${fin.fteReleased.toFixed(1)} people. The same `
+      + 'saving expressed the way management states it. Hours only — cash releases no capacity, and folding it in here would '
+      + 'report people freed up who are not.', { muted: true })
 
-    method('AND WHAT IS NOT IN ANY OF IT', null, '', { bold: true })
-    method('Owned by IT or the business', Math.round(totals.outsideHours),
-      `${totals.outsideCount} projects, listed in full on the Projects sheet — real work, and none of it counted `
-      + 'in this team\'s hours, cost or return, because this team did not deliver it',
-      { fmt: '#,##0" hrs/month"' })
+    gap()
+    para('5. PUTTING THE TWO TOGETHER', { heading: true })
+    para(`Both sides are measured across a horizon of ${fin.horizonMonths} months.`)
+    para('RETURN ON INVESTMENT  =  (net benefit x horizon − investment) / investment.')
+    para(`For this plan:  (${money0(fin.netMonthly)} x ${fin.horizonMonths} − ${money0(fin.investment)}) / ${money0(fin.investment)}  =  `
+      + `${(fin.roi * 100).toFixed(0)}%, against a gate of ${(fin.roiGate * 100).toFixed(0)}%.`)
+    para(`The ${money0(fin.netMonthly)} there is the net benefit of the costed projects only, which is why it is smaller than the `
+      + `${money0(fin.monthlyBenefit - fin.planOpexRunRate)} above: both sides of a return have to be measured over the same set of `
+      + 'projects, or the answer is a benefit from one book divided by a cost from another.', { muted: true })
+    para(`That return is measured over the ${fin.costedCount} projects that carry BOTH a cost and a benefit — `
+      + `${(fin.roiCoverage * 100).toFixed(0)}% of the benefit in the plan. It has to be: a project with no cost estimate has no `
+      + 'return, and averaging it in as though it cost nothing would report a return the team has not earned. The remaining '
+      + `${fin.uncostedCount} in-plan projects have a benefit but no cost estimate, and are reported as uncosted rather than `
+      + 'quietly counted as though they were free.')
+    para('PAYBACK  =  investment / net benefit per month, in months. The point at which the thing has paid for itself.')
+    para(`The gate is a portfolio test, not a per-project one: the plan as a whole must clear `
+      + `${(fin.roiGate * 100).toFixed(0)}%. Individual projects are allowed to fall below it where there is a reason, and the `
+      + 'Effort_Return sheet shows which ones do.', { muted: true })
 
-    styleBody(ws, mStart, r - 1, cols.length, { zebra: false })
+    gap()
+    para('6. WHAT IS DELIBERATELY NOT IN ANY OF THE ABOVE', { heading: true })
+    para(`Projects owned by IT or by the business itself — ${totals.outsideCount} of them, ${Math.round(totals.outsideHours).toLocaleString()} `
+      + 'saving hours a month. They are listed in full on the Projects sheet under the name of whoever owns them, because they '
+      + 'are real work worth tracking, and they are counted in none of this team\'s hours, cost, return or scorecards, because '
+      + 'this team did not deliver them.')
+    para('Projects deferred to next year or marked excluded. They stay on the register and contribute nothing to this year.')
+    para('Anything without a number. An unknown effort is not zero effort and an unknown saving is not a zero saving; both are '
+      + 'reported as unknown and counted nowhere.')
+    // No styleBody here on purpose: this is prose, and gridlines and zebra
+    // striping would file it back into the table it was pulled out of.
   }
 
   // Last, once every cell is written: a column can only be sized against what

@@ -286,33 +286,53 @@ console.log(String.fromCharCode(10) + '--- the Costs sheet explains where the mo
     all.push([1, 5, 6].map((c) => txt(ws.getRow(r).getCell(c))).join(' | '))
   }
   const sheet = all.join(String.fromCharCode(10))
-  check('THE COSTS SHEET SAYS HOW THE NUMBERS ARE BUILT', /HOW THESE NUMBERS ARE BUILT/.test(sheet))
-  check('  the developer salary is stated', /Developer salary/.test(sheet))
-  check('  and the user salary with its blend',
-    /User salary/.test(sheet) && /20% Manager and 80% Staff/.test(sheet),
-    (sheet.match(/[^\n]*20% Manager[^\n]*/) || [''])[0].slice(0, 100))
-  check('  both day and hour rates show their arithmetic',
-    /Developer day rate/.test(sheet) && /Value of one user hour released/.test(sheet))
-  check('  investment is defined', /build \+ CAPEX/.test(sheet))
-  check('  benefit is defined', /From hours released/.test(sheet) && /Stated in cash/.test(sheet))
-  check('  and the return, with the subset it is measured over',
-    /Return on investment/.test(sheet) && /Investment behind the return/.test(sheet))
-  // The figures in that block must be the plan's, not a retelling of them.
-  const money = (label) => {
-    const row = all.find((l) => l.startsWith(label))
-    return row ? Number(row.split(' | ')[1]) : null
-  }
-  check('the stated developer salary IS the model\u2019s',
-    money('Developer salary, per month') === Math.round(plan.finance.devMonthlySalary),
-    `${money('Developer salary, per month')} vs ${Math.round(plan.finance.devMonthlySalary)}`)
-  check('the stated user salary IS the model\u2019s',
-    money('User salary, per month') === Math.round(plan.finance.acctMonthlySalary),
-    `${money('User salary, per month')} vs ${Math.round(plan.finance.acctMonthlySalary)}`)
-  check('and the day rate is the salary through the stated arithmetic',
-    Math.abs(money('Developer day rate')
-      - Math.round((plan.finance.devMonthlySalary * plan.finance.loadFactor) / plan.finance.daysPerFteMonth)) <= 1,
-    String(money('Developer day rate')))
+  check('THE COSTS SHEET EXPLAINS HOW COST AND BENEFIT ARE CALCULATED',
+    /HOW COST AND BENEFIT ARE CALCULATED/.test(sheet))
+  // One section of prose, not a column repeated against every row.
+  // Counted by ROW: reading a merged cell back gives the same text in every
+  // column of its range, so counting matches would count the merge, not the
+  // section.
+  check('  it is one section, not a column on every row',
+    all.filter((l) => l.includes('HOW COST AND BENEFIT ARE CALCULATED')).length === 1,
+    `${all.filter((l) => l.includes('HOW COST AND BENEFIT ARE CALCULATED')).length} rows carry the heading`)
+  const says = (what, re) => check(`  it explains ${what}`, re.test(sheet),
+    (sheet.match(new RegExp(`[^
+]*${re.source}[^
+]*`)) || [''])[0].slice(0, 110))
+  says('what a developer costs', /Developer — THB/)
+  says('what a user costs', /User — THB/)
+  says('the 20 / 80 blend behind the user rate', /20% Manager and 80% Staff/)
+  says('the loading on both', /loading of/)
+  says('the working month', /A month is .* working hours/)
+  says('the developer day rate arithmetic', /Developer day rate {2}= {2}/)
+  says('the user hour rate arithmetic', /Value of one user hour released {2}= {2}/)
+  says('what build cost is', /BUILD COST {2}= {2}mandays/)
+  says('what CAPEX is, and that it is not depreciated', /CAPEX {2}= {2}.*NOT depreciated/s)
+  says('what OPEX is', /OPEX {2}= {2}what it costs to KEEP/)
+  says('what investment is, and that OPEX is not in it', /INVESTMENT {2}= {2}build cost \+ CAPEX/)
+  says('the benefit from hours', /FROM HOURS {2}= {2}saving hours/)
+  says('the benefit stated in cash', /IN CASH {2}= {2}/)
+  says('the net benefit', /NET BENEFIT {2}= {2}benefit/)
+  says('FTE released', /FTE RELEASED {2}= {2}/)
+  says('the return, with its arithmetic', /RETURN ON INVESTMENT {2}= {2}\(net benefit/)
+  says('which projects the return covers', /costed projects only/)
+  says('payback', /PAYBACK {2}= {2}investment/)
+  says('what is excluded', /WHAT IS DELIBERATELY NOT IN ANY OF THE ABOVE/)
+  says('that IT and business rows are excluded but listed', /owned by IT or by the business itself/i)
+
+  // The prose must quote the model, not a retelling of it.
+  const has = (n) => sheet.includes(Math.round(n).toLocaleString('en-US'))
+  check('the salaries it states are the model’s',
+    has(plan.finance.devMonthlySalary) && has(plan.finance.acctMonthlySalary),
+    `${Math.round(plan.finance.devMonthlySalary)} / ${Math.round(plan.finance.acctMonthlySalary)}`)
+  check('so are the two rates it derives',
+    has(plan.finance.devDayRate) && has(plan.finance.acctHourRate),
+    `${Math.round(plan.finance.devDayRate)} / ${Math.round(plan.finance.acctHourRate)}`)
+  check('and the return it quotes',
+    sheet.includes(`${(plan.finance.roi * 100).toFixed(0)}%`),
+    `${(plan.finance.roi * 100).toFixed(0)}%`)
 }
+
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
