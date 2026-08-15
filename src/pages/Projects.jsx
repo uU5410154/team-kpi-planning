@@ -289,6 +289,12 @@ export default function Projects({
   const [fCommit, setFCommit] = useState('all')
   const [fGap, setFGap] = useState('all')
   const [fTeam, setFTeam] = useState('all')
+  /*
+   * A LIST, like the PIC filter and for the same reason: the question anyone
+   * asks of a register this size is "what do these two sub teams hold between
+   * them", and one at a time cannot answer it. Empty means all.
+   */
+  const [fSub, setFSub] = useState([])
   const [fHc, setFHc] = useState('all')
   const [sort, setSort] = useState({ by: 'savingHours', dir: 'desc' })
   const [sel, setSel] = useState(() => new Set())
@@ -316,6 +322,9 @@ export default function Projects({
       if (fGap === 'pastdue' && !p.pastDue) return false
       if (fGap === 'nokey' && p.jiraKey) return false
       if (fTeam !== 'all' && (p.team || '') !== fTeam) return false
+      // Blank sub team is a real answer, not a missing one — it is how most of
+      // the register reads, so it has to be selectable rather than unfindable.
+      if (fSub.length && !fSub.includes(p.subTeam || 'none')) return false
       if (fHc !== 'all') {
         const fte = p.fte || 0
         if (fHc === 'some' && fte <= 0) return false
@@ -338,7 +347,7 @@ export default function Projects({
       return String(va).localeCompare(String(vb)) * dir
     })
     return out
-  }, [projects, q, fObj, fPic, fCommit, fGap, fTeam, fHc, sort])
+  }, [projects, q, fObj, fPic, fCommit, fGap, fTeam, fSub, fHc, sort])
 
   // What the exported file says it is. A working file with no idea which
   // slice of the register it holds is one nobody can check.
@@ -357,12 +366,13 @@ export default function Projects({
     }
     if (fObj !== 'all') bits.push(`Obj ${OBJ_BY_ID[fObj]?.no} ${OBJ_BY_ID[fObj]?.short || fObj}`)
     if (fTeam !== 'all') bits.push(fTeam)
+    if (fSub.length) bits.push(fSub.map((t) => (t === 'none' ? 'no sub team' : t)).join('+'))
     if (fCommit !== 'all') bits.push(fCommit)
     if (fGap !== 'all') bits.push(`gap ${fGap}`)
     if (fHc !== 'all') bits.push(`FTE ${fHc}`)
     if (q.trim()) bits.push(`"${q.trim()}"`)
     return bits
-  }, [q, fObj, fPic, fCommit, fTeam, fGap, fHc, assignees])
+  }, [q, fObj, fPic, fCommit, fTeam, fSub, fGap, fHc, assignees])
 
   const describeFilter = useMemo(
     () => (filterParts.length ? filterParts.join(', ') : 'the whole register'),
@@ -373,8 +383,20 @@ export default function Projects({
     () => [...new Set(projects.map((p) => p.team).filter(Boolean))].sort(),
     [projects],
   )
+  /*
+   * Narrowed by the team already chosen. Offering every sub team in the book
+   * against a team that holds four of them is a list of dead ends.
+   */
+  const subTeams = useMemo(
+    () => [...new Set(projects
+      .filter((p) => fTeam === 'all' || (p.team || '') === fTeam)
+      .map((p) => p.subTeam)
+      .filter(Boolean))].sort(),
+    [projects, fTeam],
+  )
   const filtersOn =
-    q.trim() !== '' || fPic.length > 0 || [fObj, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
+    q.trim() !== '' || fPic.length > 0 || fSub.length > 0
+    || [fObj, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
 
   const head = (id, label, align = 'left', minWidth) => (
     <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined}>
@@ -562,9 +584,35 @@ export default function Projects({
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 128 }}>
             <InputLabel>Team</InputLabel>
-            <Select label="Team" value={fTeam} onChange={(e) => setFTeam(e.target.value)}>
+            <Select
+              label="Team"
+              value={fTeam}
+              onChange={(e) => {
+                setFTeam(e.target.value)
+                // A sub team belongs to a team. Keeping a selection that the
+                // new team does not contain leaves an empty table and no
+                // visible reason for it.
+                setFSub([])
+              }}
+            >
               <MenuItem value="all">All teams</MenuItem>
               {teams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Sub team</InputLabel>
+            <Select
+              multiple
+              label="Sub team"
+              value={fSub}
+              onChange={(e) => setFSub(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+              displayEmpty
+              renderValue={(sel) => (sel.length === 0
+                ? 'All sub teams'
+                : sel.map((t) => (t === 'none' ? 'None' : t)).join(', '))}
+            >
+              <MenuItem value="none"><em>No sub team</em></MenuItem>
+              {subTeams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 158 }}>
@@ -608,7 +656,7 @@ export default function Projects({
               size="small"
               onClick={() => {
                 setQ(''); setFObj('all'); setFPic([]); setFCommit('all')
-                setFGap('all'); setFTeam('all'); setFHc('all')
+                setFGap('all'); setFTeam('all'); setFSub([]); setFHc('all')
               }}
             >
               Clear filters
