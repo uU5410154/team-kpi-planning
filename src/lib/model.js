@@ -701,7 +701,7 @@ export function kpiTargetTotals(lines) {
   }
 }
 
-export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}, counted = {}) {
+export function scorecardWeights(person, settings, credited = {}, creditedMoney = {}, counted = {}, ratio = null) {
   const held = person.objectives || []
   const prio = settings.objectivePriority
   const totalPrio = held.reduce((a, id) => a + (prio[id] ?? 1), 0)
@@ -719,9 +719,36 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
       // count: objective 3 is measured by a date but still contributes hours.
       const kind = targetKindFor(id)
       const live = kind === 'percent'
-        // The gate itself: the plan's own floor, so changing it on the Model
-        // tab moves every card that has not been typed over.
-        ? Math.round((settings?.finance?.roiGate ?? DEFAULT_FINANCE.roiGate) * 100)
+        /*
+         * What this person is actually returning — the same discipline as
+         * every other line on the card, which starts at what the register
+         * says rather than at somebody's round number.
+         *
+         * It used to start at the plan's gate, which made objective 1 the one
+         * line whose target had nothing to do with the person in front of it:
+         * a card carrying +145% opened stating 30%, and a target already met
+         * three times over is not a target.
+         *
+         * The gate has not gone anywhere. It is the plan-level floor on the
+         * Model tab, it still colours whether a line is met, and it is what
+         * this falls back to for somebody with no return yet — a new joiner
+         * has to aim at the standard, having nothing of their own to aim at.
+         */
+        ? (() => {
+          const gate = settings?.finance?.roiGate ?? DEFAULT_FINANCE.roiGate
+          /*
+           * Never below the gate. The objective reads "the return must not be
+           * less than X", so a person returning −4% cannot have a target of
+           * −4% — that is not a standard, it is a description. They aim at the
+           * gate, and the card shows them short of it, which is the point.
+           *
+           * FLOORED, not rounded: a card has to open MEETING its own default.
+           * Rounding 144.6 up to 145 left somebody failing a target the app
+           * had just written for them.
+           */
+          const base = ratio == null ? gate : Math.max(ratio, gate)
+          return Math.floor(base * 100 + 1e-9)
+        })()
         : kind === 'thb'
           ? Math.round(creditedMoney[id] || 0)
         : kind === 'hours'
@@ -955,10 +982,10 @@ export const fmtTarget = (line, basis = 'monthly', symbol = '฿') => {
 }
 
 /** Lines removed from a scorecard, so they can be listed and restored. */
-export function hiddenLines(person, settings, credited = {}, creditedMoney = {}, counted = {}) {
+export function hiddenLines(person, settings, credited = {}, creditedMoney = {}, counted = {}, ratio = null) {
   const hidden = new Set(person.kpiHidden || [])
   if (!hidden.size) return []
-  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited, creditedMoney, counted)
+  const all = scorecardWeights({ ...person, kpiHidden: [] }, settings, credited, creditedMoney, counted, ratio)
   return all.filter((l) => hidden.has(l.id))
 }
 
@@ -2025,7 +2052,7 @@ export function computePlan(state) {
    * the lead disagreeing with the people underneath it the moment one of them
    * typed a target.
    */
-  const cardOf = (person, byObj, benefitByObj, rows, countByObj = {}) => {
+  const cardOf = (person, byObj, benefitByObj, rows, countByObj = {}, ratio = null) => {
     // An objective is held when it carries a figure OR when a project serves
     // it — a counted objective has no hours behind it, so presence in the
     // portfolio is what puts it on the card.
@@ -2040,7 +2067,7 @@ export function computePlan(state) {
       .filter((id) => OBJ_BY_ID[id] && !derived.includes(id))
     const objectives = OBJECTIVE_ORDER.filter((id) => derived.includes(id) || added.includes(id))
     const withObjectives = { ...person, objectives }
-    const lines = scorecardWeights(withObjectives, s, byObj, benefitByObj, countByObj)
+    const lines = scorecardWeights(withObjectives, s, byObj, benefitByObj, countByObj, ratio)
       .map((l) => ({ ...l, manual: !!l.objective && added.includes(l.objective) }))
     return {
       derived, added, objectives, withObjectives, lines,
@@ -2052,7 +2079,9 @@ export function computePlan(state) {
   const memberCards = new Map()
   for (const p of byPersonShown) {
     if (p.aggregatesTeam === true) continue
-    memberCards.set(p.id, cardOf(p, p.byObjective, p.benefitByObjective, p.rows, p.countByObjective))
+    // Their own average return, so objective 1 opens at what they are carrying.
+    memberCards.set(p.id, cardOf(p, p.byObjective, p.benefitByObjective, p.rows, p.countByObjective,
+      p.avgProjectRoi ?? null))
   }
 
   // The lead's own personal share has no card of its own, so it enters the
@@ -2129,7 +2158,8 @@ export function computePlan(state) {
      * so the two kinds are kept apart and every line says which it is.
      */
     const card = aggregates
-      ? cardOf(p, scByObjective, scBenefitByObjective, scRows, teamCountByObjective)
+      // The team's, for the card that IS the team's.
+      ? cardOf(p, scByObjective, scBenefitByObjective, scRows, teamCountByObjective, teamAvgRoi)
       : memberCards.get(p.id)
     const derivedObjectives = card.derived
     const addedObjectives = card.added

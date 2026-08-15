@@ -596,5 +596,61 @@ console.log('\n--- the exported workbook carries the same figures ---')
   unlinkSync(file)
 }
 
+/* ====== objective 1 opens at what the person is returning ====== */
+console.log(String.fromCharCode(10) + '--- the financial target starts where the person is ---')
+{
+  const costedState = {
+    ...base,
+    projects: base.projects.map((p, i) => ({ ...p, manday: 3 + (i % 9) })),
+    settings: { ...base.settings, finance: { ...(base.settings || {}).finance, roiGate: 0.3 } },
+  }
+  const p2 = computePlan(costedState)
+  const gatePct = Math.round(p2.finance.roiGate * 100)
+  const lineOf = (person) => person.kpiLines.find((l) => l.objective === 'financial' && !l.custom)
+
+  const withReturn = p2.people.filter((x) => x.avgProjectRoi != null && x.avgProjectRoi > p2.finance.roiGate)
+  check('somebody is above the gate to check', withReturn.length >= 2,
+    p2.people.map((x) => `${x.nick} ${x.avgProjectRoi == null ? 'null' : `${Math.round(x.avgProjectRoi * 100)}%`}`).join(' · '))
+
+  check('THE TARGET IS THEIR OWN RETURN, NOT THE GATE',
+    withReturn.every((x) => lineOf(x).target === Math.floor(x.avgProjectRoi * 100 + 1e-9)),
+    withReturn.map((x) => `${x.nick} target ${lineOf(x).target}% vs return ${(x.avgProjectRoi * 100).toFixed(1)}%`).join(' | '))
+  check('  so a card opens meeting its own default',
+    withReturn.every((x) => lineOf(x).meetsTarget === true))
+
+  // Below the gate, the gate is the target: a return of −4% is not a standard.
+  const below = p2.people.filter((x) => x.avgProjectRoi != null && x.avgProjectRoi < p2.finance.roiGate)
+  check('BELOW THE GATE, THE GATE IS THE TARGET',
+    below.every((x) => lineOf(x).target === gatePct && lineOf(x).meetsTarget === false),
+    below.map((x) => `${x.nick} ${(x.avgProjectRoi * 100).toFixed(0)}% -> target ${lineOf(x).target}%`).join(' | ') || 'nobody below it')
+  check('  and no target is ever negative',
+    p2.people.every((x) => Number(lineOf(x).target) >= 0),
+    p2.people.map((x) => `${x.nick} ${lineOf(x).target}`).join(' · '))
+
+  // Moving the gate moves only the cards that were leaning on it.
+  const higher = computePlan({ ...costedState, settings: { ...costedState.settings, finance: { ...costedState.settings.finance, roiGate: 1 } } })
+  const lineIn = (plan2, id) => lineOf(plan2.people.find((x) => x.id === id))
+  check('raising the gate leaves a card that clears it alone',
+    withReturn.filter((x) => x.avgProjectRoi > 1).every((x) => lineIn(higher, x.id).target === lineOf(x).target),
+    withReturn.map((x) => `${x.nick} ${lineOf(x).target} -> ${lineIn(higher, x.id).target}`).join(' | '))
+  check('  and lifts the ones that were on the floor',
+    below.every((x) => lineIn(higher, x.id).target === 100),
+    below.map((x) => `${x.nick} -> ${lineIn(higher, x.id).target}%`).join(' | ') || 'nobody was on the floor')
+
+  // A typed target still wins over both.
+  const person = withReturn[0]
+  const typed = computePlan({
+    ...costedState,
+    people: costedState.people.map((x) => (x.id === person.id
+      ? { ...x, kpi: { ...(x.kpi || {}), 'obj-financial': { ...((x.kpi || {})['obj-financial'] || {}), target: 500 } } }
+      : x)),
+  })
+  const t = lineOf(typed.people.find((x) => x.id === person.id))
+  check('A TYPED TARGET STILL WINS', Number(t.target) === 500 && t.overridden === true,
+    `${person.nick}: ${t.target}, overridden ${t.overridden}`)
+  check('  and it is judged against, not ignored', t.meetsTarget === false,
+    `return ${(person.avgProjectRoi * 100).toFixed(0)}% vs typed 500%`)
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)
