@@ -126,11 +126,16 @@ try {
   // opened the app is holding a copy of the seed. It reported that as work in
   // progress and refused to take the shared plan — which is what an incognito
   // window did on its second load.
-  await page.evaluate(() => {
+  await page.evaluate((seedProjects) => {
     const raw = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
-    // put it back to the bundled seed, as a first visit would have left it
-    localStorage.setItem('fa-tech-kpi-2026', JSON.stringify({ ...raw, projects: raw.projects.map((p) => ({ ...p, manday: 0 })) }))
-  })
+    // Exactly what a window that has only OPENED the app is holding: the
+    // bundled seed, mirrored on mount, with no record of ever having agreed
+    // with the database.
+    delete raw.syncHash
+    delete raw.syncedAt
+    raw.projects = seedProjects
+    localStorage.setItem('fa-tech-kpi-2026', JSON.stringify(raw))
+  }, seed.projects)
   await page.goto(`${base}/?again=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 3000))
   const second = await page.evaluate(() => {
@@ -143,6 +148,41 @@ try {
   check('A SECOND VISIT WITH NOTHING OF ITS OWN STILL TAKES THE SHARED PLAN',
     second.withMandays === withMandays, JSON.stringify(second))
   check('and is not told to open it by hand', second.notice === false, JSON.stringify(second))
+
+  /* ---------- 1c. in sync, and the database moves on ---------- */
+  /*
+   * The case that had somebody staring at a stale register: this browser
+   * loaded the shared plan and typed nothing, then somebody else saved to the
+   * database. Holding a copy is not the same as having work in it — with
+   * nothing of its own to lose, it must move on too, or it shows last week's
+   * register indefinitely and reads as "the data was never ingested".
+   */
+  const client2 = new MongoClient(uri)
+  await client2.connect()
+  await client2.db('team_kpi_planning').collection('kpi_scenarios').updateOne(
+    { name: 'Baseline' },
+    {
+      $set: {
+        payload: { ...saved, projects: [...saved.projects, { ...saved.projects[0], key: 'BRAND-NEW-ROW', summary: 'Added by somebody else', manday: 99 }] },
+        updatedAt: new Date(Date.now() + 60000).toISOString(),
+        updatedBy: 'somebody else',
+      },
+    },
+  )
+  await client2.close()
+
+  await page.goto(`${base}/?moved=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 3500))
+  const moved = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    return {
+      rows: st.projects.length,
+      hasNew: st.projects.some((p) => p.key === 'BRAND-NEW-ROW'),
+      notice: /shared database was saved/i.test(document.body.innerText),
+    }
+  })
+  check('AN UNTOUCHED BROWSER TAKES A NEWER SHARED PLAN', moved.hasNew, JSON.stringify(moved))
+  check('without anybody having to be told', moved.notice === false, JSON.stringify(moved))
 
   /* ---------- 2. a browser that already holds work ---------- */
   await page.evaluate(() => {

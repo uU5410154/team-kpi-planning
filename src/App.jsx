@@ -21,6 +21,7 @@ import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import {
   loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState,
+  planHash,
   hasNothingOfItsOwn,
 } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
@@ -91,6 +92,7 @@ export default function App() {
    * told the database has a newer one and is left alone.
    */
   const [dbNotice, setDbNotice] = useState(null)
+  const [loadingShared, setLoadingShared] = useState(false)
   /*
    * Read during the FIRST RENDER, not inside the effect.
    *
@@ -113,6 +115,38 @@ export default function App() {
    * plan has something true to show immediately.
    */
   const [bootstrapping, setBootstrapping] = useState(startedBlank.current)
+  /*
+   * Take the shared plan. One path, so the automatic case and the button can
+   * never end up doing subtly different things.
+   */
+  const takeShared = useCallback(async (entry, how) => {
+    const doc = await api.loadScenario(entry.name)
+    if (!doc?.payload?.projects) throw new Error('That scenario has no projects in it.')
+    let taken = null
+    setState((s) => {
+      const next = repairState({
+        ...s,
+        people: doc.payload.people,
+        projects: doc.payload.projects,
+        settings: { ...s.settings, ...doc.payload.settings },
+        repair: doc.payload.repair,
+        scenarioName: entry.name,
+      })
+      // Stamped as agreeing with the database, so the next visit can tell
+      // "untouched since the last sync" from "somebody has been working".
+      taken = { ...next, syncHash: planHash(next), syncedAt: entry.updatedAt }
+      return taken
+    })
+    setLastSaved(entry.updatedAt)
+    linkedToDb.current = true
+    setDbNotice(null)
+    setTimeout(() => setDirty(false), 0)
+    setToast({
+      severity: 'success',
+      msg: `${how} "${entry.name}" from the shared database — ${doc.payload.projects.length} projects.`,
+    })
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     const blank = startedBlank.current
@@ -133,23 +167,26 @@ export default function App() {
         if (cancelled || !Array.isArray(list) || !list.length) return
         const latest = [...list].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
         if (!blank) {
+          /*
+           * This browser holds a plan — but holding one is not the same as
+           * having work in it. If its content still matches the fingerprint
+           * taken when it last agreed with the database, nobody has typed
+           * anything since, and refusing the newer plan just leaves somebody
+           * reading last week's register and reporting the app as broken.
+           *
+           * Only genuinely unsaved work stops it, and then it asks.
+           */
+          const stored = loadState()
+          const untouched = stored.syncHash && planHash(stored) === stored.syncHash
+          const isNewer = String(latest.updatedAt || '') !== String(stored.syncedAt || '')
+          if (untouched && isNewer) {
+            await takeShared(latest, 'Updated to')
+            return
+          }
           setDbNotice(latest)
           return
         }
-        const doc = await api.loadScenario(latest.name)
-        if (cancelled || !doc?.payload?.projects) return
-        setState((s) => repairState({
-          ...s,
-          people: doc.payload.people,
-          projects: doc.payload.projects,
-          settings: { ...s.settings, ...doc.payload.settings },
-          repair: doc.payload.repair,
-          scenarioName: latest.name,
-        }))
-        setLastSaved(latest.updatedAt)
-        linkedToDb.current = true
-        setTimeout(() => setDirty(false), 0)
-        setToast({ severity: 'success', msg: `Loaded "${latest.name}" from the shared database.` })
+        await takeShared(latest, 'Loaded')
       } catch {
         // No database reachable. The browser copy stands, which is the point of
         // keeping one.
@@ -159,7 +196,7 @@ export default function App() {
       }
     })()
     return () => { cancelled = true; clearTimeout(cap) }
-  }, [])
+  }, [takeShared])
 
   useEffect(() => {
     if (wasReset) {
@@ -208,6 +245,9 @@ export default function App() {
       setDirty(false)
       setLastSaved(r.updatedAt)
       linkedToDb.current = true
+      // The browser and the database now hold the same thing; stamp it so the
+      // next visit can take a newer plan without asking.
+      setState((s) => ({ ...s, syncHash: planHash(s), syncedAt: r.updatedAt }))
       setToast({ severity: 'success', msg: `Saved "${name}" to the database.` })
     } catch (e) {
       setToast({ severity: 'error', msg: `${e.message} Your work is still safe in this browser.` })
@@ -750,30 +790,38 @@ export default function App() {
           }}
         />
 
-        {/* Not loaded automatically: this browser already holds a plan, and
-            replacing it would throw away edits nobody had finished. */}
+        {/* Only reached when this browser holds UNSAVED work, so it is a
+            question, not an announcement: it stays until it is answered.
+            As a twelve-second toast it was simply missed, and the browser
+            then showed a stale register indefinitely with no sign of it. */}
         <Snackbar
           open={!!dbNotice}
-          autoHideDuration={12000}
-          onClose={() => setDbNotice(null)}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
           <Alert
-            severity="info"
+            severity="warning"
             onClose={() => setDbNotice(null)}
             action={(
               <Button
                 color="inherit"
                 size="small"
-                onClick={() => { setScenario('load'); setDbNotice(null) }}
+                variant="outlined"
+                disabled={loadingShared}
+                onClick={async () => {
+                  setLoadingShared(true)
+                  try { await takeShared(dbNotice, 'Loaded') } catch (e) {
+                    setToast({ severity: 'error', msg: e.message })
+                  } finally { setLoadingShared(false) }
+                }}
               >
-                Open
+                {loadingShared ? 'Loading…' : 'Load it'}
               </Button>
             )}
           >
             &ldquo;{dbNotice?.name}&rdquo; in the shared database was saved{' '}
-            {dbNotice?.updatedAt ? new Date(dbNotice.updatedAt).toLocaleString() : ''}. This browser is
-            showing its own copy.
+            {dbNotice?.updatedAt ? new Date(dbNotice.updatedAt).toLocaleString() : ''}, and is newer than
+            what this browser is showing. Loading it replaces the unsaved edits in this browser — save
+            them first if you want to keep them.
           </Alert>
         </Snackbar>
 

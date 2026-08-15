@@ -401,6 +401,15 @@ try {
   const teamHeadline = () => page.evaluate(() =>
     Number((document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? '0').replace(/,/g, '')))
   const before2 = await teamHeadline()
+  /*
+   * The header counts the BOOK — every row on the register, including the ones
+   * IT or a business user owns. The card counts the team's commitment. The two
+   * are different figures on purpose, so what must hold is that they move by
+   * the same amount, not that they are equal.
+   */
+  const headerTotal = () => page.evaluate(() =>
+    Number((document.body.innerText.match(/([\d,]+)\s*\/\s*3,000 hrs/)?.[1] ?? '0').replace(/,/g, '')))
+  const header2 = await headerTotal()
 
   const bumped = await page.evaluate(() => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
@@ -417,8 +426,8 @@ try {
   check('editing it moves the team headline', (await teamHeadline()) === before2 + 100,
     `${before2} -> ${await teamHeadline()}`)
   check('and the header total moves with it',
-    (await page.evaluate(() => document.body.innerText.match(/([\d,]+)\s*\/\s*3,000 hrs/)?.[1])) ===
-      (before2 + 100).toLocaleString('en-US'))
+    (await headerTotal()) === header2 + 100,
+    `${header2} -> ${await headerTotal()}`)
   check('weights are still on the grid after the edit',
     (await weightsOf()).every((v) => v % 5 === 0))
 

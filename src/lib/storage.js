@@ -1,5 +1,5 @@
 import seed from '../data/seed.json'
-import { DEFAULT_SETTINGS, repairState, REPAIR_VERSION } from './model.js'
+import { DEFAULT_SETTINGS, repairState, repairRoster, REPAIR_VERSION } from './model.js'
 
 const KEY = 'fa-tech-kpi-2026'
 // 5: the corporate and capability KPI lines were dropped, and typed weights are
@@ -35,12 +35,35 @@ const seedStamp = () =>
   `${seed.meta?.source || '?'}|${seed.projects.length}|${seed.people.length}|` +
   `${hash(JSON.stringify(seed.people))}|${hash(JSON.stringify(seed.projects))}`
 
+/**
+ * Fingerprint of the plan's CONTENT — what it holds, not when it was written.
+ *
+ * Stamped whenever the browser and the database agree (a load or a save). If
+ * it still matches later, nobody has typed anything since, and a newer plan in
+ * the database can be taken without asking: there is nothing here to lose.
+ * If it differs, this browser holds work of its own and must never be
+ * overwritten without being asked.
+ */
+export const planHash = (s) => hash(JSON.stringify([
+  s?.projects || [], s?.people || [], s?.settings || {}, s?.scenarioName || '',
+]))
+
 export const freshState = () => ({
   version: VERSION,
   repair: REPAIR,
   seedStamp: seedStamp(),
   meta: seed.meta,
-  people: seed.people.map((p) => ({ ...p })),
+  /*
+   * The roster the app actually holds, not the one the file ships.
+   *
+   * freshState stamps the CURRENT repair version, so repairState treats it as
+   * already migrated and never runs on it — the seed's roster stayed as
+   * written while every loaded plan gained the assignable-but-unmeasured
+   * entries. The two could then never compare equal, so a browser holding
+   * nothing but the mirrored seed looked like somebody's work in progress and
+   * the shared plan was refused indefinitely.
+   */
+  people: repairRoster(seed.people.map((p) => ({ ...p }))).people,
   projects: seed.projects.map((p) => ({ ...p })),
   settings: { ...DEFAULT_SETTINGS },
   scenarioName: 'Baseline',
