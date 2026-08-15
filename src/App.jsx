@@ -183,7 +183,16 @@ export default function App() {
             await takeShared(latest, 'Updated to')
             return
           }
-          setDbNotice(latest)
+          /*
+           * Two different situations, and telling them apart matters: a
+           * browser with real edits stands to lose them, while one that simply
+           * has no fingerprint yet — every browser, the first time it opens a
+           * build that has this — stands to lose nothing at all. Saying "your
+           * unsaved edits" to the second is a warning about a danger that is
+           * not there, and a warning nobody can verify is one people learn to
+           * click through.
+           */
+          setDbNotice({ ...latest, knowsOfEdits: !!stored.syncHash })
           return
         }
         await takeShared(latest, 'Loaded')
@@ -235,6 +244,17 @@ export default function App() {
     }
     const name = (state.scenarioName || '').trim()
     if (!name) { setScenario('save'); return }
+    /*
+     * The other direction, and the one that actually destroys work: this
+     * browser is showing an older plan it never took, and Save would put it
+     * over the newer one — deleting whatever somebody else added in between,
+     * with no copy of it anywhere. Nothing warned about that at all.
+     */
+    if (dbNotice && !window.confirm(
+      `The shared "${name}" was saved ${new Date(dbNotice.updatedAt).toLocaleString()}, after this browser last had it, `
+      + 'and this browser never loaded it. Saving now REPLACES that newer plan with what is on this screen, '
+      + 'and whatever was added in between is gone.\n\nSave anyway?',
+    )) return
     setSaving(true)
     try {
       const r = await api.saveScenario(
@@ -254,7 +274,7 @@ export default function App() {
     } finally {
       setSaving(false)
     }
-  }, [state, plan.invalid])
+  }, [state, plan.invalid, dbNotice])
 
   /*
    * Work reaches the database on its own.
@@ -802,26 +822,44 @@ export default function App() {
             severity="warning"
             onClose={() => setDbNotice(null)}
             action={(
-              <Button
-                color="inherit"
-                size="small"
-                variant="outlined"
-                disabled={loadingShared}
-                onClick={async () => {
-                  setLoadingShared(true)
-                  try { await takeShared(dbNotice, 'Loaded') } catch (e) {
-                    setToast({ severity: 'error', msg: e.message })
-                  } finally { setLoadingShared(false) }
-                }}
-              >
-                {loadingShared ? 'Loading…' : 'Load it'}
-              </Button>
+              <>
+                {/* The whole plan as a file, before anything replaces it. A
+                    safety net nobody has to think about is worth more than a
+                    warning telling them to think. */}
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    downloadScenario(state)
+                    setToast({ severity: 'success', msg: 'Copy downloaded — open it again from the menu if you need it.' })
+                  }}
+                >
+                  Keep a copy
+                </Button>
+                <Button
+                  color="inherit"
+                  size="small"
+                  variant="outlined"
+                  sx={{ ml: 1 }}
+                  disabled={loadingShared}
+                  onClick={async () => {
+                    setLoadingShared(true)
+                    try { await takeShared(dbNotice, 'Loaded') } catch (e) {
+                      setToast({ severity: 'error', msg: e.message })
+                    } finally { setLoadingShared(false) }
+                  }}
+                >
+                  {loadingShared ? 'Loading…' : 'Load it'}
+                </Button>
+              </>
             )}
           >
             &ldquo;{dbNotice?.name}&rdquo; in the shared database was saved{' '}
             {dbNotice?.updatedAt ? new Date(dbNotice.updatedAt).toLocaleString() : ''}, and is newer than
-            what this browser is showing. Loading it replaces the unsaved edits in this browser — save
-            them first if you want to keep them.
+            what this browser is showing.{' '}
+            {dbNotice?.knowsOfEdits
+              ? 'This browser holds edits that never reached the database; loading replaces them.'
+              : 'This browser cannot tell whether it holds anything of its own, so it is asking rather than guessing. Keep a copy first if you are unsure — it downloads in a second and can be opened again from the menu.'}
           </Alert>
         </Snackbar>
 
