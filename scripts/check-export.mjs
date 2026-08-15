@@ -237,5 +237,82 @@ console.log(String.fromCharCode(10) + '--- the register sheet carries Notes and 
     String(ws.getColumn(col).width))
 }
 
+/* ====== every project is on the register, under its real owner ====== */
+console.log(String.fromCharCode(10) + '--- the register lists everyone, including who is not us ---')
+{
+  const ws = back.getWorksheet('Projects')
+  let hdr = null
+  ws.eachRow((row, r) => {
+    if (hdr) return
+    const vals = row.values.map((v) => String(v ?? '').trim())
+    if (vals.includes('Project') && vals.includes('PIC')) hdr = { r, vals }
+  })
+  const pc = hdr.vals.indexOf('PIC')
+  const rows = []
+  ws.eachRow((row, r) => {
+    if (r <= hdr.r) return
+    const name = String(row.getCell(2).value ?? '').trim()
+    if (!name || name.startsWith('TOTAL')) return
+    rows.push(String(row.getCell(pc).value ?? '').trim())
+  })
+  check('EVERY PROJECT IS ON THE REGISTER SHEET', rows.length === plan.projects.length,
+    `${rows.length} rows vs ${plan.projects.length} projects`)
+
+  // The bug this replaces: a PIC was looked up among the six who hold a
+  // scorecard, so every project owned by IT or a business user printed TBC and
+  // was painted red as unassigned. They are assigned — just not to us.
+  const outside = plan.projects.filter((p) => p.outsideTeam)
+  const named = new Set(rows)
+  check('AND UNDER THE NAME OF WHOEVER OWNS IT',
+    outside.every((p) => named.has(plan.assignees.find((x) => x.id === p.pic)?.nick)),
+    `${outside.length} owned outside the team; PIC column holds: ${[...named].join(', ')}`)
+  check('nothing reads TBC that has an owner',
+    rows.filter((v) => v === 'TBC').length === plan.projects.filter((p) => !p.pic).length,
+    `${rows.filter((v) => v === 'TBC').length} TBC vs ${plan.projects.filter((p) => !p.pic).length} unassigned`)
+}
+
+/* ====== the Costs sheet shows its working ====== */
+console.log(String.fromCharCode(10) + '--- the Costs sheet explains where the money comes from ---')
+{
+  const ws = back.getWorksheet('Costs')
+  const txt = (c) => {
+    const v = c && c.value
+    if (v == null) return ''
+    if (typeof v === 'object') return String(v.richText ? v.richText.map((t) => t.text).join('') : (v.text ?? v.result ?? ''))
+    return String(v)
+  }
+  const all = []
+  for (let r = 1; r <= ws.rowCount; r++) {
+    all.push([1, 5, 6].map((c) => txt(ws.getRow(r).getCell(c))).join(' | '))
+  }
+  const sheet = all.join(String.fromCharCode(10))
+  check('THE COSTS SHEET SAYS HOW THE NUMBERS ARE BUILT', /HOW THESE NUMBERS ARE BUILT/.test(sheet))
+  check('  the developer salary is stated', /Developer salary/.test(sheet))
+  check('  and the user salary with its blend',
+    /User salary/.test(sheet) && /20% Manager and 80% Staff/.test(sheet),
+    (sheet.match(/[^\n]*20% Manager[^\n]*/) || [''])[0].slice(0, 100))
+  check('  both day and hour rates show their arithmetic',
+    /Developer day rate/.test(sheet) && /Value of one user hour released/.test(sheet))
+  check('  investment is defined', /build \+ CAPEX/.test(sheet))
+  check('  benefit is defined', /From hours released/.test(sheet) && /Stated in cash/.test(sheet))
+  check('  and the return, with the subset it is measured over',
+    /Return on investment/.test(sheet) && /Investment behind the return/.test(sheet))
+  // The figures in that block must be the plan's, not a retelling of them.
+  const money = (label) => {
+    const row = all.find((l) => l.startsWith(label))
+    return row ? Number(row.split(' | ')[1]) : null
+  }
+  check('the stated developer salary IS the model\u2019s',
+    money('Developer salary, per month') === Math.round(plan.finance.devMonthlySalary),
+    `${money('Developer salary, per month')} vs ${Math.round(plan.finance.devMonthlySalary)}`)
+  check('the stated user salary IS the model\u2019s',
+    money('User salary, per month') === Math.round(plan.finance.acctMonthlySalary),
+    `${money('User salary, per month')} vs ${Math.round(plan.finance.acctMonthlySalary)}`)
+  check('and the day rate is the salary through the stated arithmetic',
+    Math.abs(money('Developer day rate')
+      - Math.round((plan.finance.devMonthlySalary * plan.finance.loadFactor) / plan.finance.daysPerFteMonth)) <= 1,
+    String(money('Developer day rate')))
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

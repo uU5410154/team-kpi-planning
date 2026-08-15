@@ -202,7 +202,16 @@ function writeTarget(cell, line, basis, currency) {
 
 /** Builds the workbook. Pure — no DOM — so it can be exercised from Node. */
 export async function buildWorkbook(plan, state) {
-  const { totals, people, projects, quality, settings, byObjective, finance: fin } = plan
+  const {
+    totals, people, projects, quality, settings, byObjective, finance: fin,
+  } = plan
+  /*
+   * Everyone a project can be assigned to, including IT and the business users
+   * who hold no scorecard. `people` is the six who are measured; looking a PIC
+   * up in that list printed "TBC" against eighty-four real rows and painted
+   * them red as unassigned, when they are assigned — just not to us.
+   */
+  const assignees = plan.assignees || people
   const stamp = new Date().toISOString().slice(0, 10)
   const basis = SAVING_BASIS[settings.savingBasis]
   const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
@@ -565,7 +574,7 @@ export async function buildWorkbook(plan, state) {
     const sorted = [...inPlan].sort((a, b) => (b.manday || 0) - (a.manday || 0))
 
     for (const p of sorted) {
-      const person = people.find((x) => x.id === p.pic)
+      const person = assignees.find((x) => x.id === p.pic)
       const tasks = p.tasks || []
 
       // The task lines, where there are any. A project imported with a bare
@@ -918,7 +927,7 @@ export async function buildWorkbook(plan, state) {
     const first = r
     const sorted = [...projects].sort((a, b) => (b.savingHours ?? 0) - (a.savingHours ?? 0))
     sorted.forEach((p) => {
-      const person = people.find((x) => x.id === p.pic)
+      const person = assignees.find((x) => x.id === p.pic)
       const row = ws.getRow(r++)
       row.values = [
         p.jiraKey || '',
@@ -954,7 +963,10 @@ export async function buildWorkbook(plan, state) {
         row.height = Math.min(90, 12 + p.softBenefits.length * 12)
       }
 
-      if (!person) tone(row.getCell(ix('PIC')), BAD)
+      // Red means UNASSIGNED, a gap to be closed. A row owned by IT or the
+      // business is not a gap; it is muted below, with the rest of what is not
+      // on our book.
+      if (!p.pic) tone(row.getCell(ix('PIC')), BAD)
       if (p.outsideTeam) {
         tone(row.getCell(ix('Team (roles')), MUTED)
         tone(row.getCell(ix('Saving')), MUTED)
@@ -1120,6 +1132,105 @@ export async function buildWorkbook(plan, state) {
     }
     styleBody(ws, gStart, r - 2, cols.length, { zebra: false })
     grand.height = 20
+
+    /* ---- how every figure above was arrived at ----
+     * A cost sheet that cannot be argued with is a cost sheet nobody believes.
+     * Every rate here is one number times another; written out, anybody can
+     * check it, and anybody who disagrees can point at the line they disagree
+     * with rather than at the total.
+     */
+    r += 2
+    sectionRow(ws, r++, 'HOW THESE NUMBERS ARE BUILT', cols.length)
+    const mStart = r
+
+    // label in A..B, the figure in E (the yearly column), the working in F
+    const method = (label, value, working, opts = {}) => {
+      const row = ws.getRow(r++)
+      row.getCell(1).value = label
+      ws.mergeCells(r - 1, 1, r - 1, 4)
+      if (value != null) {
+        row.getCell(5).value = value
+        row.getCell(5).numFmt = opts.fmt || MONEY
+      }
+      row.getCell(6).value = working
+      ws.mergeCells(r - 1, 6, r - 1, Math.min(cols.length, 6 + MONTHS_IN_YEAR))
+      row.getCell(1).font = { name: FONT, size: 9.5, bold: !!opts.bold }
+      row.getCell(6).font = { name: FONT, size: 9, color: { argb: MUTED }, italic: true }
+      row.getCell(6).alignment = { horizontal: 'left', vertical: 'middle', wrapText: false }
+      if (opts.tone) tone(row.getCell(5), opts.tone)
+      return row
+    }
+
+    method('WHAT ONE PERSON COSTS', null, '', { bold: true })
+    method('Developer salary, per month', Math.round(fin.devMonthlySalary),
+      'the team that builds it — one month of one developer, before the loading below')
+    method('User salary, per month', Math.round(fin.acctMonthlySalary),
+      fin.acctRateNote || 'the blended cost of the people whose time the automation gives back')
+    method('Loading on both', fin.loadFactor,
+      'employer cost on top of salary — pension, insurance, the rest', { fmt: '0.00"x"' })
+    method('A working month', fin.hoursPerFteMonth,
+      `${fin.daysPerFteMonth.toFixed(0)} days of ${fin.hoursPerManday} hours — one calendar for cost and benefit alike`,
+      { fmt: '#,##0" hours"' })
+
+    method('THE TWO RATES EVERYTHING USES', null, '', { bold: true })
+    method('Developer day rate', Math.round(fin.devDayRate),
+      `${Math.round(fin.devMonthlySalary).toLocaleString()} x ${fin.loadFactor} / ${fin.daysPerFteMonth.toFixed(0)} days`)
+    method('Value of one user hour released', Math.round(fin.acctHourRate),
+      `${Math.round(fin.acctMonthlySalary).toLocaleString()} x ${fin.loadFactor} / ${fin.hoursPerFteMonth} hours`)
+
+    method('WHAT A PROJECT COSTS  (investment)', null, '', { bold: true })
+    method('Build', Math.round(fin.planBuildCost),
+      `mandays x ${Math.round(fin.devDayRate).toLocaleString()} a day — the effort to build it, priced`)
+    method('CAPEX', Math.round(fin.planCapex),
+      'licences and hardware bought outright — one-off, never depreciated across the months')
+    method('OPEX', Math.round(fin.planOpexYear),
+      'what it costs to KEEP running for the year — subscriptions, hosting, per-transaction fees')
+    method('Investment', Math.round(fin.planInvestment),
+      'build + CAPEX. OPEX is not investment: it is netted off the benefit below, month by month',
+      { bold: true })
+
+    /*
+     * Every figure in this block is PLAN-WIDE, like the ones above it. The
+     * return underneath is not, and cannot be — a project with no cost
+     * estimate has no return — so it is labelled and its coverage stated
+     * rather than left to be read as the same basis.
+     */
+    method('WHAT A PROJECT RETURNS  (benefit)', null, '', { bold: true })
+    method('From hours released, a month', Math.round(fin.hoursAnnualBenefit / 12),
+      `saving hours x ${Math.round(fin.acctHourRate).toLocaleString()} an hour — time handed back to the business, priced`)
+    method('Stated in cash, a month', Math.round((fin.monetaryAnnualBenefit || 0) / 12),
+      `a licence dropped, a penalty avoided — money that is not time, entered directly and never priced from hours (${Math.round(fin.monetaryAnnualBenefit || 0).toLocaleString()} a year)`)
+    method('Benefit, a month', Math.round(fin.monthlyBenefit),
+      'the two halves together — this is the figure the annual benefit is twelve of', { bold: true })
+    method('Less the OPEX run-rate, a month', -Math.round(fin.planOpexRunRate),
+      'a benefit that costs a subscription to keep is worth the subscription less')
+    method('Net benefit, a month', Math.round(fin.monthlyBenefit - fin.planOpexRunRate),
+      'this is what repays the investment', { bold: true })
+
+    method('AND THE RETURN', null, '', { bold: true })
+    method('Over a horizon of', fin.horizonMonths,
+      'the period the return is measured across — change it on the Model tab and every return moves',
+      { fmt: '#,##0" months"' })
+    method('Investment behind the return', Math.round(fin.investment),
+      `only the ${fin.costedCount} projects carrying BOTH a cost and a benefit — averaging in a project with no cost `
+      + 'would report a return the team has not earned')
+    method('Which is this much of the benefit', fin.roiCoverage,
+      'how much of the book that subset represents — a flattering return over a sliver of it is not the whole portfolio’s',
+      { fmt: '0%' })
+    method('Return on investment', fin.roi,
+      '(net benefit x horizon − investment) / investment, over exactly that subset',
+      { fmt: '+0%;-0%;0%', tone: fin.roi >= fin.roiGate ? GOOD : BAD })
+    method('Must clear', fin.roiGate,
+      'the gate on objective 1 — the plan is judged against this, not against any single project',
+      { fmt: '+0%;-0%;0%' })
+
+    method('AND WHAT IS NOT IN ANY OF IT', null, '', { bold: true })
+    method('Owned by IT or the business', Math.round(totals.outsideHours),
+      `${totals.outsideCount} projects, listed in full on the Projects sheet — real work, and none of it counted `
+      + 'in this team\'s hours, cost or return, because this team did not deliver it',
+      { fmt: '#,##0" hrs/month"' })
+
+    styleBody(ws, mStart, r - 1, cols.length, { zebra: false })
   }
 
   // Last, once every cell is written: a column can only be sized against what
