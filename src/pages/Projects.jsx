@@ -555,9 +555,14 @@ export default function Projects({
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>PIC</InputLabel>
+            {/* shrink + notched: with displayEmpty the box is never empty to
+                the reader, but MUI reads the VALUE, so the label stayed put
+                and printed itself over "All PICs". */}
+            <InputLabel shrink id="pic-filter-label">PIC</InputLabel>
             <Select
               multiple
+              notched
+              labelId="pic-filter-label"
               label="PIC"
               value={fPic}
               onChange={(e) => setFPic(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
@@ -600,9 +605,11 @@ export default function Projects({
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Sub team</InputLabel>
+            <InputLabel shrink id="subteam-filter-label">Sub team</InputLabel>
             <Select
               multiple
+              notched
+              labelId="subteam-filter-label"
               label="Sub team"
               value={fSub}
               onChange={(e) => setFSub(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
