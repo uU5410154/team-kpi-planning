@@ -21,7 +21,7 @@ import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import {
   loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState,
-  planHash,
+  markSynced, syncStatus,
   hasNothingOfItsOwn,
 } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
@@ -76,7 +76,19 @@ export default function App() {
   const theme = useMemo(() => buildTheme(mode), [mode])
   const plan = useMemo(() => computePlan(state), [state])
 
-  useEffect(() => { saveState(state) }, [state])
+  /*
+   * One write, one mark. The mark has to describe the bytes that just landed
+   * in local storage, so it is taken here rather than wherever the sync
+   * happened — anything else races the very write it is trying to describe.
+   */
+  const pendingSync = useRef(null)
+  useEffect(() => {
+    saveState(state)
+    if (pendingSync.current !== null) {
+      markSynced(pendingSync.current)
+      pendingSync.current = null
+    }
+  }, [state])
   useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
 
   /*
@@ -134,9 +146,10 @@ export default function App() {
       })
       // Stamped as agreeing with the database, so the next visit can tell
       // "untouched since the last sync" from "somebody has been working".
-      taken = { ...next, syncHash: planHash(next), syncedAt: entry.updatedAt }
+      taken = next
       return taken
     })
+    pendingSync.current = entry.updatedAt
     setLastSaved(entry.updatedAt)
     linkedToDb.current = true
     setDbNotice(null)
@@ -176,10 +189,16 @@ export default function App() {
            *
            * Only genuinely unsaved work stops it, and then it asks.
            */
-          const stored = loadState()
-          const untouched = stored.syncHash && planHash(stored) === stored.syncHash
-          const isNewer = String(latest.updatedAt || '') !== String(stored.syncedAt || '')
-          if (untouched && isNewer) {
+          const sync = syncStatus()
+          const isNewer = String(latest.updatedAt || '') !== String(sync.syncedAt || '')
+          /*
+           * Nothing to say. This browser is already holding what the database
+           * holds — it took it, or it saved it. Warning here is how the notice
+           * came back on every refresh after somebody had already answered it,
+           * which teaches people to click past the one that matters.
+           */
+          if (!isNewer) return
+          if (sync.untouched) {
             await takeShared(latest, 'Updated to')
             return
           }
@@ -192,7 +211,7 @@ export default function App() {
            * not there, and a warning nobody can verify is one people learn to
            * click through.
            */
-          setDbNotice({ ...latest, knowsOfEdits: !!stored.syncHash })
+          setDbNotice({ ...latest, knowsOfEdits: sync.marked })
           return
         }
         await takeShared(latest, 'Loaded')
@@ -265,9 +284,10 @@ export default function App() {
       setDirty(false)
       setLastSaved(r.updatedAt)
       linkedToDb.current = true
-      // The browser and the database now hold the same thing; stamp it so the
+      // The browser and the database now hold the same thing; mark it so the
       // next visit can take a newer plan without asking.
-      setState((s) => ({ ...s, syncHash: planHash(s), syncedAt: r.updatedAt }))
+      pendingSync.current = r.updatedAt
+      setState((s) => ({ ...s }))
       setToast({ severity: 'success', msg: `Saved "${name}" to the database.` })
     } catch (e) {
       setToast({ severity: 'error', msg: `${e.message} Your work is still safe in this browser.` })
@@ -317,6 +337,12 @@ export default function App() {
         )
         setDirty(false)
         setLastSaved(r.updatedAt)
+        // The browser and the database agree again — mark it, exactly as the
+        // Save button does. Without this the automatic save moved the
+        // database on and left the browser's mark behind, so the next visit
+        // read its own work as somebody else's and asked about it.
+        pendingSync.current = r.updatedAt
+        setState((cur) => ({ ...cur }))
       } catch {
         // Offline, or the database is down. The browser copy stands and the
         // Save button still says there is something to send.

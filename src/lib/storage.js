@@ -44,7 +44,24 @@ const seedStamp = () =>
  * If it differs, this browser holds work of its own and must never be
  * overwritten without being asked.
  */
-export const planHash = (s) => hash(JSON.stringify([
+/*
+ * Stable across key ORDER, which JSON.stringify is not.
+ *
+ * The same settings object reaches the hash built two ways — `{...defaults,
+ * ...stored}` on load and `{...current, ...incoming}` after a fetch — and the
+ * keys come out in different orders. Identical content, different string,
+ * different hash: the browser then reported edits nobody had made, on every
+ * single refresh, and the only way out was a warning that would not go away.
+ */
+const stable = (v) => {
+  if (Array.isArray(v)) return `[${v.map(stable).join(',')}]`
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(',')}}`
+  }
+  return JSON.stringify(v ?? null)
+}
+
+export const planHash = (s) => hash(stable([
   s?.projects || [], s?.people || [], s?.settings || {}, s?.scenarioName || '',
 ]))
 
@@ -138,6 +155,52 @@ export function hasNothingOfItsOwn() {
     return isUntouchedSeed(JSON.parse(raw))
   } catch {
     return true
+  }
+}
+
+/**
+ * Record that this browser and the database now hold the same plan.
+ *
+ * The fingerprint is taken from what is IN LOCAL STORAGE, not from the state
+ * in memory, and `syncStatus` below reads it back from the same place. That
+ * is the whole point: the in-memory state is merged with defaults and run
+ * through the repairs on its way in and out, so hashing one and comparing the
+ * other reported edits nobody had made — and the warning came back on every
+ * refresh, which is how a warning stops being read.
+ */
+export function markSynced(updatedAt) {
+  try {
+    const raw = localStorage.getItem(KEY)
+    if (!raw) return false
+    const next = { ...JSON.parse(raw), syncedAt: updatedAt || null }
+    next.syncHash = planHash(next)
+    localStorage.setItem(KEY, JSON.stringify(next))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * What this browser knows about its relationship with the database.
+ *
+ * `untouched` is only ever true when there is a mark AND the plan still
+ * matches it — never a guess. A browser that has never been marked says so,
+ * so the caller can ask rather than assume either way.
+ */
+export function syncStatus() {
+  try {
+    const raw = localStorage.getItem(KEY)
+    if (!raw) return { marked: false, untouched: false, syncedAt: null }
+    const parsed = JSON.parse(raw)
+    if (!parsed.syncHash) return { marked: false, untouched: false, syncedAt: parsed.syncedAt || null }
+    return {
+      marked: true,
+      untouched: planHash(parsed) === parsed.syncHash,
+      syncedAt: parsed.syncedAt || null,
+    }
+  } catch {
+    return { marked: false, untouched: false, syncedAt: null }
   }
 }
 

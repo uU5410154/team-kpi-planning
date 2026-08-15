@@ -184,6 +184,28 @@ try {
   check('AN UNTOUCHED BROWSER TAKES A NEWER SHARED PLAN', moved.hasNew, JSON.stringify(moved))
   check('without anybody having to be told', moved.notice === false, JSON.stringify(moved))
 
+  /* ---------- 1d. taking it makes the question stop ---------- */
+  /*
+   * A warning that comes back after you have answered it is worse than no
+   * warning: it trains people to ignore the one that matters. Once this
+   * browser has taken the shared plan, refreshing must be silent.
+   */
+  for (const visit of [1, 2]) {
+    await page.goto(`${base}/?settled=${visit}#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await new Promise((r) => setTimeout(r, 3500))
+    const after = await page.evaluate(() => {
+      const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+      return {
+        notice: /shared database was saved/i.test(document.body.innerText),
+        claimsEdits: /holds edits that never reached/i.test(document.body.innerText),
+        rows: st.projects.length,
+        hash: st.syncHash, syncedAt: st.syncedAt, repair: st.repair,
+      }
+    })
+    check(`refresh ${visit} after loading asks nothing`, after.notice === false, JSON.stringify(after))
+    check(`  and never claims edits nobody made`, after.claimsEdits === false, JSON.stringify(after))
+  }
+
   /* ---------- 2. a browser that already holds work ---------- */
   await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
@@ -204,7 +226,36 @@ try {
   })
   check('WORK ALREADY IN THE BROWSER IS NOT OVERWRITTEN',
     mine?.sample === 7 && mine?.scenario === 'My own work in progress', JSON.stringify(mine))
-  check('but it is told a newer plan is waiting', mine?.notice === true, JSON.stringify(mine))
+  /*
+   * And it is NOT nagged about a plan that is not newer than the one it holds.
+   * Local edits are not a conflict: nothing is at risk, autosave will carry
+   * them up, and a warning here is the one that came back on every refresh.
+   */
+  check('and is not warned when nothing newer exists', mine?.notice === false, JSON.stringify(mine))
+
+  /* ---------- 2b. now somebody else does save ---------- */
+  const client3 = new MongoClient(uri)
+  await client3.connect()
+  await client3.db('team_kpi_planning').collection('kpi_scenarios').updateOne(
+    { name: 'Baseline' },
+    { $set: { updatedAt: new Date(Date.now() + 600000).toISOString(), updatedBy: 'somebody else again' } },
+  )
+  await client3.close()
+  await page.goto(`${base}/?conflict=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 3500))
+  const conflict = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    return {
+      sample: st.projects.find((p) => (p.manday || 0) > 0)?.manday ?? null,
+      notice: /shared database was saved/i.test(document.body.innerText),
+      claimsEdits: /holds edits that never reached/i.test(document.body.innerText),
+      canKeepACopy: /Keep a copy/i.test(document.body.innerText),
+    }
+  })
+  check('A NEWER PLAN AGAINST UNSAVED WORK IS A QUESTION, NOT A TAKEOVER',
+    conflict.notice === true && conflict.sample === 7, JSON.stringify(conflict))
+  check('  and it says which of the two it is', conflict.claimsEdits === true, JSON.stringify(conflict))
+  check('  and offers a copy before anything replaces it', conflict.canKeepACopy === true, JSON.stringify(conflict))
 
   /* ---------- 3. no database at all ---------- */
   const noDbPort = 5325
