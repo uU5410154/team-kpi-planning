@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import {
   Box, Paper, Typography, Grid, TextField, Slider, Table, TableBody, TableCell,
   TableHead, TableRow, Select, MenuItem, Divider, Alert, FormControlLabel, Switch, Chip,
@@ -14,6 +15,54 @@ const BANDS = [
   { id: 'senior', label: 'Senior' },
   { id: 'analyst', label: 'Analyst' },
 ]
+
+/**
+ * A number field that can be emptied while it is being retyped.
+ *
+ * Held as text so a half-typed value is never written to the model, and
+ * re-synced whenever the model moves underneath it — a slider drag, another
+ * browser's save — so the two can never drift apart.
+ */
+function useDraft(value) {
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => { setDraft(String(value)) }, [value])
+  return [draft, setDraft]
+}
+
+/**
+ * A salary box, same discipline as the gate.
+ *
+ * `Number('') || 0` wrote a zero the moment somebody selected the figure and
+ * pressed backspace to retype it — and a salary of zero prices every hour in
+ * the plan at nothing, which takes the whole financial model with it.
+ */
+function MoneyField({ label, value, sym, help, onCommit }) {
+  const [draft, setDraft] = useDraft(value)
+  return (
+    <Box sx={{ mb: 2 }}>
+      <TextField
+        fullWidth
+        size="small"
+        type="number"
+        label={label}
+        value={draft}
+        onChange={(e) => {
+          const raw = e.target.value
+          setDraft(raw)
+          if (raw.trim() === '') return
+          const n = Number(raw)
+          if (Number.isFinite(n)) onCommit(Math.max(0, n))
+        }}
+        onBlur={() => setDraft(String(value))}
+        InputProps={{ startAdornment: <InputAdornment position="start">{sym}</InputAdornment> }}
+        inputProps={{ step: 1000, min: 0 }}
+      />
+      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+        {help}
+      </Typography>
+    </Box>
+  )
+}
 
 function Card({ title, subtitle, children }) {
   return (
@@ -34,22 +83,16 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
   const sym = fin.symbol
 
   const setFinance = (patch) => onSettings({ finance: { ...settings.finance, ...patch } })
+  const [gateDraft, setGateDraft] = useDraft(Math.round(fin.roiGate * 100))
   const money = (label, key, help) => (
-    <Box sx={{ mb: 2 }}>
-      <TextField
-        fullWidth
-        size="small"
-        type="number"
-        label={label}
-        value={settings.finance[key]}
-        onChange={(e) => setFinance({ [key]: Math.max(0, Number(e.target.value) || 0) })}
-        InputProps={{ startAdornment: <InputAdornment position="start">{sym}</InputAdornment> }}
-        inputProps={{ step: 1000, min: 0 }}
-      />
-      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
-        {help}
-      </Typography>
-    </Box>
+    <MoneyField
+      key={key}
+      label={label}
+      value={settings.finance[key]}
+      sym={sym}
+      help={help}
+      onCommit={(n) => setFinance({ [key]: n })}
+    />
   )
 
   return (
@@ -105,6 +148,13 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
               Objective 1 gate — {fmtRoi(fin.roiGate)} return within {fin.horizonMonths} months
             </Typography>
+            {fin.roiGate === 0 && (
+              <Alert severity="warning" sx={{ mb: 1.5 }}>
+                The gate is <strong>0%</strong>, so <strong>every scorecard states a financial target of 0%</strong> — any
+                project that merely gets its money back passes. That is almost always an accident rather than a decision;
+                set the standard you mean below.
+              </Alert>
+            )}
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
               A project must return at least this much on top of everything invested in it — mandays plus any
               infrastructure CAPEX — inside the horizon, counting the benefit net of its monthly OPEX. That is a
@@ -128,15 +178,29 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
               {/* Typed entry beside the slider: the slider moves in 25% steps
                   and stops at 500%, which is fine for a rough setting and no
                   use at all for entering an exact standard. */}
+              {/*
+                * Typed into a DRAFT, committed only when it parses.
+                *
+                * It used to write straight through on every keystroke, and
+                * Number('') is 0 — so selecting "200" and pressing backspace
+                * to type a new figure set the gate to 0% instantly. Every
+                * scorecard then showed a financial target of 0%, which reads
+                * as the KPI having been deleted. An empty box means somebody
+                * is mid-edit, not that they want no standard at all.
+                */}
               <TextField
                 size="small"
                 type="number"
                 label="Exact"
-                value={Math.round(fin.roiGate * 100)}
+                value={gateDraft}
                 onChange={(e) => {
-                  const pct = Number(e.target.value)
+                  const raw = e.target.value
+                  setGateDraft(raw)
+                  if (raw.trim() === '') return
+                  const pct = Number(raw)
                   if (Number.isFinite(pct)) setFinance({ roiGate: Math.max(0, pct) / 100 })
                 }}
+                onBlur={() => setGateDraft(String(Math.round(fin.roiGate * 100)))}
                 InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
                 inputProps={{ step: 5, min: 0, style: { textAlign: 'right', width: 64, fontVariantNumeric: 'tabular-nums' } }}
                 sx={{ flexShrink: 0 }}
