@@ -454,7 +454,21 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
    */
   function RowGroup({ row, depth }) {
     const tl = row.timeline
-    const planned = bar(tl.plannedStart, tl.plannedEnd)
+    /*
+     * A task carries a due date and no planned start — Jira's Start date is an
+     * epic-level habit here, and 31 of the 40 tasks under one epic have no due
+     * date at all. Drawn literally, its plan collapsed to a sliver at the due
+     * date and there was nothing to compare the outcome against: the two bars
+     * were a dot and a bar rather than a pair.
+     *
+     * So a plan with an end but no start is drawn from the same left edge as
+     * the outcome. Both bars then start together and the only difference
+     * between them is where they finish, which is the comparison being asked
+     * for. The tooltip says the start was not planned, so nothing here claims
+     * a commitment that was never made.
+     */
+    const plannedLeft = tl.plannedStart || tl.actualStart
+    const planned = tl.plannedEnd ? bar(plannedLeft, tl.plannedEnd) : bar(tl.plannedStart, tl.plannedEnd)
     /*
      * The actual bar starts where the PLAN starts.
      *
@@ -547,7 +561,15 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
             />
 
             {planned && (
-              <Tooltip title={`Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}${tl.plannedDays != null ? ` · ${tl.plannedDays} days` : ''}${canEdit ? ' · click to change' : ''}`}>
+              <Tooltip title={[
+                `Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}`,
+                tl.plannedDays != null ? `${tl.plannedDays} days` : null,
+                !tl.plannedStart && tl.plannedEnd
+                  ? 'No planned start — drawn from where the work began, so only the finish is compared'
+                  : null,
+                canEdit ? 'click to change' : null,
+              ].filter(Boolean).join(' · ')}
+              >
                 <Box
                   onClick={canEdit ? (e) => setEditing({ anchor: e.currentTarget, row }) : undefined}
                   sx={{

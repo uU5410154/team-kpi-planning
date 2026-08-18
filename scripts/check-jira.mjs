@@ -533,6 +533,35 @@ if (!exe) {
     }),
     'drawn from the plan, held as it happened')
 
+  // ---- a task with no planned start still draws a pair ----
+  const taskBars = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('div')]
+      .filter((d) => (d.innerText || '').includes('FNP-11 ·') && d.querySelectorAll('div').length < 40)
+    const row = rows[rows.length - 1]
+    const track = row && [...row.parentElement.parentElement.children]
+      .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)
+    if (!track) return null
+    return [...track.children]
+      .filter((c) => getComputedStyle(c).position === 'absolute' && c.getBoundingClientRect().width > 2)
+      .map((c) => ({
+        left: Math.round(c.getBoundingClientRect().left * 10) / 10,
+        width: Math.round(c.getBoundingClientRect().width * 10) / 10,
+        filled: getComputedStyle(c).backgroundColor !== 'rgba(0, 0, 0, 0)',
+        hatched: getComputedStyle(c).backgroundImage !== 'none',
+      }))
+  })
+  const tPlanned = taskBars?.find((b) => !b.filled && !b.hatched)
+  const tActual = taskBars?.find((b) => b.filled && !b.hatched)
+  check('A TASK DRAWS TWO BARS, NOT A DOT AND A BAR',
+    tPlanned && tActual && tPlanned.width > 5 && tActual.width > 5,
+    taskBars ? `planned ${tPlanned?.width}px, actual ${tActual?.width}px` : 'no bars found')
+  check('  starting on the same day, so only the finish differs',
+    tPlanned && tActual && Math.abs(tPlanned.left - tActual.left) < 0.01,
+    `planned at ${tPlanned?.left}, actual at ${tActual?.left}`)
+  check('  and the overrun is drawn beyond the planned edge',
+    taskBars.some((b) => b.hatched && b.left >= tPlanned.left + tPlanned.width - 1),
+    `${taskBars.filter((b) => b.hatched).length} hatched segment(s)`)
+
   // ---- a task is the bottom of the chart ----
   const leaves = await page.evaluate(() => ({
     epicOpens: !!document.querySelector('[aria-label="collapse FNP-1"]'),
