@@ -452,7 +452,7 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
    * tasks, and neither the fetch nor the drawing needs to know which it is
    * looking at.
    */
-  function RowGroup({ row, depth }) {
+  function RowGroup({ row, depth, parentPlan }) {
     const tl = row.timeline
     /*
      * A task carries a due date and no planned start — Jira's Start date is an
@@ -469,6 +469,22 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
      */
     const plannedLeft = tl.plannedStart || tl.actualStart
     const planned = tl.plannedEnd ? bar(plannedLeft, tl.plannedEnd) : bar(tl.plannedStart, tl.plannedEnd)
+    /*
+     * Most tasks on this board carry no due date at all — thirty-one of the
+     * forty under one epic. Drawn strictly they get an outcome bar and nothing
+     * to read it against, which makes the row useless for the one question the
+     * chart asks.
+     *
+     * So the epic's planned finish is drawn behind them, dashed, as a
+     * reference. It is NOT the task's plan and is never treated as one: no
+     * slip is computed from it, nothing is counted against it, and the tooltip
+     * says whose date it is. A borrowed deadline shown as a borrowed deadline
+     * is information; the same line drawn solid would be a commitment nobody
+     * made.
+     */
+    const inherited = !tl.plannedEnd && parentPlan?.end && (tl.actualStart || tl.actualEnd)
+      ? bar(tl.actualStart || parentPlan.start, parentPlan.end)
+      : null
     /*
      * The actual bar starts where the PLAN starts.
      *
@@ -599,6 +615,22 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
                 </IconButton>
               </Tooltip>
             )}
+            {inherited && (
+              <Tooltip title={`No due date on this one. Dashed line is ${parentPlan.ownerKey || 'its epic'}’s planned finish (${parentPlan.end}), shown for reference only — nothing is measured against it.`}>
+                <Box sx={{
+                  position: 'absolute',
+                  left: `${inherited.left}%`,
+                  width: `${inherited.width}%`,
+                  top: depth ? 4 : 6,
+                  height: depth ? 7 : 9,
+                  borderRadius: 0.5,
+                  border: '1px dashed',
+                  borderColor: 'text.disabled',
+                  opacity: 0.55,
+                }}
+                />
+              </Tooltip>
+            )}
             {actual && (
               <Tooltip title={[
                 `Actually ran ${tl.actualStart || '—'} to ${tl.actualEnd || (tl.running ? 'still running' : '—')}`,
@@ -706,7 +738,12 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
             </Box>
           ) : (
             under.rows.map((issue) => (
-              <RowGroup key={issue.key} row={asRow(issue)} depth={depth + 1} />
+              <RowGroup
+                key={issue.key}
+                row={asRow(issue)}
+                depth={depth + 1}
+                parentPlan={{ start: tl.plannedStart, end: tl.plannedEnd, ownerKey: row.jiraKey }}
+              />
             ))
           )
         )}
@@ -967,6 +1004,10 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
             }}
             />
             <Typography variant="caption">the slip itself — days past the planned finish</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 9, borderRadius: 0.5, border: '1px dashed', borderColor: 'text.disabled', opacity: 0.55 }} />
+            <Typography variant="caption">its epic&rsquo;s deadline, borrowed — nothing is measured against it</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 2, height: 14, bgcolor: STATUS.warning }} />

@@ -113,15 +113,15 @@ const CHILDREN = {
     {
       key: 'FNP-12',
       fields: {
-        summary: 'Task still in the backlog',
-        status: { name: 'Backlog', statusCategory: { key: 'new' } },
+        summary: 'Task with no due date of its own',
+        status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
         issuetype: { name: 'Story' },
         parent: { key: 'FNP-1' },
         created: '2026-01-06T09:00:00.000+0700',
-        updated: '2026-01-06T09:00:00.000+0700',
+        updated: '2026-05-06T09:00:00.000+0700',
         duedate: null,
         resolutiondate: null,
-        customfield_10015: null,
+        customfield_10015: '2026-01-20',
       },
     },
   ],
@@ -492,7 +492,7 @@ if (!exe) {
     collapsible: !!document.querySelector('[aria-label="collapse FNP-1"]'),
   }))
   check('EXPANDING AN EPIC SHOWS ITS TASKS',
-    /Task that finished late/.test(opened.text) && /Task still in the backlog/.test(opened.text),
+    /Task that finished late/.test(opened.text) && /Task with no due date of its own/.test(opened.text),
     opened.collapsible ? 'row is now collapsible' : 'row did not open')
   check('  and each task says what it is',
     /FNP-11 · Task/.test(opened.text) && /FNP-12 · Story/.test(opened.text),
@@ -561,6 +561,37 @@ if (!exe) {
   check('  and the overrun is drawn beyond the planned edge',
     taskBars.some((b) => b.hatched && b.left >= tPlanned.left + tPlanned.width - 1),
     `${taskBars.filter((b) => b.hatched).length} hatched segment(s)`)
+
+  // ---- a task with NO due date still gets something to read against ----
+  const borrowed = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('div')]
+      .filter((d) => (d.innerText || '').includes('FNP-12 ·') && d.querySelectorAll('div').length < 40)
+    const row = rows[rows.length - 1]
+    const track = row && [...row.parentElement.parentElement.children]
+      .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)
+    if (!track) return null
+    const bars = [...track.children]
+      .filter((c) => getComputedStyle(c).position === 'absolute' && c.getBoundingClientRect().width > 2)
+      .map((c) => ({
+        left: Math.round(c.getBoundingClientRect().left * 10) / 10,
+        width: Math.round(c.getBoundingClientRect().width * 10) / 10,
+        filled: getComputedStyle(c).backgroundColor !== 'rgba(0, 0, 0, 0)',
+        dashed: getComputedStyle(c).borderTopStyle === 'dashed',
+      }))
+    const chip = row.parentElement.parentElement.querySelector('.MuiChip-root')
+    return { bars, chip: chip ? chip.innerText.trim() : null }
+  })
+  const dashed = borrowed?.bars.find((b) => b.dashed)
+  const solid = borrowed?.bars.find((b) => b.filled)
+  check('A TASK WITH NO DUE DATE STILL SHOWS A PAIR',
+    !!dashed && !!solid && dashed.width > 5 && solid.width > 5,
+    borrowed ? `dashed ${dashed?.width}px, solid ${solid?.width}px` : 'no bars found')
+  check('  the borrowed line is DASHED, not drawn as its own plan', dashed?.dashed === true)
+  check('  and no slip is claimed against a date it never had',
+    borrowed?.chip == null || borrowed.chip === '' || borrowed.chip === '—',
+    `chip reads ${JSON.stringify(borrowed?.chip)}`)
+  check('  the legend explains the dashed line',
+    /borrowed/.test(await page.evaluate(() => document.body.innerText)))
 
   // ---- a task is the bottom of the chart ----
   const leaves = await page.evaluate(() => ({
