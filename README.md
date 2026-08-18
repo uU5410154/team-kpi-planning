@@ -129,3 +129,35 @@ workbook can still be sorted, summed and charted.
 React 18 · Vite 6 · MUI 6 · Express · SheetJS. Charts are hand-rolled SVG against a
 CVD-validated palette (both light and dark modes pass adjacent-pair separation); every chart
 carries direct value labels and a table view.
+
+## Connecting Jira (Render)
+
+The Timeline tab fills its actual dates from Jira. That connection lives on the
+**server**, not in the browser and not over MCP — the Atlassian MCP server signs
+in a *person* through an interactive consent screen and issues a token for that
+session, so there is no credential to hand a web server that anybody else is
+using. The Jira Cloud REST API with an API token is the supported path for a
+service, and it is what `server/jira.js` uses.
+
+1. Create a token at <https://id.atlassian.com/manage-profile/security/api-tokens>.
+2. Render dashboard → the service → **Environment** → add:
+
+   | Key | Value |
+   | --- | --- |
+   | `JIRA_BASE_URL` | `https://lotusretails.atlassian.net` |
+   | `JIRA_EMAIL` | the account the token belongs to |
+   | `JIRA_API_TOKEN` | the token from step 1 |
+   | `JIRA_START_FIELD` | optional, defaults to `customfield_10015` (Jira's *Start date*) |
+
+3. Save. Render redeploys, and the Timeline tab's **Sync from Jira** button
+   turns on. It names the account it is acting as, underneath the button.
+
+**The token acts as that account for everyone who opens the app.** Nobody can
+send it a query — the endpoint takes issue KEYS the register already holds and
+refuses anything that is not one — but every read happens with that account's
+permissions, so a service account with read-only access to the FNP project is
+worth asking IT for rather than using a personal token.
+
+Never put any of this in a `VITE_` variable: Vite compiles those into the
+JavaScript the browser downloads, which would publish the token to anyone who
+opened the page.

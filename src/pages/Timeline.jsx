@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Box, Paper, Typography, Chip, TextField, Select, MenuItem, FormControl, InputLabel,
-  FormControlLabel, Switch, Tooltip, InputAdornment,
+  FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
+import SyncIcon from '@mui/icons-material/Sync'
+import * as api from '../lib/api.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
 import { fmtHours, isDate } from '../lib/model.js'
@@ -25,11 +27,77 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * is the truthful picture: most of this register has never been told what
  * happened. It is never coloured as though it were on time.
  */
-export default function Timeline({ plan, settings }) {
+export default function Timeline({ plan, settings, onUpdate }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const asOf = settings.asOfDate
   const t = plan.totals.timeliness
+
+  /*
+   * Jira, through our own server.
+   *
+   * The browser never holds a Jira credential: it sends the keys the register
+   * already contains and the server, which does hold one, answers with those
+   * issues and nothing else.
+   */
+  const [jira, setJira] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncNote, setSyncNote] = useState(null)
+  useEffect(() => {
+    let dead = false
+    api.jiraStatus().then((s) => { if (!dead) setJira(s) }).catch(() => setJira({ configured: false }))
+    return () => { dead = true }
+  }, [])
+
+  const keyed = useMemo(
+    () => plan.projects.filter((p) => /^[A-Za-z][A-Za-z0-9_]+-\d+$/.test(String(p.jiraKey || '').trim())),
+    [plan.projects],
+  )
+
+  const sync = async () => {
+    setSyncing(true)
+    setSyncNote(null)
+    try {
+      const r = await api.jiraIssues(keyed.map((p) => p.jiraKey.trim()))
+      const byKey = new Map(r.issues.map((i) => [i.key.toUpperCase(), i]))
+      let changed = 0
+      let fromCreated = 0
+      for (const p of keyed) {
+        const issue = byKey.get(p.jiraKey.trim().toUpperCase())
+        if (!issue) continue
+        /*
+         * Only what actually happened. The PLAN is never touched — not the
+         * start, not the due date — however tempting it is to take Jira's due
+         * date as authoritative: the plan is what was committed to at the
+         * start of the year, and Jira's due date moves whenever somebody drags
+         * a card.
+         */
+        const patch = {}
+        const actualStart = issue.start || issue.created || null
+        const actualEnd = issue.done ? (issue.resolved || null) : null
+        if (actualStart && actualStart !== p.actualStart) patch.actualStart = actualStart
+        if (actualEnd && actualEnd !== p.actualEnd) patch.actualEnd = actualEnd
+        // A ticket reopened in Jira has to be able to un-finish here too, or
+        // the chart keeps reporting a finish that was taken back.
+        if (!issue.done && p.actualEnd) patch.actualEnd = null
+        if (issue.startSource === 'created') fromCreated += 1
+        if (Object.keys(patch).length) {
+          onUpdate(p.key, patch)
+          changed += 1
+        }
+      }
+      setSyncNote({
+        severity: 'success',
+        text: `${changed} project${changed === 1 ? '' : 's'} updated from ${r.issues.length} Jira issue${r.issues.length === 1 ? '' : 's'}`
+          + `${r.missing.length ? ` · ${r.missing.length} key${r.missing.length === 1 ? '' : 's'} not found in Jira: ${r.missing.slice(0, 4).join(', ')}` : ''}`
+          + `${fromCreated ? ` · ${fromCreated} start date${fromCreated === 1 ? '' : 's'} taken from when the ticket was raised, Jira having no Start date on them` : ''}`,
+      })
+    } catch (e) {
+      setSyncNote({ severity: 'error', text: e.message })
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
@@ -120,13 +188,41 @@ export default function Timeline({ plan, settings }) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box>
-        <Typography variant="h2">Timeline</Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-          What was planned, and what actually happened. The outline is the plan; the solid bar is the outcome. The gap
-          between their right-hand edges is the slip.
-        </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: 1, minWidth: 320 }}>
+          <Typography variant="h2">Timeline</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+            What was planned, and what actually happened. The outline is the plan; the solid bar is the outcome. The gap
+            between their right-hand edges is the slip.
+          </Typography>
+        </Box>
+        <Box sx={{ textAlign: 'right' }}>
+          <Button
+            variant="outlined"
+            startIcon={<SyncIcon />}
+            disabled={!jira?.configured || syncing || !keyed.length}
+            onClick={sync}
+          >
+            {syncing ? 'Reading Jira…' : `Sync ${keyed.length} from Jira`}
+          </Button>
+          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5 }}>
+            {jira == null ? 'checking…'
+              : jira.configured ? `${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account}`
+                : 'not configured on the server'}
+          </Typography>
+        </Box>
       </Box>
+      {syncing && <LinearProgress />}
+      {syncNote && (
+        <Alert severity={syncNote.severity} onClose={() => setSyncNote(null)}>{syncNote.text}</Alert>
+      )}
+      {jira && !jira.configured && (
+        <Alert severity="info">
+          Jira is not connected on the server, so actual dates have to be typed in by hand. To connect it, set{' '}
+          <strong>JIRA_BASE_URL</strong>, <strong>JIRA_EMAIL</strong> and <strong>JIRA_API_TOKEN</strong> in the Render
+          dashboard under Environment — the token stays on the server and is never sent to this page.
+        </Alert>
+      )}
 
       <Paper variant="outlined" sx={{ p: 2.5, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {stat('with a plan', t.planned)}

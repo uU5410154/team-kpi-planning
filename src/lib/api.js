@@ -35,3 +35,21 @@ export const saveScenario = async (name, payload, updatedBy) =>
 
 export const deleteScenario = async (name) =>
   j(await fetch(`/api/scenarios/${encodeURIComponent(name)}`, { method: 'DELETE' }))
+
+/* ---------------------------- jira ---------------------------- */
+
+/** Is the server able to reach Jira at all, and as whom. */
+export const jiraStatus = async () => j(await fetch('/api/jira/status'))
+
+/**
+ * Live issues for the keys the register holds.
+ *
+ * The keys go up, the token never comes down: the browser has no credential
+ * of its own and cannot query Jira directly even if it wanted to.
+ */
+export const jiraIssues = async (keys) =>
+  j(await fetch('/api/jira/issues', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  }))

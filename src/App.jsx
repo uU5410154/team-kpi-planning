@@ -788,7 +788,9 @@ export default function App() {
             />
           )}
           {tab === 'team' && <Team plan={plan} />}
-          {tab === 'timeline' && <Timeline plan={plan} settings={plan.settings} />}
+          {tab === 'timeline' && (
+            <Timeline plan={plan} settings={plan.settings} onUpdate={updateProject} />
+          )}
 
           {tab === 'people' && (
             <People

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import * as store from './db.js'
+import * as jira from './jira.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -31,7 +32,40 @@ app.use(express.json({ limit: '8mb' }))
 /* ---------------------------- api ---------------------------- */
 
 app.get('/api/health', async (_req, res) => {
-  res.json({ ok: true, service: 'team-kpi-planning', store: await store.status() })
+  res.json({ ok: true, service: 'team-kpi-planning', store: await store.status(), jira: jira.status() })
+})
+
+/* ---------------------------- jira ---------------------------- */
+
+app.get('/api/jira/status', (_req, res) => res.json(jira.status()))
+
+/*
+ * Issues BY KEY, and by nothing else.
+ *
+ * The client sends the keys its own register holds; it cannot send JQL. That
+ * is deliberate: this endpoint is open to anybody who can open the app, and a
+ * query parameter would make it a general-purpose window onto Jira running
+ * under one account's credentials.
+ */
+app.post('/api/jira/issues', async (req, res) => {
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys : []
+  if (keys.length > 400) {
+    return res.status(400).json({ error: 'Too many keys in one request (max 400).' })
+  }
+  try {
+    const r = await jira.issuesByKey(keys)
+    if (r === jira.UNAVAILABLE) {
+      return res.status(503).json({
+        error: 'Jira is not configured on this server. Set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN.',
+      })
+    }
+    return res.json(r)
+  } catch (e) {
+    // The status Jira gave us, so a wrong token reads as a wrong token rather
+    // than as the app being broken.
+    const code = e.statusCode === 401 || e.statusCode === 403 ? 502 : 502
+    return res.status(code).json({ error: e.message || 'Jira request failed.' })
+  }
 })
 
 const unavailable = (res) =>
