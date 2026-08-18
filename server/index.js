@@ -61,10 +61,26 @@ app.post('/api/jira/issues', async (req, res) => {
     }
     return res.json(r)
   } catch (e) {
-    // The status Jira gave us, so a wrong token reads as a wrong token rather
-    // than as the app being broken.
-    const code = e.statusCode === 401 || e.statusCode === 403 ? 502 : 502
-    return res.status(code).json({ error: e.message || 'Jira request failed.' })
+    // Jira's own words, so a wrong token reads as a wrong token rather than as
+    // the app being broken.
+    return res.status(502).json({ error: e.message || 'Jira request failed.' })
+  }
+})
+
+/** The work under an epic, or the epics under an initiative. One level. */
+app.post('/api/jira/children', async (req, res) => {
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys : []
+  if (keys.length > 40) {
+    return res.status(400).json({ error: 'Too many parents in one request (max 40).' })
+  }
+  try {
+    const r = await jira.childrenOf(keys)
+    if (r === jira.UNAVAILABLE) {
+      return res.status(503).json({ error: 'Jira is not configured on this server.' })
+    }
+    return res.json(r)
+  } catch (e) {
+    return res.status(502).json({ error: e.message || 'Jira request failed.' })
   }
 })
 

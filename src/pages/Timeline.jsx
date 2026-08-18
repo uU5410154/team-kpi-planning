@@ -5,10 +5,13 @@ import {
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import SyncIcon from '@mui/icons-material/Sync'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import { IconButton, CircularProgress } from '@mui/material'
 import * as api from '../lib/api.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
-import { fmtHours, isDate } from '../lib/model.js'
+import { fmtHours, isDate, timelineOf } from '../lib/model.js'
 
 const DAY = 86400000
 const at = (d) => Date.parse(`${d}T00:00:00Z`)
@@ -99,6 +102,62 @@ export default function Timeline({ plan, settings, onUpdate }) {
     }
   }
 
+  /*
+   * The work underneath a row, fetched only when somebody asks for it.
+   *
+   * A hundred and fifty-nine epics have thousands of tasks between them, and
+   * pulling all of it to draw six visible rows would be slow, rude to Jira's
+   * rate limit, and mostly wasted. So: expand a row, fetch that row's children
+   * once, keep them for the session.
+   *
+   * Keyed by JIRA key rather than by project, because a child expands the same
+   * way its parent did — an initiative opens into epics, an epic into tasks —
+   * and the loader does not need to know which level it is looking at.
+   */
+  const [open, setOpen] = useState(() => new Set())
+  const [kids, setKids] = useState(() => new Map())
+
+  const toggle = async (jiraKey) => {
+    if (!jiraKey) return
+    const key = jiraKey.trim().toUpperCase()
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+    if (kids.has(key)) return
+    setKids((prev) => new Map(prev).set(key, { loading: true, rows: [], error: null }))
+    try {
+      const r = await api.jiraChildren([key])
+      const issues = (r.byParent && r.byParent[key]) || []
+      setKids((prev) => new Map(prev).set(key, { loading: false, error: null, rows: issues }))
+    } catch (e) {
+      setKids((prev) => new Map(prev).set(key, { loading: false, error: e.message, rows: [] }))
+    }
+  }
+
+  /*
+   * A Jira issue, read as the register reads a project, so one drawing routine
+   * serves both. The task's PLAN is its due date; a task rarely carries a
+   * planned start, and inventing one from its creation date would draw a bar
+   * nobody committed to.
+   */
+  const asRow = (issue) => ({
+    rowKey: issue.key,
+    jiraKey: issue.key,
+    title: issue.summary,
+    sub: `${issue.key} · ${issue.type || 'issue'} · ${issue.status}`,
+    timeline: timelineOf({
+      start: null,
+      due: issue.due,
+      actualStart: issue.start || issue.created,
+      actualEnd: issue.done ? issue.resolved : null,
+      status: issue.done ? 'Done' : issue.status,
+    }, asOf),
+    outsideTeam: false,
+  })
+
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
@@ -177,6 +236,169 @@ export default function Timeline({ plan, settings, onUpdate }) {
     if (late(p)) return STATUS.critical
     if (p.timeline.state === 'finished') return STATUS.good
     return CHART[mode].series[0]
+  }
+
+  /*
+   * One row, and everything underneath it.
+   *
+   * Defined here rather than at module scope so it shares the calendar the
+   * bars are measured against — a task drawn on its own scale would line up
+   * with nothing above it, which is the one thing a Gantt chart has to get
+   * right.
+   *
+   * Recursive on purpose: an initiative opens into epics and an epic into
+   * tasks, and neither the fetch nor the drawing needs to know which it is
+   * looking at.
+   */
+  function RowGroup({ row, depth }) {
+    const tl = row.timeline
+    const planned = bar(tl.plannedStart, tl.plannedEnd)
+    const actual = bar(tl.actualStart, tl.actualEnd || (tl.running ? asOf : null))
+    const colour = colourOf(row)
+    const key = String(row.jiraKey || '').trim().toUpperCase()
+    const canOpen = !!key && !!jira?.configured
+    const isOpen = open.has(key)
+    const under = kids.get(key)
+
+    return (
+      <>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            minHeight: depth ? 28 : 34,
+            borderBottom: 1,
+            borderColor: 'divider',
+            opacity: row.outsideTeam ? 0.6 : 1,
+            bgcolor: depth ? 'action.hover' : undefined,
+            '&:hover': { bgcolor: 'action.selected' },
+          }}
+        >
+          <Box sx={{ width: 300, flexShrink: 0, px: 1.5, py: 0.5, display: 'flex', alignItems: 'center', gap: 0.5, pl: 1.5 + depth * 2 }}>
+            {canOpen ? (
+              <IconButton
+                size="small"
+                sx={{ p: 0.25 }}
+                onClick={() => toggle(key)}
+                aria-label={isOpen ? `collapse ${key}` : `expand ${key}`}
+              >
+                {under?.loading ? <CircularProgress size={13} />
+                  : isOpen ? <ExpandMoreIcon sx={{ fontSize: 17 }} /> : <ChevronRightIcon sx={{ fontSize: 17 }} />}
+              </IconButton>
+            ) : (
+              <Box sx={{ width: 21, flexShrink: 0 }} />
+            )}
+            <Box sx={{ overflow: 'hidden' }}>
+              <Typography variant="body2" noWrap sx={{ fontSize: depth ? '0.72rem' : '0.78rem', fontWeight: depth ? 400 : 600 }}>
+                {row.title}
+              </Typography>
+              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
+                {row.sub}
+              </Typography>
+            </Box>
+          </Box>
+
+          <Box sx={{ position: 'relative', flex: 1, height: depth ? 28 : 34 }}>
+            {ticks.map((tk) => (
+              <Box
+                key={tk.ms}
+                sx={{
+                  position: 'absolute', left: `${pct(tk.ms)}%`, top: 0, bottom: 0,
+                  borderLeft: 1, borderColor: 'divider', opacity: 0.5,
+                }}
+              />
+            ))}
+            <Box sx={{
+              position: 'absolute', left: `${pct(at(asOf))}%`, top: 0, bottom: 0,
+              borderLeft: 2, borderColor: STATUS.warning, opacity: 0.7,
+            }}
+            />
+
+            {planned && (
+              <Tooltip title={`Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}${tl.plannedDays != null ? ` · ${tl.plannedDays} days` : ''}`}>
+                <Box sx={{
+                  position: 'absolute',
+                  left: `${planned.left}%`,
+                  width: `${planned.width}%`,
+                  top: depth ? 4 : 6,
+                  height: depth ? 7 : 9,
+                  borderRadius: 0.5,
+                  border: 1,
+                  borderColor: 'text.disabled',
+                }}
+                />
+              </Tooltip>
+            )}
+            {actual && (
+              <Tooltip title={`Actual ${tl.actualStart || '—'} to ${tl.actualEnd || (tl.running ? 'still running' : '—')}${tl.actualDays != null ? ` · ${tl.actualDays} days` : ''}`}>
+                <Box sx={{
+                  position: 'absolute',
+                  left: `${actual.left}%`,
+                  width: `${actual.width}%`,
+                  top: depth ? 14 : 18,
+                  height: depth ? 7 : 9,
+                  borderRadius: 0.5,
+                  bgcolor: colour,
+                }}
+                />
+              </Tooltip>
+            )}
+            {!actual && planned && (
+              <Typography
+                variant="caption"
+                sx={{
+                  position: 'absolute',
+                  left: `${Math.min(92, planned.left + planned.width + 0.6)}%`,
+                  top: depth ? 11 : 15,
+                  fontSize: '0.6rem',
+                  color: 'text.disabled',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                no actual dates
+              </Typography>
+            )}
+          </Box>
+
+          <Box sx={{ width: 96, flexShrink: 0, px: 1, textAlign: 'right' }}>
+            {tl.lateBy == null ? (
+              <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+            ) : (
+              <Chip
+                size="small"
+                label={tl.lateBy > 0 ? `+${tl.lateBy}d` : `${tl.lateBy}d`}
+                variant="outlined"
+                sx={{
+                  height: 19,
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  color: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
+                  borderColor: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
+                }}
+              />
+            )}
+          </Box>
+        </Box>
+
+        {isOpen && under && !under.loading && (
+          under.error ? (
+            <Box sx={{ pl: 4 + depth * 2, py: 0.75, borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="caption" sx={{ color: STATUS.critical }}>{under.error}</Typography>
+            </Box>
+          ) : under.rows.length === 0 ? (
+            <Box sx={{ pl: 4 + depth * 2, py: 0.75, borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+                Nothing under {key} in Jira.
+              </Typography>
+            </Box>
+          ) : (
+            under.rows.map((issue) => (
+              <RowGroup key={issue.key} row={asRow(issue)} depth={depth + 1} />
+            ))
+          )
+        )}
+      </>
+    )
   }
 
   const stat = (label, value, tone) => (
@@ -297,118 +519,24 @@ export default function Timeline({ plan, settings, onUpdate }) {
         </Box>
 
         <Box sx={{ maxHeight: '60vh', overflowY: 'auto' }}>
-          {rows.map((p) => {
-            const tl = p.timeline
-            const planned = bar(tl.plannedStart, tl.plannedEnd)
-            const actual = bar(tl.actualStart, tl.actualEnd || (tl.running ? asOf : null))
-            const colour = colourOf(p)
-            return (
-              <Box
-                key={p.key}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  minHeight: 34,
-                  borderBottom: 1,
-                  borderColor: 'divider',
-                  opacity: p.outsideTeam ? 0.6 : 1,
-                  '&:hover': { bgcolor: 'action.hover' },
-                }}
-              >
-                <Box sx={{ width: 300, flexShrink: 0, px: 1.5, py: 0.5, overflow: 'hidden' }}>
-                  <Typography variant="body2" noWrap sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
-                    {p.summary}
-                  </Typography>
-                  <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
-                    {p.jiraKey ? `${p.jiraKey} · ` : ''}
-                    {OBJ_BY_ID[p.objective] ? `Obj ${OBJ_BY_ID[p.objective].no}` : ''}
-                    {p.savingHours ? ` · ${fmtHours(p.savingHours)} hrs/mth` : ''}
-                  </Typography>
-                </Box>
-
-                <Box sx={{ position: 'relative', flex: 1, height: 34 }}>
-                  {ticks.map((tk) => (
-                    <Box
-                      key={tk.ms}
-                      sx={{
-                        position: 'absolute', left: `${pct(tk.ms)}%`, top: 0, bottom: 0,
-                        borderLeft: 1, borderColor: 'divider', opacity: 0.5,
-                      }}
-                    />
-                  ))}
-                  <Box sx={{
-                    position: 'absolute', left: `${pct(at(asOf))}%`, top: 0, bottom: 0,
-                    borderLeft: 2, borderColor: STATUS.warning, opacity: 0.7,
-                  }}
-                  />
-
-                  {planned && (
-                    <Tooltip title={`Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}${tl.plannedDays != null ? ` · ${tl.plannedDays} days` : ''}`}>
-                      <Box sx={{
-                        position: 'absolute',
-                        left: `${planned.left}%`,
-                        width: `${planned.width}%`,
-                        top: 6,
-                        height: 9,
-                        borderRadius: 0.5,
-                        border: 1,
-                        borderColor: 'text.disabled',
-                      }}
-                      />
-                    </Tooltip>
-                  )}
-                  {actual && (
-                    <Tooltip title={`Actual ${tl.actualStart || '—'} to ${tl.actualEnd || (tl.running ? 'still running' : '—')}${tl.actualDays != null ? ` · ${tl.actualDays} days` : ''}`}>
-                      <Box sx={{
-                        position: 'absolute',
-                        left: `${actual.left}%`,
-                        width: `${actual.width}%`,
-                        top: 18,
-                        height: 9,
-                        borderRadius: 0.5,
-                        bgcolor: colour,
-                      }}
-                      />
-                    </Tooltip>
-                  )}
-                  {!actual && planned && (
-                    <Typography
-                      variant="caption"
-                      sx={{
-                        position: 'absolute',
-                        left: `${Math.min(92, planned.left + planned.width + 0.6)}%`,
-                        top: 15,
-                        fontSize: '0.6rem',
-                        color: 'text.disabled',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      no actual dates
-                    </Typography>
-                  )}
-                </Box>
-
-                <Box sx={{ width: 96, flexShrink: 0, px: 1, textAlign: 'right' }}>
-                  {tl.lateBy == null ? (
-                    <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
-                  ) : (
-                    <Chip
-                      size="small"
-                      label={tl.lateBy > 0 ? `+${tl.lateBy}d` : `${tl.lateBy}d`}
-                      variant="outlined"
-                      sx={{
-                        height: 19,
-                        fontSize: '0.65rem',
-                        fontWeight: 700,
-                        color: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
-                        borderColor: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
-                      }}
-                    />
-                  )}
-                </Box>
-              </Box>
-            )
-          })}
+          {rows.map((p) => (
+            <RowGroup
+              key={p.key}
+              row={{
+                rowKey: p.key,
+                jiraKey: p.jiraKey,
+                title: p.summary,
+                sub: [
+                  p.jiraKey || null,
+                  OBJ_BY_ID[p.objective] ? `Obj ${OBJ_BY_ID[p.objective].no}` : null,
+                  p.savingHours ? `${fmtHours(p.savingHours)} hrs/mth` : null,
+                ].filter(Boolean).join(' · '),
+                timeline: p.timeline,
+                outsideTeam: p.outsideTeam,
+              }}
+              depth={0}
+            />
+          ))}
           {rows.length === 0 && (
             <Box sx={{ p: 4, textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>

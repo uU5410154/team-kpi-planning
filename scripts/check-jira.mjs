@@ -66,6 +66,39 @@ const ISSUES = {
   },
 }
 
+const CHILDREN = {
+  'FNP-1': [
+    {
+      key: 'FNP-11',
+      fields: {
+        summary: 'Task that finished late',
+        status: { name: 'Done', statusCategory: { key: 'done' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-1' },
+        created: '2026-01-06T09:00:00.000+0700',
+        updated: '2026-03-20T09:00:00.000+0700',
+        duedate: '2026-02-01',
+        resolutiondate: '2026-03-15T09:00:00.000+0700',
+        customfield_10015: '2026-01-08',
+      },
+    },
+    {
+      key: 'FNP-12',
+      fields: {
+        summary: 'Task still in the backlog',
+        status: { name: 'Backlog', statusCategory: { key: 'new' } },
+        issuetype: { name: 'Story' },
+        parent: { key: 'FNP-1' },
+        created: '2026-01-06T09:00:00.000+0700',
+        updated: '2026-01-06T09:00:00.000+0700',
+        duedate: null,
+        resolutiondate: null,
+        customfield_10015: null,
+      },
+    },
+  ],
+}
+
 const fake = createServer((req, res) => {
   seenAuth.push(req.headers.authorization || '')
   let body = ''
@@ -73,8 +106,11 @@ const fake = createServer((req, res) => {
   req.on('end', () => {
     const parsed = body ? JSON.parse(body) : {}
     askedFor.push(parsed.jql || '')
-    const keys = String(parsed.jql || '').replace(/.*\(|\).*/g, '').split(',').map((k) => k.trim())
-    const issues = keys.map((k) => ISSUES[k]).filter(Boolean)
+    const jql = String(parsed.jql || '')
+    const keys = jql.replace(/.*\(|\).*/g, '').split(',').map((k) => k.trim())
+    const issues = /^parent IN/.test(jql)
+      ? Object.values(CHILDREN).flat().filter((c) => keys.includes(c.fields.parent.key))
+      : keys.map((k) => ISSUES[k]).filter(Boolean)
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ issues }))
   })
@@ -159,6 +195,32 @@ const tooMany = await fetch(`${base}/api/jira/issues`, {
 })
 check('and a request big enough to be abuse is refused', tooMany.status === 400)
 
+/* ---------------- the breakdown ---------------- */
+console.log(String.fromCharCode(10) + '--- an epic breaks down into its tasks ---')
+{
+  const kids = await (await fetch(`${base}/api/jira/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1', 'FNP-2'] }),
+  })).json()
+  check('children come back under the parent that owns them',
+    kids.byParent['FNP-1'].length === 2 && kids.byParent['FNP-2'].length === 0,
+    JSON.stringify(Object.fromEntries(Object.entries(kids.byParent).map(([k, v]) => [k, v.length]))))
+  const child = kids.byParent['FNP-1'].find((c) => c.key === 'FNP-11')
+  check('a task carries its own dates', child.due === '2026-02-01' && child.resolved === '2026-03-15',
+    `${child.due} planned, ${child.resolved} actual`)
+  check('  and its issue type, so a Story reads as a Story', child.type === 'Task',
+    kids.byParent['FNP-1'].map((c) => `${c.key}:${c.type}`).join(', '))
+  check('AND THE TOKEN IS STILL NOT IN THE ANSWER', !JSON.stringify(kids).includes(TOKEN))
+
+  const bad = await fetch(`${base}/api/jira/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: Array.from({ length: 60 }, (_, i) => `FNP-${i}`) }),
+  })
+  check('and too many parents at once is refused', bad.status === 400)
+}
+
 /* ---------------- the sync, in a real browser ---------------- */
 const exe = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -236,6 +298,35 @@ if (!exe) {
     after.rows.map((r) => `${r.jira} ${r.start}..${r.due}`).join(' | '))
   check('it says what it did, including where a start came from',
     /taken from when the ticket was raised/.test(after.note), after.note)
+
+  // ---- the breakdown, on screen ----
+  const rowsBefore = await page.evaluate(() =>
+    document.querySelectorAll('[aria-label^="expand"], [aria-label^="collapse"]').length)
+  check('every keyed row offers a breakdown', rowsBefore >= 3, `${rowsBefore} expandable rows`)
+
+  await page.evaluate(() => {
+    document.querySelector('[aria-label="expand FNP-1"]').click()
+  })
+  await new Promise((r) => setTimeout(r, 2500))
+  const opened = await page.evaluate(() => ({
+    text: document.body.innerText,
+    collapsible: !!document.querySelector('[aria-label="collapse FNP-1"]'),
+  }))
+  check('EXPANDING AN EPIC SHOWS ITS TASKS',
+    /Task that finished late/.test(opened.text) && /Task still in the backlog/.test(opened.text),
+    opened.collapsible ? 'row is now collapsible' : 'row did not open')
+  check('  and each task says what it is',
+    /FNP-11 · Task/.test(opened.text) && /FNP-12 · Story/.test(opened.text),
+    (opened.text.match(new RegExp('FNP-1[12][^' + String.fromCharCode(10) + ']*', 'g')) || []).join(' | '))
+  check('  and a late task carries its own slip',
+    /\+42d/.test(opened.text), 'FNP-11 was due 2026-02-01 and finished 2026-03-15')
+
+  await page.evaluate(() => {
+    document.querySelector('[aria-label="collapse FNP-1"]').click()
+  })
+  await new Promise((r) => setTimeout(r, 700))
+  const closed = await page.evaluate(() => document.body.innerText)
+  check('  and it closes again', !/Task that finished late/.test(closed))
 
   await browser.close()
 }

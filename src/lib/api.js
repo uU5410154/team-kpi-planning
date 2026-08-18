@@ -53,3 +53,11 @@ export const jiraIssues = async (keys) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keys }),
   }))
+
+/** The tasks under an epic, or the epics under an initiative. */
+export const jiraChildren = async (keys) =>
+  j(await fetch('/api/jira/children', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  }))
