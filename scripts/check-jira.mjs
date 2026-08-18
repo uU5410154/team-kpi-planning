@@ -358,7 +358,8 @@ if (!exe) {
       }
       : { ...p, jiraKey: '' }))
     localStorage.setItem(K, JSON.stringify(st))
-    return st.projects.slice(0, 3).map((p) => ({ key: p.key, start: p.start, due: p.due, hours: p.savingHours }))
+    // The whole row, so what comes back can be compared field by field.
+    return st.projects.slice(0, 3).map((p) => JSON.parse(JSON.stringify(p)))
   })
   await page.goto(`${base}/?synced=1#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 3500))
@@ -398,6 +399,34 @@ if (!exe) {
   check('AND THE PLAN IS EXACTLY AS IT WAS',
     after.rows.every((r, i) => r.start === before[i].start && r.due === before[i].due),
     after.rows.map((r) => `${r.jira} ${r.start}..${r.due}`).join(' | '))
+
+  /*
+   * And nothing else moved either.
+   *
+   * A sync exists to record when things happened. Saving hours, mandays,
+   * cost, objective, commit level, owner — none of that is Jira's to have an
+   * opinion about, and a sync that quietly restated any of it would rewrite
+   * the KPI the register exists to report. Compared field by field rather
+   * than by spot-check, so a field added later is covered without anybody
+   * remembering to add it here.
+   */
+  const full = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('fa-tech-kpi-2026')).projects.slice(0, 3))
+  const drifted = []
+  full.forEach((now, i) => {
+    const was = before[i]
+    for (const field of new Set([...Object.keys(was), ...Object.keys(now)])) {
+      if (field === 'actualStart' || field === 'actualEnd') continue
+      if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
+        drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)
+      }
+    }
+  })
+  check('A SYNC TOUCHES THE ACTUAL DATES AND NOTHING ELSE', drifted.length === 0,
+    drifted.join(' | ') || `${Object.keys(before[0]).length} fields per project, all unchanged but the two`)
+  check('  the saving hours in particular are Jira’s business to nobody',
+    full.every((now, i) => now.savingHours === before[i].savingHours),
+    full.map((p, i) => `${p.jiraKey} ${before[i].savingHours} -> ${p.savingHours}`).join(' | '))
   check('it says what it did, including where a start came from',
     /taken from when the ticket was raised/.test(after.note), after.note)
 
