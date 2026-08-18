@@ -83,6 +83,34 @@ const CHILDREN = {
       },
     },
     {
+      key: 'FNP-13',
+      fields: {
+        summary: 'Task that finished early',
+        status: { name: 'Done', statusCategory: { key: 'done' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-1' },
+        created: '2026-01-06T09:00:00.000+0700',
+        updated: '2026-02-10T09:00:00.000+0700',
+        duedate: '2026-03-01',
+        resolutiondate: '2026-02-10T09:00:00.000+0700',
+        customfield_10015: '2026-01-08',
+      },
+    },
+    {
+      key: 'FNP-14',
+      fields: {
+        summary: 'Task that finished on the day',
+        status: { name: 'Done', statusCategory: { key: 'done' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-1' },
+        created: '2026-01-06T09:00:00.000+0700',
+        updated: '2026-04-01T09:00:00.000+0700',
+        duedate: '2026-04-01',
+        resolutiondate: '2026-04-01T09:00:00.000+0700',
+        customfield_10015: '2026-01-08',
+      },
+    },
+    {
       key: 'FNP-12',
       fields: {
         summary: 'Task still in the backlog',
@@ -217,7 +245,7 @@ console.log(String.fromCharCode(10) + '--- an epic breaks down into its tasks --
     body: JSON.stringify({ keys: ['FNP-1', 'FNP-2'] }),
   })).json()
   check('children come back under the parent that owns them',
-    kids.byParent['FNP-1'].length === 2 && kids.byParent['FNP-2'].length === 0,
+    kids.byParent['FNP-1'].length === 4 && kids.byParent['FNP-2'].length === 0,
     JSON.stringify(Object.fromEntries(Object.entries(kids.byParent).map(([k, v]) => [k, v.length]))))
   const child = kids.byParent['FNP-1'].find((c) => c.key === 'FNP-11')
   check('a task carries its own dates', child.due === '2026-02-01' && child.resolved === '2026-03-15',
@@ -451,6 +479,79 @@ if (!exe) {
     (opened.text.match(new RegExp('FNP-1[12][^' + String.fromCharCode(10) + ']*', 'g')) || []).join(' | '))
   check('  and a late task carries its own slip',
     /\+42d/.test(opened.text), 'FNP-11 was due 2026-02-01 and finished 2026-03-15')
+
+  // ---- both bars start on the same day ----
+  const aligned = await page.evaluate(() => {
+    // sx compiles to a class, so there is no inline style to read — the
+    // rendered geometry is the thing being asserted anyway.
+    const rows = [...document.querySelectorAll('div')]
+      .filter((d) => (d.innerText || '').includes('FNP-1 ·') && d.querySelectorAll('div').length < 40)
+    const row = rows[rows.length - 1]
+    const track = row && [...row.parentElement.parentElement.children]
+      .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)
+    if (!track) return null
+    return [...track.children]
+      .filter((c) => getComputedStyle(c).position === 'absolute' && c.getBoundingClientRect().width > 1)
+      .map((c) => ({
+        left: Math.round(c.getBoundingClientRect().left * 10) / 10,
+        width: Math.round(c.getBoundingClientRect().width * 10) / 10,
+        filled: getComputedStyle(c).backgroundColor !== 'rgba(0, 0, 0, 0)',
+        hatched: getComputedStyle(c).backgroundImage !== 'none',
+      }))
+      .filter((b) => b.width > 2)
+  })
+  const plannedBar = aligned?.find((b) => !b.filled)
+  const actualBar = aligned?.find((b) => b.filled)
+  check('THE ACTUAL BAR STARTS ON THE PLANNED START',
+    plannedBar && actualBar && Math.abs(plannedBar.left - actualBar.left) < 0.01,
+    aligned ? `planned at ${plannedBar?.left}%, actual at ${actualBar?.left}%` : 'no bars found')
+  check('  and the real start is still recorded, not lost',
+    await page.evaluate(() => {
+      const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+      const p = st.projects.find((x) => x.jiraKey === 'FNP-1')
+      return p.actualStart === '2026-01-10' && p.start === '2026-01-01'
+    }),
+    'drawn from the plan, held as it happened')
+
+  // ---- a task is the bottom of the chart ----
+  const leaves = await page.evaluate(() => ({
+    epicOpens: !!document.querySelector('[aria-label="collapse FNP-1"]'),
+    taskOffersToOpen: !!document.querySelector('[aria-label="expand FNP-11"]')
+      || !!document.querySelector('[aria-label="expand FNP-12"]'),
+  }))
+  check('A STORY OR TASK OFFERS NO FURTHER BREAKDOWN', leaves.taskOffersToOpen === false,
+    'sub-tasks are not what a portfolio timeline is read for')
+  check('  while the epic above it still opens', leaves.epicOpens === true)
+
+  // ---- the three finishes read differently ----
+  const finishes = await page.evaluate(() => {
+    const out = {}
+    for (const key of ['FNP-11', 'FNP-13', 'FNP-14']) {
+      const row = [...document.querySelectorAll('div')].find((d) => {
+        const t = d.innerText || ''
+        return t.startsWith(key + ' ·') || (d.previousElementSibling && false)
+      })
+      void row
+    }
+    // Read the slip chips instead: they carry the same colour as their bar.
+    const chips = [...document.querySelectorAll('.MuiChip-root')].map((c) => ({
+      label: c.innerText.trim(),
+      colour: getComputedStyle(c).color,
+    }))
+    out.chips = chips
+    out.text = document.body.innerText
+    return out
+  })
+  const chipFor = (label) => finishes.chips.find((c) => c.label === label)
+  check('A LATE FINISH, AN EARLY ONE AND AN ON-TIME ONE ARE ALL SHOWN',
+    !!chipFor('+42d') && !!chipFor('-19d') && !!chipFor('0d'),
+    finishes.chips.map((c) => c.label).join(' | '))
+  check('  and they are three different colours, not two',
+    new Set([chipFor('+42d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour]).size === 3,
+    [chipFor('+42d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour].join(' | '))
+  check('  the legend names all three outcomes',
+    /ahead of schedule/.test(finishes.text) && /on schedule/.test(finishes.text)
+    && /behind schedule/.test(finishes.text))
 
   await page.evaluate(() => {
     document.querySelector('[aria-label="collapse FNP-1"]').click()

@@ -207,11 +207,19 @@ export default function Timeline({ plan, settings, onUpdate }) {
    * planned start, and inventing one from its creation date would draw a bar
    * nobody committed to.
    */
+  /*
+   * A story or a task is the bottom of this chart. Sub-tasks exist in Jira and
+   * are not what anybody is reading a portfolio timeline to find out, so those
+   * rows offer no chevron at all rather than one that opens onto noise.
+   */
+  const LEAF = /^(story|task|sub-?task|bug|defect)$/i
+
   const asRow = (issue) => ({
     rowKey: issue.key,
     jiraKey: issue.key,
     title: issue.summary,
     sub: `${issue.key} · ${issue.type || 'issue'} · ${issue.status}`,
+    leaf: LEAF.test(issue.type || ''),
     timeline: timelineOf({
       start: null,
       due: issue.due,
@@ -275,6 +283,8 @@ export default function Timeline({ plan, settings, onUpdate }) {
       .filter((p) => {
         if (fState === 'all') return true
         if (fState === 'late') return (p.timeline.lateBy ?? 0) > 0
+        if (fState === 'ahead') return (p.timeline.lateBy ?? 0) < 0
+        if (fState === 'on') return p.timeline.lateBy === 0
         if (fState === 'overdue') return p.timeline.overdue
         return p.timeline.state === fState
       })
@@ -333,9 +343,25 @@ export default function Timeline({ plan, settings, onUpdate }) {
   }, [span])
 
   const picks = [{ id: 'all', nick: 'All PICs' }, ...plan.assignees.map((p) => ({ id: p.id, nick: p.nick }))]
-  const late = (p) => (p.timeline.lateBy ?? 0) > 0
+
+  /*
+   * The three answers a finished project can give, and they are not shades of
+   * one another: early, on the day, and late are different outcomes and get
+   * different colours. Anything still running is neither — it is blue, and
+   * says nothing about a finish it has not reached.
+   */
+  const AHEAD = mode === 'dark' ? '#3ba7f0' : '#1d7fc4'
+  const finishOf = (tl) => {
+    if (tl.lateBy == null) return null
+    if (tl.lateBy > 0) return 'late'
+    if (tl.lateBy < 0) return 'ahead'
+    return 'on'
+  }
+  const FINISH_COLOUR = { ahead: AHEAD, on: STATUS.good, late: STATUS.critical }
+  const FINISH_WORD = { ahead: 'ahead of schedule', on: 'on schedule', late: 'behind schedule' }
   const colourOf = (p) => {
-    if (late(p)) return STATUS.critical
+    const f = finishOf(p.timeline)
+    if (f) return FINISH_COLOUR[f]
     if (p.timeline.state === 'finished') return STATUS.good
     return CHART[mode].series[0]
   }
@@ -355,10 +381,34 @@ export default function Timeline({ plan, settings, onUpdate }) {
   function RowGroup({ row, depth }) {
     const tl = row.timeline
     const planned = bar(tl.plannedStart, tl.plannedEnd)
-    const actual = bar(tl.actualStart, tl.actualEnd || (tl.running ? asOf : null))
+    /*
+     * The actual bar starts where the PLAN starts.
+     *
+     * Asked for, and it is the right call for this chart: lining both bars up
+     * on the left makes the only difference between them the one that matters
+     * — where they end. Two bars offset at both ends turn a simple question
+     * ("did it land on time") into mental arithmetic.
+     *
+     * The real start is not lost. It is in the tooltip, and the model still
+     * holds it, so nothing that measures duration is reading the drawn bar.
+     */
+    const drawnStart = tl.plannedStart || tl.actualStart
+    const finished = tl.actualEnd || (tl.running ? asOf : null)
+    const actual = bar(drawnStart, finished)
+    const finish = finishOf(tl)
     const colour = colourOf(row)
+
+    /*
+     * The variance, drawn as its own segment beyond the planned edge (late) or
+     * short of it (early). That segment IS the slip: its length is the number
+     * in the last column, so the chart and the figure cannot disagree.
+     */
+    const overrun = finish === 'late' && tl.plannedEnd && tl.actualEnd
+      ? bar(tl.plannedEnd, tl.actualEnd) : null
+    const saved = finish === 'ahead' && tl.plannedEnd && tl.actualEnd
+      ? bar(tl.actualEnd, tl.plannedEnd) : null
     const key = String(row.jiraKey || '').trim().toUpperCase()
-    const canOpen = !!key && !!jira?.configured
+    const canOpen = !!key && !!jira?.configured && !row.leaf
     /*
      * A project row is editable because the register owns its plan. A Jira
      * child is editable only when this server is allowed to write, since there
@@ -454,7 +504,15 @@ export default function Timeline({ plan, settings, onUpdate }) {
               </Tooltip>
             )}
             {actual && (
-              <Tooltip title={`Actual ${tl.actualStart || '—'} to ${tl.actualEnd || (tl.running ? 'still running' : '—')}${tl.actualDays != null ? ` · ${tl.actualDays} days` : ''}`}>
+              <Tooltip title={[
+                `Actually ran ${tl.actualStart || '—'} to ${tl.actualEnd || (tl.running ? 'still running' : '—')}`,
+                tl.actualDays != null ? `${tl.actualDays} days` : null,
+                finish ? `Finished ${FINISH_WORD[finish]} by ${Math.abs(tl.lateBy)} day${Math.abs(tl.lateBy) === 1 ? '' : 's'}` : null,
+                tl.plannedStart && tl.actualStart && tl.plannedStart !== tl.actualStart
+                  ? `Bar drawn from the planned start (${tl.plannedStart}); work actually began ${tl.actualStart}`
+                  : null,
+              ].filter(Boolean).join(' · ')}
+              >
                 <Box sx={{
                   position: 'absolute',
                   left: `${actual.left}%`,
@@ -463,6 +521,41 @@ export default function Timeline({ plan, settings, onUpdate }) {
                   height: depth ? 7 : 9,
                   borderRadius: 0.5,
                   bgcolor: colour,
+                }}
+                />
+              </Tooltip>
+            )}
+            {overrun && (
+              <Tooltip title={`${tl.lateBy} days beyond the planned finish`}>
+                <Box sx={{
+                  position: 'absolute',
+                  left: `${overrun.left}%`,
+                  width: `${overrun.width}%`,
+                  top: depth ? 14 : 18,
+                  height: depth ? 7 : 9,
+                  borderRadius: 0.5,
+                  // Hatched, so an overrun cannot be mistaken for work: it is
+                  // the gap between the promise and the delivery.
+                  backgroundImage: `repeating-linear-gradient(45deg, ${STATUS.critical}, ${STATUS.critical} 3px, transparent 3px, transparent 6px)`,
+                  border: 1,
+                  borderColor: STATUS.critical,
+                }}
+                />
+              </Tooltip>
+            )}
+            {saved && (
+              <Tooltip title={`${Math.abs(tl.lateBy)} days earlier than planned`}>
+                <Box sx={{
+                  position: 'absolute',
+                  left: `${saved.left}%`,
+                  width: `${saved.width}%`,
+                  top: depth ? 14 : 18,
+                  height: depth ? 7 : 9,
+                  borderRadius: 0.5,
+                  backgroundImage: `repeating-linear-gradient(45deg, ${AHEAD}, ${AHEAD} 3px, transparent 3px, transparent 6px)`,
+                  border: 1,
+                  borderColor: AHEAD,
+                  opacity: 0.65,
                 }}
                 />
               </Tooltip>
@@ -496,8 +589,8 @@ export default function Timeline({ plan, settings, onUpdate }) {
                   height: 19,
                   fontSize: '0.65rem',
                   fontWeight: 700,
-                  color: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
-                  borderColor: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
+                  color: FINISH_COLOUR[finish] || STATUS.good,
+                  borderColor: FINISH_COLOUR[finish] || STATUS.good,
                 }}
               />
             )}
@@ -601,7 +694,9 @@ export default function Timeline({ plan, settings, onUpdate }) {
           <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
             <MenuItem value="all">Everything</MenuItem>
             <MenuItem value="overdue">Past due, unfinished</MenuItem>
-            <MenuItem value="late">Late by any measure</MenuItem>
+            <MenuItem value="late">Behind schedule</MenuItem>
+            <MenuItem value="on">Finished on schedule</MenuItem>
+            <MenuItem value="ahead">Finished ahead of schedule</MenuItem>
             <MenuItem value="running">Running now</MenuItem>
             <MenuItem value="finished">Finished</MenuItem>
             <MenuItem value="not started">Not started</MenuItem>
@@ -689,12 +784,28 @@ export default function Timeline({ plan, settings, onUpdate }) {
             <Typography variant="caption">planned</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 9, bgcolor: AHEAD, borderRadius: 0.5 }} />
+            <Typography variant="caption">finished ahead of schedule</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 34, height: 9, bgcolor: STATUS.good, borderRadius: 0.5 }} />
-            <Typography variant="caption">finished on time</Typography>
+            <Typography variant="caption">finished on schedule</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 34, height: 9, bgcolor: STATUS.critical, borderRadius: 0.5 }} />
-            <Typography variant="caption">late, or past due and unfinished</Typography>
+            <Typography variant="caption">behind schedule</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{
+              width: 34,
+              height: 9,
+              borderRadius: 0.5,
+              border: 1,
+              borderColor: STATUS.critical,
+              backgroundImage: `repeating-linear-gradient(45deg, ${STATUS.critical}, ${STATUS.critical} 3px, transparent 3px, transparent 6px)`,
+            }}
+            />
+            <Typography variant="caption">the slip itself — days past the planned finish</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 2, height: 14, bgcolor: STATUS.warning }} />
