@@ -24,6 +24,10 @@ const conf = () => ({
   email: process.env.JIRA_EMAIL || '',
   token: process.env.JIRA_API_TOKEN || '',
   startField: process.env.JIRA_START_FIELD || 'customfield_10015',
+  // Which project the register is drawn from, and what counts as a top-level
+  // piece of work in it. Both configurable, because neither is universal.
+  project: String(process.env.JIRA_PROJECT || 'FNP').trim().toUpperCase(),
+  epicType: process.env.JIRA_EPIC_TYPE || 'Epic',
 })
 
 export const UNAVAILABLE = Symbol('jira-unavailable')
@@ -248,6 +252,61 @@ export async function updateIssue(key, patch) {
   // by definition — drop it rather than serve a five-minute-old contradiction.
   cache.delete(k)
   return { key: k, written: Object.keys(fields) }
+}
+
+/**
+ * Every top-level piece of work in the Jira project.
+ *
+ * The JQL is built here from an environment variable and never from the
+ * request, for the same reason the other two endpoints take keys: this is
+ * reachable by anyone who can open the app.
+ *
+ * Returns everything and lets the caller work out what is new. The comparison
+ * belongs on the client, which is the only side that knows what the register
+ * already holds — and a server that decided would have to be told the register
+ * on every call.
+ */
+export async function epics({ since = null } = {}) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+
+  const clauses = [`project = ${c.project}`, `issuetype = "${c.epicType.replace(/"/g, '')}"`]
+  // Optional window, as a number of days. Parsed as a number so nothing from
+  // the request can reach the query as text.
+  const days = Number(since)
+  if (Number.isFinite(days) && days > 0) clauses.push(`created >= -${Math.floor(days)}d`)
+  const jql = `${clauses.join(' AND ')} ORDER BY created DESC`
+
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', c.startField]
+  const out = []
+  let token = null
+  // Paged, because a project accumulates epics forever and the page size is
+  // capped at 100 whatever we ask for.
+  for (let page = 0; page < 12; page++) {
+    const res = await fetch(`${c.base}/rest/api/3/search/jql`, {
+      method: 'POST',
+      headers: {
+        Authorization: auth(),
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ jql, fields, maxResults: 100, ...(token ? { nextPageToken: token } : {}) }),
+      signal: AbortSignal.timeout(25000),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      const err = new Error(`Jira ${res.status}: ${text.slice(0, 300)}`)
+      err.statusCode = res.status
+      throw err
+    }
+    const data = await res.json()
+    for (const raw of data.issues || []) {
+      out.push({ ...shape(raw, c), assignee: raw.fields?.assignee?.displayName || null })
+    }
+    token = data.nextPageToken || null
+    if (!token) break
+  }
+  return { epics: out, jql, project: c.project }
 }
 
 /** One issue, read the same way wherever it came from. */

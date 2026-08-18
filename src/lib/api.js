@@ -75,3 +75,7 @@ export const jiraUpdate = async (key, patch) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   }))
+
+/** Every epic in the Jira project — the app works out which are new. */
+export const jiraEpics = async (sinceDays) =>
+  j(await fetch(`/api/jira/epics${sinceDays ? `?since=${encodeURIComponent(sinceDays)}` : ''}`))

@@ -158,6 +158,25 @@ refuses anything that is not one — but every read happens with that account's
 permissions, so a service account with read-only access to the FNP project is
 worth asking IT for rather than using a personal token.
 
+### Pulling in new epics
+
+**Find new epics** on the Timeline lists every epic in the Jira project that the
+register has never seen, and adds the ones you tick. They arrive as **Watch**,
+with no saving hours and no effort, so they show up on the register and count
+toward nobody's committed total until somebody sizes one and promotes it — an
+epic raised in Jira is not automatically this team's work.
+
+Jira's dates become the project's plan at that moment, and only at that moment:
+there is no earlier commitment for them to overwrite. Every sync afterwards
+leaves the plan alone.
+
+Two optional variables control what counts as an epic:
+
+| Key | Default |
+| --- | --- |
+| `JIRA_PROJECT` | `FNP` |
+| `JIRA_EPIC_TYPE` | `Epic` |
+
 ### Writing back to Jira
 
 The Timeline can push the PLAN back to a ticket: click a planned bar, change

@@ -72,6 +72,19 @@ app.post('/api/jira/issues', async (req, res) => {
   }
 })
 
+/** Every epic in the Jira project, so the app can spot the ones it lacks. */
+app.get('/api/jira/epics', async (req, res) => {
+  try {
+    const r = await jira.epics({ since: req.query.since })
+    if (r === jira.UNAVAILABLE) {
+      return res.status(503).json({ error: 'Jira is not configured on this server.' })
+    }
+    return res.json(r)
+  } catch (e) {
+    return res.status(502).json({ error: e.message || 'Jira request failed.' })
+  }
+})
+
 /*
  * Write the plan back to a ticket.
  *

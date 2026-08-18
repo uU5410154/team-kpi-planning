@@ -7,8 +7,12 @@ import SearchIcon from '@mui/icons-material/Search'
 import SyncIcon from '@mui/icons-material/Sync'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { IconButton, CircularProgress, Popover, Divider } from '@mui/material'
+import {
+  IconButton, CircularProgress, Popover, Divider, Dialog, DialogTitle, DialogContent,
+  DialogActions, Checkbox, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
+} from '@mui/material'
 import EditCalendarIcon from '@mui/icons-material/EditCalendar'
+import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import * as api from '../lib/api.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
@@ -94,7 +98,7 @@ function PlanEditor({ row, onSave, saving, jira }) {
  * is the truthful picture: most of this register has never been told what
  * happened. It is never coloured as though it were on time.
  */
-export default function Timeline({ plan, settings, onUpdate }) {
+export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const asOf = settings.asOfDate
@@ -266,6 +270,76 @@ export default function Timeline({ plan, settings, onUpdate }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  /*
+   * Epics raised in Jira that the register has never heard of.
+   *
+   * The comparison happens here rather than on the server, because this side
+   * is the only one that knows what the register holds. Nothing is added
+   * without being shown first: an epic in Jira is not automatically this
+   * team's work, and a register that grows by itself stops being a decision.
+   */
+  const [finding, setFinding] = useState(false)
+  const [candidates, setCandidates] = useState(null)
+  const [picked, setPicked] = useState(() => new Set())
+
+  const findNew = async () => {
+    setFinding(true)
+    setSyncNote(null)
+    try {
+      const r = await api.jiraEpics()
+      const have = new Set(plan.projects
+        .map((p) => String(p.jiraKey || '').trim().toUpperCase())
+        .filter(Boolean))
+      const fresh = r.epics.filter((e) => !have.has(e.key.toUpperCase()))
+      setCandidates({ all: r.epics.length, project: r.project, rows: fresh })
+      setPicked(new Set(fresh.map((e) => e.key)))
+      if (!fresh.length) {
+        setSyncNote({ severity: 'success', text: `Nothing new — all ${r.epics.length} epics in ${r.project} are already on the register.` })
+        setCandidates(null)
+      }
+    } catch (e) {
+      setSyncNote({ severity: 'error', text: e.message })
+    } finally {
+      setFinding(false)
+    }
+  }
+
+  const addPicked = () => {
+    const rows = candidates.rows.filter((e) => picked.has(e.key))
+    onAddProjects(rows.map((e) => ({
+      jiraKey: e.key,
+      summary: e.summary || e.key,
+      /*
+       * Jira's dates ARE the plan for a project the register is meeting for
+       * the first time — there is no earlier commitment for them to overwrite.
+       * That is the one moment this is true, which is why the sync never does
+       * it afterwards.
+       */
+      start: e.start || null,
+      due: e.due || null,
+      actualStart: e.start || e.created || null,
+      actualEnd: e.done ? e.resolved : null,
+      status: e.done ? 'Done' : (/progress/i.test(e.status) ? 'In Progress' : 'Not Start'),
+      /*
+       * WATCH, not commit. An epic somebody raised in Jira has not been
+       * costed, sized or agreed as part of this team's year; letting it into
+       * the committed total on arrival would move the KPI by accident.
+       * Somebody promotes it deliberately, once it has hours against it.
+       */
+      commitLevel: 'watch',
+      comment: [
+        e.assignee ? `Jira assignee: ${e.assignee}` : null,
+        `Imported from ${e.key} on the Timeline tab.`,
+      ].filter(Boolean).join('\n'),
+    })))
+    setSyncNote({
+      severity: 'success',
+      text: `${rows.length} epic${rows.length === 1 ? '' : 's'} added to the register as WATCH — they carry no saving hours `
+        + 'and count toward nothing until somebody sizes them.',
+    })
+    setCandidates(null)
   }
 
   const [q, setQ] = useState('')
@@ -638,6 +712,15 @@ export default function Timeline({ plan, settings, onUpdate }) {
         <Box sx={{ textAlign: 'right' }}>
           <Button
             variant="outlined"
+            startIcon={<PlaylistAddIcon />}
+            disabled={!jira?.configured || finding}
+            onClick={findNew}
+            sx={{ mr: 1 }}
+          >
+            {finding ? 'Looking…' : 'Find new epics'}
+          </Button>
+          <Button
+            variant="outlined"
             startIcon={<SyncIcon />}
             disabled={!jira?.configured || syncing || !keyed.length}
             onClick={sync}
@@ -766,6 +849,62 @@ export default function Timeline({ plan, settings, onUpdate }) {
           )}
         </Box>
       </Paper>
+
+      <Dialog open={!!candidates} onClose={() => setCandidates(null)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {candidates?.rows.length} epic{candidates?.rows.length === 1 ? '' : 's'} in {candidates?.project} that the
+          register does not have
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          <Box sx={{ px: 3, py: 1.5 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Of {candidates?.all} epics in the project. Anything added comes in as <strong>Watch</strong> with no
+              saving hours, so it appears on the register and in nobody&rsquo;s committed total until it has been sized
+              and promoted. Jira&rsquo;s dates become its plan — the only time that happens, since there is no earlier
+              commitment to overwrite.
+            </Typography>
+          </Box>
+          <List dense sx={{ maxHeight: '50vh', overflowY: 'auto' }}>
+            {candidates?.rows.map((e) => (
+              <ListItem key={e.key} disablePadding>
+                <ListItemButton
+                  onClick={() => setPicked((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(e.key)) next.delete(e.key)
+                    else next.add(e.key)
+                    return next
+                  })}
+                >
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    <Checkbox edge="start" size="small" checked={picked.has(e.key)} tabIndex={-1} disableRipple />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={e.summary || e.key}
+                    secondary={[
+                      e.key,
+                      e.status,
+                      e.assignee ? `assigned ${e.assignee}` : null,
+                      e.start || e.due ? `plan ${e.start || '—'} to ${e.due || '—'}` : 'no dates in Jira',
+                      e.resolved ? `resolved ${e.resolved}` : null,
+                    ].filter(Boolean).join(' · ')}
+                    primaryTypographyProps={{ fontSize: '0.85rem' }}
+                    secondaryTypographyProps={{ fontSize: '0.7rem' }}
+                  />
+                </ListItemButton>
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button size="small" onClick={() => setPicked(new Set(candidates.rows.map((e) => e.key)))}>All</Button>
+          <Button size="small" onClick={() => setPicked(new Set())}>None</Button>
+          <Box sx={{ flex: 1 }} />
+          <Button onClick={() => setCandidates(null)}>Cancel</Button>
+          <Button variant="contained" disabled={!picked.size} onClick={addPicked}>
+            Add {picked.size} to the register
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Popover
         open={!!editing}

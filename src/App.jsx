@@ -603,6 +603,31 @@ export default function App() {
     return created
   }, [])
 
+  /**
+   * Add several projects at once, from a source that already knows what they
+   * are — the Jira epic import.
+   *
+   * Separate from addProject because that one exists to give somebody a blank
+   * row to type into, and says so in a toast. This one is silent and returns
+   * what it made, so the caller can report on its own terms.
+   */
+  const addProjects = useCallback((rows) => {
+    if (!rows || !rows.length) return []
+    let made = []
+    setState((s) => {
+      let i = s.projects.filter((p) => p.key.startsWith('NEW-')).length
+      const taken = new Set(s.projects.map((p) => p.key))
+      made = rows.map((row) => {
+        let p = newProject(++i)
+        while (taken.has(p.key)) p = newProject(++i)
+        taken.add(p.key)
+        return { ...p, ...row }
+      })
+      return { ...s, projects: [...made, ...s.projects] }
+    })
+    return made
+  }, [])
+
   const deleteProjects = useCallback((keys) => {
     const set = new Set(keys)
     setState((s) => ({ ...s, projects: s.projects.filter((p) => !set.has(p.key)) }))
@@ -789,7 +814,12 @@ export default function App() {
           )}
           {tab === 'team' && <Team plan={plan} />}
           {tab === 'timeline' && (
-            <Timeline plan={plan} settings={plan.settings} onUpdate={updateProject} />
+            <Timeline
+              plan={plan}
+              settings={plan.settings}
+              onUpdate={updateProject}
+              onAddProjects={addProjects}
+            />
           )}
 
           {tab === 'people' && (

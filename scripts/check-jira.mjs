@@ -149,9 +149,11 @@ const fake = createServer((req, res) => {
     askedFor.push(parsed.jql || '')
     const jql = String(parsed.jql || '')
     const keys = jql.replace(/.*\(|\).*/g, '').split(',').map((k) => k.trim())
-    const issues = /^parent IN/.test(jql)
-      ? Object.values(CHILDREN).flat().filter((c) => keys.includes(c.fields.parent.key))
-      : keys.map((k) => ISSUES[k]).filter(Boolean)
+    const issues = /issuetype = /.test(jql)
+      ? Object.entries(ISSUES).map(([k, v]) => ({ ...v, key: k }))
+      : /^parent IN/.test(jql)
+        ? Object.values(CHILDREN).flat().filter((c) => keys.includes(c.fields.parent.key))
+        : keys.map((k) => ISSUES[k]).filter(Boolean)
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ issues }))
   })
@@ -260,6 +262,24 @@ console.log(String.fromCharCode(10) + '--- an epic breaks down into its tasks --
     body: JSON.stringify({ keys: Array.from({ length: 60 }, (_, i) => `FNP-${i}`) }),
   })
   check('and too many parents at once is refused', bad.status === 400)
+}
+
+/* ---------------- epics the register has never seen ---------------- */
+console.log(String.fromCharCode(10) + '--- new epics can be found and brought in ---')
+{
+  const r = await (await fetch(`${base}/api/jira/epics`)).json()
+  check('every epic in the project comes back', r.epics.length === 3,
+    r.epics.map((e) => e.key).join(', '))
+  check('  under a query the CLIENT never supplied',
+    /project = FNP AND issuetype = "Epic"/.test(r.jql), r.jql)
+  check('  and the token is still not in it', !JSON.stringify(r).includes(TOKEN))
+
+  // A window can be asked for, and it has to arrive as a number.
+  const windowed = await (await fetch(`${base}/api/jira/epics?since=30`)).json()
+  check('a since window becomes a bounded clause', /created >= -30d/.test(windowed.jql), windowed.jql)
+  const nasty = await (await fetch(`${base}/api/jira/epics?since=${encodeURIComponent('1d OR project = SECRET')}`)).json()
+  check('AND A WINDOW THAT IS NOT A NUMBER IS DROPPED, NOT PASSED THROUGH',
+    !/SECRET/.test(nasty.jql), nasty.jql)
 }
 
 /* ---------------- writing the plan back ---------------- */
@@ -559,6 +579,75 @@ if (!exe) {
   await new Promise((r) => setTimeout(r, 700))
   const closed = await page.evaluate(() => document.body.innerText)
   check('  and it closes again', !/Task that finished late/.test(closed))
+
+  // ---- epics the register has never seen ----
+  const beforeCount = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('fa-tech-kpi-2026')).projects.length)
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find((b) => /Find new epics/.test(b.innerText)).click()
+  })
+  await new Promise((r) => setTimeout(r, 2500))
+  const dialog = await page.evaluate(() => ({
+    open: !!document.querySelector('[role="dialog"]'),
+    text: document.querySelector('[role="dialog"]')?.innerText || '',
+    rows: document.querySelectorAll('[role="dialog"] li').length,
+  }))
+  // FNP-1..3 are on projects already, so nothing should be offered.
+  check('AN EPIC ALREADY ON THE REGISTER IS NOT OFFERED AGAIN',
+    dialog.open === false && /Nothing new/.test(await page.evaluate(() => document.body.innerText)),
+    dialog.open ? `${dialog.rows} offered: ${dialog.text.slice(0, 120)}` : 'nothing offered')
+
+  // Take one off the register and it becomes findable again.
+  await page.evaluate(() => {
+    const K = 'fa-tech-kpi-2026'
+    const st = JSON.parse(localStorage.getItem(K))
+    st.projects = st.projects.map((p) => (p.jiraKey === 'FNP-3' ? { ...p, jiraKey: '' } : p))
+    localStorage.setItem(K, JSON.stringify(st))
+  })
+  await page.goto(`${base}/?found=1#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await new Promise((r) => setTimeout(r, 3000))
+  await page.evaluate(() => {
+    [...document.querySelectorAll('button')].find((b) => /Find new epics/.test(b.innerText)).click()
+  })
+  await new Promise((r) => setTimeout(r, 2500))
+  const offered = await page.evaluate(() => ({
+    open: !!document.querySelector('[role="dialog"]'),
+    text: document.querySelector('[role="dialog"]')?.innerText || '',
+    rows: document.querySelectorAll('[role="dialog"] li').length,
+  }))
+  check('AND ONE THE REGISTER LACKS IS FOUND', offered.open && offered.rows === 1,
+    offered.text.split(String.fromCharCode(10)).slice(0, 3).join(' / '))
+  check('  it says what it will do with it',
+    /Watch/.test(offered.text) && /committed total/.test(offered.text))
+
+  await page.evaluate(() => {
+    [...document.querySelectorAll('[role="dialog"] button')].find((b) => /Add 1 to the register/.test(b.innerText)).click()
+  })
+  await new Promise((r) => setTimeout(r, 1500))
+  const added = await page.evaluate((was) => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    const row = st.projects.find((p) => p.jiraKey === 'FNP-3')
+    return {
+      grew: st.projects.length - was,
+      row: row && {
+        summary: row.summary,
+        commitLevel: row.commitLevel,
+        savingHours: row.savingHours,
+        manday: row.manday,
+        start: row.start,
+        due: row.due,
+        atTop: st.projects[0].jiraKey === 'FNP-3',
+      },
+    }
+  }, beforeCount)
+  check('IT IS ADDED TO THE REGISTER', added.grew === 1 && !!added.row, JSON.stringify(added))
+  check('  as WATCH, carrying no hours and no effort',
+    added.row.commitLevel === 'watch' && added.row.savingHours == null && !(added.row.manday > 0),
+    `${added.row.commitLevel}, hours ${added.row.savingHours}, mandays ${added.row.manday}`)
+  check('  with Jira’s dates as its plan, this once',
+    added.row.start === '2026-01-02' && added.row.due === '2026-05-01',
+    `${added.row.start} to ${added.row.due}`)
+  check('  and at the top, where a new row belongs', added.row.atTop === true)
 
   await browser.close()
 }
