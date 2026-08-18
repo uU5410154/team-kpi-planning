@@ -168,7 +168,10 @@ if (!exe) {
   const seen = await page.evaluate(() => ({
     tab: [...document.querySelectorAll('button, [role="tab"]')].some((b) => b.innerText.trim() === 'Timeline'),
     heading: /Timeline/.test(document.body.innerText),
-    legend: /planned/i.test(document.body.innerText) && /finished on time/i.test(document.body.innerText),
+    // All three outcomes, not just that a legend exists: early, on the day
+    // and late are the distinction the chart is for.
+    legend: ['planned', 'ahead of schedule', 'on schedule', 'behind schedule']
+      .every((w) => new RegExp(w, 'i').test(document.body.innerText)),
     warning: /never edited to match reality/i.test(document.body.innerText),
     bars: document.querySelectorAll('[class*="MuiPaper"] div').length,
     rows: (document.body.innerText.match(/(\d+) projects? on the chart/) || [])[1],
