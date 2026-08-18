@@ -1332,6 +1332,16 @@ export function newProject(seq) {
     srcStatus: null,
     start: null,
     due: null,
+    /*
+     * What actually happened, kept apart from what was planned.
+     *
+     * `start` and `due` are the plan and must not be edited to match reality —
+     * overwriting them is how a portfolio comes to look as though everything
+     * landed on time. These two are filled from Jira, or by hand where there
+     * is no ticket.
+     */
+    actualStart: null,
+    actualEnd: null,
     assignee: null,
     pic: null,
     contributors: [],
@@ -1422,6 +1432,72 @@ export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, credi
 /* ------------------------------------------------------------------ */
 /* per-project derived values                                          */
 /* ------------------------------------------------------------------ */
+
+/**
+ * A calendar date the app understands: YYYY-MM-DD, and a day that exists.
+ *
+ * The round trip is the point. Date.parse accepts "2026-02-31" and quietly
+ * hands back the 3rd of March, so a typo in a spreadsheet would have become a
+ * real date three days later and drawn a bar nobody planned.
+ */
+export const isDate = (v) => {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const ms = Date.parse(`${v}T00:00:00Z`)
+  return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === v
+}
+
+/** Whole days from a to b, positive when b is later. Null if either is absent. */
+export function daysBetween(a, b) {
+  if (!isDate(a) || !isDate(b)) return null
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000)
+}
+
+/**
+ * How a project ran against its plan.
+ *
+ * Deliberately says "unknown" rather than "on time" wherever a date is
+ * missing: two thirds of the register has no actual dates yet, and defaulting
+ * those to on-time would report a portfolio delivering perfectly.
+ */
+export function timelineOf(p, asOf) {
+  const plannedStart = isDate(p.start) ? p.start : null
+  const plannedEnd = isDate(p.due) ? p.due : null
+  const actualStart = isDate(p.actualStart) ? p.actualStart : null
+  // A finished project with no end date recorded ends at nothing; an
+  // unfinished one is still running, which the bar draws up to today.
+  const actualEnd = isDate(p.actualEnd) ? p.actualEnd : null
+  const done = p.status === 'Done'
+  const running = !!actualStart && !actualEnd && !done
+
+  const startVariance = daysBetween(plannedStart, actualStart)
+  const endVariance = daysBetween(plannedEnd, actualEnd)
+  // Not finished and already past its due date is late NOW, whatever the
+  // finish variance says — which is null, because there is no finish.
+  const overdue = !!plannedEnd && !actualEnd && p.status !== 'Done' && plannedEnd < asOf
+  const lateBy = endVariance != null ? endVariance : (overdue ? daysBetween(plannedEnd, asOf) : null)
+
+  const state = actualEnd || done ? 'finished'
+    : running ? 'running'
+      : actualStart ? 'started'
+        : 'not started'
+
+  return {
+    plannedStart,
+    plannedEnd,
+    actualStart,
+    actualEnd,
+    running,
+    overdue,
+    startVariance,
+    endVariance,
+    lateBy,
+    state,
+    plannedDays: daysBetween(plannedStart, plannedEnd),
+    actualDays: daysBetween(actualStart, actualEnd || (running ? asOf : null)),
+    // Only a project with both a plan and an outcome can be judged against it.
+    comparable: !!plannedEnd && (!!actualEnd || overdue),
+  }
+}
 
 export const isCounted = (p) => p.commitLevel === 'commit' || p.commitLevel === 'stretch'
 
@@ -1713,6 +1789,10 @@ export function computePlan(state) {
       manday: resolveManday(raw),
       capex: num(raw.capex),
       comment: typeof raw.comment === 'string' ? raw.comment : '',
+      // A date is a YYYY-MM-DD string or nothing. Anything else — a stray
+      // number from a spreadsheet, an empty string — is missing, not a date.
+      actualStart: isDate(raw.actualStart) ? raw.actualStart : null,
+      actualEnd: isDate(raw.actualEnd) ? raw.actualEnd : null,
     }
     // Whose book is this on. Decided by the PIC and by the PIC alone, so the
     // answer is the same one a reader gets from the register's own column.
@@ -1744,6 +1824,7 @@ export function computePlan(state) {
       gate: gateStatus(fin.roi, rates.roiGate),
       poolHours: countsToPool(p) && isCounted(p) ? (p.savingHours ?? 0) : 0,
       pastDue: !!p.due && p.due < s.asOfDate && p.status !== 'Done',
+      timeline: timelineOf(p, s.asOfDate),
     }
   })
 
@@ -1789,6 +1870,33 @@ export function computePlan(state) {
   // Deferred to next year: kept on the record, deliberately outside the total.
   const nextYear = perProject.filter((p) => p.commitLevel === 'nextyear')
   const nextYearHours = nextYear.reduce((a, p) => a + (p.savingHours ?? 0), 0)
+
+  /* ---- delivery against the plan ------------------------------------
+   * Counted over rows that are IN PLAN and OURS. A schedule kept by IT or the
+   * business is not this team's to answer for, and a deferred project has no
+   * date this year to miss.
+   */
+  const timed = perProject.filter((p) => isInPlan(p) && !p.outsideTeam)
+  const judged = timed.filter((p) => p.timeline.comparable)
+  const lateRows = judged.filter((p) => (p.timeline.lateBy ?? 0) > 0)
+  const timeliness = {
+    planned: timed.filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd).length,
+    noDates: timed.filter((p) => !p.timeline.plannedStart && !p.timeline.plannedEnd).length,
+    started: timed.filter((p) => p.timeline.actualStart).length,
+    finished: timed.filter((p) => p.timeline.state === 'finished').length,
+    running: timed.filter((p) => p.timeline.running).length,
+    // Judged: has a due date and either finished or is already past it.
+    judged: judged.length,
+    onTime: judged.length - lateRows.length,
+    late: lateRows.length,
+    overdue: timed.filter((p) => p.timeline.overdue).length,
+    // The average slip, over the rows that actually slipped — an average that
+    // included the on-time ones would report a fortnight's delay as three days.
+    avgSlip: lateRows.length
+      ? Math.round(lateRows.reduce((a, p) => a + p.timeline.lateBy, 0) / lateRows.length)
+      : null,
+    worst: [...lateRows].sort((a, b) => b.timeline.lateBy - a.timeline.lateBy).slice(0, 5),
+  }
 
   // Delivered by IT or by the business itself: on the register, off our book.
   // Reported so the difference between the two totals has a name.
@@ -2408,6 +2516,7 @@ export function computePlan(state) {
       byStatus,
       nextYearHours,
       nextYearCount: nextYear.length,
+      timeliness,
       outsideHours,
       outsideCount: outside.length,
       doneHours,

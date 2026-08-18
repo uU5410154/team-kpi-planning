@@ -30,6 +30,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import Projects from './pages/Projects.jsx'
 import People from './pages/People.jsx'
 import Team from './pages/Team.jsx'
+import Timeline from './pages/Timeline.jsx'
 import Settings from './pages/Settings.jsx'
 
 const TABS = [
@@ -39,6 +40,9 @@ const TABS = [
   // Beside the individual cards, not instead of them: one answers what a
   // person is measured on, the other whether the team adds up.
   { id: 'team', label: 'Overall team' },
+  // Beside the register rather than inside it: the register answers what a
+  // project is worth, this answers when it was supposed to land.
+  { id: 'timeline', label: 'Timeline' },
   { id: 'settings', label: 'Model' },
 ]
 
@@ -784,6 +788,7 @@ export default function App() {
             />
           )}
           {tab === 'team' && <Team plan={plan} />}
+          {tab === 'timeline' && <Timeline plan={plan} settings={plan.settings} />}
 
           {tab === 'people' && (
             <People

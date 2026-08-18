@@ -1,0 +1,357 @@
+import { useMemo, useState } from 'react'
+import {
+  Box, Paper, Typography, Chip, TextField, Select, MenuItem, FormControl, InputLabel,
+  FormControlLabel, Switch, Tooltip, InputAdornment,
+} from '@mui/material'
+import SearchIcon from '@mui/icons-material/Search'
+import { useTheme } from '@mui/material/styles'
+import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
+import { fmtHours, isDate } from '../lib/model.js'
+
+const DAY = 86400000
+const at = (d) => Date.parse(`${d}T00:00:00Z`)
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * Planned against actual, as bars on one calendar.
+ *
+ * The register holds both a plan (start, due) and what happened (actualStart,
+ * actualEnd). Four date columns in a table are unreadable — the question is
+ * "did this slip", and a slip is a shape rather than a number. So the plan is
+ * drawn as an outline, the outcome solid beneath it, and the gap between their
+ * right-hand edges IS the delay.
+ *
+ * A project with no actual dates is drawn as a plan with an empty track, which
+ * is the truthful picture: most of this register has never been told what
+ * happened. It is never coloured as though it were on time.
+ */
+export default function Timeline({ plan, settings }) {
+  const theme = useTheme()
+  const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
+  const asOf = settings.asOfDate
+  const t = plan.totals.timeliness
+
+  const [q, setQ] = useState('')
+  const [fPic, setFPic] = useState('all')
+  const [fState, setFState] = useState('all')
+  const [ours, setOurs] = useState(true)
+
+  const rows = useMemo(() => {
+    const hay = q.trim().toLowerCase()
+    return plan.projects
+      .filter((p) => p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded')
+      .filter((p) => (ours ? !p.outsideTeam : true))
+      .filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd || p.timeline.actualStart)
+      .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
+      .filter((p) => {
+        if (fState === 'all') return true
+        if (fState === 'late') return (p.timeline.lateBy ?? 0) > 0
+        if (fState === 'overdue') return p.timeline.overdue
+        return p.timeline.state === fState
+      })
+      .filter((p) => !hay || `${p.jiraKey || ''} ${p.summary} ${p.program || ''}`.toLowerCase().includes(hay))
+      .sort((a, b) => String(a.timeline.plannedStart || a.timeline.actualStart || '9999')
+        .localeCompare(String(b.timeline.plannedStart || b.timeline.actualStart || '9999')))
+  }, [plan.projects, q, fPic, fState, ours])
+
+  /*
+   * The calendar the bars are drawn on, taken from the dates actually present
+   * rather than assumed to be the plan year: a project that started in
+   * December 2025 or runs into 2027 has to be visible, not clipped to keep the
+   * grid tidy.
+   */
+  const span = useMemo(() => {
+    const all = []
+    for (const p of rows) {
+      const tl = p.timeline
+      for (const d of [tl.plannedStart, tl.plannedEnd, tl.actualStart, tl.actualEnd]) {
+        if (isDate(d)) all.push(at(d))
+      }
+    }
+    const year = Number((asOf || '2026-01-01').slice(0, 4))
+    all.push(at(`${year}-01-01`), at(`${year}-12-31`))
+    const min = Math.min(...all)
+    const max = Math.max(...all)
+    const pad = Math.max(DAY * 7, (max - min) * 0.02)
+    return { from: min - pad, to: max + pad }
+  }, [rows, asOf])
+
+  const pct = (ms) => ((ms - span.from) / (span.to - span.from)) * 100
+  const bar = (a, b) => {
+    if (!isDate(a) && !isDate(b)) return null
+    // A single date is still worth drawing: a start with no end is a bar that
+    // has begun, not a bar that does not exist.
+    const s = at(isDate(a) ? a : b)
+    const e = at(isDate(b) ? b : a)
+    const left = pct(Math.min(s, e))
+    const width = Math.max(0.4, pct(Math.max(s, e)) - left)
+    return { left, width }
+  }
+
+  // Month ticks across the whole span.
+  const ticks = useMemo(() => {
+    const out = []
+    const d = new Date(span.from)
+    d.setUTCDate(1)
+    d.setUTCHours(0, 0, 0, 0)
+    for (let i = 0; i < 60; i++) {
+      const ms = d.getTime()
+      if (ms > span.to) break
+      if (ms >= span.from) out.push({ ms, label: MONTHS[d.getUTCMonth()], year: d.getUTCFullYear() })
+      d.setUTCMonth(d.getUTCMonth() + 1)
+    }
+    return out
+  }, [span])
+
+  const picks = [{ id: 'all', nick: 'All PICs' }, ...plan.assignees.map((p) => ({ id: p.id, nick: p.nick }))]
+  const late = (p) => (p.timeline.lateBy ?? 0) > 0
+  const colourOf = (p) => {
+    if (late(p)) return STATUS.critical
+    if (p.timeline.state === 'finished') return STATUS.good
+    return CHART[mode].series[0]
+  }
+
+  const stat = (label, value, tone) => (
+    <Box sx={{ minWidth: 96 }}>
+      <Typography variant="h3" sx={{ color: tone || 'text.primary', lineHeight: 1.1 }}>{value}</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary' }}>{label}</Typography>
+    </Box>
+  )
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      <Box>
+        <Typography variant="h2">Timeline</Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+          What was planned, and what actually happened. The outline is the plan; the solid bar is the outcome. The gap
+          between their right-hand edges is the slip.
+        </Typography>
+      </Box>
+
+      <Paper variant="outlined" sx={{ p: 2.5, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {stat('with a plan', t.planned)}
+        {stat('finished', t.finished, STATUS.good)}
+        {stat('running now', t.running)}
+        {stat('past due, unfinished', t.overdue, t.overdue ? STATUS.critical : undefined)}
+        {stat('judged against a date', t.judged)}
+        {stat('of those, on time', t.onTime, t.onTime ? STATUS.good : 'text.secondary')}
+        {stat('average slip', t.avgSlip == null ? '—' : `${t.avgSlip}d`, t.avgSlip ? STATUS.warning : undefined)}
+        {t.noDates > 0 && stat('no dates at all', t.noDates, 'text.disabled')}
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 1.5, display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+        <TextField
+          size="small"
+          placeholder="Search key, project, programme"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          sx={{ minWidth: 260 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+        />
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <InputLabel>PIC</InputLabel>
+          <Select label="PIC" value={fPic} onChange={(e) => setFPic(e.target.value)}>
+            {picks.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 170 }}>
+          <InputLabel>State</InputLabel>
+          <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
+            <MenuItem value="all">Everything</MenuItem>
+            <MenuItem value="overdue">Past due, unfinished</MenuItem>
+            <MenuItem value="late">Late by any measure</MenuItem>
+            <MenuItem value="running">Running now</MenuItem>
+            <MenuItem value="finished">Finished</MenuItem>
+            <MenuItem value="not started">Not started</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControlLabel
+          control={<Switch size="small" checked={ours} onChange={(e) => setOurs(e.target.checked)} />}
+          label={<Typography variant="body2">Ours only</Typography>}
+        />
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {rows.length} project{rows.length === 1 ? '' : 's'} on the chart
+        </Typography>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
+          <Box sx={{ width: 300, flexShrink: 0, px: 1.5, py: 0.75 }}>
+            <Typography variant="caption" sx={{ fontWeight: 700 }}>PROJECT</Typography>
+          </Box>
+          <Box sx={{ position: 'relative', flex: 1, height: 26 }}>
+            {ticks.map((tk) => (
+              <Box
+                key={tk.ms}
+                sx={{
+                  position: 'absolute', left: `${pct(tk.ms)}%`, top: 0, bottom: 0,
+                  borderLeft: 1, borderColor: 'divider', pl: 0.5,
+                }}
+              >
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
+                  {tk.label === 'Jan' ? `${tk.label} ${String(tk.year).slice(2)}` : tk.label}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+          <Box sx={{ width: 96, flexShrink: 0, px: 1, py: 0.75, textAlign: 'right' }}>
+            <Typography variant="caption" sx={{ fontWeight: 700 }}>SLIP</Typography>
+          </Box>
+        </Box>
+
+        <Box sx={{ maxHeight: '60vh', overflowY: 'auto' }}>
+          {rows.map((p) => {
+            const tl = p.timeline
+            const planned = bar(tl.plannedStart, tl.plannedEnd)
+            const actual = bar(tl.actualStart, tl.actualEnd || (tl.running ? asOf : null))
+            const colour = colourOf(p)
+            return (
+              <Box
+                key={p.key}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: 34,
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  opacity: p.outsideTeam ? 0.6 : 1,
+                  '&:hover': { bgcolor: 'action.hover' },
+                }}
+              >
+                <Box sx={{ width: 300, flexShrink: 0, px: 1.5, py: 0.5, overflow: 'hidden' }}>
+                  <Typography variant="body2" noWrap sx={{ fontSize: '0.78rem', fontWeight: 600 }}>
+                    {p.summary}
+                  </Typography>
+                  <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
+                    {p.jiraKey ? `${p.jiraKey} · ` : ''}
+                    {OBJ_BY_ID[p.objective] ? `Obj ${OBJ_BY_ID[p.objective].no}` : ''}
+                    {p.savingHours ? ` · ${fmtHours(p.savingHours)} hrs/mth` : ''}
+                  </Typography>
+                </Box>
+
+                <Box sx={{ position: 'relative', flex: 1, height: 34 }}>
+                  {ticks.map((tk) => (
+                    <Box
+                      key={tk.ms}
+                      sx={{
+                        position: 'absolute', left: `${pct(tk.ms)}%`, top: 0, bottom: 0,
+                        borderLeft: 1, borderColor: 'divider', opacity: 0.5,
+                      }}
+                    />
+                  ))}
+                  <Box sx={{
+                    position: 'absolute', left: `${pct(at(asOf))}%`, top: 0, bottom: 0,
+                    borderLeft: 2, borderColor: STATUS.warning, opacity: 0.7,
+                  }}
+                  />
+
+                  {planned && (
+                    <Tooltip title={`Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}${tl.plannedDays != null ? ` · ${tl.plannedDays} days` : ''}`}>
+                      <Box sx={{
+                        position: 'absolute',
+                        left: `${planned.left}%`,
+                        width: `${planned.width}%`,
+                        top: 6,
+                        height: 9,
+                        borderRadius: 0.5,
+                        border: 1,
+                        borderColor: 'text.disabled',
+                      }}
+                      />
+                    </Tooltip>
+                  )}
+                  {actual && (
+                    <Tooltip title={`Actual ${tl.actualStart || '—'} to ${tl.actualEnd || (tl.running ? 'still running' : '—')}${tl.actualDays != null ? ` · ${tl.actualDays} days` : ''}`}>
+                      <Box sx={{
+                        position: 'absolute',
+                        left: `${actual.left}%`,
+                        width: `${actual.width}%`,
+                        top: 18,
+                        height: 9,
+                        borderRadius: 0.5,
+                        bgcolor: colour,
+                      }}
+                      />
+                    </Tooltip>
+                  )}
+                  {!actual && planned && (
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        position: 'absolute',
+                        left: `${Math.min(92, planned.left + planned.width + 0.6)}%`,
+                        top: 15,
+                        fontSize: '0.6rem',
+                        color: 'text.disabled',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      no actual dates
+                    </Typography>
+                  )}
+                </Box>
+
+                <Box sx={{ width: 96, flexShrink: 0, px: 1, textAlign: 'right' }}>
+                  {tl.lateBy == null ? (
+                    <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
+                  ) : (
+                    <Chip
+                      size="small"
+                      label={tl.lateBy > 0 ? `+${tl.lateBy}d` : `${tl.lateBy}d`}
+                      variant="outlined"
+                      sx={{
+                        height: 19,
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        color: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
+                        borderColor: tl.lateBy > 0 ? STATUS.critical : STATUS.good,
+                      }}
+                    />
+                  )}
+                </Box>
+              </Box>
+            )
+          })}
+          {rows.length === 0 && (
+            <Box sx={{ p: 4, textAlign: 'center' }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Nothing matches that filter.
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2.5 }}>
+        <Typography variant="h4" sx={{ mb: 1 }}>How to read it</Typography>
+        <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 1.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 9, border: 1, borderColor: 'text.disabled', borderRadius: 0.5 }} />
+            <Typography variant="caption">planned</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 9, bgcolor: STATUS.good, borderRadius: 0.5 }} />
+            <Typography variant="caption">finished on time</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 9, bgcolor: STATUS.critical, borderRadius: 0.5 }} />
+            <Typography variant="caption">late, or past due and unfinished</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 2, height: 14, bgcolor: STATUS.warning }} />
+            <Typography variant="caption">today ({asOf})</Typography>
+          </Box>
+        </Box>
+        <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
+          <strong>Planned dates are never edited to match reality.</strong> Moving a due date to the day something
+          actually landed is how a portfolio comes to look as though everything arrived on time. The plan stays as it
+          was set, and the outcome is recorded beside it. A project counts as on time or late only once there is
+          something to judge — a due date, and either a finish or a date already gone past. {t.judged} of {t.planned}{' '}
+          with a plan qualify so far; the rest show an empty track rather than a green bar, because nobody has said what
+          happened yet.
+        </Typography>
+      </Paper>
+    </Box>
+  )
+}
