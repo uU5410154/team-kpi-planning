@@ -61,3 +61,17 @@ export const jiraChildren = async (keys) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keys }),
   }))
+
+/**
+ * Push the plan back to a ticket: the start date, the due date, or both.
+ *
+ * Not the resolution date. Jira stamps that itself when an issue transitions
+ * into a resolved status and refuses to accept it as a field, so outcomes flow
+ * one way — out of Jira — and only the plan flows both.
+ */
+export const jiraUpdate = async (key, patch) =>
+  j(await fetch(`/api/jira/issue/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }))

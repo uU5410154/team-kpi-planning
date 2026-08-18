@@ -158,6 +158,32 @@ refuses anything that is not one — but every read happens with that account's
 permissions, so a service account with read-only access to the FNP project is
 worth asking IT for rather than using a personal token.
 
+### Writing back to Jira
+
+The Timeline can push the PLAN back to a ticket: click a planned bar, change
+the dates, save. It is **off until you switch it on** — add `JIRA_ALLOW_WRITES=true`
+to the same Environment section. Without it the app reads Jira and saves plan
+changes locally only, which is the safer default for an app the whole team can
+open.
+
+Which way each date travels, and why:
+
+| date | owner | direction |
+| --- | --- | --- |
+| Planned start | this app | pushed to Jira's **Start date** |
+| Planned finish | this app | pushed to Jira's **Due date** |
+| Actual start | Jira | read only |
+| Actual finish | Jira | read only |
+
+The last row is not a design preference. Jira stamps `resolutiondate` when an
+issue transitions into a resolved status and does not list it as an editable
+field at all — its own edit metadata offers `duedate` and the Start date custom
+field and nothing else — so a resolution date cannot be typed in from here or
+from anywhere. To change one, resolve or reopen the ticket in Jira and sync.
+
+The write endpoint forwards exactly two fields and drops everything else in the
+request body, so no summary, status or assignee can be changed through it.
+
 Never put any of this in a `VITE_` variable: Vite compiles those into the
 JavaScript the browser downloads, which would publish the token to anyone who
 opened the page.

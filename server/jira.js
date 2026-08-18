@@ -183,6 +183,73 @@ export async function childrenOf(keys) {
   return { byParent, total: Object.values(byParent).reduce((a, v) => a + v.length, 0) }
 }
 
+/**
+ * Write the PLAN back to Jira: the start date and the due date, and nothing
+ * else.
+ *
+ * Those two are the only dates Jira will accept. Its own edit metadata lists
+ * `duedate` and the Start date custom field as settable and does not list
+ * `resolutiondate` at all — a resolution date is stamped by Jira when an issue
+ * transitions into a resolved status, so it cannot be typed, here or there.
+ * That is why the sync runs one way for outcomes and both ways for the plan.
+ *
+ * The whitelist is the security boundary. This endpoint edits real tickets
+ * under a real account, so it accepts two named dates and refuses to pass
+ * anything else through — no summary, no status, no assignee, whatever the
+ * request body happens to contain.
+ */
+export async function updateIssue(key, patch) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+
+  const k = String(key || '').trim().toUpperCase()
+  if (!/^[A-Z][A-Z0-9_]+-\d+$/.test(k)) {
+    const err = new Error('Not an issue key.')
+    err.statusCode = 400
+    throw err
+  }
+
+  // Null is a legitimate value — it clears the date. Undefined means "leave it
+  // alone", and the two must not be confused, or saving a start date would
+  // silently wipe a due date.
+  const ok = (v) => v === null || (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v))
+  const fields = {}
+  if ('due' in patch) {
+    if (!ok(patch.due)) { const e = new Error('Due date must be YYYY-MM-DD or null.'); e.statusCode = 400; throw e }
+    fields.duedate = patch.due
+  }
+  if ('start' in patch) {
+    if (!ok(patch.start)) { const e = new Error('Start date must be YYYY-MM-DD or null.'); e.statusCode = 400; throw e }
+    fields[c.startField] = patch.start
+  }
+  if (!Object.keys(fields).length) {
+    const e = new Error('Nothing to write: send start, due, or both.')
+    e.statusCode = 400
+    throw e
+  }
+
+  const res = await fetch(`${c.base}/rest/api/3/issue/${encodeURIComponent(k)}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: auth(),
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields }),
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    const err = new Error(`Jira ${res.status}: ${text.slice(0, 300)}`)
+    err.statusCode = res.status
+    throw err
+  }
+  // What was just written is what Jira now holds, so the cached copy is stale
+  // by definition — drop it rather than serve a five-minute-old contradiction.
+  cache.delete(k)
+  return { key: k, written: Object.keys(fields) }
+}
+
 /** One issue, read the same way wherever it came from. */
 function shape(raw, c) {
   const f = raw.fields || {}

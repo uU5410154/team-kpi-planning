@@ -37,7 +37,12 @@ app.get('/api/health', async (_req, res) => {
 
 /* ---------------------------- jira ---------------------------- */
 
-app.get('/api/jira/status', (_req, res) => res.json(jira.status()))
+app.get('/api/jira/status', (_req, res) => res.json({
+  ...jira.status(),
+  // Whether this server will WRITE, which the page needs to know before it
+  // offers somebody a date field that cannot save.
+  writable: String(process.env.JIRA_ALLOW_WRITES || '').toLowerCase() === 'true',
+}))
 
 /*
  * Issues BY KEY, and by nothing else.
@@ -64,6 +69,33 @@ app.post('/api/jira/issues', async (req, res) => {
     // Jira's own words, so a wrong token reads as a wrong token rather than as
     // the app being broken.
     return res.status(502).json({ error: e.message || 'Jira request failed.' })
+  }
+})
+
+/*
+ * Write the plan back to a ticket.
+ *
+ * Guarded by JIRA_ALLOW_WRITES. This edits real tickets under one account's
+ * credentials and is reachable by anyone who can open the app, so it stays off
+ * until somebody turns it on deliberately in the Render dashboard.
+ */
+app.put('/api/jira/issue/:key', async (req, res) => {
+  if (String(process.env.JIRA_ALLOW_WRITES || '').toLowerCase() !== 'true') {
+    return res.status(403).json({
+      error: 'Writing to Jira is switched off. Set JIRA_ALLOW_WRITES=true on the server to enable it.',
+    })
+  }
+  const patch = {}
+  if ('start' in (req.body || {})) patch.start = req.body.start
+  if ('due' in (req.body || {})) patch.due = req.body.due
+  try {
+    const r = await jira.updateIssue(req.params.key, patch)
+    if (r === jira.UNAVAILABLE) {
+      return res.status(503).json({ error: 'Jira is not configured on this server.' })
+    }
+    return res.json(r)
+  } catch (e) {
+    return res.status(e.statusCode === 400 ? 400 : 502).json({ error: e.message || 'Jira rejected the change.' })
   }
 })
 

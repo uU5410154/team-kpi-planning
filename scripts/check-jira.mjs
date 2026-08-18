@@ -99,11 +99,24 @@ const CHILDREN = {
   ],
 }
 
+const writes = []
 const fake = createServer((req, res) => {
   seenAuth.push(req.headers.authorization || '')
   let body = ''
   req.on('data', (c) => { body += c })
   req.on('end', () => {
+    // A write: Jira answers 204 and the ticket changes.
+    if (req.method === 'PUT') {
+      const sent = JSON.parse(body || '{}')
+      writes.push({ url: req.url, fields: sent.fields })
+      const key = decodeURIComponent(req.url.split('/').pop())
+      if (ISSUES[key] && sent.fields) {
+        if ('duedate' in sent.fields) ISSUES[key].fields.duedate = sent.fields.duedate
+        if ('customfield_10015' in sent.fields) ISSUES[key].fields.customfield_10015 = sent.fields.customfield_10015
+      }
+      res.writeHead(204)
+      return res.end()
+    }
     const parsed = body ? JSON.parse(body) : {}
     askedFor.push(parsed.jql || '')
     const jql = String(parsed.jql || '')
@@ -220,6 +233,95 @@ console.log(String.fromCharCode(10) + '--- an epic breaks down into its tasks --
   })
   check('and too many parents at once is refused', bad.status === 400)
 }
+
+/* ---------------- writing the plan back ---------------- */
+console.log(String.fromCharCode(10) + '--- the plan can be pushed to Jira, and only the plan ---')
+{
+  // Off by default, however configured Jira is: this edits real tickets.
+  const off = await fetch(`${base}/api/jira/issue/FNP-1`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ due: '2026-06-01' }),
+  })
+  check('WRITING IS REFUSED UNTIL IT IS SWITCHED ON',
+    off.status === 403 && /JIRA_ALLOW_WRITES/.test((await off.json()).error),
+    'a token with write access is not the same as permission to use it')
+  check('  and nothing reached Jira', writes.length === 0, JSON.stringify(writes))
+}
+
+const PORT3 = 5414
+const writable = spawn(process.execPath, ['server/index.js'], {
+  env: {
+    ...process.env,
+    PORT: String(PORT3),
+    MONGODB_URI: '',
+    JIRA_BASE_URL: 'http://127.0.0.1:5411',
+    JIRA_EMAIL: EMAIL,
+    JIRA_API_TOKEN: TOKEN,
+    JIRA_ALLOW_WRITES: 'true',
+  },
+  stdio: 'ignore',
+})
+const wbase = `http://127.0.0.1:${PORT3}`
+for (let i = 0; i < 50; i++) {
+  try {
+    if ((await fetch(`${wbase}/api/health`, { signal: AbortSignal.timeout(1500) })).ok) break
+  } catch { /* starting */ }
+  await new Promise((r) => setTimeout(r, 400))
+}
+{
+  const st3 = await (await fetch(`${wbase}/api/jira/status`)).json()
+  check('with it on, the server says it can write', st3.writable === true)
+
+  const ok = await fetch(`${wbase}/api/jira/issue/FNP-1`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start: '2026-01-20', due: '2026-06-01' }),
+  })
+  const okBody = await ok.json()
+  check('BOTH PLANNED DATES REACH THE TICKET', ok.status === 200
+    && writes.some((w) => w.fields.duedate === '2026-06-01' && w.fields.customfield_10015 === '2026-01-20'),
+    JSON.stringify(okBody))
+
+  // The whitelist: anything else in the body is dropped, not forwarded.
+  await fetch(`${wbase}/api/jira/issue/FNP-1`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      due: '2026-07-01', summary: 'hacked', status: 'Done', assignee: 'somebody', resolutiondate: '2026-01-01',
+    }),
+  })
+  const last = writes[writes.length - 1]
+  check('NOTHING BUT DATES IS EVER FORWARDED',
+    Object.keys(last.fields).every((f) => ['duedate', 'customfield_10015'].includes(f)),
+    JSON.stringify(last.fields))
+
+  const bad = await fetch(`${wbase}/api/jira/issue/FNP-1`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ due: 'next Tuesday' }),
+  })
+  check('a date that is not a date is refused before it is sent', bad.status === 400)
+
+  const clear = await fetch(`${wbase}/api/jira/issue/FNP-1`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ due: null }),
+  })
+  check('and null clears a date rather than meaning "leave it"',
+    clear.status === 200 && writes[writes.length - 1].fields.duedate === null)
+
+  // Read it back: the cache must not serve what Jira no longer holds.
+  const after = await (await fetch(`${wbase}/api/jira/issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1'] }),
+  })).json()
+  check('A WRITE INVALIDATES THE CACHED COPY',
+    after.issues[0].start === '2026-01-20' && after.issues[0].due === null,
+    JSON.stringify({ start: after.issues[0].start, due: after.issues[0].due }))
+}
+writable.kill()
 
 /* ---------------- the sync, in a real browser ---------------- */
 const exe = [

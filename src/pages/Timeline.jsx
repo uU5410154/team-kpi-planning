@@ -7,7 +7,8 @@ import SearchIcon from '@mui/icons-material/Search'
 import SyncIcon from '@mui/icons-material/Sync'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import { IconButton, CircularProgress } from '@mui/material'
+import { IconButton, CircularProgress, Popover, Divider } from '@mui/material'
+import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import * as api from '../lib/api.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
@@ -16,6 +17,69 @@ import { fmtHours, isDate, timelineOf } from '../lib/model.js'
 const DAY = 86400000
 const at = (d) => Date.parse(`${d}T00:00:00Z`)
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * The two dates a plan is made of.
+ *
+ * Held as a draft and saved on purpose, rather than written on every
+ * keystroke: a half-typed year is not a date, and this one is pushed to a real
+ * ticket that other people are looking at.
+ */
+function PlanEditor({ row, onSave, saving, jira }) {
+  const [start, setStart] = useState(row.timeline.plannedStart || '')
+  const [due, setDue] = useState(row.timeline.plannedEnd || '')
+  const bad = !!start && !!due && start > due
+
+  return (
+    <Box sx={{ p: 2, width: 290 }}>
+      <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>Planned dates</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+        {row.jiraKey
+          ? (jira?.writable
+            ? `Saved here and written to ${row.jiraKey}.`
+            : `Saved here only — writing to ${row.jiraKey} is switched off on the server.`)
+          : 'Saved here. No Jira key on this row.'}
+      </Typography>
+      <TextField
+        size="small"
+        fullWidth
+        type="date"
+        label="Planned start"
+        value={start}
+        onChange={(e) => setStart(e.target.value)}
+        InputLabelProps={{ shrink: true }}
+        sx={{ mb: 1.5 }}
+      />
+      <TextField
+        size="small"
+        fullWidth
+        type="date"
+        label="Planned finish"
+        value={due}
+        onChange={(e) => setDue(e.target.value)}
+        InputLabelProps={{ shrink: true }}
+        error={bad}
+        helperText={bad ? 'The finish is before the start.' : ' '}
+      />
+      <Divider sx={{ my: 1 }} />
+      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 1.5 }}>
+        The actual dates are not editable: Jira stamps a resolution date when an issue is resolved and will not accept
+        one as a field, so outcomes are read from there and never written back.
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+        <Button size="small" onClick={() => { setStart(''); setDue('') }} disabled={saving}>Clear both</Button>
+        <Button
+          size="small"
+          variant="contained"
+          disabled={saving || bad}
+          onClick={() => onSave(row, { start, due })}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      </Box>
+    </Box>
+  )
+}
 
 /**
  * Planned against actual, as bars on one calendar.
@@ -158,6 +222,44 @@ export default function Timeline({ plan, settings, onUpdate }) {
     outsideTeam: false,
   })
 
+  /*
+   * Editing the plan, in both places at once.
+   *
+   * The register is master for the PLAN — it is where the year was committed
+   * to — so a change here writes the project and then pushes the same two
+   * dates to the ticket. Outcomes go the other way and only the other way:
+   * Jira stamps a resolution date when an issue is resolved and will not
+   * accept one as a field, which is why there is no box for it here.
+   */
+  const [editing, setEditing] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const savePlan = async (row, next) => {
+    setSaving(true)
+    try {
+      // The register first: it is the thing being reported on, and it must
+      // hold the change even if Jira is unreachable.
+      if (row.projectKey) onUpdate(row.projectKey, { start: next.start || null, due: next.due || null })
+      if (row.jiraKey && jira?.writable) {
+        await api.jiraUpdate(row.jiraKey, { start: next.start || null, due: next.due || null })
+        setSyncNote({ severity: 'success', text: `${row.jiraKey} updated here and in Jira.` })
+      } else if (row.jiraKey && jira?.configured) {
+        setSyncNote({
+          severity: 'info',
+          text: `Saved here. Not written to ${row.jiraKey}: this server has writing switched off `
+            + '(set JIRA_ALLOW_WRITES=true in the Render dashboard).',
+        })
+      }
+      setEditing(null)
+    } catch (e) {
+      // The register keeps the change; the ticket did not take it. Saying so
+      // is the whole point — a silent half-write is how two systems drift.
+      setSyncNote({ severity: 'error', text: `Saved here, but Jira refused it: ${e.message}` })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
@@ -257,6 +359,12 @@ export default function Timeline({ plan, settings, onUpdate }) {
     const colour = colourOf(row)
     const key = String(row.jiraKey || '').trim().toUpperCase()
     const canOpen = !!key && !!jira?.configured
+    /*
+     * A project row is editable because the register owns its plan. A Jira
+     * child is editable only when this server is allowed to write, since there
+     * is nothing here to save it into — the ticket IS the record.
+     */
+    const canEdit = !!row.projectKey || (!!row.jiraKey && !!jira?.writable)
     const isOpen = open.has(key)
     const under = kids.get(key)
 
@@ -315,18 +423,34 @@ export default function Timeline({ plan, settings, onUpdate }) {
             />
 
             {planned && (
-              <Tooltip title={`Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}${tl.plannedDays != null ? ` · ${tl.plannedDays} days` : ''}`}>
-                <Box sx={{
-                  position: 'absolute',
-                  left: `${planned.left}%`,
-                  width: `${planned.width}%`,
-                  top: depth ? 4 : 6,
-                  height: depth ? 7 : 9,
-                  borderRadius: 0.5,
-                  border: 1,
-                  borderColor: 'text.disabled',
-                }}
+              <Tooltip title={`Planned ${tl.plannedStart || '—'} to ${tl.plannedEnd || '—'}${tl.plannedDays != null ? ` · ${tl.plannedDays} days` : ''}${canEdit ? ' · click to change' : ''}`}>
+                <Box
+                  onClick={canEdit ? (e) => setEditing({ anchor: e.currentTarget, row }) : undefined}
+                  sx={{
+                    position: 'absolute',
+                    left: `${planned.left}%`,
+                    width: `${planned.width}%`,
+                    top: depth ? 4 : 6,
+                    height: depth ? 7 : 9,
+                    borderRadius: 0.5,
+                    border: 1,
+                    borderColor: 'text.disabled',
+                    cursor: canEdit ? 'pointer' : 'default',
+                    '&:hover': canEdit ? { borderColor: 'primary.main', bgcolor: 'action.selected' } : undefined,
+                  }}
                 />
+              </Tooltip>
+            )}
+            {!planned && canEdit && (
+              <Tooltip title="No planned dates — click to set them">
+                <IconButton
+                  size="small"
+                  sx={{ position: 'absolute', left: 2, top: depth ? 2 : 5, p: 0.25, opacity: 0.35, '&:hover': { opacity: 1 } }}
+                  onClick={(e) => setEditing({ anchor: e.currentTarget, row })}
+                  aria-label={`set dates for ${row.rowKey}`}
+                >
+                  <EditCalendarIcon sx={{ fontSize: 15 }} />
+                </IconButton>
               </Tooltip>
             )}
             {actual && (
@@ -524,6 +648,7 @@ export default function Timeline({ plan, settings, onUpdate }) {
               key={p.key}
               row={{
                 rowKey: p.key,
+                projectKey: p.key,
                 jiraKey: p.jiraKey,
                 title: p.summary,
                 sub: [
@@ -546,6 +671,15 @@ export default function Timeline({ plan, settings, onUpdate }) {
           )}
         </Box>
       </Paper>
+
+      <Popover
+        open={!!editing}
+        anchorEl={editing?.anchor}
+        onClose={() => setEditing(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        {editing && <PlanEditor row={editing.row} onSave={savePlan} saving={saving} jira={jira} />}
+      </Popover>
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>
         <Typography variant="h4" sx={{ mb: 1 }}>How to read it</Typography>
@@ -570,7 +704,10 @@ export default function Timeline({ plan, settings, onUpdate }) {
         <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
           <strong>Planned dates are never edited to match reality.</strong> Moving a due date to the day something
           actually landed is how a portfolio comes to look as though everything arrived on time. The plan stays as it
-          was set, and the outcome is recorded beside it. A project counts as on time or late only once there is
+          was set, and the outcome is recorded beside it. Each kind of date has one owner:{' '}
+          <strong>the plan is owned here</strong> — click a planned bar to change it, and it is written to the ticket
+          too — while <strong>outcomes are owned by Jira</strong> and only ever read. A resolution date cannot be typed
+          into Jira at all: it is stamped when an issue is resolved, so it arrives from there or not at all. A project counts as on time or late only once there is
           something to judge — a due date, and either a finish or a date already gone past. {t.judged} of {t.planned}{' '}
           with a plan qualify so far; the rest show an empty track rather than a green bar, because nobody has said what
           happened yet.
