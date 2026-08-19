@@ -628,6 +628,18 @@ export default function App() {
     return made
   }, [])
 
+  /**
+   * Swap the whole register for one somebody has already computed.
+   *
+   * Used by the Jira sync, which works out the new list in one pass — dates
+   * refreshed and new epics folded in — rather than through a hundred separate
+   * edits that would each mark the plan dirty and each fire a save.
+   */
+  const replaceProjects = useCallback((projects) => {
+    if (!Array.isArray(projects)) return
+    setState((s) => ({ ...s, projects }))
+  }, [])
+
   const deleteProjects = useCallback((keys) => {
     const set = new Set(keys)
     setState((s) => ({ ...s, projects: s.projects.filter((p) => !set.has(p.key)) }))
@@ -819,6 +831,8 @@ export default function App() {
               settings={plan.settings}
               onUpdate={updateProject}
               onAddProjects={addProjects}
+              onReplaceProjects={replaceProjects}
+              rawProjects={state.projects}
             />
           )}
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import * as store from './db.js'
 import * as jira from './jira.js'
+import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -71,6 +72,24 @@ app.post('/api/jira/issues', async (req, res) => {
     return res.status(502).json({ error: e.message || 'Jira request failed.' })
   }
 })
+
+/*
+ * Run the whole sync on the server, against the shared plan.
+ *
+ * The same merge the button uses, but it does not need a browser open — which
+ * is what makes a schedule worth having.
+ */
+app.post('/api/jira/sync', async (_req, res) => {
+  try {
+    const r = await runSync({ trigger: 'manual' })
+    return res.status(r.ok ? 200 : 400).json(r)
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: e.message || 'Sync failed.' })
+  }
+})
+
+/** What the last sync did, whoever or whatever started it. */
+app.get('/api/jira/sync', (_req, res) => res.json(lastRun() || { at: null, ok: null }))
 
 /** Every epic in the Jira project, so the app can spot the ones it lacks. */
 app.get('/api/jira/epics', async (req, res) => {
@@ -180,4 +199,7 @@ app.listen(port, async () => {
       ? `scenario store: ${s.db}.${s.collection}`
       : `scenario store: unavailable (${s.reason}) — clients fall back to browser storage`,
   )
+  // Armed after the port is open, so a slow Jira cannot delay the app coming
+  // up. Silent when Jira is not configured — there would be nothing to sync.
+  if (jira.status().configured) startSchedule()
 })

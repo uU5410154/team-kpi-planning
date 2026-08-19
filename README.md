@@ -158,6 +158,27 @@ refuses anything that is not one — but every read happens with that account's
 permissions, so a service account with read-only access to the FNP project is
 worth asking IT for rather than using a personal token.
 
+### The daily sync
+
+The server syncs itself at **07:00 Asia/Bangkok** every day: it refreshes the
+actual dates for every project carrying a Jira key and adds any epic on the
+board the register has never seen. It needs no browser open — that is the point
+of a schedule — and writes straight to the shared plan.
+
+| Key | Default | |
+| --- | --- | --- |
+| `JIRA_SYNC_ENABLED` | `true` | set `false` to stop the schedule |
+| `JIRA_SYNC_HOUR` | `7` | 0–23, local to the timezone below |
+| `JIRA_SYNC_TZ` | `Asia/Bangkok` | any IANA name |
+| `JIRA_SYNC_SCENARIO` | `Baseline` | which shared plan to keep up to date |
+
+`GET /api/jira/sync` reports what the last run did, whoever started it.
+`POST /api/jira/sync` runs it now.
+
+**Sync with Jira** on the Timeline does the same two things to the copy in your
+browser, using the same merge — one rule, two callers, so a run at seven and a
+person clicking cannot disagree about what the register should hold.
+
 ### Pulling in new epics
 
 **Find new epics** on the Timeline lists every epic in the Jira project that the

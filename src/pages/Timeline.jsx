@@ -14,6 +14,7 @@ import {
 import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import * as api from '../lib/api.js'
+import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
 import { fmtHours, isDate, timelineOf } from '../lib/model.js'
@@ -98,7 +99,9 @@ function PlanEditor({ row, onSave, saving, jira }) {
  * is the truthful picture: most of this register has never been told what
  * happened. It is never coloured as though it were on time.
  */
-export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
+export default function Timeline({
+  plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects,
+}) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const asOf = settings.asOfDate
@@ -121,47 +124,65 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
   }, [])
 
   const keyed = useMemo(
-    () => plan.projects.filter((p) => /^[A-Za-z][A-Za-z0-9_]+-\d+$/.test(String(p.jiraKey || '').trim())),
+    () => plan.projects.filter((p) => JIRA_KEY.test(String(p.jiraKey || '').trim())),
     [plan.projects],
   )
 
+  /*
+   * The whole board, not just what the register already knows about.
+   *
+   * Refreshing dates for rows that happen to carry a key left a newly created
+   * epic invisible until somebody thought to press a different button — that
+   * is a refresh, not a sync. It now pulls both: actual dates for everything
+   * keyed, and any epic on the board the register has never seen.
+   *
+   * The merge itself is shared with the scheduled job on the server, so a run
+   * at seven in the morning and a person clicking this cannot end up
+   * disagreeing about what the register should contain.
+   */
   const sync = async () => {
     setSyncing(true)
     setSyncNote(null)
     try {
-      const r = await api.jiraIssues(keyed.map((p) => p.jiraKey.trim()))
-      const byKey = new Map(r.issues.map((i) => [i.key.toUpperCase(), i]))
-      let changed = 0
-      let fromCreated = 0
-      for (const p of keyed) {
-        const issue = byKey.get(p.jiraKey.trim().toUpperCase())
-        if (!issue) continue
-        /*
-         * Only what actually happened. The PLAN is never touched — not the
-         * start, not the due date — however tempting it is to take Jira's due
-         * date as authoritative: the plan is what was committed to at the
-         * start of the year, and Jira's due date moves whenever somebody drags
-         * a card.
-         */
-        const patch = {}
-        const actualStart = issue.start || issue.created || null
-        const actualEnd = issue.done ? (issue.resolved || null) : null
-        if (actualStart && actualStart !== p.actualStart) patch.actualStart = actualStart
-        if (actualEnd && actualEnd !== p.actualEnd) patch.actualEnd = actualEnd
-        // A ticket reopened in Jira has to be able to un-finish here too, or
-        // the chart keeps reporting a finish that was taken back.
-        if (!issue.done && p.actualEnd) patch.actualEnd = null
-        if (issue.startSource === 'created') fromCreated += 1
-        if (Object.keys(patch).length) {
-          onUpdate(p.key, patch)
-          changed += 1
-        }
+      const [fetched, board] = await Promise.all([
+        keyed.length
+          ? api.jiraIssues(keyed.map((p) => p.jiraKey.trim()))
+          : Promise.resolve({ issues: [], missing: [] }),
+        api.jiraEpics(),
+      ])
+      /*
+       * The RAW register, not the computed one.
+       *
+       * plan.projects carries everything computePlan derived — shares, ROI,
+       * the timeline, thirty-odd fields — and writing those back into stored
+       * state would bake a snapshot of yesterday's arithmetic into the plan,
+       * where it would be saved, exported and never recomputed.
+       */
+      const r = mergeJira({ projects: rawProjects },
+        { issues: fetched.issues, epics: board.epics }, { addNew: true })
+      if (r.unchanged) {
+        setSyncNote({
+          severity: 'success',
+          text: `Already up to date — ${fetched.issues.length} issues checked, and all ${board.epics.length} epics `
+            + `in ${board.project} are on the register.`,
+        })
+        return
       }
+      onReplaceProjects(r.projects)
       setSyncNote({
         severity: 'success',
-        text: `${changed} project${changed === 1 ? '' : 's'} updated from ${r.issues.length} Jira issue${r.issues.length === 1 ? '' : 's'}`
-          + `${r.missing.length ? ` · ${r.missing.length} key${r.missing.length === 1 ? '' : 's'} not found in Jira: ${r.missing.slice(0, 4).join(', ')}` : ''}`
-          + `${fromCreated ? ` · ${fromCreated} start date${fromCreated === 1 ? '' : 's'} taken from when the ticket was raised, Jira having no Start date on them` : ''}`,
+        text: [
+          r.updated ? `${r.updated} project${r.updated === 1 ? '' : 's'} had dates updated` : null,
+          r.added
+            ? `${r.added} new epic${r.added === 1 ? '' : 's'} added as Watch (${r.addedKeys.slice(0, 5).join(', ')}${r.addedKeys.length > 5 ? '…' : ''})`
+            : null,
+          (fetched.missing || []).length
+            ? `${fetched.missing.length} key${fetched.missing.length === 1 ? '' : 's'} not in Jira: ${fetched.missing.slice(0, 3).join(', ')}`
+            : null,
+          r.fromCreated
+            ? `${r.fromCreated} start${r.fromCreated === 1 ? '' : 's'} taken from when the ticket was raised`
+            : null,
+        ].filter(Boolean).join(' · '),
       })
     } catch (e) {
       setSyncNote({ severity: 'error', text: e.message })
@@ -781,10 +802,10 @@ export default function Timeline({ plan, settings, onUpdate, onAddProjects }) {
           <Button
             variant="outlined"
             startIcon={<SyncIcon />}
-            disabled={!jira?.configured || syncing || !keyed.length}
+            disabled={!jira?.configured || syncing}
             onClick={sync}
           >
-            {syncing ? 'Reading Jira…' : `Sync ${keyed.length} from Jira`}
+            {syncing ? 'Reading Jira…' : 'Sync with Jira'}
           </Button>
           <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5 }}>
             {jira == null ? 'checking…'

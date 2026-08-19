@@ -413,13 +413,15 @@ if (!exe) {
   await new Promise((r) => setTimeout(r, 3500))
 
   const label = await page.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => /Sync \d+ from Jira/.test(x.innerText))
+    const b = [...document.querySelectorAll('button')].find((x) => /Sync with Jira/.test(x.innerText))
     return b ? b.innerText.trim() : null
   })
-  check('the button offers exactly the keyed projects', label === 'Sync 3 from Jira', String(label))
+  // No longer counts keys in its label: it pulls the whole board, not just
+  // the rows that happen to have one.
+  check('the sync button is offered', label === 'Sync with Jira', String(label))
 
   await page.evaluate(() => {
-    [...document.querySelectorAll('button')].find((x) => /Sync \d+ from Jira/.test(x.innerText)).click()
+    [...document.querySelectorAll('button')].find((x) => /Sync with Jira/.test(x.innerText)).click()
   })
   await new Promise((r) => setTimeout(r, 3000))
 
@@ -427,7 +429,7 @@ if (!exe) {
     const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
     const byKey = Object.fromEntries(st.projects.slice(0, 3).map((p) => [p.jiraKey, p]))
     return {
-      note: (document.body.innerText.match(/\d+ projects? updated[^\n]*/) || [''])[0],
+      note: (document.body.innerText.match(new RegExp('[0-9]+ projects? had dates updated[^' + String.fromCharCode(10) + ']*')) || [''])[0],
       rows: st.projects.slice(0, 3).map((p) => ({
         jira: p.jiraKey, start: p.start, due: p.due, actualStart: p.actualStart, actualEnd: p.actualEnd,
       })),
@@ -713,6 +715,31 @@ if (!exe) {
 }
 
 srv.kill()
+
+/* ---------------- the sync the server runs by itself ---------------- */
+console.log(String.fromCharCode(10) + '--- the schedule, and the sync that does not need a browser ---')
+{
+  const { startSchedule } = await import('../server/jiraSync.js')
+
+  // 07:00 in a named timezone, whatever the machine's own clock says.
+  process.env.JIRA_SYNC_HOUR = '7'
+  process.env.JIRA_SYNC_TZ = 'Asia/Bangkok'
+  const armed = startSchedule()
+  check('THE DAILY SYNC IS ARMED', !!armed && armed.hour === 7 && armed.tz === 'Asia/Bangkok',
+    armed ? `next in ${Math.round(armed.nextInMs / 60000)} min` : 'not armed')
+  check('  for a time within the next day', armed.nextInMs > 0 && armed.nextInMs <= 86400000,
+    `${Math.round(armed.nextInMs / 3600000)} hours away`)
+  // Prove it lands on the hour: now + wait, read back in Bangkok, must be 07:00.
+  const landing = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Bangkok', hour12: false, hour: '2-digit', minute: '2-digit',
+  }).format(new Date(Date.now() + armed.nextInMs))
+  check('  AND IT LANDS ON 07:00 IN THAT TIMEZONE, not on the machine’s', landing === '07:00', landing)
+  armed.stop()
+
+  process.env.JIRA_SYNC_ENABLED = 'false'
+  check('and it can be switched off', startSchedule() === null)
+  delete process.env.JIRA_SYNC_ENABLED
+}
 
 /* ---------------- and without Jira at all ---------------- */
 console.log('\n--- with no Jira configured, the app still works ---')
