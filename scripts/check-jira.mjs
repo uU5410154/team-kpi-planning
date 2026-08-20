@@ -149,11 +149,20 @@ const fake = createServer((req, res) => {
     askedFor.push(parsed.jql || '')
     const jql = String(parsed.jql || '')
     const keys = jql.replace(/.*\(|\).*/g, '').split(',').map((k) => k.trim())
-    const issues = /issuetype = /.test(jql)
+    let issues = /issuetype = /.test(jql)
       ? Object.entries(ISSUES).map(([k, v]) => ({ ...v, key: k }))
       : /^parent IN/.test(jql)
         ? Object.values(CHILDREN).flat().filter((c) => keys.includes(c.fields.parent.key))
         : keys.map((k) => ISSUES[k]).filter(Boolean)
+    /*
+     * Rank is a deliberate scramble here: neither key order nor date order, so
+     * a client that quietly sorts by either is caught rather than passing by
+     * coincidence.
+     */
+    if (/ORDER BY Rank ASC/.test(jql)) {
+      const rank = ['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13']
+      issues = [...issues].sort((a, b) => rank.indexOf(a.key) - rank.indexOf(b.key))
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ issues }))
   })
@@ -280,6 +289,25 @@ console.log(String.fromCharCode(10) + '--- new epics can be found and brought in
   const nasty = await (await fetch(`${base}/api/jira/epics?since=${encodeURIComponent('1d OR project = SECRET')}`)).json()
   check('AND A WINDOW THAT IS NOT A NUMBER IS DROPPED, NOT PASSED THROUGH',
     !/SECRET/.test(nasty.jql), nasty.jql)
+}
+
+/* ---------------- the order Jira shows ---------------- */
+console.log(String.fromCharCode(10) + '--- children come back in the order Jira lists them ---')
+{
+  const kids = await (await fetch(`${base}/api/jira/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1'] }),
+  })).json()
+  const order = kids.byParent['FNP-1'].map((c) => c.key)
+  check('IT ASKS JIRA FOR RANK ORDER, WHICH IS THE BOARD ORDER',
+    kids.ordering === 'Rank ASC' && askedFor.some((j) => /ORDER BY Rank ASC/.test(j)),
+    `ordering: ${kids.ordering}`)
+  check('AND HANDS BACK EXACTLY THAT ORDER',
+    JSON.stringify(order) === JSON.stringify(['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13']),
+    order.join(', '))
+  check('  which is neither key order nor date order',
+    order.join() !== [...order].sort().join(), 'a sort by anything else would have shown here')
 }
 
 /* ---------------- writing the plan back ---------------- */
@@ -563,6 +591,21 @@ if (!exe) {
   check('  and the overrun is drawn beyond the planned edge',
     taskBars.some((b) => b.hatched && b.left >= tPlanned.left + tPlanned.width - 1),
     `${taskBars.filter((b) => b.hatched).length} hatched segment(s)`)
+
+  // ---- and the page renders them in that order ----
+  const drawnOrder = await page.evaluate(() => {
+    // Read the rendered text top to bottom and keep the first mention of each
+    // child key: whatever order the DOM is in IS the order on screen.
+    const text = document.body.innerText
+    const seen = []
+    for (const m of text.matchAll(/FNP-1[1-4]/g)) {
+      if (!seen.includes(m[0])) seen.push(m[0])
+    }
+    return seen
+  })
+  check('THE PAGE DRAWS THEM IN THE ORDER JIRA GAVE',
+    JSON.stringify(drawnOrder) === JSON.stringify(['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13']),
+    drawnOrder.join(', '))
 
   // ---- a task with NO due date still gets something to read against ----
   const borrowed = await page.evaluate(() => {

@@ -155,8 +155,21 @@ export async function childrenOf(keys) {
   const byParent = {}
   for (const k of parents) byParent[k] = []
 
-  for (let i = 0; i < parents.length; i += 20) {
-    const batch = parents.slice(i, i + 20)
+  /*
+   * BY RANK, which is the order Jira itself shows.
+   *
+   * Ordered by creation date, the list here disagreed with the board on screen
+   * the moment anybody dragged a card — and dragging cards is how a backlog is
+   * kept. Rank is that drag order; it is what "the same order as in Jira"
+   * means, and it is not derivable from any other field.
+   *
+   * Not every Jira has the field: it comes with Jira Software and a site
+   * without it answers 400. That is worth falling back from rather than
+   * failing on, so the order degrades to creation date and the caller is told
+   * which one it got.
+   */
+  let ordering = 'Rank ASC'
+  const ask = async (batch, orderBy) => {
     const res = await fetch(`${c.base}/rest/api/3/search/jql`, {
       method: 'POST',
       headers: {
@@ -165,12 +178,22 @@ export async function childrenOf(keys) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        jql: `parent IN (${batch.join(',')}) ORDER BY created ASC`,
+        jql: `parent IN (${batch.join(',')}) ORDER BY ${orderBy}`,
         fields,
         maxResults: 100,
       }),
       signal: AbortSignal.timeout(20000),
     })
+    return res
+  }
+
+  for (let i = 0; i < parents.length; i += 20) {
+    const batch = parents.slice(i, i + 20)
+    let res = await ask(batch, ordering)
+    if (!res.ok && res.status === 400 && ordering !== 'created ASC') {
+      ordering = 'created ASC'
+      res = await ask(batch, ordering)
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       const err = new Error(`Jira ${res.status}: ${text.slice(0, 200)}`)
@@ -178,13 +201,19 @@ export async function childrenOf(keys) {
       throw err
     }
     const data = await res.json()
+    // Pushed in the order Jira answered in, and never sorted afterwards: the
+    // order IS the data here.
     for (const raw of data.issues || []) {
       const parent = raw.fields?.parent?.key
       if (!parent || !byParent[parent]) continue
       byParent[parent].push({ ...shape(raw, c), type: raw.fields?.issuetype?.name || '' })
     }
   }
-  return { byParent, total: Object.values(byParent).reduce((a, v) => a + v.length, 0) }
+  return {
+    byParent,
+    total: Object.values(byParent).reduce((a, v) => a + v.length, 0),
+    ordering,
+  }
 }
 
 /**
