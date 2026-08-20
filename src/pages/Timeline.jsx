@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Chip, TextField, Select, MenuItem, FormControl, InputLabel,
   FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress,
@@ -13,6 +13,7 @@ import {
 } from '@mui/material'
 import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
+import { ToggleButton, ToggleButtonGroup } from '@mui/material'
 import * as api from '../lib/api.js'
 import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
@@ -366,6 +367,8 @@ export default function Timeline({
     setCandidates(null)
   }
 
+  const [scale, setScale] = useState('month')
+  const scrollRef = useRef(null)
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
@@ -413,6 +416,21 @@ export default function Timeline({
     return { from: min - pad, to: max + pad }
   }, [rows, asOf])
 
+  /*
+   * Months, weeks or days.
+   *
+   * A year across a screen answers "did this land in Q3". It cannot answer
+   * "which week did it slip into", because a week is four pixels wide. So the
+   * finer scales stop fitting the year into the width and give each unit a
+   * real size instead, and the calendar scrolls sideways underneath a project
+   * column that stays put.
+   */
+  const PER_UNIT = { month: 0, week: 46, day: 26 }
+  const days = Math.max(1, Math.round((span.to - span.from) / DAY))
+  const trackPx = scale === 'month'
+    ? null
+    : Math.max(720, Math.round(days * (scale === 'day' ? PER_UNIT.day : PER_UNIT.week / 7)))
+
   const pct = (ms) => ((ms - span.from) / (span.to - span.from)) * 100
   const bar = (a, b) => {
     if (!isDate(a) && !isDate(b)) return null
@@ -425,20 +443,87 @@ export default function Timeline({
     return { left, width }
   }
 
-  // Month ticks across the whole span.
+  /*
+   * The gridlines, at whatever interval the scale asks for.
+   *
+   * `strong` marks the line worth seeing at a glance — the first of the month
+   * on the finer scales — so a day view still reads as a calendar rather than
+   * as three hundred identical stripes.
+   */
   const ticks = useMemo(() => {
     const out = []
     const d = new Date(span.from)
-    d.setUTCDate(1)
     d.setUTCHours(0, 0, 0, 0)
-    for (let i = 0; i < 60; i++) {
+
+    if (scale === 'month') {
+      d.setUTCDate(1)
+      for (let i = 0; i < 120 && d.getTime() <= span.to; i++) {
+        const ms = d.getTime()
+        if (ms >= span.from) {
+          out.push({
+            ms,
+            label: d.getUTCMonth() === 0 ? `${MONTHS[0]} ${String(d.getUTCFullYear()).slice(2)}` : MONTHS[d.getUTCMonth()],
+            strong: d.getUTCMonth() === 0,
+          })
+        }
+        d.setUTCMonth(d.getUTCMonth() + 1)
+      }
+      return out
+    }
+
+    if (scale === 'week') {
+      // Back to the Monday on or before the start: a week that begins midweek
+      // is not a week anybody reads.
+      const back = (d.getUTCDay() + 6) % 7
+      d.setUTCDate(d.getUTCDate() - back)
+      for (let i = 0; i < 400 && d.getTime() <= span.to; i++) {
+        const ms = d.getTime()
+        if (ms >= span.from) {
+          out.push({
+            ms,
+            label: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`,
+            strong: d.getUTCDate() <= 7,
+          })
+        }
+        d.setUTCDate(d.getUTCDate() + 7)
+      }
+      return out
+    }
+
+    for (let i = 0; i < 1200 && d.getTime() <= span.to; i++) {
       const ms = d.getTime()
-      if (ms > span.to) break
-      if (ms >= span.from) out.push({ ms, label: MONTHS[d.getUTCMonth()], year: d.getUTCFullYear() })
-      d.setUTCMonth(d.getUTCMonth() + 1)
+      const dow = d.getUTCDay()
+      if (ms >= span.from) {
+        out.push({
+          ms,
+          label: String(d.getUTCDate()),
+          strong: d.getUTCDate() === 1,
+          // Saturdays and Sundays, shaded: a four-day overrun that swallowed a
+          // weekend is a different story from one that did not.
+          weekend: dow === 0 || dow === 6,
+          width: DAY,
+        })
+      }
+      d.setUTCDate(d.getUTCDate() + 1)
     }
     return out
-  }, [span])
+  }, [span, scale])
+
+  /*
+   * Scrolled to today whenever the scale changes.
+   *
+   * A day view of a fourteen-month span is nine thousand pixels wide, and it
+   * opens on the first of January — five thousand pixels from anything anybody
+   * wanted to look at. Landing on today is the only sane starting point.
+   */
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || scale === 'month') return
+    const width = el.scrollWidth - el.clientWidth
+    if (width <= 0) return
+    const at01 = (pct(at(asOf)) / 100) * (el.scrollWidth - 396)
+    el.scrollLeft = Math.max(0, Math.min(width, at01 - el.clientWidth / 2))
+  }, [scale, asOf, span.from, span.to])
 
   const picks = [{ id: 'all', nick: 'All PICs' }, ...plan.assignees.map((p) => ({ id: p.id, nick: p.nick }))]
 
@@ -560,7 +645,23 @@ export default function Timeline({
             '&:hover': { bgcolor: 'action.selected' },
           }}
         >
-          <Box sx={{ width: 300, flexShrink: 0, px: 1.5, py: 0.5, display: 'flex', alignItems: 'center', gap: 0.5, pl: 1.5 + depth * 2 }}>
+          <Box sx={{
+            width: 300,
+            flexShrink: 0,
+            px: 1.5,
+            py: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            pl: 1.5 + depth * 2,
+            // Pinned: the calendar slides underneath it on the finer scales,
+            // and a bar with no name against it is a bar nobody can use.
+            position: 'sticky',
+            left: 0,
+            bgcolor: depth ? 'background.default' : 'background.paper',
+            zIndex: 1,
+          }}
+          >
             {canOpen ? (
               <IconButton
                 size="small"
@@ -584,13 +685,28 @@ export default function Timeline({
             </Box>
           </Box>
 
-          <Box sx={{ position: 'relative', flex: 1, height: depth ? 28 : 34 }}>
+          <Box sx={{
+            position: 'relative',
+            flex: trackPx ? 'none' : 1,
+            width: trackPx || 'auto',
+            height: depth ? 28 : 34,
+          }}
+          >
             {ticks.map((tk) => (
               <Box
                 key={tk.ms}
                 sx={{
-                  position: 'absolute', left: `${pct(tk.ms)}%`, top: 0, bottom: 0,
-                  borderLeft: 1, borderColor: 'divider', opacity: 0.5,
+                  position: 'absolute',
+                  left: `${pct(tk.ms)}%`,
+                  width: tk.weekend ? `${(tk.width / (span.to - span.from)) * 100}%` : undefined,
+                  top: 0,
+                  bottom: 0,
+                  borderLeft: tk.strong ? 2 : 1,
+                  borderColor: tk.strong ? 'text.disabled' : 'divider',
+                  opacity: tk.strong ? 0.55 : 0.4,
+                  // Weekends shaded on the day scale: an overrun that swallowed
+                  // a weekend is a different story from one that did not.
+                  bgcolor: tk.weekend ? 'action.hover' : undefined,
                 }}
               />
             ))}
@@ -729,7 +845,17 @@ export default function Timeline({
             )}
           </Box>
 
-          <Box sx={{ width: 96, flexShrink: 0, px: 1, textAlign: 'right' }}>
+          <Box sx={{
+            width: 96,
+            flexShrink: 0,
+            px: 1,
+            textAlign: 'right',
+            position: 'sticky',
+            right: 0,
+            bgcolor: depth ? 'background.default' : 'background.paper',
+            zIndex: 1,
+          }}
+          >
             {tl.lateBy == null ? (
               <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>
             ) : (
@@ -873,37 +999,93 @@ export default function Timeline({
           label={<Typography variant="body2">Ours only</Typography>}
         />
         <Box sx={{ flex: 1 }} />
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={scale}
+          onChange={(_e, v) => v && setScale(v)}
+        >
+          <ToggleButton value="day">Day</ToggleButton>
+          <ToggleButton value="week">Week</ToggleButton>
+          <ToggleButton value="month">Month</ToggleButton>
+        </ToggleButtonGroup>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           {rows.length} project{rows.length === 1 ? '' : 's'} on the chart
         </Typography>
       </Paper>
 
-      <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-        <Box sx={{ display: 'flex', borderBottom: 1, borderColor: 'divider', bgcolor: 'action.hover' }}>
-          <Box sx={{ width: 300, flexShrink: 0, px: 1.5, py: 0.75 }}>
-            <Typography variant="caption" sx={{ fontWeight: 700 }}>PROJECT</Typography>
-          </Box>
-          <Box sx={{ position: 'relative', flex: 1, height: 26 }}>
-            {ticks.map((tk) => (
-              <Box
-                key={tk.ms}
-                sx={{
-                  position: 'absolute', left: `${pct(tk.ms)}%`, top: 0, bottom: 0,
-                  borderLeft: 1, borderColor: 'divider', pl: 0.5,
-                }}
+      <Paper variant="outlined">
+        <Box ref={scrollRef} sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '62vh' }}>
+          <Box sx={{ minWidth: trackPx ? trackPx + 396 : 'auto' }}>
+            <Box sx={{
+              display: 'flex',
+              borderBottom: 1,
+              borderColor: 'divider',
+              bgcolor: 'action.hover',
+              position: 'sticky',
+              top: 0,
+              zIndex: 3,
+            }}
+            >
+              <Box sx={{
+                width: 300,
+                flexShrink: 0,
+                px: 1.5,
+                py: 0.75,
+                position: 'sticky',
+                left: 0,
+                bgcolor: 'background.paper',
+                zIndex: 2,
+              }}
               >
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                  {tk.label === 'Jan' ? `${tk.label} ${String(tk.year).slice(2)}` : tk.label}
-                </Typography>
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>PROJECT</Typography>
               </Box>
-            ))}
-          </Box>
-          <Box sx={{ width: 96, flexShrink: 0, px: 1, py: 0.75, textAlign: 'right' }}>
-            <Typography variant="caption" sx={{ fontWeight: 700 }}>SLIP</Typography>
-          </Box>
-        </Box>
+              <Box sx={{ position: 'relative', flex: trackPx ? 'none' : 1, width: trackPx || 'auto', height: 26 }}>
+                {ticks.map((tk) => (
+                  <Box
+                    key={tk.ms}
+                    sx={{
+                      position: 'absolute',
+                      left: `${pct(tk.ms)}%`,
+                      top: 0,
+                      bottom: 0,
+                      borderLeft: tk.strong ? 2 : 1,
+                      borderColor: tk.strong ? 'text.disabled' : 'divider',
+                      pl: 0.4,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: tk.strong ? 'text.primary' : 'text.secondary',
+                        fontSize: '0.62rem',
+                        fontWeight: tk.strong ? 700 : 400,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {tk.label}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Box sx={{
+                width: 96,
+                flexShrink: 0,
+                px: 1,
+                py: 0.75,
+                textAlign: 'right',
+                position: 'sticky',
+                right: 0,
+                bgcolor: 'background.paper',
+                zIndex: 2,
+              }}
+              >
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>SLIP</Typography>
+              </Box>
+            </Box>
 
-        <Box sx={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            <Box>
           {rows.map((p) => (
             <RowGroup
               key={p.key}
@@ -923,13 +1105,15 @@ export default function Timeline({
               depth={0}
             />
           ))}
-          {rows.length === 0 && (
-            <Box sx={{ p: 4, textAlign: 'center' }}>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Nothing matches that filter.
-              </Typography>
+              {rows.length === 0 && (
+                <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    Nothing matches that filter.
+                  </Typography>
+                </Box>
+              )}
             </Box>
-          )}
+          </Box>
         </Box>
       </Paper>
 

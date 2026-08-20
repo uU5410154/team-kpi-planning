@@ -195,6 +195,54 @@ if (!exe) {
   check('the state filter offers the states that matter',
     ['Past due, unfinished', 'Running now', 'Finished'].every((x) => opts.includes(x)), opts.join(' | '))
 
+  /* ---- day, week and month ---- */
+  const scaleOf = async (label) => {
+    await page.evaluate((l) => {
+      // The theme upper-cases button labels, so match without regard to case.
+      const b = [...document.querySelectorAll('button')]
+        .find((x) => x.innerText.trim().toLowerCase() === l.toLowerCase())
+      if (!b) throw new Error(`no ${l} button`)
+      b.click()
+    }, label)
+    await new Promise((r) => setTimeout(r, 900))
+    return page.evaluate(() => {
+      // The header row is the one carrying both column titles; the calendar is
+      // the box between them.
+      const rows = [...document.querySelectorAll('div')].filter((d) => {
+        const t = d.innerText || ''
+        return t.includes('PROJECT') && t.includes('SLIP') && d.children.length === 3
+      })
+      const head = rows[rows.length - 1]
+      const track = head && head.children[1]
+      const box = [...document.querySelectorAll('div')].find((d) => d.scrollWidth > d.clientWidth + 50)
+      return {
+        ticks: track ? track.children.length : 0,
+        firstTicks: track ? [...track.children].slice(0, 3).map((c) => c.innerText.trim()) : [],
+        trackWidth: track ? Math.round(track.getBoundingClientRect().width) : 0,
+        scrollable: !!box,
+        scrolled: box ? box.scrollLeft : 0,
+      }
+    })
+  }
+
+  const month = await scaleOf('Month')
+  const week = await scaleOf('Week')
+  const day = await scaleOf('Day')
+
+  check('THERE IS A DAY, WEEK AND MONTH VIEW',
+    month.ticks > 0 && week.ticks > month.ticks && day.ticks > week.ticks,
+    `month ${month.ticks} ticks, week ${week.ticks}, day ${day.ticks}`)
+  check('  each scale is finer than the last, and wider',
+    day.trackWidth > week.trackWidth && week.trackWidth > month.trackWidth,
+    `${month.trackWidth}px -> ${week.trackWidth}px -> ${day.trackWidth}px`)
+  check('  the month view still fits without scrolling', month.scrollable === false || month.trackWidth < 2000,
+    `${month.trackWidth}px`)
+  check('  and the finer ones scroll', day.scrollable === true)
+  check('  landing on today rather than on January',
+    day.scrolled > 0, `scrolled ${Math.round(day.scrolled)}px in`)
+  check('  the week scale is labelled by date', /^\d+ \w+$/.test(week.firstTicks[0] || ''), week.firstTicks.join(' | '))
+  check('  and the day scale by day number', /^\d+$/.test(day.firstTicks[0] || ''), day.firstTicks.join(' | '))
+
   await browser.close()
   srv.kill()
 }
