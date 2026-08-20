@@ -8,14 +8,21 @@ import { newProject } from './model.js'
  * and a person clicking a button end up disagreeing about the register, and
  * the disagreement is always found weeks later.
  *
- * Two things happen here and nothing else:
+ * Three things happen here and nothing else:
  *
  *   1. every project with a Jira key has its ACTUAL dates refreshed;
- *   2. every epic on the board that the register has never seen is added.
+ *   2. and its NAME, because the ticket is where that is decided — an epic
+ *      renamed in Jira left the register showing a title nobody uses;
+ *   3. every epic on the board that the register has never seen is added.
  *
  * The plan, the saving hours, the effort, the objective and the owner are the
  * register's own and are never restated from Jira. The one exception is an
  * epic arriving for the first time, which has no plan here to overwrite.
+ *
+ * Nothing is ever DELETED from here. A ticket removed in Jira is reported as
+ * missing and left alone: the row may carry saving hours, effort and a place
+ * in somebody's KPI, none of which live in Jira, and none of which should
+ * vanish because a ticket was tidied up.
  */
 export const JIRA_KEY = /^[A-Za-z][A-Za-z0-9_]+-\d+$/
 
@@ -60,17 +67,34 @@ export function mergeJira(state, { issues = [], epics = [] } = {}, { addNew = tr
 
   let updated = 0
   let fromCreated = 0
+  const renamed = []
   const projects = (state.projects || []).map((p) => {
     const issue = byKey.get(String(p.jiraKey || '').trim().toUpperCase())
     if (!issue) return p
     if (issue.startSource === 'created') fromCreated += 1
+
+    const patch = {}
     const actualStart = issue.start || issue.created || null
     // Not done in Jira means not finished here either: a ticket reopened after
     // being resolved has to be able to take its finish back.
     const actualEnd = issue.done ? (issue.resolved || null) : null
-    if (actualStart === (p.actualStart || null) && actualEnd === (p.actualEnd || null)) return p
+    if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart
+    if (actualEnd !== (p.actualEnd || null)) patch.actualEnd = actualEnd
+
+    /*
+     * The name follows the ticket. What a piece of work is called is settled
+     * in Jira — it gets renamed there as scope becomes clear — and a register
+     * still showing the old title is a register people stop trusting.
+     */
+    const title = String(issue.summary || '').trim()
+    if (title && title !== String(p.summary || '').trim()) {
+      patch.summary = title
+      renamed.push({ key: issue.key, from: p.summary, to: title })
+    }
+
+    if (!Object.keys(patch).length) return p
     updated += 1
-    return { ...p, actualStart, actualEnd }
+    return { ...p, ...patch }
   })
 
   const addedKeys = []
@@ -100,6 +124,8 @@ export function mergeJira(state, { issues = [], epics = [] } = {}, { addNew = tr
     updated,
     added: addedKeys.length,
     addedKeys,
+    renamed: renamed.length,
+    renames: renamed.slice(0, 20),
     fromCreated,
     unchanged: updated === 0 && addedKeys.length === 0,
   }

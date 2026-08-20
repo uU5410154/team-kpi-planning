@@ -172,7 +172,10 @@ export default function Timeline({
       setSyncNote({
         severity: 'success',
         text: [
-          r.updated ? `${r.updated} project${r.updated === 1 ? '' : 's'} had dates updated` : null,
+          r.updated ? `${r.updated} project${r.updated === 1 ? '' : 's'} updated` : null,
+          r.renamed
+            ? `${r.renamed} renamed to match Jira (${r.renames.slice(0, 2).map((x) => x.to).join(', ')}${r.renamed > 2 ? '…' : ''})`
+            : null,
           r.added
             ? `${r.added} new epic${r.added === 1 ? '' : 's'} added as Watch (${r.addedKeys.slice(0, 5).join(', ')}${r.addedKeys.length > 5 ? '…' : ''})`
             : null,

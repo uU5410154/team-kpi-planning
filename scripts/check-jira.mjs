@@ -291,6 +291,128 @@ console.log(String.fromCharCode(10) + '--- new epics can be found and brought in
     !/SECRET/.test(nasty.jql), nasty.jql)
 }
 
+/* ---------------- renamed, added, deleted ---------------- */
+console.log(String.fromCharCode(10) + '--- a board that changes shape ---')
+{
+  const { mergeJira } = await import('../src/lib/jiraMerge.js')
+  const plan = {
+    projects: [
+      {
+        key: 'P-1',
+        jiraKey: 'FNP-1',
+        summary: 'The name it had last week',
+        savingHours: 120,
+        manday: 8,
+        commitLevel: 'commit',
+        actualStart: null,
+        actualEnd: null,
+      },
+      { key: 'P-2', jiraKey: 'FNP-GONE-99', summary: 'Ticket somebody deleted', savingHours: 40, commitLevel: 'commit' },
+    ],
+  }
+  const issues = [{
+    key: 'FNP-1',
+    summary: 'The name it has today',
+    status: 'Done',
+    done: true,
+    created: '2026-01-05',
+    start: '2026-01-10',
+    resolved: '2026-04-01',
+    startSource: 'start-date',
+  }]
+
+  const r = mergeJira(plan, { issues, epics: [] }, { addNew: false })
+  const one = r.projects.find((x) => x.jiraKey === 'FNP-1')
+  check('AN EPIC RENAMED IN JIRA IS RENAMED HERE', one.summary === 'The name it has today', one.summary)
+  check('  and the rename is reported, not silent',
+    r.renamed === 1 && r.renames[0].from === 'The name it had last week',
+    JSON.stringify(r.renames))
+  check('  while its hours, effort and commit level are untouched',
+    one.savingHours === 120 && one.manday === 8 && one.commitLevel === 'commit',
+    'a name is Jira’s; a KPI is not')
+
+  const gone = r.projects.find((x) => x.key === 'P-2')
+  check('A TICKET DELETED IN JIRA DOES NOT DELETE THE ROW',
+    !!gone && gone.savingHours === 40,
+    'the row carries hours and a place in a KPI that never lived in Jira')
+
+  // Adding is the epic import, already proven above; assert it here too so the
+  // three verbs are checked in one place.
+  const added = mergeJira(plan, {
+    issues: [],
+    epics: [{ key: 'FNP-NEW-1', summary: 'Raised this morning', status: 'Backlog', created: '2026-08-19' }],
+  }, { addNew: true })
+  check('AN EPIC ADDED IN JIRA APPEARS HERE', added.addedKeys.includes('FNP-NEW-1'), JSON.stringify(added.addedKeys))
+
+  // And renaming back is just another rename: nothing sticks.
+  const backAgain = mergeJira({ projects: r.projects },
+    { issues: [{ ...issues[0], summary: 'The name it had last week' }], epics: [] }, { addNew: false })
+  check('  a name changed back changes back', backAgain.renamed === 1
+    && backAgain.projects.find((x) => x.jiraKey === 'FNP-1').summary === 'The name it had last week')
+
+  // Only three fields may ever move.
+  const allowed = new Set(['summary', 'actualStart', 'actualEnd'])
+  const moved = new Set()
+  plan.projects.forEach((was) => {
+    const now = r.projects.find((x) => x.key === was.key)
+    for (const f of new Set([...Object.keys(was), ...Object.keys(now)])) {
+      if (JSON.stringify(was[f]) !== JSON.stringify(now[f])) moved.add(f)
+    }
+  })
+  check('AND NOTHING ELSE MOVES', [...moved].every((f) => allowed.has(f)),
+    [...moved].join(', ') || 'nothing moved at all')
+}
+
+/* ---------------- tasks follow their board too ---------------- */
+console.log(String.fromCharCode(10) + '--- a task renamed, added or deleted in Jira ---')
+{
+  // The fixture is shared with the checks below, so it is put back exactly as
+  // it was afterwards — a test that leaves the world different is a test that
+  // breaks the next one for reasons that have nothing to do with the code.
+  const original = JSON.parse(JSON.stringify(CHILDREN['FNP-1']))
+
+  const before = await (await fetch(`${base}/api/jira/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1'] }),
+  })).json()
+  const wasCount = before.byParent['FNP-1'].length
+
+  // rename one, delete one, add one — in the stand-in Jira itself
+  CHILDREN['FNP-1'][0].fields.summary = 'Renamed in Jira just now'
+  const deleted = CHILDREN['FNP-1'].pop()
+  CHILDREN['FNP-1'].push({
+    key: 'FNP-15',
+    fields: {
+      summary: 'Created in Jira just now',
+      status: { name: 'Backlog', statusCategory: { key: 'new' } },
+      issuetype: { name: 'Task' },
+      parent: { key: 'FNP-1' },
+      created: '2026-08-19T09:00:00.000+0700',
+      updated: '2026-08-19T09:00:00.000+0700',
+      duedate: null,
+      resolutiondate: null,
+      customfield_10015: null,
+    },
+  })
+
+  const after = await (await fetch(`${base}/api/jira/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1'] }),
+  })).json()
+  const rows = after.byParent['FNP-1']
+  check('A TASK RENAMED IN JIRA READS ITS NEW NAME',
+    rows.some((c) => c.summary === 'Renamed in Jira just now'))
+  check('A TASK ADDED IN JIRA APPEARS', rows.some((c) => c.key === 'FNP-15'))
+  check('A TASK DELETED IN JIRA DISAPPEARS', !rows.some((c) => c.key === deleted.key),
+    `${wasCount} before, ${rows.length} after`)
+  check('  because tasks are never stored, only read',
+    rows.length === wasCount, 'one out, one in')
+
+  CHILDREN['FNP-1'] = original
+}
+
 /* ---------------- the order Jira shows ---------------- */
 console.log(String.fromCharCode(10) + '--- children come back in the order Jira lists them ---')
 {
@@ -457,7 +579,7 @@ if (!exe) {
     const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
     const byKey = Object.fromEntries(st.projects.slice(0, 3).map((p) => [p.jiraKey, p]))
     return {
-      note: (document.body.innerText.match(new RegExp('[0-9]+ projects? had dates updated[^' + String.fromCharCode(10) + ']*')) || [''])[0],
+      note: (document.body.innerText.match(new RegExp('[0-9]+ projects? updated[^' + String.fromCharCode(10) + ']*')) || [''])[0],
       rows: st.projects.slice(0, 3).map((p) => ({
         jira: p.jiraKey, start: p.start, due: p.due, actualStart: p.actualStart, actualEnd: p.actualEnd,
       })),
@@ -494,14 +616,18 @@ if (!exe) {
   full.forEach((now, i) => {
     const was = before[i]
     for (const field of new Set([...Object.keys(was), ...Object.keys(now)])) {
-      if (field === 'actualStart' || field === 'actualEnd') continue
+      // The three a sync owns. Everything else is the register's.
+      if (field === 'actualStart' || field === 'actualEnd' || field === 'summary') continue
       if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
         drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)
       }
     }
   })
-  check('A SYNC TOUCHES THE ACTUAL DATES AND NOTHING ELSE', drifted.length === 0,
-    drifted.join(' | ') || `${Object.keys(before[0]).length} fields per project, all unchanged but the two`)
+  check('A SYNC TOUCHES THE DATES AND THE NAME, AND NOTHING ELSE', drifted.length === 0,
+    drifted.join(' | ') || `${Object.keys(before[0]).length} fields per project, all unchanged but the three`)
+  check('  and the name it wrote is the one Jira holds',
+    full.every((now) => !now.jiraKey || typeof now.summary === 'string'),
+    full.map((p) => `${p.jiraKey}: ${String(p.summary).slice(0, 28)}`).join(' | '))
   check('  the saving hours in particular are Jira’s business to nobody',
     full.every((now, i) => now.savingHours === before[i].savingHours),
     full.map((p, i) => `${p.jiraKey} ${before[i].savingHours} -> ${p.savingHours}`).join(' | '))
