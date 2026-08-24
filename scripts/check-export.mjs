@@ -392,12 +392,13 @@ console.log(String.fromCharCode(10) + '--- every ROI cell is a percentage ---')
   let hr = null
   for (let rr = 1; rr <= ws.rowCount; rr++) {
     const line = [1, 2, 3].map((k) => String(ws.getRow(rr).getCell(k).value ?? '')).join(' ')
-    if (/Financial/i.test(line)) fr = fr ?? rr
+    if (/Project management|Financial/i.test(line)) fr = fr ?? rr
     if (/Target/.test(String(ws.getRow(rr).getCell(4).value ?? ''))) hr = hr ?? rr
   }
   const wrong = costed.people.map((p, i) => {
     const cell = ws.getRow(fr).getCell(4 + i * 3 + 2)
-    const want = p.avgProjectRoi
+    // Objective 1 is the share delivered on time now, not the return.
+    const want = p.kpiLines.find((l) => l.targetKind === 'percent' && !l.custom)?.creditedRatio
     if (want == null) return null
     return Math.abs(Number(cell.value) - want) < 5e-4 ? null : `${p.nick}: sheet ${cell.value} vs ${want.toFixed(4)}`
   }).filter(Boolean)

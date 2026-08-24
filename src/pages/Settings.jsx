@@ -104,7 +104,10 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
 
       <Grid container spacing={2.5}>
         <Grid item xs={12} md={6}>
-          <Card title="Targets and the efficiency gate" subtitle="Objective 2 sets the pool; Objective 1 sets the gate applied across it">
+          <Card
+            title="Targets, delivery and the efficiency gate"
+            subtitle="Objective 1 is on-time delivery; objective 2 sets the hours pool; the return gate is a cost test, not a KPI"
+          >
             <TextField
               fullWidth
               size="small"
@@ -145,14 +148,56 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
               ))}
             </Select>
 
+            {/* ---- objective 1: delivering on the committed timeline ---- */}
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              Objective 1 gate — {fmtRoi(fin.roiGate)} return within {fin.horizonMonths} months
+              Objective 1 — deliver {Math.round((settings.onTimeGate ?? 0.8) * 100)}% of projects within{' '}
+              {settings.sprintDays ?? 14} days of plan
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+              Each person commits to a timeline and is measured on how much of their work lands on it. A date may move
+              by up to <strong>one sprint</strong> without counting against anybody — a plan that may not move at all is
+              not a plan, and a team punished for a two-day slip learns to pad every estimate. Below that tolerance, the
+              share of a person&rsquo;s finished projects that landed inside it is the figure on their card. A project
+              with no due date, or one still running with time left, is not counted either way: it has not been asked yet.
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, mb: 2.5, flexWrap: 'wrap' }}>
+              <TextField
+                size="small"
+                type="number"
+                label="Tolerance"
+                value={settings.sprintDays ?? 14}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (Number.isFinite(n) && n >= 0) onSettings({ sprintDays: Math.round(n) })
+                }}
+                InputProps={{ endAdornment: <InputAdornment position="end">days</InputAdornment> }}
+                inputProps={{ step: 1, min: 0, style: { width: 70 } }}
+                helperText="one sprint"
+              />
+              <TextField
+                size="small"
+                type="number"
+                label="Must land on time"
+                value={Math.round((settings.onTimeGate ?? 0.8) * 100)}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (Number.isFinite(n)) onSettings({ onTimeGate: Math.min(100, Math.max(0, n)) / 100 })
+                }}
+                InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                inputProps={{ step: 5, min: 0, max: 100, style: { width: 70 } }}
+                helperText="of the projects each person holds"
+              />
+            </Box>
+            <Divider sx={{ mb: 2 }} />
+
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              Return gate — {fmtRoi(fin.roiGate)} within {fin.horizonMonths} months
             </Typography>
             {fin.roiGate === 0 && (
               <Alert severity="warning" sx={{ mb: 1.5 }}>
-                The gate is <strong>0%</strong>, so <strong>every scorecard states a financial target of 0%</strong> — any
-                project that merely gets its money back passes. That is almost always an accident rather than a decision;
-                set the standard you mean below.
+                The gate is <strong>0%</strong>, so any project that merely gets its money back passes. It no longer sets
+                anybody&rsquo;s KPI — objective 1 is on-time delivery now — but it is still what marks a project as
+                failing on the Effort_Return sheet, and 0% is almost always an accident rather than a decision.
               </Alert>
             )}
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>

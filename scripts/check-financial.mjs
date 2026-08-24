@@ -389,15 +389,14 @@ console.log('\n--- objective 1 reads as money on every card ---')
 // Objective 1 states a FLOOR the plan has to clear, not an amount it has to
 // reach: doubling the plan doubles a baht target and leaves a ratio where it
 // was, which is the whole point of asking whether the effort was worth it.
-check('objective 1 maps to a percentage target kind', targetKindFor('financial') === 'percent')
+check('objective 1 maps to a percentage target kind', targetKindFor('delivery') === 'percent')
 // One objective in hours, one in money, one a date, two counted. That split
 // is what lets a project answer to several at once without being counted
 // twice, so it is asserted rather than assumed.
+const ALL_OBJECTIVES = ['delivery', 'process_automation', 'datawarehouse', 'efficiency', 'ai_automation']
 check('ONLY ONE OBJECTIVE IS MEASURED IN HOURS',
-  ['financial', 'process_automation', 'datawarehouse', 'efficiency', 'ai_automation']
-    .filter((o) => targetKindFor(o) === 'hours').join(',') === 'process_automation',
-  ['financial', 'process_automation', 'datawarehouse', 'efficiency', 'ai_automation']
-    .map((o) => `${o}:${targetKindFor(o)}`).join(' '))
+  ALL_OBJECTIVES.filter((o) => targetKindFor(o) === 'hours').join(',') === 'process_automation',
+  ALL_OBJECTIVES.map((o) => `${o}:${targetKindFor(o)}`).join(' '))
 check('objectives 4 and 5 are counted, not weighed in hours',
   ['efficiency', 'ai_automation'].every((o) => targetKindFor(o) === 'number'))
 check('objective 3 is still a milestone', targetKindFor('datawarehouse') === 'text')
@@ -585,7 +584,7 @@ console.log('\n--- the exported workbook carries the same figures ---')
       !sheetText.some((t) => t === 'POSITION' || t.startsWith('Value of hours released') || t === 'Return on investment'),
       sheetText.filter(Boolean).slice(0, 3).join(' / '))
     if (objOneTarget != null) {
-      const line = p.kpiLines.find((l) => l.objective === 'financial')
+      const line = p.kpiLines.find((l) => l.objective === 'delivery')
       // A real Excel percentage, so the cell can be compared with the reading
       // beside it rather than being a string that only looks like one.
       check(`${p.nick}: objective 1 target exports as a real percentage`,
@@ -606,50 +605,46 @@ console.log(String.fromCharCode(10) + '--- the financial target starts where the
   }
   const p2 = computePlan(costedState)
   const gatePct = Math.round(p2.finance.roiGate * 100)
-  const lineOf = (person) => person.kpiLines.find((l) => l.objective === 'financial' && !l.custom)
+  const lineOf = (person) => person.kpiLines.find((l) => l.objective === 'delivery' && !l.custom)
 
-  const withReturn = p2.people.filter((x) => x.avgProjectRoi != null && x.avgProjectRoi > p2.finance.roiGate)
-  check('somebody is above the gate to check', withReturn.length >= 2,
-    p2.people.map((x) => `${x.nick} ${x.avgProjectRoi == null ? 'null' : `${Math.round(x.avgProjectRoi * 100)}%`}`).join(' · '))
+  /*
+   * Objective 1 stopped being a return and became on-time delivery, so the
+   * rule changed with it: the target is now the same STANDARD for everybody
+   * rather than a floor under each person's own number. A team is asked to
+   * commit to a timeline; a target defaulted to what somebody already achieves
+   * is not a commitment.
+   */
+  check('EVERY CARD STATES THE SAME DELIVERY STANDARD',
+    p2.people.every((x) => lineOf(x).target === Math.round(p2.settings.onTimeGate * 100)),
+    p2.people.map((x) => `${x.nick} ${lineOf(x).target}%`).join(' · '))
+  check('  and it is not a readout of what they already do',
+    p2.people.some((x) => lineOf(x).creditedRatio != null
+      && Math.round(lineOf(x).creditedRatio * 100) !== lineOf(x).target),
+    p2.people.map((x) => `${x.nick} ${lineOf(x).creditedRatio == null ? '—' : `${Math.round(lineOf(x).creditedRatio * 100)}%`}`).join(' · '))
+  check('  a card is met only when the share reaches the standard',
+    p2.people.every((x) => {
+      const l = lineOf(x)
+      if (l.creditedRatio == null) return l.meetsTarget === null
+      return l.meetsTarget === (l.creditedRatio * 100 >= l.target - 1e-9)
+    }))
+  check('  and nobody is judged on work that cannot be judged yet',
+    p2.people.every((x) => lineOf(x).judged <= (x.scorecardRows || []).length),
+    p2.people.map((x) => `${x.nick} ${lineOf(x).judged}/${(x.scorecardRows || []).length}`).join(' · '))
 
-  check('THE TARGET IS THEIR OWN RETURN, NOT THE GATE',
-    withReturn.every((x) => lineOf(x).target === Math.floor(x.avgProjectRoi * 100 + 1e-9)),
-    withReturn.map((x) => `${x.nick} target ${lineOf(x).target}% vs return ${(x.avgProjectRoi * 100).toFixed(1)}%`).join(' | '))
-  check('  so a card opens meeting its own default',
-    withReturn.every((x) => lineOf(x).meetsTarget === true))
-
-  // Below the gate, the gate is the target: a return of −4% is not a standard.
-  const below = p2.people.filter((x) => x.avgProjectRoi != null && x.avgProjectRoi < p2.finance.roiGate)
-  check('BELOW THE GATE, THE GATE IS THE TARGET',
-    below.every((x) => lineOf(x).target === gatePct && lineOf(x).meetsTarget === false),
-    below.map((x) => `${x.nick} ${(x.avgProjectRoi * 100).toFixed(0)}% -> target ${lineOf(x).target}%`).join(' | ') || 'nobody below it')
-  check('  and no target is ever negative',
-    p2.people.every((x) => Number(lineOf(x).target) >= 0),
-    p2.people.map((x) => `${x.nick} ${lineOf(x).target}`).join(' · '))
-
-  // Moving the gate moves only the cards that were leaning on it.
-  const higher = computePlan({ ...costedState, settings: { ...costedState.settings, finance: { ...costedState.settings.finance, roiGate: 1 } } })
-  const lineIn = (plan2, id) => lineOf(plan2.people.find((x) => x.id === id))
-  check('raising the gate leaves a card that clears it alone',
-    withReturn.filter((x) => x.avgProjectRoi > 1).every((x) => lineIn(higher, x.id).target === lineOf(x).target),
-    withReturn.map((x) => `${x.nick} ${lineOf(x).target} -> ${lineIn(higher, x.id).target}`).join(' | '))
-  check('  and lifts the ones that were on the floor',
-    below.every((x) => lineIn(higher, x.id).target === 100),
-    below.map((x) => `${x.nick} -> ${lineIn(higher, x.id).target}%`).join(' | ') || 'nobody was on the floor')
-
-  // A typed target still wins over both.
-  const person = withReturn[0]
+  // A typed target still beats the standard, and is still judged against.
+  const person = p2.people.find((x) => lineOf(x).creditedRatio != null) || p2.people[0]
   const typed = computePlan({
     ...costedState,
     people: costedState.people.map((x) => (x.id === person.id
-      ? { ...x, kpi: { ...(x.kpi || {}), 'obj-financial': { ...((x.kpi || {})['obj-financial'] || {}), target: 500 } } }
+      ? { ...x, kpi: { ...(x.kpi || {}), 'obj-delivery': { ...((x.kpi || {})['obj-delivery'] || {}), target: 100 } } }
       : x)),
   })
   const t = lineOf(typed.people.find((x) => x.id === person.id))
-  check('A TYPED TARGET STILL WINS', Number(t.target) === 500 && t.overridden === true,
-    `${person.nick}: ${t.target}, overridden ${t.overridden}`)
-  check('  and it is judged against, not ignored', t.meetsTarget === false,
-    `return ${(person.avgProjectRoi * 100).toFixed(0)}% vs typed 500%`)
+  check('A TYPED TARGET STILL WINS', Number(t.target) === 100 && t.overridden === true,
+    `${person.nick}: ${t.target}%, overridden ${t.overridden}`)
+  check('  and it is judged against, not ignored',
+    t.creditedRatio == null ? t.meetsTarget === null : t.meetsTarget === (t.creditedRatio >= 1),
+    `${t.creditedRatio == null ? '—' : `${Math.round(t.creditedRatio * 100)}%`} against a typed 100%`)
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)

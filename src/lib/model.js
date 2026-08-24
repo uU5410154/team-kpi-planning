@@ -28,7 +28,7 @@ export const DEFAULT_ROLE_WEIGHTS = {
 
 /** Relative emphasis inside the delivery block, normalised over objectives held. */
 export const DEFAULT_OBJECTIVE_PRIORITY = {
-  financial: 1,
+  delivery: 1,
   process_automation: 3,
   datawarehouse: 1.5,
   efficiency: 1.5,
@@ -382,6 +382,18 @@ export function projectCosts(p) {
 export const totalInvestment = (buildCost, capex) =>
   buildCost == null && capex == null ? null : (buildCost ?? 0) + (capex ?? 0)
 
+/**
+ * How far a timeline may move before it counts against anybody.
+ *
+ * One sprint. A plan that may not move at all is not a plan, and a team
+ * punished for a two-day slip learns to pad every estimate — which makes every
+ * plan less true, which is the opposite of what measuring this is for.
+ */
+export const DEFAULT_SPRINT_DAYS = 14
+
+/** The share of a person's judged projects that must land inside it. */
+export const DEFAULT_ONTIME_GATE = 0.8
+
 export const DEFAULT_SETTINGS = {
   targetHours: 3000,
   // The source workbook's column is "Saving hrs/mth", and the 2025 plan was
@@ -400,6 +412,13 @@ export const DEFAULT_SETTINGS = {
   creditPartners: false,
   // Anything due before this and not Done is flagged past due.
   asOfDate: '2026-08-07',
+  /*
+   * Objective 1, which is about delivering on the timeline that was committed.
+   * Both are decisions, so both are settings: how far a date may move, and how
+   * much of somebody's work has to land inside that.
+   */
+  sprintDays: DEFAULT_SPRINT_DAYS,
+  onTimeGate: DEFAULT_ONTIME_GATE,
 }
 
 /**
@@ -735,7 +754,15 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
          * has to aim at the standard, having nothing of their own to aim at.
          */
         ? (() => {
-          const gate = settings?.finance?.roiGate ?? DEFAULT_FINANCE.roiGate
+          /*
+           * The GATE, for everybody.
+           *
+           * A target defaulted to what somebody is already doing is not a
+           * target — and unlike the return this replaced, on-time delivery is
+           * a standard the whole team is held to alike, which is the point of
+           * the boss asking each person to commit to one.
+           */
+          const gate = settings?.onTimeGate ?? DEFAULT_ONTIME_GATE
           /*
            * Never below the gate. The objective reads "the return must not be
            * less than X", so a person returning −4% cannot have a target of
@@ -746,8 +773,7 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
            * Rounding 144.6 up to 145 left somebody failing a target the app
            * had just written for them.
            */
-          const base = ratio == null ? gate : Math.max(ratio, gate)
-          return Math.floor(base * 100 + 1e-9)
+          return Math.round(gate * 100)
         })()
         : kind === 'thb'
           ? Math.round(creditedMoney[id] || 0)
@@ -1179,7 +1205,73 @@ export function repairOwnership(projects, people, roleWeights = DEFAULT_ROLE_WEI
  * 1: a PIC change used to write only `pic`, leaving the project on the old
  *    owner's scorecard at 77%.
  */
-export const REPAIR_VERSION = 3
+export const REPAIR_VERSION = 4
+
+/**
+ * Objective 1 stopped being Financial and became Project management, and an
+ * id changed with it.
+ *
+ * Five projects in the seed and four in the live plan name `financial` as
+ * their primary objective. An id nothing answers to is not a tag, it is a
+ * hole: countsToPool reads the objective to decide whether a project's hours
+ * enter the pool, so those rows would have silently dropped out of the team
+ * total — the sort of change that shows up as a KPI moving for no reason
+ * anybody can explain.
+ */
+export const RENAMED_OBJECTIVES = { financial: 'delivery' }
+
+export function repairObjectiveIds(projects) {
+  let moved = 0
+  const out = (projects || []).map((p) => {
+    const from = RENAMED_OBJECTIVES[p.objective]
+    const tags = Array.isArray(p.objectives) ? p.objectives : null
+    const retagged = tags && tags.some((id) => RENAMED_OBJECTIVES[id])
+      ? [...new Set(tags.map((id) => RENAMED_OBJECTIVES[id] || id))]
+      : null
+    if (!from && !retagged) return p
+    moved += 1
+    return { ...p, ...(from ? { objective: from } : {}), ...(retagged ? { objectives: retagged } : {}) }
+  })
+  return { projects: out, moved }
+}
+
+/** The same rename, on the KPI lines people have typed targets into. */
+export function repairKpiIds(people) {
+  let moved = 0
+  const out = (people || []).map((person) => {
+    const kpi = person && person.kpi
+    const extra = Array.isArray(person?.extraObjectives) ? person.extraObjectives : null
+    const nextExtra = extra && extra.some((id) => RENAMED_OBJECTIVES[id])
+      ? [...new Set(extra.map((id) => RENAMED_OBJECTIVES[id] || id))]
+      : null
+    let nextKpi = null
+    if (kpi) {
+      for (const [oldId, newId] of Object.entries(RENAMED_OBJECTIVES)) {
+        if (kpi[`obj-${oldId}`]) {
+          nextKpi = nextKpi || { ...kpi }
+          /*
+           * The WEIGHT travels, the target does not. A weight is a share of a
+           * card and means the same thing whatever the line measures; a target
+           * of "150" meant 150% return and would read as 150% of projects
+           * delivered on time, which is not a number that exists.
+           */
+          const { target, ...rest } = nextKpi[`obj-${oldId}`]
+          void target
+          delete nextKpi[`obj-${oldId}`]
+          if (Object.keys(rest).length) nextKpi[`obj-${newId}`] = { ...(nextKpi[`obj-${newId}`] || {}), ...rest }
+        }
+      }
+    }
+    if (!nextKpi && !nextExtra) return person
+    moved += 1
+    return {
+      ...person,
+      ...(nextKpi ? { kpi: nextKpi } : {}),
+      ...(nextExtra ? { extraObjectives: nextExtra } : {}),
+    }
+  })
+  return { people: out, moved }
+}
 
 /**
  * Add any assignable-but-unmeasured entry the stored roster is missing.
@@ -1210,7 +1302,7 @@ export function repairRoster(people) {
  * WEIGHTS are kept. A weight is a share of the card and means the same thing
  * whatever the line is measured in.
  */
-export const REUNITED_OBJECTIVES = ['efficiency', 'ai_automation', 'financial']
+export const REUNITED_OBJECTIVES = ['efficiency', 'ai_automation', 'financial', 'delivery']
 
 export function repairTargetUnits(people) {
   const lineIds = new Set(REUNITED_OBJECTIVES.map((id) => `obj-${id}`))
@@ -1249,9 +1341,11 @@ export function repairState(s) {
   if (!s || !Array.isArray(s.projects) || s.repair === REPAIR_VERSION) {
     return { ...s, repair: REPAIR_VERSION }
   }
-  const { projects } = repairOwnership(s.projects, s.people)
+  const { projects: owned } = repairOwnership(s.projects, s.people)
+  const { projects } = repairObjectiveIds(owned)
   const { people: retargeted } = repairTargetUnits(s.people)
-  const { people } = repairRoster(retargeted)
+  const { people: rostered } = repairRoster(retargeted)
+  const { people } = repairKpiIds(rostered)
   return { ...s, projects, people, repair: REPAIR_VERSION }
 }
 
@@ -1497,6 +1591,35 @@ export function timelineOf(p, asOf) {
     // Only a project with both a plan and an outcome can be judged against it.
     comparable: !!plannedEnd && (!!actualEnd || overdue),
   }
+}
+
+
+/**
+ * Did this project land within the tolerance?
+ *
+ * Null — not false — while there is nothing to judge. A project with no due
+ * date, or one still running with time left, has not failed to be on time: it
+ * has not been asked yet.
+ */
+export function onTimeOf(p, sprintDays = DEFAULT_SPRINT_DAYS) {
+  const tl = p && p.timeline
+  if (!tl || !tl.comparable || tl.lateBy == null) return null
+  return tl.lateBy <= sprintDays
+}
+
+/**
+ * The share of somebody's judged projects that landed on time.
+ *
+ * Null when none of their work can be judged yet, so somebody who has finished
+ * nothing reads as "nothing to say" rather than as a zero — the same rule the
+ * Timeline follows, and for the same reason.
+ */
+export function onTimeShare(rows, sprintDays = DEFAULT_SPRINT_DAYS) {
+  const projects = (rows || []).map((r) => (r && r.p ? r.p : r))
+  const judged = projects.filter((p) => onTimeOf(p, sprintDays) !== null)
+  if (!judged.length) return { share: null, onTime: 0, judged: 0, late: 0 }
+  const onTime = judged.filter((p) => onTimeOf(p, sprintDays)).length
+  return { share: onTime / judged.length, onTime, judged: judged.length, late: judged.length - onTime }
 }
 
 export const isCounted = (p) => p.commitLevel === 'commit' || p.commitLevel === 'stretch'
@@ -1789,6 +1912,20 @@ export function computePlan(state) {
       manday: resolveManday(raw),
       capex: num(raw.capex),
       comment: typeof raw.comment === 'string' ? raw.comment : '',
+      /*
+       * An objective that was renamed answers to its new name here, whether or
+       * not this plan has been through the repair yet.
+       *
+       * Normalised at the read boundary rather than only in the migration,
+       * because countsToPool decides from this id whether a project's hours
+       * enter the team total: a row still naming `financial` would silently
+       * drop out, and a KPI moving for no reason anybody can explain is the
+       * worst kind of bug this model can have.
+       */
+      objective: RENAMED_OBJECTIVES[raw.objective] || raw.objective,
+      objectives: Array.isArray(raw.objectives)
+        ? [...new Set(raw.objectives.map((id) => RENAMED_OBJECTIVES[id] || id))]
+        : raw.objectives,
       // A date is a YYYY-MM-DD string or nothing. Anything else — a stray
       // number from a spreadsheet, an empty string — is missing, not a date.
       actualStart: isDate(raw.actualStart) ? raw.actualStart : null,
@@ -2057,6 +2194,10 @@ export function computePlan(state) {
      * beside it, because the two answer different questions and a small
      * project with a spectacular ratio moves this one a long way.
      */
+    // Objective 1's figure: did this person's work land when it was said it
+    // would. Computed over the projects credited to them, on the same rows the
+    // rest of their card is built from.
+    const delivery = onTimeShare(counted, s.sprintDays)
     const roiRows = costedRows.filter((r) => r.p.roi != null)
     const avgProjectRoi = roiRows.length
       ? roiRows.reduce((a, r) => a + r.p.roi, 0) / roiRows.length
@@ -2119,6 +2260,10 @@ export function computePlan(state) {
       countByObjective,
       avgProjectRoi,
       roiRowCount: roiRows.length,
+      onTimeShare: delivery.share,
+      onTimeCount: delivery.onTime,
+      onTimeJudged: delivery.judged,
+      onTimeLate: delivery.late,
       monthlyBenefit,
       hoursMonthlyBenefit,
       monetaryAnnualBenefit,
@@ -2229,6 +2374,7 @@ export function computePlan(state) {
   const teamCounted = perProject.filter((p) => isCounted(p) && Object.keys(p.shares).length > 0)
 
   // The lead's average is over the whole book, each project once.
+  const teamDelivery = onTimeShare(teamCounted, s.sprintDays)
   const teamRoiRows = teamCounted.filter((pr) => pr.roi != null && countsToPool(pr))
   const teamAvgRoi = teamRoiRows.length
     ? teamRoiRows.reduce((a, pr) => a + pr.roi, 0) / teamRoiRows.length
@@ -2331,6 +2477,21 @@ export function computePlan(state) {
      * and being attached from the rolled-up figure is exactly what makes it
      * recalculate the moment a manday, a CAPEX or a saving hour changes.
      */
+    /*
+     * OBJECTIVE 1 IS DELIVERY, NOT RETURN.
+     *
+     * It used to be the average return on this person's projects, which
+     * measured a Tech team on how profitable the work it was handed happened
+     * to be. The return is still computed and still reported — on the Costs
+     * sheet and on Effort_Return, where a cost question belongs — but what
+     * this line asks is whether the work landed when it was said it would.
+     */
+    const delivered = aggregates ? teamDelivery : {
+      share: p.onTimeShare ?? null,
+      onTime: p.onTimeCount || 0,
+      judged: p.onTimeJudged || 0,
+      late: p.onTimeLate || 0,
+    }
     const avgRoi = aggregates ? teamAvgRoi : (p.avgProjectRoi ?? null)
     const lines = card.lines.map((l) => (l.targetKind === 'percent' && !l.custom
       ? {
@@ -2339,13 +2500,19 @@ export function computePlan(state) {
         // counts once. The portfolio return is kept beside it, because a
         // ฿5k project at 900% moves an average a long way and moves the
         // portfolio hardly at all.
-        creditedRatio: avgRoi,
+        creditedRatio: delivered.share,
+        onTime: delivered.onTime,
+        judged: delivered.judged,
+        lateCount: delivered.late,
+        sprintDays: s.sprintDays,
+        // The return, kept beside it: no longer the target, still worth seeing.
         portfolioRatio: scFinance.roi,
+        avgRoi,
         roiRowCount: aggregates ? teamRoiRows.length : (p.roiRowCount || 0),
         creditedMoney: scFinance.annualBenefit,
-        meetsTarget: avgRoi == null
+        meetsTarget: delivered.share == null
           ? null
-          : avgRoi * 100 >= Number(l.target) - 1e-9,
+          : delivered.share * 100 >= Number(l.target) - 1e-9,
       }
       : l))
 

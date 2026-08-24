@@ -93,29 +93,36 @@ export const ASSIGNEE_ONLY = [
 
 export const OBJECTIVES = [
   {
-    id: 'financial',
+    id: 'delivery',
     no: 1,
-    name: 'Financial',
-    short: 'Financial',
-    detail: 'Activities which improve PL, BS, Cash flow',
-    target: 'Overall ROI at or above the gate',
+    name: 'Project management',
+    short: 'Delivery',
+    detail: 'Deliver what was committed, on the timeline that was committed',
+    target: 'Projects delivered within the agreed timeline',
     /*
-     * A floor, not an amount.
+     * A SHARE, and not money.
      *
-     * The guideline asks whether the man-hours invested are worth the benefit
-     * returned. That is answered by a RATIO, and a ratio is the only form of
-     * this target that cannot be met by simply doing more work: doubling the
-     * plan doubles a baht target and leaves a ratio exactly where it was.
+     * This replaced a financial return, which measured a Tech team on how
+     * profitable the work it was handed happened to be — something the team
+     * does not choose. What a delivery team does control is whether it lands
+     * what it said it would, when it said it would, so that is what this asks.
      *
-     * The money it is built from — every released hour priced, plus cash
-     * stated outright — is still reported beside it.
+     * Measured as the share of a person's projects that finished within the
+     * agreed tolerance of their planned date. A share, because it cannot be met
+     * by carrying fewer projects: dropping work leaves the ratio where it was,
+     * while a count would flatter whoever holds least.
+     *
+     * The tolerance is one sprint, set on the Model tab. A plan that may not
+     * move at all is not a plan, and a team punished for a two-day slip learns
+     * to pad every estimate, which makes every plan less true.
      */
     measure: 'ratio',
     countsToPool: true,
-    guidelineName: 'Financial',
-    guidelineDetail: 'Activities which improve PL, BS, Cash flow',
+    guidelineName: 'Project management',
+    guidelineDetail: 'Commit a timeline and deliver against it',
     guidelineTarget:
-      'FTEs management เช่น การนำเสนอ project sprint vs. man-hour ที่ทีม invest vs. benefits ที่ได้ ว่าคุ้มค่าหรือไม่',
+      'Commit timeline ของตนเอง: ปรับ timeline ได้ไม่เกิน 1 sprint '
+      + 'และไม่เกินสัดส่วนที่ตกลงไว้ ของจำนวน report + project ที่ถืออยู่',
   },
   {
     id: 'process_automation',

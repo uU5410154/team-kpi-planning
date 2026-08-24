@@ -48,9 +48,11 @@ console.log('--- each objective is measured in its own unit ---')
     OBJECTIVES.filter((o) => targetKindFor(o.id) === 'hours').length === 1,
     OBJECTIVES.map((o) => `${o.no}:${targetKindFor(o.id)}`).join(' '))
   check('and it is the one the engine uses', HOURS_OBJECTIVE === 'process_automation', String(HOURS_OBJECTIVE))
-  check('exactly one is a ratio — a floor the plan has to clear',
+  // Objective 1 is a SHARE now — how much of somebody's work landed on the
+  // timeline they committed to — rather than a return on money.
+  check('exactly one is a ratio — a share of the work that landed on time',
     OBJECTIVES.filter((o) => targetKindFor(o.id) === 'percent').length === 1
-    && MONEY_OBJECTIVE === 'financial',
+    && MONEY_OBJECTIVE === 'delivery',
     OBJECTIVES.map((o) => `${o.no}:${targetKindFor(o.id)}`).join(' '))
   check('and no objective states a bare money amount as its target',
     OBJECTIVES.every((o) => targetKindFor(o.id) !== 'thb'))
@@ -76,7 +78,7 @@ console.log('\n--- a project can answer to several ---')
   check('an unknown id is dropped',
     projectObjectives({ objective: 'efficiency', objectives: ['wizardry'] }).join(',') === 'efficiency')
   check('no tags at all still gives the primary',
-    projectObjectives({ objective: 'financial' }).join(',') === 'financial')
+    projectObjectives({ objective: 'delivery' }).join(',') === 'delivery')
   check('servesObjective answers for any of them',
     servesObjective(p, 'ai_automation') && !servesObjective(p, 'datawarehouse'))
 }
@@ -116,21 +118,30 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
   check('and it is the hours priced, at the rate the model states',
     Math.abs(money - (lead.scorecardHours * plain.finance.acctHourRate * 12)) < 1,
     `${Math.round(money)} vs ${Math.round(lead.scorecardHours * plain.finance.acctHourRate * 12)}`)
-  const roiLine = lead.kpiLines.find((l) => l.objective === MONEY_OBJECTIVE)
-  check('THE RETURN LINE CARRIES NO HOURS', roiLine?.creditedHours == null)
-  check('its target is the gate, stated as a percentage',
-    roiLine.targetKind === 'percent'
-    && Math.abs(roiLine.target - plain.finance.roiGate * 100) < 1e-9,
-    `${roiLine.target}% vs gate ${plain.finance.roiGate * 100}%`)
-  // The average of the project returns, as asked for: every project once.
-  check('its ACTUAL is the average of the project returns',
-    roiLine.creditedRatio === lead.avgProjectRoi,
-    `${roiLine.creditedRatio} vs ${lead.avgProjectRoi}`)
-  check('with the portfolio return kept beside it',
-    roiLine.portfolioRatio === lead.finance.roi,
-    `${roiLine.portfolioRatio} vs ${lead.finance.roi}`)
-  check('and it says how many projects it averaged',
-    typeof roiLine.roiRowCount === 'number', String(roiLine.roiRowCount))
+  const line1 = lead.kpiLines.find((l) => l.objective === MONEY_OBJECTIVE)
+  check('OBJECTIVE 1 CARRIES NO HOURS', line1?.creditedHours == null)
+  /*
+   * It is on-time delivery now, at the request of the boss: a Tech team was
+   * being measured on how profitable the work it was handed happened to be,
+   * which it does not choose. What it does choose is whether it lands what it
+   * said it would, when it said it would.
+   */
+  check('its target is the delivery standard, stated as a percentage',
+    line1.targetKind === 'percent'
+    && Math.abs(line1.target - plain.settings.onTimeGate * 100) < 1e-9,
+    `${line1.target}% vs the standard ${plain.settings.onTimeGate * 100}%`)
+  check('ITS ACTUAL IS THE SHARE THAT LANDED ON TIME, NOT A RETURN',
+    line1.creditedRatio === (line1.judged ? line1.onTime / line1.judged : null),
+    `${line1.onTime} of ${line1.judged} within ${line1.sprintDays} days`)
+  check('and it is not the return, which measures something else entirely',
+    line1.creditedRatio !== lead.avgProjectRoi || lead.avgProjectRoi == null,
+    `delivery ${line1.creditedRatio} vs return ${lead.avgProjectRoi}`)
+  check('with the return kept beside it, since it is still worth seeing',
+    line1.portfolioRatio === lead.finance.roi,
+    `${line1.portfolioRatio} vs ${lead.finance.roi}`)
+  check('and it says how much work it judged',
+    typeof line1.judged === 'number' && typeof line1.sprintDays === 'number',
+    `${line1.judged} judged, tolerance ${line1.sprintDays} days`)
   check('EVERY SCORECARD CARRIES OBJECTIVE 1, TAGGED OR NOT',
     plain.people.every((x) => x.kpiLines.some((l) => l.targetKind === 'percent' && !l.custom)),
     plain.people.filter((x) => !x.kpiLines.some((l) => l.targetKind === 'percent')).map((x) => x.nick).join(','))
@@ -145,21 +156,49 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
     return Math.abs(priced.avgProjectRoi - mean) < 1e-9
   })())
   check('with the money it is built from stated beside it',
-    Math.abs(roiLine.creditedMoney - lead.finance.annualBenefit) < 1e-6)
-  check('AND IT RECALCULATES WHEN A COST CHANGES', (() => {
+    Math.abs(line1.creditedMoney - lead.finance.annualBenefit) < 1e-6)
+  /*
+   * It recalculates when a DATE changes, not when a cost does. That is the
+   * whole point of the change: a cost estimate moving no longer moves anybody's
+   * objective 1, and a project landing late does.
+   */
+  check('AND IT RECALCULATES WHEN A DELIVERY DATE CHANGES', (() => {
+    // Every dated project finishes on its due date, then every one finishes a
+    // year later. The first is perfect delivery, the second is none of it.
+    const onTime = computePlan({
+      ...base,
+      projects: base.projects.map((p) => (p.due ? { ...p, actualEnd: p.due, status: 'Done' } : p)),
+    }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
+    const slipped = computePlan({
+      ...base,
+      projects: base.projects.map((p) => (p.due
+        ? { ...p, actualEnd: '2027-12-31', status: 'Done' }
+        : p)),
+    }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
+    return onTime.judged > 0 && onTime.creditedRatio === 1 && onTime.meetsTarget === true
+      && slipped.creditedRatio === 0 && slipped.meetsTarget === false
+  })())
+  check('  while a cost estimate changing leaves it exactly where it was', (() => {
     const heavier = computePlan({
       ...base,
       projects: base.projects.map((p) => (p.savingHours > 0 ? { ...p, manday: 200 } : p)),
     }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
-    return heavier.creditedRatio !== roiLine.creditedRatio && heavier.meetsTarget === false
-  })())
-  check('and the target follows the gate when the gate is changed', (() => {
+    return heavier.creditedRatio === line1.creditedRatio
+  })(), 'a Tech team is not measured on how profitable its handed work happens to be')
+  check('and the target follows the standard when the standard is changed', (() => {
     const strict = computePlan({
       ...base,
-      settings: { ...DEFAULT_SETTINGS, finance: { ...DEFAULT_SETTINGS.finance, roiGate: 5 } },
+      settings: { ...DEFAULT_SETTINGS, onTimeGate: 0.95 },
     }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
-    return strict.target === 500
+    return strict.target === 95
   })())
+  check('and the tolerance moves what counts as on time', (() => {
+    const tight = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, sprintDays: 0 } })
+      .people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
+    const loose = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, sprintDays: 365 } })
+      .people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
+    return (loose.creditedRatio ?? 0) >= (tight.creditedRatio ?? 0)
+  })(), 'a longer tolerance can only ever forgive more, never less')
   check('so the card total is the hours ONCE, not twice',
     Math.abs(lead.kpiTotals.savingHours - lead.registerHours) < 1e-6,
     `${Math.round(lead.kpiTotals.savingHours)} vs ${Math.round(lead.registerHours)}`)
@@ -298,8 +337,13 @@ console.log(String.fromCharCode(10) + '--- the exported total row is the same av
         : Math.abs(totalRoi - p.avgProjectRoi) < 1e-4,
       `${totalRoi} vs ${p.avgProjectRoi == null ? null : p.avgProjectRoi.toFixed(4)}`)
     const line = p.kpiLines.find((l) => l.targetKind === 'percent')
-    check(`${p.nick}: and it is what objective 1 is measured on`,
-      (line?.creditedRatio ?? null) === (p.avgProjectRoi ?? null))
+    check(`${p.nick}: AND IT IS NO LONGER WHAT OBJECTIVE 1 MEASURES`,
+      line.creditedRatio == null || p.avgProjectRoi == null
+      || line.creditedRatio !== p.avgProjectRoi,
+      `delivery ${line.creditedRatio} vs return ${p.avgProjectRoi}`)
+    check(`${p.nick}: and the sheet still states the return beside it`,
+      (line?.portfolioRatio ?? null) === (p.finance?.roi ?? null),
+      'the return did not stop existing, it stopped being the KPI')
   }
 }
 
