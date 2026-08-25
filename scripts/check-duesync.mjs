@@ -158,6 +158,69 @@ check('a project not yet due is not overdue',
 check('the saving hours do not move with the date',
   plan.totals.committedHours === computePlan(repairState(state([base]))).totals.committedHours)
 
+console.log('\n— and a row somebody took out of the plan —')
+/*
+ * EXCLUDED MEANS EXCLUDED.
+ *
+ * A person has decided this row is not part of the year — a duplicate, a
+ * ticket raised by mistake, work that was dropped. A sync that keeps
+ * rewriting its dates, its name, its owner and its task counts is arguing
+ * with that decision every morning.
+ */
+const dropped = {
+  ...base,
+  commitLevel: 'excluded',
+  summary: 'The name somebody gave it here',
+  start: '2026-01-01',
+  due: '2026-02-01',
+  pic: null,
+  actualEnd: null,
+  tasksTotal: 0,
+  tasksDone: 0,
+}
+const loud = {
+  issues: [issue({
+    summary: 'Renamed in Jira',
+    start: '2026-07-07',
+    due: '2026-12-31',
+    assignee: 'Nakittapon Imjaijaroenying',
+    resolved: '2026-11-30',
+    done: true,
+    started: true,
+  })],
+  epics: [],
+  rollups: { 'FNP-1065': { total: 9, done: 9, allDone: true, anyStarted: true, started: true, latestResolved: '2026-11-30', latestDue: '2026-12-31', latestSprintEnd: '2027-01-09', latestDelayDue: '2027-02-02', delayKey: 'FNP-9' } },
+}
+const untouched = mergeJira(state([dropped]), loud, { addNew: false })
+const still = untouched.projects[0]
+check('AN EXCLUDED ROW IS NOT TOUCHED AT ALL',
+  JSON.stringify(still) === JSON.stringify(dropped),
+  Object.keys(dropped).concat(Object.keys(still))
+    .filter((k, i, a) => a.indexOf(k) === i)
+    .filter((k) => JSON.stringify(dropped[k]) !== JSON.stringify(still[k]))
+    .map((k) => `${k}: ${JSON.stringify(dropped[k])} -> ${JSON.stringify(still[k])}`).join(' | ') || 'identical')
+check('  its commitment does not move', still.due === '2026-02-01')
+check('  nor its start', still.start === '2026-01-01')
+check('  nor its name', still.summary === 'The name somebody gave it here')
+check('  nor its owner — not even into a blank one', still.pic === null)
+check('  nor its finish', still.actualEnd === null)
+check('  nor its task counts', still.tasksTotal === 0 && still.tasksDone === 0)
+check('  and no adjusted date is drawn on it', !still.adjustedDue)
+check('  it spends no re-plan', (still.replanCount || 0) === 0)
+check('  the sync reports having left it alone',
+  untouched.skippedExcluded === 1, String(untouched.skippedExcluded))
+check('  and reports nothing else about it',
+  untouched.updated === 0 && untouched.reassigned === 0
+  && untouched.replanned === 0 && untouched.picDisagreements === 0,
+  JSON.stringify({ updated: untouched.updated, reassigned: untouched.reassigned }))
+check('  running it twice still changes nothing',
+  JSON.stringify(mergeJira(state([still]), loud, { addNew: false }).projects[0]) === JSON.stringify(dropped))
+check('AND THE SAME ROW, NOT EXCLUDED, DOES CHANGE — so this is the flag doing it',
+  mergeJira(state([{ ...dropped, commitLevel: 'commit' }]), loud, { addNew: false }).updated === 1)
+check('  putting it back in the plan lets the sync have it again',
+  mergeJira(state([{ ...dropped, commitLevel: 'commit' }]), loud, { addNew: false })
+    .projects[0].summary === 'Renamed in Jira')
+
 console.log('\n— and the fields it must not touch —')
 const held = { ...p1, actualEnd: '2026-08-01', actualEndPinned: true }
 const after = mergeJira(state([held]), feed({ resolved: '2026-11-20', done: true }), {})

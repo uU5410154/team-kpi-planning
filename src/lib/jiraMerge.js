@@ -101,10 +101,33 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
   // be settled by somebody, and never settled by this.
   const disagreed = []
   let fromCreated = 0
+  // Rows a person has taken out of the plan. Counted so a sync can say what it
+  // deliberately left alone, the same way it does for a held finish date.
+  let skippedExcluded = 0
   const renamed = []
   const projects = (state.projects || []).map((p) => {
     const issue = byKey.get(String(p.jiraKey || '').trim().toUpperCase())
     if (!issue) return p
+
+    /*
+     * EXCLUDED MEANS EXCLUDED.
+     *
+     * Somebody has decided this row is not part of the year — a duplicate, a
+     * ticket raised by mistake, work that was dropped. It counts toward
+     * nothing, and a sync that keeps rewriting its dates, its name, its owner
+     * and its task counts is arguing with that decision every morning. The row
+     * is left exactly as it is, and nothing about it moves until a person
+     * takes it out of Excluded themselves.
+     *
+     * Deliberately BEFORE the patch is built, not a filter over the result: a
+     * rule that says "do not touch this" has to be the first thing the code
+     * does, or the next field somebody adds will quietly touch it.
+     */
+    if (p.commitLevel === 'excluded') {
+      skippedExcluded += 1
+      return p
+    }
+
     if (issue.startSource === 'created') fromCreated += 1
 
     const patch = {}
@@ -340,6 +363,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     updated,
     // Projects whose finish date this sync deliberately left alone.
     pinned,
+    // And the rows it did not look at at all, because they are excluded.
+    skippedExcluded,
     replanned: replanned.length,
     replans: replanned.slice(0, 20),
     reassigned: reassigned.length,

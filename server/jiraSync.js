@@ -73,6 +73,8 @@ export async function runSync({ trigger = 'manual', scenario = null } = {}) {
     // Projects whose finish date the register holds. Reported so a morning run
     // says what it left alone as well as what it changed.
     pinned: merged.pinned,
+    // Rows a person took out of the plan, which this did not look at.
+    skippedExcluded: merged.skippedExcluded,
     added: merged.added,
     addedKeys: merged.addedKeys.slice(0, 20),
     fromCreated: merged.fromCreated,

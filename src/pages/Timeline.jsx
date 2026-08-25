@@ -250,6 +250,9 @@ export default function Timeline({
           r.fromCreated
             ? `${r.fromCreated} start${r.fromCreated === 1 ? '' : 's'} taken from when the ticket was raised`
             : null,
+          r.skippedExcluded
+            ? `${r.skippedExcluded} excluded project${r.skippedExcluded === 1 ? '' : 's'} not touched`
+            : null,
         ].filter(Boolean).join(' · '),
         /*
          * WHERE IT LANDED, said out loud.
@@ -392,6 +395,10 @@ export default function Timeline({
           r.added ? `${r.added} new epic${r.added === 1 ? '' : 's'} added as Watch` : null,
           r.adjusted ? `${r.adjusted} carrying an adjusted date from a delay elsewhere` : null,
           r.pinned ? `${r.pinned} finish date${r.pinned === 1 ? '' : 's'} left alone as held` : null,
+          // Said out loud, because "excluded" is a decision somebody made and
+          // a sync that silently honoured it would be indistinguishable from
+          // one that silently ignored it.
+          r.skippedExcluded ? `${r.skippedExcluded} excluded project${r.skippedExcluded === 1 ? '' : 's'} not touched` : null,
         ].filter(Boolean).join(' · '),
         note: r.wrote ? 'Reload the page to see it — everyone else will get it when they do.' : null,
       })
