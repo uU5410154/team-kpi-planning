@@ -83,6 +83,12 @@ export const freshState = () => ({
   people: repairRoster(seed.people.map((p) => ({ ...p }))).people,
   projects: seed.projects.map((p) => ({ ...p })),
   settings: { ...DEFAULT_SETTINGS },
+  /*
+   * The home screen: shortcuts the team keeps together, in folders they
+   * arrange themselves. Part of the plan rather than of one browser, because
+   * a link somebody found is worth more to the six of them than to one.
+   */
+  apps: [],
   scenarioName: 'Baseline',
 })
 

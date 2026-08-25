@@ -33,6 +33,7 @@ import Projects from './pages/Projects.jsx'
 import People from './pages/People.jsx'
 import Team from './pages/Team.jsx'
 import Timeline from './pages/Timeline.jsx'
+import Apps from './pages/Apps.jsx'
 import Settings from './pages/Settings.jsx'
 
 const TABS = [
@@ -45,6 +46,7 @@ const TABS = [
   // Beside the register rather than inside it: the register answers what a
   // project is worth, this answers when it was supposed to land.
   { id: 'timeline', label: 'Timeline' },
+  { id: 'apps', label: 'Apps' },
   { id: 'settings', label: 'Model' },
 ]
 
@@ -401,6 +403,17 @@ export default function App() {
         return { ...p, ...full }
       }),
     }))
+  }, [])
+
+  /**
+   * Replace the whole home screen.
+   *
+   * Whole, not patched: a drag reorders, folds and unfolds several items at
+   * once, and applying that as a series of edits would leave the screen
+   * half-arranged if one of them lost a race.
+   */
+  const updateApps = useCallback((apps) => {
+    setState((s) => ({ ...s, apps: Array.isArray(apps) ? apps : [] }))
   }, [])
 
   const updateSettings = useCallback((patch) => {
@@ -843,6 +856,7 @@ export default function App() {
             />
           )}
           {tab === 'team' && <Team plan={plan} />}
+          {tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
           {tab === 'timeline' && (
             <Timeline
               plan={plan}
