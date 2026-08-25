@@ -10,7 +10,9 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import puppeteer from 'puppeteer-core'
-import { computePlan, DEFAULT_SETTINGS, timelineOf, daysBetween, isDate } from '../src/lib/model.js'
+import {
+  computePlan, DEFAULT_SETTINGS, timelineOf, daysBetween, isDate, repairAsOfDate, STALE_AS_OF,
+} from '../src/lib/model.js'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -259,6 +261,46 @@ console.log(String.fromCharCode(10) + '--- the tasks underneath decide two thing
   }).projects[0]
   check('  and an "adjustment" that is earlier is not one',
     noAdj.timeline.adjustedEnd === null)
+}
+
+/* ---------------- an actual bar is a fact, not a stopwatch ---------------- */
+console.log(String.fromCharCode(10) + '--- nothing unfinished draws an actual bar ---')
+{
+  const running = timelineOf({
+    start: '2026-01-01', due: '2026-12-01', actualStart: '2026-02-01', status: 'In Progress',
+  }, AS_OF)
+  check('work under way has a start and NO finish',
+    running.actualStart === '2026-02-01' && running.actualEnd === null && running.running === true)
+
+  const done = timelineOf({
+    start: '2026-01-01', due: '2026-12-01', actualStart: '2026-02-01', actualEnd: '2026-03-01', status: 'Done',
+  }, AS_OF)
+  check('  and a finished one has both', done.actualEnd === '2026-03-01' && done.running === false)
+
+  /*
+   * The as-of date is TODAY, not a string typed months ago. A stale one made
+   * anything running measure to a date in the past — a task begun on the 16th
+   * read as minus nine days — and delayed everything becoming overdue.
+   */
+  const today = new Date().toISOString().slice(0, 10)
+  check('THE AS-OF DATE IS TODAY BY DEFAULT', DEFAULT_SETTINGS.asOfDate === today,
+    `${DEFAULT_SETTINGS.asOfDate} vs ${today}`)
+  check('  a plan holding the old hard-coded default is moved on', (() => {
+    const { settings, moved } = repairAsOfDate({ asOfDate: STALE_AS_OF })
+    return moved === true && settings.asOfDate === today
+  })())
+  check('  BUT A DATE SOMEBODY CHOSE IS LEFT ALONE', (() => {
+    const { settings, moved } = repairAsOfDate({ asOfDate: '2026-03-31' })
+    return moved === false && settings.asOfDate === '2026-03-31'
+  })(), 'a pinned as-of date is how a figure reported last month is reproduced')
+
+  // No negative durations, whatever the dates say.
+  const backwards = timelineOf({
+    start: '2026-01-01', due: '2026-12-01', actualStart: '2026-08-16', status: 'In Progress',
+  }, '2026-08-07')
+  check('a start after the as-of date reports no duration, not a negative one',
+    backwards.actualDays === null || backwards.actualDays >= 0,
+    `${backwards.actualDays} days`)
 }
 
 /* ---------------- it draws ---------------- */

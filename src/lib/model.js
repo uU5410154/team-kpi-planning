@@ -430,7 +430,16 @@ export const DEFAULT_SETTINGS = {
   // true  = NET: partner/outsource devs dilute the core shares.
   creditPartners: false,
   // Anything due before this and not Done is flagged past due.
-  asOfDate: '2026-08-07',
+  /*
+   * TODAY, unless somebody deliberately changes it.
+   *
+   * It used to be a fixed string, and it went stale: the plan still said the
+   * 7th of August while the calendar said the 25th, so anything running was
+   * measured to a date eighteen days in the past — a task that began on the
+   * 16th read as minus nine days — and nothing became overdue for a fortnight
+   * after it should have.
+   */
+  asOfDate: new Date().toISOString().slice(0, 10),
   /*
    * Objective 1, which is about delivering on the timeline that was committed.
    * Both are decisions, so both are settings: how far a date may move, and how
@@ -1228,7 +1237,23 @@ export function repairOwnership(projects, people, roleWeights = DEFAULT_ROLE_WEI
  * 1: a PIC change used to write only `pic`, leaving the project on the old
  *    owner's scorecard at 77%.
  */
-export const REPAIR_VERSION = 5
+export const REPAIR_VERSION = 6
+
+/**
+ * The as-of date that nobody chose.
+ *
+ * '2026-08-07' was the hard-coded default for months, so a plan holding
+ * exactly that value is holding a default rather than a decision, and it is
+ * safe to move to today. Any OTHER date was typed by a person and is left
+ * alone — a deliberately pinned as-of date is how somebody reproduces a
+ * figure they reported last month.
+ */
+export const STALE_AS_OF = '2026-08-07'
+
+export function repairAsOfDate(settings) {
+  if (!settings || settings.asOfDate !== STALE_AS_OF) return { settings, moved: false }
+  return { settings: { ...settings, asOfDate: new Date().toISOString().slice(0, 10) }, moved: true }
+}
 
 /**
  * Give every already-committed project a baseline date.
@@ -1388,7 +1413,10 @@ export function repairState(s) {
   const { people: retargeted } = repairTargetUnits(s.people)
   const { people: rostered } = repairRoster(retargeted)
   const { people } = repairKpiIds(rostered)
-  return { ...s, projects, people, repair: REPAIR_VERSION }
+  const { settings } = repairAsOfDate(s.settings)
+  return {
+    ...s, projects, people, settings, repair: REPAIR_VERSION,
+  }
 }
 
 export function setRolesPatch(project, person, roles) {
@@ -1666,7 +1694,16 @@ export function timelineOf(p, asOf) {
     lateBy,
     state,
     plannedDays: daysBetween(plannedStart, plannedEnd),
-    actualDays: daysBetween(actualStart, actualEnd || (running ? asOf : null)),
+    /*
+     * Never negative. Work cannot have taken minus nine days — that only ever
+     * meant the start lay after the date it was being measured to, which is a
+     * date problem, not a duration. Reported as unknown rather than as a
+     * number nobody can act on.
+     */
+    actualDays: (() => {
+      const n = daysBetween(actualStart, actualEnd || (running ? asOf : null))
+      return n == null || n < 0 ? null : n
+    })(),
     // Only a project with both a plan and an outcome can be judged against it.
     comparable: !!plannedEnd && (!!actualEnd || overdue),
   }

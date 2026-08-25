@@ -897,11 +897,20 @@ export default function Timeline({
                   left: `${Math.min(92, planned.left + planned.width + 0.6)}%`,
                   top: depth ? 11 : 15,
                   fontSize: '0.6rem',
-                  color: 'text.disabled',
                   whiteSpace: 'nowrap',
+                  color: tl.running ? STATUS.warning : 'text.disabled',
                 }}
               >
-                no actual dates
+                {/*
+                  * Three different silences, and they are not the same thing:
+                  * work under way has no finish YET, work never begun has no
+                  * start, and a row nobody has reported on has neither.
+                  */}
+                {tl.running
+                  ? `in progress since ${tl.actualStart}`
+                  : tl.actualStart
+                    ? 'started, not finished'
+                    : 'not started'}
               </Typography>
             )}
           </Box>
