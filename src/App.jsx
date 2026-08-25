@@ -330,6 +330,22 @@ export default function App() {
     if (plan.invalid.length) return undefined
     const name = (state.scenarioName || '').trim()
     if (!name) return undefined
+    /*
+     * AND NOT WHEN THIS BROWSER IS BEHIND.
+     *
+     * The Save button asks before replacing a shared plan that has moved on;
+     * this did not ask anything, because it does not ask anything at all. So a
+     * browser showing yesterday's plan needed only one keystroke, and four
+     * seconds later it had quietly overwritten everything saved since —
+     * projects marked Excluded came back as Watch, promoted hours went back to
+     * Watch, twice in one afternoon.
+     *
+     * Automatic saving is for keeping one person's own work safe. It has no
+     * business resolving a disagreement between two plans: the change stays
+     * here, `dirty` stays set, and the Save button — which explains what would
+     * be lost and asks first — is how that gets settled.
+     */
+    if (dbNotice) return undefined
 
     autoSaveTimer.current = setTimeout(async () => {
       try {
@@ -357,7 +373,7 @@ export default function App() {
       }
     }, 4000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [dirty, state, plan.invalid.length])
+  }, [dirty, state, plan.invalid.length, dbNotice])
 
   // Keep the tab in the URL hash so a view can be linked or bookmarked.
   useEffect(() => {
