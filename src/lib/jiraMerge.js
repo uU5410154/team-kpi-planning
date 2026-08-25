@@ -176,9 +176,26 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
      * Only ever written when Jira has one — a blank there is an absence of
      * information, not an instruction to drop the commitment.
      */
-    if (issue.due && issue.due !== (p.due || null)) {
-      Object.assign(patch, replanPatch(p, issue.due))
-      replanned.push({ key: issue.key, from: p.due || null, to: issue.due })
+    /*
+     * THE EPIC'S OWN DATE, OR THE SPRINT IT IS IN.
+     *
+     * An epic scheduled into a sprint has been committed to a fortnight even
+     * where nobody filled in the due date field, and that sprint's end IS the
+     * date it is expected by. It stands in only where the due date is missing:
+     * a dated epic has been committed to deliberately, and a sprint it happens
+     * to sit in does not overrule that.
+     *
+     * NOT the latest date on the tasks underneath. That was tried and taken
+     * back: an epic nobody has dated is a commitment nobody has made, and
+     * rolling its tasks up would put a date on somebody's objective that no
+     * person had agreed to.
+     */
+    const jiraDue = issue.due || issue.sprintEnd || null
+    if (jiraDue && jiraDue !== (p.due || null)) {
+      Object.assign(patch, replanPatch(p, jiraDue))
+      replanned.push({
+        key: issue.key, from: p.due || null, to: jiraDue, fromSprint: !issue.due,
+      })
     }
 
     if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart

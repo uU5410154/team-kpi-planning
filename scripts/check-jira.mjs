@@ -824,12 +824,18 @@ if (!exe) {
   check('A TICKET REOPENED IN JIRA UN-FINISHES HERE TOO', after.three.actualEnd === null,
     'a finish that was taken back must not keep being reported')
   /*
-   * The DUE date is the commitment and is never touched by a sync. The start
-   * is maintained in the ticket and follows it — the register's copy had
-   * twenty-three day/month transpositions in it from an old import.
+   * BOTH PLANNED DATES NOW FOLLOW THE TICKET.
+   *
+   * The due date was frozen here for months, on the reasoning that a sync
+   * rewriting the commitment would be marking its own homework. What settled
+   * it the other way is that this server cannot write to Jira: the board is
+   * where these dates are moved, and twenty-nine of them had drifted away from
+   * the register — one by 417 days. So it follows the ticket, and the move is
+   * RECORDED as a re-plan rather than applied silently, which is what keeps it
+   * honest: the first is free, the rest are drift.
    */
-  check('THE COMMITTED DUE DATE IS EXACTLY AS IT WAS',
-    after.rows.every((r, i) => r.due === before[i].due),
+  check('THE COMMITTED DUE DATE FOLLOWS THE TICKET',
+    after.rows.every((r) => r.due === (byKeyIssue[r.jira]?.due || r.due)),
     after.rows.map((r) => `${r.jira} due ${r.due}`).join(' | '))
   check('  while the planned start follows the ticket',
     after.rows.every((r, i) => r.start === (byKeyIssue[r.jira]?.start || before[i].start)),
@@ -851,6 +857,19 @@ if (!exe) {
       .map((k) => st.projects.find((p) => p.jiraKey === k))
       .filter(Boolean)
   })
+  check('  and a moved commitment is recorded as a re-plan, not applied quietly',
+    after.rows.every((r, i) => {
+      const moved = (byKeyIssue[r.jira]?.due || null) && byKeyIssue[r.jira].due !== before[i].due
+      const row = full.find((x) => x.jiraKey === r.jira)
+      // First move: the baseline names what was first promised, and the count
+      // says one — which is the free re-plan, spent but not yet drift.
+      return !moved || (row.baselineDue === before[i].due && (row.replanCount || 0) >= 1)
+    }),
+    after.rows.map((r) => {
+      const row = full.find((x) => x.jiraKey === r.jira)
+      return `${r.jira} baseline ${row?.baselineDue} moves ${row?.replanCount || 0}`
+    }).join(' | '))
+
   const drifted = []
   full.forEach((now, i) => {
     const was = before[i]
@@ -860,14 +879,22 @@ if (!exe) {
        * two come from the tasks underneath it — where the work now lands, and
        * how much of it is finished.
        */
-      if (['start', 'actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone']
+      /*
+       * `due`, `baselineDue` and `replanCount` move together or not at all:
+       * the commitment follows the ticket and the move is recorded. Listing
+       * them here is the point of this check — a field that starts moving
+       * without being named must fail it.
+       */
+      if (['start', 'due', 'baselineDue', 'replanCount',
+        'actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone']
         .includes(field)) continue
       if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
         drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)
       }
     }
   })
-  check('A SYNC TOUCHES THE DATES, THE NAME AND THE TASK COUNTS — NOTHING ELSE', drifted.length === 0,
+  check('A SYNC TOUCHES THE PLANNED AND ACTUAL DATES, THE NAME AND THE TASK COUNTS — NOTHING ELSE',
+    drifted.length === 0,
     drifted.join(' | ') || `${Object.keys(before[0]).length} fields per project, all unchanged but those`)
   check('  and the name it wrote is the one Jira holds',
     full.every((now) => !now.jiraKey || typeof now.summary === 'string'),

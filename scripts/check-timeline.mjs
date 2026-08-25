@@ -360,6 +360,61 @@ if (!exe) {
   check('and warns against editing the plan to match reality', seen.warning)
   check('it puts projects on the chart', Number(seen.rows) > 0, `${seen.rows} rows`)
 
+  /* ---- a bar is evidence of work, or it is not drawn ----
+   *
+   * The actual bar is drawn from the PLANNED start, so a project nobody has
+   * touched still had two real dates to draw with — and drew a sliver whose
+   * own tooltip read "Actually ran — to —". The model was right the whole
+   * time; the drawing was inventing the bar. Checked here, in the browser,
+   * because that is the only place the fault existed.
+   */
+  const labels = () => page.evaluate(() => [...document.querySelectorAll('[aria-label^="Actually ran"]')]
+    .map((el) => el.getAttribute('aria-label')))
+
+  const seedBars = await labels()
+  check('NOTHING SAYS "Actually ran — to —"',
+    !seedBars.some((t) => /Actually ran — to —/.test(t)),
+    seedBars.filter((t) => /— to —/.test(t)).slice(0, 2).join(' | ') || `${seedBars.length} actual bars`)
+  check('a register with no outcomes draws no actual bars at all',
+    seedBars.length === 0, `${seedBars.length} drawn`)
+
+  /*
+   * And the other half: where there IS an outcome, the bar must appear. A rule
+   * that draws nothing is not a fix, it is a blank chart.
+   */
+  await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    const withDates = st.projects.filter((p) => p.start && p.due).slice(0, 3)
+    // one finished, one still running, one untouched
+    withDates[0].actualStart = withDates[0].start
+    withDates[0].actualEnd = withDates[0].due
+    withDates[0].status = 'Done'
+    withDates[1].actualStart = withDates[1].start
+    withDates[1].status = 'In Progress'
+    delete withDates[2].actualStart
+    delete withDates[2].actualEnd
+    localStorage.setItem('fa-tech-kpi-2026', JSON.stringify(st))
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await new Promise((r) => setTimeout(r, 3500))
+
+  const after = await labels()
+  check('a finished project DOES draw one',
+    after.some((t) => /Actually ran \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/.test(t)),
+    after.slice(0, 1).join('') || 'none')
+  check('and one under way draws one, running to today',
+    after.some((t) => /Actually ran \d{4}-\d{2}-\d{2} to still running/.test(t)),
+    after.find((t) => /still running/.test(t)) || 'none')
+  check('and the untouched one still draws nothing',
+    after.length === 2, `${after.length} actual bars for 2 projects with outcomes`)
+  check('STILL nothing says "— to —"', !after.some((t) => /— to —/.test(t)),
+    after.filter((t) => /— to —/.test(t)).join(' | '))
+
+  // Put the register back before the rest of the suite reads it.
+  await page.evaluate(() => localStorage.clear())
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await new Promise((r) => setTimeout(r, 2500))
+
   // Filtering to a state nothing is in must empty it rather than show everything
   const filtered = await page.evaluate(() => {
     const label = [...document.querySelectorAll('label')].find((l) => l.innerText.trim() === 'State')

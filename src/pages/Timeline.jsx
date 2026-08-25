@@ -727,7 +727,20 @@ export default function Timeline({
      */
     const drawnStart = tl.plannedStart || tl.actualStart
     const finished = tl.actualEnd || (tl.running ? asOf : null)
-    const actual = bar(drawnStart, finished)
+    /*
+     * AND ONLY WHERE THERE IS AN OUTCOME TO DRAW.
+     *
+     * Because the bar is drawn from the PLANNED start, a project nobody has
+     * touched still had two real dates to hand — the plan's — and drew a sliver
+     * of an "actual" bar whose own tooltip read "Actually ran — to —". A bar
+     * that says it does not know when the work ran is not evidence of work; it
+     * is the absence of it, and it belongs on no chart.
+     *
+     * The evidence is the register's, not the drawing's: a real start, a real
+     * finish, or a status that says it is in flight.
+     */
+    const happened = !!tl.actualStart || !!tl.actualEnd || !!tl.running
+    const actual = happened ? bar(drawnStart, finished) : null
     const finish = finishOf(tl)
     const colour = colourOf(row)
 

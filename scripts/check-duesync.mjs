@@ -95,6 +95,34 @@ check('the sync accounts for a move exactly as the app does',
   JSON.stringify(mergeJira(state([base]), feed(), {}).projects[0].baselineDue)
   === JSON.stringify({ ...base, ...replanPatch(base, '2026-11-13') }.baselineDue))
 
+console.log('\n— an epic with no date of its own —')
+const undated = { ...base, due: null, baselineDue: null }
+const sprint = { sprintEnd: '2026-10-31', sprintName: 'FNP Sprint 21' }
+const filled = mergeJira(state([undated]), feed({ due: null, ...sprint }), {}).projects[0]
+check('THE SPRINT IT IS IN STANDS IN FOR THE DUE DATE',
+  filled.due === '2026-10-31', String(filled.due))
+check('...and the sync says the date came from a sprint',
+  mergeJira(state([undated]), feed({ due: null, ...sprint }), {}).replans[0].fromSprint === true)
+check('...and a first commitment spends no re-plan',
+  (filled.replanCount || 0) === 0 && filled.baselineDue === '2026-10-31',
+  `baseline ${filled.baselineDue}, moves ${filled.replanCount || 0}`)
+check('a DATED epic is not overruled by a sprint it sits in',
+  mergeJira(state([undated]), feed({ due: '2026-09-01', ...sprint }), {}).projects[0].due === '2026-09-01')
+check('no due date and no sprint leaves it undated',
+  mergeJira(state([undated]), feed({ due: null }), {}).projects[0].due === null)
+/*
+ * And NOT from the tasks underneath. That was built, applied to the live plan
+ * and taken back within the hour: an epic nobody has dated is a commitment
+ * nobody has made, and six live commitments moved on the strength of undated
+ * tickets — one of them five months earlier than what had been agreed.
+ */
+const roll = { 'FNP-1065': { total: 4, done: 1, latestDue: '2027-06-30', anyStarted: true } }
+check('THE TASKS UNDERNEATH DO NOT SET THE PROJECT\'S DATE',
+  mergeJira(state([undated]), feed({ due: null }, roll), {}).projects[0].due === null,
+  String(mergeJira(state([undated]), feed({ due: null }, roll), {}).projects[0].due))
+check('...not even where the register already holds one',
+  mergeJira(state([base]), feed({ due: null }, roll), {}).projects[0].due === '2026-07-31')
+
 console.log('\n— what moves with it —')
 const plan = computePlan(repairState(state([p1])))
 const row = plan.projects[0]

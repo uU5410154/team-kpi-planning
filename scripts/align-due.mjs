@@ -38,6 +38,14 @@ const { issues } = await post('/api/jira/issues', { keys })
 const jira = new Map(issues.map((i) => [i.key, i]))
 console.log(`${issues.length} of ${keys.length} keys found on the board`)
 
+/*
+ * The date this project is committed to, by the same rule the sync uses: the
+ * epic's own date, or the end of the sprint it has been scheduled into. Never
+ * the latest date on the tasks underneath — an epic nobody has dated is a
+ * commitment nobody has made.
+ */
+const dueFor = (raw, j) => (j && (j.due || j.sprintEnd)) || null
+
 const before = computePlan(repairState({ ...state }))
 const rowOf = new Map(before.projects.map((p) => [p.key, p]))
 
@@ -45,17 +53,19 @@ const moves = state.projects
   .map((raw) => ({ raw, j: jira.get(raw.jiraKey), row: rowOf.get(raw.key) }))
   // Only where Jira HAS a date and it differs. A blank on the board is an
   // absence of information, never an instruction to drop a commitment.
-  .filter(({ raw, j }) => j && isDate(j.due) && j.due !== (raw.due || null))
-  .sort((a, b) => String(a.j.due).localeCompare(String(b.j.due)))
+  .map((m) => ({ ...m, want: dueFor(m.raw, m.j) }))
+  .filter(({ raw, want }) => isDate(want) && want !== (raw.due || null))
+  .sort((a, b) => String(a.want).localeCompare(String(b.want)))
 
 console.log(`\n${moves.length} commitment(s) to bring into line:\n`)
 console.log(`  ${'KEY'.padEnd(10)} ${'PIC'.padEnd(9)} ${'REGISTER'.padEnd(11)} ${'JIRA'.padEnd(11)} `
   + `${'MOVE'.padStart(6)}  PROJECT`)
-for (const { raw, j, row } of moves) {
-  const days = Math.round((Date.parse(j.due) - Date.parse(raw.due || j.due)) / 86400000)
+for (const { raw, j, row, want } of moves) {
+  const days = Math.round((Date.parse(want) - Date.parse(raw.due || want)) / 86400000)
   console.log(`  ${String(raw.jiraKey).padEnd(10)} ${String(row?.pic || '—').padEnd(9)} `
-    + `${String(raw.due || '—').padEnd(11)} ${String(j.due).padEnd(11)} `
-    + `${(days > 0 ? `+${days}` : String(days)).padStart(6)}  ${String(raw.summary).slice(0, 46)}`)
+    + `${String(raw.due || '—').padEnd(11)} ${String(want).padEnd(11)} `
+    + `${(days > 0 ? `+${days}` : String(days)).padStart(6)}  ${String(raw.summary).slice(0, 40)}`
+  )
 }
 
 const next = repairState({
@@ -69,7 +79,7 @@ const next = repairState({
      * register says this project was always due on the day the board says it
      * was, and nobody has spent anything.
      */
-    return { ...raw, due: hit.j.due, baselineDue: hit.j.due }
+    return { ...raw, due: hit.want, baselineDue: hit.want }
   }),
 })
 const after = computePlan(next)
