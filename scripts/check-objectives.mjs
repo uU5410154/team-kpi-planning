@@ -347,5 +347,60 @@ console.log(String.fromCharCode(10) + '--- the exported total row is the same av
   }
 }
 
+/* ====== objective 1 is a list of dates ====== */
+console.log(String.fromCharCode(10) + '--- objective 1 names every project a person runs, and its date ---')
+{
+  const dated = computePlan({
+    ...base,
+    projects: base.projects.map((p, i) => ({
+      ...p,
+      pic: i % 2 === 0 ? 'kade' : p.pic,
+      due: i % 5 === 0 ? null : (p.due || '2026-06-30'),
+      actualEnd: i % 3 === 0 ? '2026-07-05' : p.actualEnd,
+      status: i % 3 === 0 ? 'Done' : p.status,
+    })),
+  })
+  const kade = dated.people.find((x) => x.id === 'kade')
+  const owned = dated.projects.filter((x) => x.pic === 'kade'
+    && x.commitLevel !== 'nextyear' && x.commitLevel !== 'excluded')
+
+  check('EVERY PROJECT A PERSON IS PIC OF IS ON THEIR OBJECTIVE 1',
+    kade.commitments.length === owned.length,
+    `${kade.commitments.length} listed vs ${owned.length} they run`)
+  check('  and nothing they merely contribute to is',
+    kade.commitments.every((c) => owned.some((o) => o.key === c.key)))
+  check('  each one carries the date it must land by',
+    kade.commitments.every((c) => 'due' in c && 'actualEnd' in c && 'met' in c))
+  check('  in date order, so the next thing due reads first',
+    kade.commitments.every((c, i, a) => i === 0
+      || String(a[i - 1].due || '9999') <= String(c.due || '9999')),
+    kade.commitments.slice(0, 4).map((c) => c.due || 'none').join(' -> '))
+
+  // A project with no date is listed and counted as a gap, not as a pass.
+  const undated = kade.commitments.filter((c) => !c.due)
+  check('A PROJECT WITH NO COMMITTED DATE IS SHOWN AS A GAP',
+    undated.length === kade.undatedCount && undated.every((c) => c.met === null),
+    `${kade.undatedCount} with no date, none of them scored`)
+
+  // The share is the roll-up of the list, not a separate calculation.
+  const line = kade.kpiLines.find((l) => l.targetKind === 'percent' && !l.custom)
+  const judged = kade.commitments.filter((c) => c.judged)
+  check('THE PERCENTAGE IS THE LIST ROLLED UP, NOT A SECOND OPINION',
+    line.judged === judged.length
+    && line.onTime === judged.filter((c) => c.met).length,
+    `${line.onTime}/${line.judged} vs ${judged.filter((c) => c.met).length}/${judged.length}`)
+  check('  and only what has an answer is counted',
+    judged.every((c) => c.met !== null) && line.judged <= kade.commitments.length)
+
+  // Reassigning the PIC moves the commitment with it.
+  const moved = computePlan({
+    ...base,
+    projects: base.projects.map((p, i) => (i === 0 ? { ...p, pic: 'pol', due: '2026-05-05' } : p)),
+  })
+  const polHas = moved.people.find((x) => x.id === 'pol').commitments.some((c) => c.due === '2026-05-05')
+  check('A DATE FOLLOWS THE PIC WHEN THE PIC CHANGES', polHas,
+    'whoever runs the project owns the date')
+}
+
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

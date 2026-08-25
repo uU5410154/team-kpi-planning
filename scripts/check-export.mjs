@@ -114,8 +114,16 @@ console.log('\n--- reassigning moves the project in the exported workbook ---')
   const jamesNow = rowsOn(sheetFor(back2, 'James'))
   check('the old owner sheet listed it before', jamesWas.includes(KEY))
   check('THE OLD OWNER SHEET NO LONGER LISTS IT', !jamesNow.includes(KEY))
-  check('and it lost exactly that one row',
-    jamesWas.length - jamesNow.length === 1, `${jamesWas.length} -> ${jamesNow.length}`)
+  /*
+   * A person's sheet names a project TWICE now — once under objective 1 as a
+   * date they committed to, once in the portfolio as hours they carry — so
+   * reassigning it takes both away. Counted rather than assumed to be one:
+   * what matters is that every mention goes, and none linger.
+   */
+  const mentions = (rows) => rows.filter((k) => k === KEY).length
+  check('and every mention of it went, not just the first',
+    mentions(jamesNow) === 0 && jamesWas.length - jamesNow.length === mentions(jamesWas),
+    `${mentions(jamesWas)} mention(s) before, ${mentions(jamesNow)} after; ${jamesWas.length} -> ${jamesNow.length} rows`)
   check('the new owner sheet lists it', rowsOn(sheetFor(back2, 'Gun')).includes(KEY))
 
   // Find the header by name, not by row number — the register carries a title

@@ -1614,6 +1614,50 @@ export function onTimeOf(p, sprintDays = DEFAULT_SPRINT_DAYS) {
  * nothing reads as "nothing to say" rather than as a zero — the same rule the
  * Timeline follows, and for the same reason.
  */
+/**
+ * What a person has committed to deliver, and by when.
+ *
+ * Objective 1 is a DATE KPI: every project somebody is PIC of, each with the
+ * date they said it would land. Not a percentage handed down from above — the
+ * percentage is only the roll-up. The substance is the list, because that is
+ * what a person actually commits to and what a review actually discusses.
+ *
+ * By PIC, not by credited share. Somebody can hold a slice of a project they
+ * do not run, and being asked for a delivery date on work you do not own is
+ * how a KPI stops being taken seriously. Whoever the register names as PIC
+ * owns the date.
+ */
+export function deliveryCommitments(personId, projects, sprintDays = DEFAULT_SPRINT_DAYS) {
+  return (projects || [])
+    .filter((p) => p.pic === personId && isInPlan(p))
+    .map((p) => {
+      const tl = p.timeline || {}
+      const met = onTimeOf(p, sprintDays)
+      return {
+        key: p.key,
+        jiraKey: p.jiraKey || null,
+        summary: p.summary,
+        // The date committed to, and the date it actually landed.
+        due: tl.plannedEnd || null,
+        actualEnd: tl.actualEnd || null,
+        lateBy: tl.lateBy ?? null,
+        running: !!tl.running,
+        overdue: !!tl.overdue,
+        status: p.status || '',
+        savingHours: p.savingHours ?? null,
+        /*
+         * met === null is not a failure. A project with no committed date has
+         * not been promised yet, and one still running with time left has not
+         * been asked yet. Both are listed — a missing date is the thing this
+         * objective most wants somebody to notice — and neither is scored.
+         */
+        met,
+        judged: met !== null,
+      }
+    })
+    .sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')))
+}
+
 export function onTimeShare(rows, sprintDays = DEFAULT_SPRINT_DAYS) {
   const projects = (rows || []).map((r) => (r && r.p ? r.p : r))
   const judged = projects.filter((p) => onTimeOf(p, sprintDays) !== null)
@@ -2194,10 +2238,14 @@ export function computePlan(state) {
      * beside it, because the two answer different questions and a small
      * project with a spectacular ratio moves this one a long way.
      */
-    // Objective 1's figure: did this person's work land when it was said it
-    // would. Computed over the projects credited to them, on the same rows the
-    // rest of their card is built from.
-    const delivery = onTimeShare(counted, s.sprintDays)
+    /*
+     * Objective 1: the dates this person has committed to.
+     *
+     * Built from what they are PIC of rather than from their credited share —
+     * a delivery date belongs to whoever runs the project.
+     */
+    const commitments = deliveryCommitments(person.id, perProject, s.sprintDays)
+    const delivery = onTimeShare(commitments.filter((c) => c.judged).map((c) => ({ timeline: { comparable: true, lateBy: c.lateBy } })), s.sprintDays)
     const roiRows = costedRows.filter((r) => r.p.roi != null)
     const avgProjectRoi = roiRows.length
       ? roiRows.reduce((a, r) => a + r.p.roi, 0) / roiRows.length
@@ -2264,6 +2312,10 @@ export function computePlan(state) {
       onTimeCount: delivery.onTime,
       onTimeJudged: delivery.judged,
       onTimeLate: delivery.late,
+      commitments,
+      // Worth its own figure: a project somebody owns with no date on it is
+      // the gap this objective exists to close.
+      undatedCount: commitments.filter((c) => !c.due).length,
       monthlyBenefit,
       hoursMonthlyBenefit,
       monetaryAnnualBenefit,

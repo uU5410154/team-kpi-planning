@@ -544,20 +544,65 @@ export default function People({
                               : l.meetsTarget ? STATUS.good : STATUS.critical,
                           }}>
                             {l.creditedRatio == null
-                              ? 'no ROI yet — no costed project'
-                              : `now ${fmtRoi(l.creditedRatio)}${l.meetsTarget ? '' : ' — below'}`}
+                              ? 'nothing finished yet that had a date to meet'
+                              : `${l.onTime} of ${l.judged} delivered on the date committed`
+                                + `${l.meetsTarget ? '' : ' — below the standard'}`}
                           </Typography>
                         )}
-                        {l.targetKind === 'percent' && l.creditedRatio != null && (
-                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', lineHeight: 1.2 }}>
-                            average of {l.roiRowCount} project{l.roiRowCount === 1 ? '' : 's'}
-                            {l.portfolioRatio != null && ` · portfolio ${fmtRoi(l.portfolioRatio)}`}
-                          </Typography>
-                        )}
-                        {l.targetKind === 'percent' && l.creditedMoney > 0 && (
-                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', lineHeight: 1.2 }}>
-                            on {fmtMoneyShort(l.creditedMoney, sym)}/yr of benefit
-                          </Typography>
+                        {/*
+                          * OBJECTIVE 1 IS A LIST OF DATES.
+                          *
+                          * The percentage above is only the roll-up. What a
+                          * person actually commits to — and what a review
+                          * actually discusses — is every project they run and
+                          * the date they said it would land, so that is what
+                          * the card shows.
+                          */}
+                        {l.targetKind === 'percent' && (p.commitments || []).length > 0 && (
+                          <Box sx={{ mt: 0.75, mb: 0.5 }}>
+                            <Table size="small" sx={{
+                              '& td': { border: 0, px: 0.75, py: 0.15, fontSize: '0.68rem' },
+                            }}
+                            >
+                              <TableBody>
+                                {p.commitments.map((c) => (
+                                  <TableRow key={c.key}>
+                                    <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                                      {c.jiraKey || '—'}
+                                    </TableCell>
+                                    <TableCell sx={{ maxWidth: 210, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {c.summary}
+                                    </TableCell>
+                                    <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                                      {c.due ? `by ${c.due}` : (
+                                        <Box component="span" sx={{ color: STATUS.warning, fontWeight: 700 }}>
+                                          no date committed
+                                        </Box>
+                                      )}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{
+                                      whiteSpace: 'nowrap',
+                                      fontWeight: 700,
+                                      color: c.met === null ? 'text.disabled' : c.met ? STATUS.good : STATUS.critical,
+                                    }}
+                                    >
+                                      {c.met === null
+                                        ? (c.running ? 'running' : 'not due yet')
+                                        : c.met
+                                          ? `met${c.actualEnd ? ` ${c.actualEnd}` : ''}`
+                                          : `${c.lateBy > 0 ? '+' : ''}${c.lateBy}d`}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                            {p.undatedCount > 0 && (
+                              <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', mt: 0.25 }}>
+                                {p.undatedCount} project{p.undatedCount === 1 ? '' : 's'} with no committed date —
+                                objective 1 is not complete until every one has one.
+                              </Typography>
+                            )}
+                          </Box>
                         )}
                         {l.creditedHours > 0 && l.targetKind !== 'hours' && (
                           <Tooltip title="The saving hours behind this line. Its target is stated in another unit, but the hours still count toward the total below.">

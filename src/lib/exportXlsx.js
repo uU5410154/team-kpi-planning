@@ -780,6 +780,47 @@ export async function buildWorkbook(plan, state) {
     tone(sr.getCell(6), NAVY)
     styleBody(ws, wStart, r - 1, 6)
 
+    /* ---- objective 1: the dates this person has committed to ----
+     *
+     * A list, not a percentage. The share on the scorecard above is the
+     * roll-up; what somebody is actually held to is every project they run and
+     * the date they said it would land, so the sheet states them one per line
+     * the way the card does.
+     */
+    if ((p.commitments || []).length) {
+      r++
+      sectionRow(ws, r++, `OBJECTIVE 1 — DELIVERY DATES COMMITTED (${p.commitments.length} projects)`, cols.length)
+      const dCols = [['Jira', 12], ['Project', 46], ['Committed by', 14], ['Actually landed', 15],
+        ['Days out', 11], ['Status', 14], [`Saving ${unit}`, 13]]
+      headerRow(ws, r++, dCols.map((c) => c[0]), dCols.map((c) => c[1]))
+      const dStart = r
+      for (const c of p.commitments) {
+        const row = ws.getRow(r++)
+        row.values = [
+          c.jiraKey || '',
+          c.summary,
+          c.due || 'NO DATE COMMITTED',
+          c.actualEnd || (c.running ? 'still running' : ''),
+          c.lateBy == null ? null : c.lateBy,
+          c.met === null ? (c.running ? 'running' : 'not due yet') : (c.met ? 'met' : 'missed'),
+          c.savingHours ?? null,
+        ]
+        row.getCell(5).numFmt = '+0;-0;0'
+        row.getCell(7).numFmt = N0
+        for (const cc of [3, 4, 5, 6]) row.getCell(cc).alignment = { horizontal: 'center' }
+        // A project with no committed date is the gap this objective exists to
+        // close, so it is coloured as one rather than left blank.
+        if (!c.due) tone(row.getCell(3), WARN)
+        if (c.met === false) tone(row.getCell(6), BAD)
+        if (c.met === true) tone(row.getCell(6), GOOD)
+      }
+      styleBody(ws, dStart, r - 1, dCols.length)
+      const dt = ws.getRow(r++)
+      dt.getCell(2).value = `${p.onTimeCount} of ${p.onTimeJudged} delivered on the date committed`
+        + `${p.undatedCount ? ` · ${p.undatedCount} still with no date` : ''}`
+      dt.getCell(2).font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } }
+    }
+
     r++
     sectionRow(ws, r++, 'PROJECT PORTFOLIO', cols.length)
     headerRow(ws, r++, cols.map((c) => c[0]), cols.map((c) => c[1]))
