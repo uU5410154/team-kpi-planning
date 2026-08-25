@@ -1496,6 +1496,8 @@ export function newProject(seq) {
      * adjustment that quietly overwrote it would erase the fact of the delay.
      */
     adjustedDue: null,
+    // The task that claimed the delay, so the bar can name its cause.
+    adjustedCause: null,
     tasksTotal: 0,
     tasksDone: 0,
     assignee: null,
@@ -1652,6 +1654,7 @@ export function timelineOf(p, asOf) {
     plannedEnd,
     adjustedEnd,
     adjustedBy,
+    adjustedCause: adjustedEnd ? (p.adjustedCause || null) : null,
     tasksTotal: Number(p.tasksTotal) || 0,
     tasksDone: Number(p.tasksDone) || 0,
     actualStart,

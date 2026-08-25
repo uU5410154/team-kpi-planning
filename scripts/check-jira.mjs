@@ -80,6 +80,12 @@ const CHILDREN = {
         duedate: '2026-02-01',
         resolutiondate: '2026-03-15T09:00:00.000+0700',
         customfield_10015: '2026-01-08',
+        // Carried across two sprints: the window is the first start to the
+        // last end, which is what a carry-over actually means.
+        customfield_10020: [
+          { id: 1, name: 'Sprint 1', startDate: '2026-01-05T00:00:00.000Z', endDate: '2026-01-18T23:59:59.000Z' },
+          { id: 2, name: 'Sprint 2', startDate: '2026-01-19T00:00:00.000Z', endDate: '2026-02-01T23:59:59.000Z' },
+        ],
       },
     },
     {
@@ -111,6 +117,51 @@ const CHILDREN = {
       },
     },
     {
+      key: 'FNP-16',
+      fields: {
+        summary: 'Blocked: data team delayed',
+        status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-1' },
+        created: '2026-02-01T09:00:00.000+0700',
+        updated: '2026-02-01T09:00:00.000+0700',
+        duedate: '2026-09-30',
+        resolutiondate: null,
+        customfield_10015: null,
+        // Mixed case on purpose: a label is a label however it was typed.
+        labels: ['blocked', 'IT-Delay'],
+      },
+    },
+    {
+      key: 'FNP-17',
+      fields: {
+        summary: 'Overran on its own, nobody else to blame',
+        status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-1' },
+        created: '2026-02-01T09:00:00.000+0700',
+        updated: '2026-02-01T09:00:00.000+0700',
+        duedate: '2026-12-31',
+        resolutiondate: null,
+        customfield_10015: null,
+        labels: ['spillover'],
+      },
+    },
+    {
+      key: 'FNP-18',
+      fields: {
+        summary: 'No dates, no sprint, nothing at all',
+        status: { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-1' },
+        created: '2026-01-06T09:00:00.000+0700',
+        updated: '2026-05-06T09:00:00.000+0700',
+        duedate: null,
+        resolutiondate: null,
+        customfield_10015: '2026-01-20',
+      },
+    },
+    {
       key: 'FNP-12',
       fields: {
         summary: 'Task with no due date of its own',
@@ -122,6 +173,9 @@ const CHILDREN = {
         duedate: null,
         resolutiondate: null,
         customfield_10015: '2026-01-20',
+        customfield_10020: [
+          { id: 3, name: 'Sprint 9 Week 2', startDate: '2026-08-16T00:00:00.000Z', endDate: '2026-08-22T23:59:59.000Z' },
+        ],
       },
     },
   ],
@@ -160,7 +214,7 @@ const fake = createServer((req, res) => {
      * coincidence.
      */
     if (/ORDER BY Rank ASC/.test(jql)) {
-      const rank = ['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13']
+      const rank = ['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13', 'FNP-16', 'FNP-17', 'FNP-18']
       issues = [...issues].sort((a, b) => rank.indexOf(a.key) - rank.indexOf(b.key))
     }
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -256,7 +310,7 @@ console.log(String.fromCharCode(10) + '--- an epic breaks down into its tasks --
     body: JSON.stringify({ keys: ['FNP-1', 'FNP-2'] }),
   })).json()
   check('children come back under the parent that owns them',
-    kids.byParent['FNP-1'].length === 4 && kids.byParent['FNP-2'].length === 0,
+    kids.byParent['FNP-1'].length === 7 && kids.byParent['FNP-2'].length === 0,
     JSON.stringify(Object.fromEntries(Object.entries(kids.byParent).map(([k, v]) => [k, v.length]))))
   const child = kids.byParent['FNP-1'].find((c) => c.key === 'FNP-11')
   check('a task carries its own dates', child.due === '2026-02-01' && child.resolved === '2026-03-15',
@@ -426,10 +480,43 @@ console.log(String.fromCharCode(10) + '--- children come back in the order Jira 
     kids.ordering === 'Rank ASC' && askedFor.some((j) => /ORDER BY Rank ASC/.test(j)),
     `ordering: ${kids.ordering}`)
   check('AND HANDS BACK EXACTLY THAT ORDER',
-    JSON.stringify(order) === JSON.stringify(['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13']),
+    JSON.stringify(order)
+      === JSON.stringify(['FNP-14', 'FNP-12', 'FNP-11', 'FNP-13', 'FNP-16', 'FNP-17', 'FNP-18']),
     order.join(', '))
   check('  which is neither key order nor date order',
     order.join() !== [...order].sort().join(), 'a sort by anything else would have shown here')
+}
+
+/* ---------------- the sprint is the plan ---------------- */
+console.log(String.fromCharCode(10) + '--- a task is scheduled by its sprint ---')
+{
+  const kids = await (await fetch(`${base}/api/jira/children`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1'] }),
+  })).json()
+  const rows = kids.byParent['FNP-1']
+  const carried = rows.find((c) => c.key === 'FNP-11')
+  const dateless = rows.find((c) => c.key === 'FNP-12')
+  const plain = rows.find((c) => c.key === 'FNP-13')
+
+  check('A TASK CARRIED ACROSS SPRINTS SPANS BOTH',
+    carried.sprintStart === '2026-01-05' && carried.sprintEnd === '2026-02-01',
+    `${carried.sprintStart} to ${carried.sprintEnd} across ${carried.sprintCount} sprints`)
+  check('  and the sprint is what gets planned against, not its own dates',
+    carried.planStart === '2026-01-05' && carried.planEnd === '2026-02-01',
+    `own dates were ${carried.start} to ${carried.due}`)
+  check('  while its own dates are still carried, so the difference is visible',
+    carried.start === '2026-01-08' && carried.due === '2026-02-01')
+  check('  and the sprint is named', /Sprint 2/.test(carried.sprintName || ''), carried.sprintName)
+
+  check('A TASK WITH NO DATES OF ITS OWN GETS THE SPRINT’S',
+    dateless.due === null && dateless.planEnd === '2026-08-22',
+    `no due date of its own, scheduled ${dateless.planStart} to ${dateless.planEnd}`)
+
+  check('and a task in no sprint keeps its own dates',
+    plain.sprintEnd == null && plain.planEnd === plain.due,
+    `${plain.planEnd} from its own due date`)
 }
 
 /* ---------------- what the tasks add up to ---------------- */
@@ -441,12 +528,17 @@ console.log(String.fromCharCode(10) + '--- the rollup under each epic ---')
     body: JSON.stringify({ keys: ['FNP-1', 'FNP-2'] }),
   })).json()
   const one = r.byParent['FNP-1']
-  check('it counts the tasks under a parent', one.total === 4, JSON.stringify(one))
+  check('it counts the tasks under a parent', one.total === 7, JSON.stringify(one))
   check('  and how many are resolved', one.done === 3, `${one.done} of ${one.total}`)
   check('  SO IT KNOWS THE PROJECT IS NOT FINISHED', one.allDone === false,
     'one task is still open')
-  check('  it takes the LATEST due date among them', one.latestDue === '2026-04-01', String(one.latestDue))
+  // A SPRINT end where a task has one: that is the window the work is
+  // actually scheduled in.
+  check('  it takes the latest date any task needs', one.latestDue === '2026-12-31', String(one.latestDue))
   check('  and the LATEST resolution', one.latestResolved === '2026-04-01', String(one.latestResolved))
+  check('  BUT ONLY A LABELLED TASK CAN CLAIM A DELAY',
+    one.latestDelayDue === '2026-09-30' && one.delayKey === 'FNP-16',
+    `${one.delayCount} labelled ${r.delayLabel}; the December overrun is not one of them`)
   check('a parent with no tasks is not "all done"',
     r.byParent['FNP-2'].total === 0 && r.byParent['FNP-2'].allDone === false,
     'there was nothing to finish')
@@ -618,8 +710,11 @@ if (!exe) {
   check('IT WROTE THE ACTUAL START', after.one.actualStart === '2026-01-10', String(after.one.actualStart))
   check('AND HELD THE FINISH BACK WHILE A TASK IS OPEN', after.one.actualEnd == null,
     `the epic says done, its tasks say ${after.one.tasksDone} of ${after.one.tasksTotal}`)
-  check('  while recording where the work now lands', after.one.adjustedDue === '2026-04-01',
-    'the latest date on a task underneath')
+  check('  while recording where the work now lands', after.one.adjustedDue === '2026-09-30',
+    `from ${after.one.adjustedCause}, the task marked as somebody else's delay`)
+  check('  AND NOT FROM THE TASK THAT SIMPLY OVERRAN',
+    after.one.adjustedDue !== '2026-12-31' && after.one.adjustedCause === 'FNP-16',
+    'an unlabelled overrun is this team’s own slippage, not an adjustment')
   check('an unfinished issue gets a start and no finish',
     after.two.actualStart === '2026-02-01' && !after.two.actualEnd,
     JSON.stringify({ s: after.two.actualStart, e: after.two.actualEnd }))
@@ -650,7 +745,8 @@ if (!exe) {
        * two come from the tasks underneath it — where the work now lands, and
        * how much of it is finished.
        */
-      if (['actualStart', 'actualEnd', 'summary', 'adjustedDue', 'tasksTotal', 'tasksDone'].includes(field)) continue
+      if (['actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone']
+        .includes(field)) continue
       if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
         drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)
       }
@@ -681,7 +777,7 @@ if (!exe) {
     collapsible: !!document.querySelector('[aria-label="collapse FNP-1"]'),
   }))
   check('EXPANDING AN EPIC SHOWS ITS TASKS',
-    /Task that finished late/.test(opened.text) && /Task with no due date of its own/.test(opened.text),
+    /Task that finished late/.test(opened.text) && /No dates, no sprint, nothing at all/.test(opened.text),
     opened.collapsible ? 'row is now collapsible' : 'row did not open')
   check('  and each task says what it is',
     /FNP-11 · Task/.test(opened.text) && /FNP-12 · Story/.test(opened.text),
@@ -769,7 +865,7 @@ if (!exe) {
   // ---- a task with NO due date still gets something to read against ----
   const borrowed = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('div')]
-      .filter((d) => (d.innerText || '').includes('FNP-12 ·') && d.querySelectorAll('div').length < 40)
+      .filter((d) => (d.innerText || '').includes('FNP-18 ·') && d.querySelectorAll('div').length < 40)
     const row = rows[rows.length - 1]
     const track = row && [...row.parentElement.parentElement.children]
       .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)

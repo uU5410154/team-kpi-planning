@@ -28,6 +28,17 @@ const conf = () => ({
   // piece of work in it. Both configurable, because neither is universal.
   project: String(process.env.JIRA_PROJECT || 'FNP').trim().toUpperCase(),
   epicType: process.env.JIRA_EPIC_TYPE || 'Epic',
+  // Jira Software's Sprint field. The id differs per site, so it is a setting.
+  sprintField: process.env.JIRA_SPRINT_FIELD || 'customfield_10020',
+  /*
+   * The label a task carries when the delay was somebody else's.
+   *
+   * Only a task marked with it may move a project's adjusted date. A task
+   * simply running past the project's date is ordinary slippage — this team's
+   * own — and drawing that as an adjustment would turn every overrun into
+   * somebody else's fault.
+   */
+  delayLabel: String(process.env.JIRA_DELAY_LABEL || 'it-delay').toLowerCase(),
 })
 
 export const UNAVAILABLE = Symbol('jira-unavailable')
@@ -66,6 +77,30 @@ const fresh = (key) => {
 const day = (v) => (typeof v === 'string' && v.length >= 10 ? v.slice(0, 10) : null)
 
 /**
+ * The window a task is actually scheduled in.
+ *
+ * A task carried across sprints belongs to several, so the span is the
+ * EARLIEST start to the LATEST end: that is the stretch of calendar the work
+ * has actually occupied, which is what a carry-over means and what a bar
+ * should show.
+ */
+function sprintWindow(value) {
+  const list = Array.isArray(value) ? value : (value ? [value] : [])
+  let start = null
+  let end = null
+  let name = null
+  for (const sp of list) {
+    if (!sp || typeof sp !== 'object') continue
+    const s0 = day(sp.startDate)
+    const e0 = day(sp.endDate || sp.completeDate)
+    if (s0 && (!start || s0 < start)) start = s0
+    if (e0 && (!end || e0 > end)) { end = e0; name = sp.name || name }
+    if (!name && sp.name) name = sp.name
+  }
+  return { start, end, name, count: list.length }
+}
+
+/**
  * Fetch issues by key.
  *
  * Batched into JQL `key IN (...)` rather than one request per issue: seventy
@@ -91,7 +126,7 @@ export async function issuesByKey(keys) {
     else stillWanted.push(k)
   }
 
-  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', c.startField]
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', c.startField, c.sprintField]
   for (let i = 0; i < stillWanted.length; i += 50) {
     const batch = stillWanted.slice(i, i + 50)
     const body = {
@@ -151,7 +186,7 @@ export async function childrenOf(keys) {
     .filter((k) => /^[A-Z][A-Z0-9_]+-\d+$/.test(k)))]
   if (!parents.length) return { byParent: {}, total: 0 }
 
-  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'parent', 'issuetype', c.startField]
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'parent', 'issuetype', c.startField, c.sprintField]
   const byParent = {}
   for (const k of parents) byParent[k] = []
 
@@ -248,11 +283,24 @@ export async function rollupOf(keys) {
 
   const byParent = {}
   for (const k of parents) {
-    byParent[k] = { total: 0, done: 0, latestDue: null, latestResolved: null, allDone: false, truncated: false }
+    byParent[k] = {
+      total: 0,
+      done: 0,
+      latestDue: null,
+      latestResolved: null,
+      // The latest date among the tasks LABELLED as somebody else's delay, and
+      // which task said so. Kept apart from latestDue: one is what the work
+      // now needs, the other is a claim about whose fault that is.
+      latestDelayDue: null,
+      delayKey: null,
+      delayCount: 0,
+      allDone: false,
+      truncated: false,
+    }
   }
 
   const later = (a, b) => (!a ? b : (!b ? a : (a > b ? a : b)))
-  const fields = ['status', 'duedate', 'resolutiondate', 'parent']
+  const fields = ['status', 'duedate', 'resolutiondate', 'parent', 'labels', c.sprintField]
 
   for (let i = 0; i < parents.length; i += 20) {
     const batch = parents.slice(i, i + 20)
@@ -285,7 +333,21 @@ export async function rollupOf(keys) {
         const agg = parent && byParent[parent]
         if (!agg) continue
         agg.total += 1
-        agg.latestDue = later(agg.latestDue, day(raw.fields?.duedate))
+        // The sprint the task sits in, where it has one: that is the window
+        // the team committed to, and a task carried into a later sprint is
+        // exactly the delay this rollup exists to surface.
+        const sp = sprintWindow(raw.fields?.[c.sprintField])
+        const when = sp.end || day(raw.fields?.duedate)
+        agg.latestDue = later(agg.latestDue, when)
+
+        const labels = (raw.fields?.labels || []).map((x) => String(x).toLowerCase())
+        if (labels.includes(c.delayLabel)) {
+          agg.delayCount += 1
+          if (when && (!agg.latestDelayDue || when > agg.latestDelayDue)) {
+            agg.latestDelayDue = when
+            agg.delayKey = raw.key
+          }
+        }
         const resolved = day(raw.fields?.resolutiondate)
         const isDone = raw.fields?.status?.statusCategory?.key === 'done'
         if (isDone) {
@@ -309,7 +371,7 @@ export async function rollupOf(keys) {
     // nothing to finish, and the project's own status is the better answer.
     agg.allDone = agg.total > 0 && agg.done === agg.total
   }
-  return { byParent, parents: parents.length, tasks }
+  return { byParent, parents: parents.length, tasks, delayLabel: c.delayLabel }
 }
 
 /**
@@ -402,7 +464,7 @@ export async function epics({ since = null } = {}) {
   if (Number.isFinite(days) && days > 0) clauses.push(`created >= -${Math.floor(days)}d`)
   const jql = `${clauses.join(' AND ')} ORDER BY created DESC`
 
-  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', c.startField]
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', c.startField, c.sprintField]
   const out = []
   let token = null
   // Paged, because a project accumulates epics forever and the page size is
@@ -438,6 +500,7 @@ export async function epics({ since = null } = {}) {
 function shape(raw, c) {
   const f = raw.fields || {}
   const startField = day(f[c.startField])
+  const sprint = sprintWindow(f[c.sprintField])
   return {
     key: raw.key,
     summary: f.summary || '',
@@ -450,6 +513,22 @@ function shape(raw, c) {
     due: day(f.duedate),
     resolved: day(f.resolutiondate),
     start: startField,
+    /*
+     * THE SPRINT WINS, where there is one.
+     *
+     * A task's own dates describe when somebody meant to touch it; the sprint
+     * is what the team actually committed to in planning, and it is the window
+     * the work is scheduled in. Both are carried so the difference is visible,
+     * and the choice is made once, where the dates are used.
+     */
+    sprintStart: sprint.start,
+    sprintEnd: sprint.end,
+    sprintName: sprint.name,
+    sprintCount: sprint.count,
+    // What the app should draw and measure: the sprint if there is one, the
+    // issue's own dates otherwise.
+    planStart: sprint.start || startField || null,
+    planEnd: sprint.end || day(f.duedate) || null,
     /*
      * Where the start came from. Jira's Start date field is filled in on a
      * minority of these issues, and `created` is when the ticket was raised

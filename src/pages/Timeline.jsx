@@ -256,15 +256,31 @@ export default function Timeline({
     rowKey: issue.key,
     jiraKey: issue.key,
     title: issue.summary,
-    sub: `${issue.key} · ${issue.type || 'issue'} · ${issue.status}`,
+    sub: [
+      issue.key,
+      issue.type || 'issue',
+      issue.status,
+      // Which sprint the dates came from, so a bar drawn from a sprint window
+      // is never mistaken for one somebody typed.
+      issue.sprintName || null,
+    ].filter(Boolean).join(' · '),
     leaf: LEAF.test(issue.type || ''),
     timeline: timelineOf({
-      start: null,
-      due: issue.due,
-      actualStart: issue.start || issue.created,
+      /*
+       * THE SPRINT IS THE PLAN, where there is one.
+       *
+       * A task's own dates say when somebody meant to touch it; the sprint is
+       * what the team committed to in planning, and it is the window the work
+       * is actually scheduled in. It also gives a bar to the many tasks
+       * carrying no dates of their own at all.
+       */
+      start: issue.sprintStart || null,
+      due: issue.planEnd || issue.due || null,
+      actualStart: issue.sprintStart || issue.start || issue.created,
       actualEnd: issue.done ? issue.resolved : null,
       status: issue.done ? 'Done' : issue.status,
     }, asOf),
+    fromSprint: !!issue.sprintEnd,
     outsideTeam: false,
   })
 
@@ -795,8 +811,8 @@ export default function Timeline({
             )}
             {adjusted && (
               <Tooltip title={`Adjusted to ${tl.adjustedEnd} — ${tl.adjustedBy} days past the committed `
-                + `${tl.plannedEnd}, taken from the latest date on a task underneath. `
-                + 'The commitment itself has not moved.'}
+                + `${tl.plannedEnd}. From ${tl.adjustedCause || 'a task'} underneath, marked as a delay caused `
+                + 'elsewhere. The commitment itself has not moved.'}
               >
                 <Box sx={{
                   position: 'absolute',

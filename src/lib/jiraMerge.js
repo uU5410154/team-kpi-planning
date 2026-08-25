@@ -94,16 +94,19 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
       : (issue.done ? (issue.resolved || null) : null)
 
     /*
-     * THE ADJUSTED DATE.
+     * THE ADJUSTED DATE, and it takes TWO things to move it.
      *
-     * When another team causes a delay, a task is raised for it — "data team
-     * delayed" — carrying a date past the epic's own. That later date is when
-     * the project will now actually finish, so it is recorded beside the
-     * commitment rather than replacing it: the plan stays as it was agreed and
-     * the adjustment is visible as an adjustment.
+     * A task must run past the project's committed date, AND be labelled as
+     * somebody else's delay — "it-delay" — for the adjustment to be drawn. A
+     * task simply overrunning is this team's own slippage, and drawing that as
+     * an adjustment would turn every overrun into somebody else's fault, which
+     * is the one thing this bar must not become.
+     *
+     * Recorded beside the commitment, never instead of it: the plan stays as
+     * agreed, and the delay is visible as a delay.
      */
-    const latestTaskDue = tasks?.latestDue || null
-    const adjustedDue = latestTaskDue && p.due && latestTaskDue > p.due ? latestTaskDue : null
+    const delayDue = tasks?.latestDelayDue || null
+    const adjustedDue = delayDue && p.due && delayDue > p.due ? delayDue : null
 
     if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart
     if (actualEnd !== (p.actualEnd || null)) patch.actualEnd = actualEnd
@@ -111,6 +114,14 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     if (tasks) {
       if ((tasks.total || 0) !== (p.tasksTotal || 0)) patch.tasksTotal = tasks.total || 0
       if ((tasks.done || 0) !== (p.tasksDone || 0)) patch.tasksDone = tasks.done || 0
+      /*
+       * Which task claimed the delay, so a reader can go and check it.
+       * NOT `adjustedBy` — the timeline already uses that name for the number
+       * of days, and two meanings on one name is how a chart ends up drawing
+       * a ticket key as a length.
+       */
+      const cause = adjustedDue ? (tasks.delayKey || null) : null
+      if (cause !== (p.adjustedCause || null)) patch.adjustedCause = cause
     }
 
     /*

@@ -146,20 +146,56 @@ console.log(String.fromCharCode(10) + '--- the tasks underneath decide two thing
     created: '2026-01-01', start: '2026-01-01', resolved: '2026-06-01', startSource: 'start-date',
   }
 
-  // 1. A task dated past the project's own date is an adjustment.
+  /*
+   * 1. A task dated past the project's own date moves the adjusted date ONLY
+   * when it is labelled as somebody else's delay. The rollup reports the two
+   * separately for exactly this reason.
+   */
   const delayed = mergeJira(plan, {
     issues: [issue],
-    rollups: { 'FNP-1': { total: 3, done: 3, allDone: true, latestDue: '2026-09-15', latestResolved: '2026-09-10' } },
+    rollups: {
+      'FNP-1': {
+        total: 3,
+        done: 3,
+        allDone: true,
+        latestDue: '2026-09-15',
+        latestDelayDue: '2026-09-15',
+        delayKey: 'FNP-99',
+        latestResolved: '2026-09-10',
+      },
+    },
   }, { addNew: false }).projects[0]
-  check('A TASK DATED PAST THE PROJECT MOVES THE ADJUSTED DATE',
+  check('A LABELLED DELAY PAST THE PROJECT MOVES THE ADJUSTED DATE',
     delayed.adjustedDue === '2026-09-15', String(delayed.adjustedDue))
+  check('  and it names the task that claimed it', delayed.adjustedCause === 'FNP-99')
+
+  const unlabelled = mergeJira(plan, {
+    issues: [issue],
+    rollups: {
+      'FNP-1': {
+        total: 3,
+        done: 3,
+        allDone: true,
+        latestDue: '2026-12-31',
+        latestDelayDue: null,
+        delayKey: null,
+        latestResolved: '2026-09-10',
+      },
+    },
+  }, { addNew: false }).projects[0]
+  check('AN UNLABELLED OVERRUN MOVES NOTHING', unlabelled.adjustedDue == null,
+    'this team’s own slippage is not an adjustment')
   check('  and the COMMITMENT is untouched', delayed.due === '2026-06-30',
     'the plan is what was agreed; the adjustment is drawn beside it')
 
   // 2. A task dated before it changes nothing.
   const early = mergeJira(plan, {
     issues: [issue],
-    rollups: { 'FNP-1': { total: 2, done: 2, allDone: true, latestDue: '2026-05-01', latestResolved: '2026-05-02' } },
+    rollups: {
+      'FNP-1': {
+        total: 2, done: 2, allDone: true, latestDue: '2026-05-01', latestDelayDue: '2026-05-01', latestResolved: '2026-05-02',
+      },
+    },
   }, { addNew: false }).projects[0]
   // Never written rather than written as null: a merge that touches nothing
   // should leave the row untouched, which is what the drift checks rely on.
@@ -169,7 +205,11 @@ console.log(String.fromCharCode(10) + '--- the tasks underneath decide two thing
     const had = { projects: [{ key: 'P1', jiraKey: 'FNP-1', due: '2026-06-30', adjustedDue: '2026-09-15' }] }
     const now = mergeJira(had, {
       issues: [issue],
-      rollups: { 'FNP-1': { total: 1, done: 1, allDone: true, latestDue: '2026-05-01', latestResolved: '2026-05-01' } },
+      rollups: {
+        'FNP-1': {
+          total: 1, done: 1, allDone: true, latestDue: '2026-05-01', latestDelayDue: null, latestResolved: '2026-05-01',
+        },
+      },
     }, { addNew: false }).projects[0]
     return now.adjustedDue === null
   })(), 'a delay that was resolved must stop being drawn')

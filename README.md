@@ -198,6 +198,25 @@ Two optional variables control what counts as an epic:
 | `JIRA_PROJECT` | `FNP` |
 | `JIRA_EPIC_TYPE` | `Epic` |
 
+### What the tasks under a project decide
+
+Three things on the Timeline are read from an epic's children rather than from
+the epic itself:
+
+| | rule |
+| --- | --- |
+| A task's dates | its **sprint** window where it has one — the earliest start to the latest end, so a task carried across sprints spans both — and its own Start/due dates otherwise |
+| A project's finish | the **latest resolution among its tasks**, and only once **every** task is resolved. An epic dragged to Done with tasks still open has not finished. An epic with no tasks answers for itself |
+| The adjusted bar | drawn only when a task runs past the project's committed date **and** carries the label `it-delay`. An unlabelled overrun is this team's own slippage, and drawing it as an adjustment would turn every overrun into somebody else's fault |
+
+The adjusted date never replaces the commitment — the plan stays as agreed and
+the delay is drawn beside it, naming the task that claimed it.
+
+| Key | Default |
+| --- | --- |
+| `JIRA_SPRINT_FIELD` | `customfield_10020` |
+| `JIRA_DELAY_LABEL` | `it-delay` |
+
 ### Writing back to Jira
 
 The Timeline can push the PLAN back to a ticket: click a planned bar, change
