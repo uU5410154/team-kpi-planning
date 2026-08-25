@@ -389,6 +389,22 @@ export const totalInvestment = (buildCost, capex) =>
  * punished for a two-day slip learns to pad every estimate — which makes every
  * plan less true, which is the opposite of what measuring this is for.
  */
+/** Today, every time it is asked — never captured into a constant. */
+export const todayISO = () => new Date().toISOString().slice(0, 10)
+
+/**
+ * The date a plan is being read AS OF.
+ *
+ * Today, unless somebody has deliberately pinned one. Derived rather than
+ * stored, because a stored "today" is wrong tomorrow — and a long-running
+ * server that captured it at boot would serve the day it started for as long
+ * as it stayed up.
+ */
+export function asOfOf(settings) {
+  const pinned = settings && settings.asOfPinned && isDate(settings.asOfDate)
+  return pinned ? settings.asOfDate : todayISO()
+}
+
 export const DEFAULT_SPRINT_DAYS = 14
 
 /**
@@ -431,15 +447,20 @@ export const DEFAULT_SETTINGS = {
   creditPartners: false,
   // Anything due before this and not Done is flagged past due.
   /*
-   * TODAY, unless somebody deliberately changes it.
+   * NOT STORED. "As of today" is a question asked at the moment somebody
+   * looks, so it is answered then — see asOfOf below.
    *
-   * It used to be a fixed string, and it went stale: the plan still said the
-   * 7th of August while the calendar said the 25th, so anything running was
-   * measured to a date eighteen days in the past — a task that began on the
-   * 16th read as minus nine days — and nothing became overdue for a fortnight
-   * after it should have.
+   * A stored one went stale twice over: the plan held the 7th of August while
+   * the calendar said the 25th, so anything running was measured to a date
+   * eighteen days in the past and nothing became overdue for a fortnight after
+   * it should have. Writing today's date into the plan instead only moves the
+   * problem to tomorrow.
+   *
+   * A date here is honoured ONLY with asOfPinned, which is how somebody
+   * reproduces a figure they reported last month.
    */
-  asOfDate: new Date().toISOString().slice(0, 10),
+  asOfDate: null,
+  asOfPinned: false,
   /*
    * Objective 1, which is about delivering on the timeline that was committed.
    * Both are decisions, so both are settings: how far a date may move, and how
@@ -1250,9 +1271,17 @@ export const REPAIR_VERSION = 6
  */
 export const STALE_AS_OF = '2026-08-07'
 
+/**
+ * Stop an old stored date being treated as a decision.
+ *
+ * Nothing is written in its place — writing today's date would be stale by
+ * tomorrow, which is the bug this exists to end. The date is simply left
+ * un-pinned, and asOfOf then answers with today, every time it is asked.
+ */
 export function repairAsOfDate(settings) {
-  if (!settings || settings.asOfDate !== STALE_AS_OF) return { settings, moved: false }
-  return { settings: { ...settings, asOfDate: new Date().toISOString().slice(0, 10) }, moved: true }
+  if (!settings || settings.asOfPinned === true) return { settings, moved: false }
+  if (settings.asOfDate == null) return { settings, moved: false }
+  return { settings: { ...settings, asOfDate: null, asOfPinned: false }, moved: true }
 }
 
 /**
@@ -2122,6 +2151,12 @@ export function computePlan(state) {
     finance: { ...DEFAULT_FINANCE, ...(state.settings?.finance || {}) },
   }
   const rates = financeRates(s)
+  /*
+   * Asked once per computation, not read from the plan: "as of today" is a
+   * question answered when somebody looks, and a stored answer is wrong the
+   * next morning.
+   */
+  const asOf = asOfOf(s)
   const projects = state.projects || []
   /*
    * Sorted for display before anything else reads them, so the scorecards, the
@@ -2221,8 +2256,8 @@ export function computePlan(state) {
       ratio: projectRatio(p),
       gate: gateStatus(fin.roi, rates.roiGate),
       poolHours: countsToPool(p) && isCounted(p) ? (p.savingHours ?? 0) : 0,
-      pastDue: !!p.due && p.due < s.asOfDate && p.status !== 'Done',
-      timeline: timelineOf(p, s.asOfDate),
+      pastDue: !!p.due && p.due < asOf && p.status !== 'Done',
+      timeline: timelineOf(p, asOf),
     }
   })
 
@@ -2983,7 +3018,9 @@ export function computePlan(state) {
   const top2 = ranked.slice(0, 2).reduce((a, p) => a + (p.savingHours ?? 0), 0)
 
   return {
-    settings: s,
+    // The effective as-of date travels with the plan, so every screen and the
+    // workbook say the same day rather than each asking the clock again.
+    settings: { ...s, asOfDate: asOf },
     projects: perProject,
     people: withScorecards,
     // Objective 1's money view: the two rates, and the portfolio's cost,

@@ -128,6 +128,21 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     const delayDue = tasks?.latestDelayDue || null
     const adjustedDue = delayDue && p.due && delayDue > p.due ? delayDue : null
 
+    /*
+     * THE PLANNED START FOLLOWS JIRA.
+     *
+     * Not the due date — that is the commitment, and moving it is a re-plan
+     * somebody has to own. The START is a fact about when the work is
+     * scheduled to begin, Jira is where it is maintained, and the register's
+     * copy had drifted badly: twenty-three rows had the day and month
+     * transposed by an old spreadsheet import, which is why so many projects
+     * appeared to begin in January.
+     *
+     * Only ever written when Jira HAS one. A blank in Jira is an absence of
+     * information, not an instruction to delete what the register knows.
+     */
+    if (issue.start && issue.start !== (p.start || null)) patch.start = issue.start
+
     if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart
     if (actualEnd !== (p.actualEnd || null)) patch.actualEnd = actualEnd
     if (adjustedDue !== (p.adjustedDue || null)) patch.adjustedDue = adjustedDue

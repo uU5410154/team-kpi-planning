@@ -78,6 +78,17 @@ const ISSUES = {
   },
 }
 
+/*
+ * The start dates as the fixture began, snapshotted here because the write-back
+ * test later moves one of them — and the browser sync reads a DIFFERENT server
+ * process with its own cache, so what it sees is the original. Comparing
+ * against the mutated fixture would be comparing against something the code
+ * under test never saw.
+ */
+const START_AT_FIRST = Object.fromEntries(
+  Object.entries(ISSUES).map(([k, v]) => [k, v.fields.customfield_10015 || null]),
+)
+
 const CHILDREN = {
   // Nothing here has begun: a plan, not work in progress.
   'FNP-4': [
@@ -435,7 +446,8 @@ console.log(String.fromCharCode(10) + '--- a board that changes shape ---')
     && backAgain.projects.find((x) => x.jiraKey === 'FNP-1').summary === 'The name it had last week')
 
   // Only three fields may ever move.
-  const allowed = new Set(['summary', 'actualStart', 'actualEnd'])
+  // What a sync owns: the ticket's own facts, and the start it maintains.
+  const allowed = new Set(['summary', 'start', 'actualStart', 'actualEnd'])
   const moved = new Set()
   plan.projects.forEach((was) => {
     const now = r.projects.find((x) => x.key === was.key)
@@ -769,6 +781,8 @@ if (!exe) {
   })
   await new Promise((r) => setTimeout(r, 3000))
 
+  const byKeyIssue = Object.fromEntries(['FNP-1', 'FNP-2', 'FNP-3']
+    .map((k) => [k, { start: START_AT_FIRST[k] }]))
   const after = await page.evaluate(() => {
     const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
     /*
@@ -809,9 +823,17 @@ if (!exe) {
     JSON.stringify({ s: after.two.actualStart, e: after.two.actualEnd }))
   check('A TICKET REOPENED IN JIRA UN-FINISHES HERE TOO', after.three.actualEnd === null,
     'a finish that was taken back must not keep being reported')
-  check('AND THE PLAN IS EXACTLY AS IT WAS',
-    after.rows.every((r, i) => r.start === before[i].start && r.due === before[i].due),
-    after.rows.map((r) => `${r.jira} ${r.start}..${r.due}`).join(' | '))
+  /*
+   * The DUE date is the commitment and is never touched by a sync. The start
+   * is maintained in the ticket and follows it — the register's copy had
+   * twenty-three day/month transpositions in it from an old import.
+   */
+  check('THE COMMITTED DUE DATE IS EXACTLY AS IT WAS',
+    after.rows.every((r, i) => r.due === before[i].due),
+    after.rows.map((r) => `${r.jira} due ${r.due}`).join(' | '))
+  check('  while the planned start follows the ticket',
+    after.rows.every((r, i) => r.start === (byKeyIssue[r.jira]?.start || before[i].start)),
+    after.rows.map((r) => `${r.jira} ${r.start}`).join(' | '))
 
   /*
    * And nothing else moved either.
@@ -838,7 +860,7 @@ if (!exe) {
        * two come from the tasks underneath it — where the work now lands, and
        * how much of it is finished.
        */
-      if (['actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone']
+      if (['start', 'actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone']
         .includes(field)) continue
       if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
         drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)
@@ -907,7 +929,10 @@ if (!exe) {
     await page.evaluate(() => {
       const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
       const p = st.projects.find((x) => x.jiraKey === 'FNP-1')
-      return p.actualStart === '2026-01-10' && p.start === '2026-01-01'
+      // The planned start now follows the ticket, and the actual start is
+      // still held separately — the bar is drawn from the plan, the fact is
+      // kept as it happened.
+      return p.actualStart === '2026-01-10' && p.start === '2026-01-10'
     }),
     'drawn from the plan, held as it happened')
 
