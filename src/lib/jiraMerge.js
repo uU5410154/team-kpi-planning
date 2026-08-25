@@ -1,4 +1,4 @@
-import { newProject } from './model.js'
+import { newProject, replanPatch } from './model.js'
 
 /**
  * Fold what Jira knows into a plan.
@@ -11,13 +11,17 @@ import { newProject } from './model.js'
  * Three things happen here and nothing else:
  *
  *   1. every project with a Jira key has its ACTUAL dates refreshed;
- *   2. and its NAME, because the ticket is where that is decided — an epic
+ *   2. and its PLANNED dates — start and committed finish — because the board
+ *      is where they are maintained: this server cannot write to Jira, so a
+ *      date changed there is the only date anybody actually changed. A moved
+ *      commitment is recorded as a re-plan, the same as one typed in the app;
+ *   3. and its NAME, because the ticket is where that is decided — an epic
  *      renamed in Jira left the register showing a title nobody uses;
- *   3. every epic on the board that the register has never seen is added.
+ *   4. every epic on the board that the register has never seen is added.
  *
- * The plan, the saving hours, the effort, the objective and the owner are the
- * register's own and are never restated from Jira. The one exception is an
- * epic arriving for the first time, which has no plan here to overwrite.
+ * The saving hours, the effort, the objective and the owner are the register's
+ * own and are never restated from Jira — none of them exists there. Nor is a
+ * finish date a project has been told to hold: see actualEndPinned below.
  *
  * Nothing is ever DELETED from here. A ticket removed in Jira is reported as
  * missing and left alone: the row may carry saving hours, effort and a place
@@ -35,8 +39,8 @@ export function projectFromEpic(epic, seq) {
     /*
      * Jira's dates ARE the plan for a project the register is meeting for the
      * first time — there is no earlier commitment for them to overwrite. It is
-     * the only moment that is true, which is why refreshing an existing row
-     * never touches its plan.
+     * the only moment at which no re-plan needs recording, which is why the
+     * refresh below routes a moved date through replanPatch and this does not.
      */
     start: epic.start || null,
     due: epic.due || null,
@@ -78,6 +82,9 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
   // How many projects held their own finish date through this sync. Reported
   // so a morning run says what it did NOT do as well as what it did.
   let pinned = 0
+  // Commitments the board moved. Reported by name: a date that changed under
+  // somebody's objective is the last thing that should arrive as a number.
+  const replanned = []
   let fromCreated = 0
   const renamed = []
   const projects = (state.projects || []).map((p) => {
@@ -134,9 +141,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     /*
      * THE PLANNED START FOLLOWS JIRA.
      *
-     * Not the due date — that is the commitment, and moving it is a re-plan
-     * somebody has to own. The START is a fact about when the work is
-     * scheduled to begin, Jira is where it is maintained, and the register's
+     * A fact about when the work is scheduled to begin, maintained on the
+     * board, and the register's
      * copy had drifted badly: twenty-three rows had the day and month
      * transposed by an old spreadsheet import, which is why so many projects
      * appeared to begin in January.
@@ -145,6 +151,35 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
      * information, not an instruction to delete what the register knows.
      */
     if (issue.start && issue.start !== (p.start || null)) patch.start = issue.start
+
+    /*
+     * AND SO DOES THE COMMITTED FINISH.
+     *
+     * This one was deliberately left alone for a long time, because the due
+     * date is the commitment objective 1 is measured against and a sync that
+     * quietly rewrites it would be marking its own homework. What settled it
+     * is that the register cannot write to Jira — JIRA_ALLOW_WRITES is off on
+     * this server — so the board is where these dates are actually maintained,
+     * and twenty-nine of them had drifted apart. A project due in November on
+     * the board and in July in the register is not a commitment anybody is
+     * managing to; it is two systems disagreeing.
+     *
+     * Recorded as a RE-PLAN, not as a silent overwrite: the first move
+     * re-baselines free — that is everybody's one re-plan after requirement
+     * gathering — and every move after it counts as drift, exactly as it would
+     * had somebody typed the new date here. replanPatch is the same door the
+     * timeline editor uses, so a date moved on the board and a date moved in
+     * the app are accounted for identically.
+     *
+     * The epic's OWN due date, never a sprint's: sprints belong to the tasks
+     * underneath and a project does not finish because a fortnight ended.
+     * Only ever written when Jira has one — a blank there is an absence of
+     * information, not an instruction to drop the commitment.
+     */
+    if (issue.due && issue.due !== (p.due || null)) {
+      Object.assign(patch, replanPatch(p, issue.due))
+      replanned.push({ key: issue.key, from: p.due || null, to: issue.due })
+    }
 
     if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart
     /*
@@ -222,6 +257,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     updated,
     // Projects whose finish date this sync deliberately left alone.
     pinned,
+    replanned: replanned.length,
+    replans: replanned.slice(0, 20),
     added: addedKeys.length,
     addedKeys,
     renamed: renamed.length,

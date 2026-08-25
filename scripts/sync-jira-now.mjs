@@ -71,7 +71,7 @@ line('projects starting Jan 2026', (p) => p.projects.filter((x) => String(x.star
 line('plans running backwards', (p) => p.projects.filter((x) => x.timeline.plannedDays < 0).length)
 line('past due, unfinished', (p) => p.totals.timeliness.overdue)
 line('committed hrs', (p) => Math.round(p.totals.committedHours))
-console.log(`  ${'due dates changed'.padEnd(30)} ${moved.due || 0} (the commitment is never synced)`)
+console.log(`  ${'due dates changed'.padEnd(30)} ${moved.due || 0} (each one recorded as a re-plan)`)
 
 if (!WRITE) { console.log('\nDRY RUN — pass --write to save it'); process.exit(0) }
 const res = await fetch(`${BASE}/api/scenarios/${encodeURIComponent(SCENARIO)}`, {
