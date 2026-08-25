@@ -559,7 +559,23 @@ export default function People({
                           * the card shows.
                           */}
                         {l.targetKind === 'percent' && (p.commitments || []).length > 0 && (
-                          <Box sx={{ mt: 0.75, mb: 0.5 }}>
+                          <Box sx={{
+                            mt: 0.75,
+                            mb: 0.5,
+                            /*
+                             * The list must not widen the card.
+                             *
+                             * A table sizes itself to its content, and thirty
+                             * project names pushed this one to 740px inside a
+                             * 451px card — which shoved the delete button back
+                             * outside the frame, the exact fault this card had
+                             * once before. Fixed layout and a hard maximum
+                             * keep the names inside their column instead.
+                             */
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                          }}
+                          >
                             {/*
                               * The commitment itself, in words, above the list
                               * it applies to. A KPI somebody cannot recite is a
@@ -613,7 +629,17 @@ export default function People({
                               )}
                             </Box>
                             <Table size="small" sx={{
-                              '& td': { border: 0, px: 0.75, py: 0.15, fontSize: '0.68rem' },
+                              tableLayout: 'fixed',
+                              width: '100%',
+                              '& td': {
+                                border: 0,
+                                px: 0.75,
+                                py: 0.15,
+                                fontSize: '0.68rem',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              },
                             }}
                             >
                               <TableBody>
@@ -622,8 +648,10 @@ export default function People({
                                     <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
                                       {c.jiraKey || '—'}
                                     </TableCell>
-                                    <TableCell sx={{ maxWidth: 210, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      {c.summary}
+                                    <TableCell sx={{ width: '46%' }}>
+                                      <Tooltip title={c.summary}>
+                                        <Box component="span">{c.summary}</Box>
+                                      </Tooltip>
                                     </TableCell>
                                     <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                                       {c.due ? `by ${c.due}` : (

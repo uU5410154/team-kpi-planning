@@ -139,6 +139,7 @@ try {
   const projVal = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('tbody tr')]
     const row = rows.find((r) => [...r.querySelectorAll('input')].some((i) => i.value === 'FNP-1431'))
+    if (!row) throw new Error(`no row matched at line 141`)
     const nums = [...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right')
     return nums[0].value
   })
@@ -165,8 +166,12 @@ try {
   /* ---------- a no-op blur on the target must not pin it ---------- */
   await page.evaluate(() => {
     const rows = [...document.querySelectorAll('tbody tr')]
-    const row = rows.find((r) => r.innerText.includes('Obj 1 — Financial'))
+    // Objective 1 is Project management now; it stopped being Financial when
+    // the boss asked for a delivery KPI instead of a return.
+    const row = rows.find((r) => /Obj 1 — /.test(r.innerText))
+    if (!row) throw new Error('no objective 1 row on the scorecard')
     const inp = [...row.querySelectorAll('input')].find((i) => i.style.textAlign === 'right')
+    if (!inp) throw new Error('objective 1 has no target input')
     inp.focus(); inp.blur()
   })
   await new Promise((r) => setTimeout(r, 400))
@@ -194,6 +199,7 @@ try {
   await page.evaluate(() => {
     const rows = [...document.querySelectorAll('tbody tr')]
     const row = rows.find((r) => r.innerText.includes('Obj 2 — F&A process automation'))
+    if (!row) throw new Error('no row for Obj 2 — F&A process automation')
     const inp = [...row.querySelectorAll('input')].find((i) => i.style.textAlign === 'right')
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
     inp.focus(); setter.call(inp, '250'); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
@@ -237,6 +243,7 @@ try {
   await page.evaluate(() => {
     const rows = [...document.querySelectorAll('tbody tr')]
     const row = rows.find((r) => [...r.querySelectorAll('input')].some((i) => i.value === 'FNP-1431'))
+    if (!row) throw new Error(`no row matched at line 244`)
     const combos = [...row.querySelectorAll('[role="combobox"]')]
     combos[1].dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
   })
@@ -298,10 +305,10 @@ try {
     inp.focus(); setter.call(inp, String(val)); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.blur()
   }, label, value)
 
-  await typeWeight('Obj 1 — Financial', 30)
+  await typeWeight('Obj 1 — Project management', 30)
   await new Promise((r) => setTimeout(r, 700))
   const typed = await page.evaluate(() => {
-    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 1 — Financial'))
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 1 — Project management'))
     return Number([...row.querySelectorAll('input')].filter((i) => i.style.textAlign === 'right').pop().value)
   })
   const wAfter = await weightsOf()
@@ -367,7 +374,7 @@ try {
   // collects every saving hour, so clicking either has to show the whole
   // portfolio. Showing five tagged projects under a figure derived from
   // eighty-six reads as a wrong number.
-  for (const [label, chip] of [['Obj 1 — Financial', 'Financial'], ['Obj 2 — F&A process automation', 'Process automation']]) {
+  for (const [label, chip] of [['Obj 1 — Project management', 'Financial'], ['Obj 2 — F&A process automation', 'Process automation']]) {
     await page.evaluate((lbl) => {
       const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes(lbl))
       ;[...row.querySelectorAll('td')].find((c) => /^Obj \d+/.test(c.innerText.trim())).click()
@@ -687,11 +694,24 @@ try {
   check('the scorecard portfolio has an ROI column', portfolioHeads.includes('roi'), portfolioHeads.join(' | '))
   check('and a per-project benefit column', portfolioHeads.some((h) => h.startsWith('benefit')), portfolioHeads.join(' | '))
   check('and mandays, so a scorecard can be costed in place', portfolioHeads.includes('mandays'))
-  check("objective 1's target on the card is stated in baht",
-    await page.evaluate(() => {
-      const row = [...document.querySelectorAll('tbody tr')].find((r) => r.innerText.includes('Obj 1 — Financial'))
-      return row ? /฿|THB/.test(row.innerText) : false
-    }))
+  /*
+   * Objective 1 stopped being money when the boss asked for a delivery KPI:
+   * it is a commitment to dates now, so the card must state the dates, the
+   * drift limit, and not a currency.
+   */
+  const obj1 = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find((r) => /Obj 1 — /.test(r.innerText))
+    return row ? row.innerText : null
+  })
+  check("OBJECTIVE 1 IS A COMMITMENT TO DATES, NOT AN AMOUNT",
+    obj1 != null && !/฿|THB/.test(obj1),
+    (obj1 || '').split(String.fromCharCode(10)).slice(0, 2).join(' / '))
+  check('  it states the commitment in words', /My commitment/i.test(obj1 || ''))
+  check('  the per-project allowance and the book limit',
+    /% of that project/i.test(obj1 || '') && /may drift/i.test(obj1 || ''))
+  check('  and it lists the projects with their dates',
+    /by 20\d\d-\d\d-\d\d|no date committed/i.test(obj1 || ''),
+    (obj1 || '').split(String.fromCharCode(10)).find((l) => /^by |no date/i.test(l)) || 'no dated row found')
 
   /* ---------- the FTE ratio is adjustable, and drives both sides ---------- */
   // The whole point of the ratio being a setting: it converts saving hours into
@@ -1390,7 +1410,13 @@ try {
   const kpiLines = () => page.evaluate(() => {
     const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
     const card = head.closest('.MuiPaper-root')
-    return card.querySelectorAll('tbody tr').length
+    /*
+     * KPI LINES, not every row in the card. Objective 1 renders a nested table
+     * of the dates it commits to, and counting those made deleting one line
+     * look like deleting sixteen.
+     */
+    return [...card.querySelectorAll('tbody tr')]
+      .filter((r) => r.querySelector('[data-testid="DeleteOutlineIcon"]')).length
   })
   const linesBefore = await kpiLines()
   const binPoint = await page.evaluate(() => {
