@@ -97,6 +97,9 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
   // Projects that changed hands. Reported by name: a project moving between
   // two people's objectives is the last thing that should arrive as a number.
   const reassigned = []
+  // Where the board and the register name different people. Reported so it can
+  // be settled by somebody, and never settled by this.
+  const disagreed = []
   let fromCreated = 0
   const renamed = []
   const projects = (state.projects || []).map((p) => {
@@ -284,9 +287,25 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
      * whoever used to hold it.
      */
     const owner = personForJiraName(people, issue.assignee)
-    if (owner && owner !== (p.pic || null)) {
+    /*
+     * ONLY WHERE THE REGISTER HAS NOBODY.
+     *
+     * A sync that overrides an existing PIC moves a project between two
+     * people's objectives on the strength of whoever a ticket happens to be
+     * assigned to — and a Jira assignee is often the person doing the current
+     * task, not the person accountable for the project. Where the register
+     * already names somebody, that stands: it was decided by a person, and
+     * disagreeing with the board is not the same as being wrong.
+     *
+     * Filling a blank is different. That is not overruling anybody.
+     */
+    if (owner && !p.pic) {
       Object.assign(patch, reassignPatch(p, owner))
-      reassigned.push({ key: issue.key, from: p.pic || null, to: owner, name: issue.assignee })
+      reassigned.push({ key: issue.key, from: null, to: owner, name: issue.assignee })
+    } else if (owner && owner !== p.pic) {
+      // Worth reporting, never worth applying: the two systems disagree about
+      // who runs this, and somebody should decide which is right.
+      disagreed.push({ key: issue.key, register: p.pic, jira: owner, name: issue.assignee })
     }
 
     if (!Object.keys(patch).length) return p
@@ -325,6 +344,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     replans: replanned.slice(0, 20),
     reassigned: reassigned.length,
     reassignments: reassigned.slice(0, 20),
+    picDisagreements: disagreed.length,
+    picConflicts: disagreed.slice(0, 20),
     added: addedKeys.length,
     addedKeys,
     renamed: renamed.length,

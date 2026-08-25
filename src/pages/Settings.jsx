@@ -4,10 +4,9 @@ import {
   TableHead, TableRow, Select, MenuItem, Divider, Alert, FormControlLabel, Switch, Chip,
   InputAdornment,
 } from '@mui/material'
-import { OBJECTIVES } from '../lib/palette.js'
+import { OBJECTIVES, STATUS } from '../lib/palette.js'
 import {
-  ROLE_ORDER, fmtPct, fmtHours, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths,
-  gateAsHoursPerManday, gateAsPaybackMonths, SAVING_BASIS,
+  fmtPct, fmtHours, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, gateAsHoursPerManday, gateAsPaybackMonths, SAVING_BASIS,
 } from '../lib/model.js'
 
 const BANDS = [
@@ -408,69 +407,52 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
 
         <Grid item xs={12} md={6}>
           <Card
-            title="Contribution weights by role"
-            subtitle="Raw weights from the Jira role labels. On each project they are normalised to sum to 100%, so a project's hours are never banked twice."
+            title="Who a project's hours belong to"
+            subtitle="One project, one owner: whoever the register names as PIC."
           >
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Jira role label</TableCell>
-                  <TableCell align="right">Raw weight</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {ROLE_ORDER.map((r) => (
-                  <TableRow key={r} hover>
-                    <TableCell sx={{ fontWeight: 500 }}>
-                      {r === 'assignee' ? 'assignee (no explicit role)' : `${r}-<name>`}
-                    </TableCell>
-                    <TableCell align="right">
-                      <TextField
-                        size="small"
-                        variant="standard"
-                        type="number"
-                        value={settings.roleWeights[r] ?? 0}
-                        onChange={(e) =>
-                          onSettings({
-                            roleWeights: { ...settings.roleWeights, [r]: Math.max(0, Number(e.target.value) || 0) },
-                          })
-                        }
-                        inputProps={{ step: 0.05, min: 0, style: { textAlign: 'right', width: 70, fontVariantNumeric: 'tabular-nums' } }}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 2 }}>
-              A person holding two roles on one project counts once, at their strongest role — holding both{' '}
-              <code>pm</code> and <code>dev</code> does not double the claim.
+            {/*
+              * THIS USED TO BE A TABLE OF EDITABLE ROLE WEIGHTS.
+              *
+              * Credit was split across the contributor record by role weight,
+              * so a developer recorded on somebody else's project carried a
+              * share of its hours and appeared on their scorecard. A KPI that
+              * credits work to somebody who does not own it is one nobody can
+              * defend in a review, so the split is gone — and so is the editor
+              * for it, because a dial that no longer turns anything is worse
+              * than no dial at all.
+              */}
+            <Typography variant="body2" sx={{ mb: 1.5 }}>
+              A project&rsquo;s saving hours go to its <strong>PIC</strong>, whole. They are never split across the
+              people recorded on it and never shared between two cards.
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+              The team roles on a project — PM, developer, QA and the rest — are still recorded and still shown beside
+              it, on the register and in the workbook. They say who did the work, which is worth knowing. They no
+              longer move an hour between cards.
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 2 }}>
+              The team lead is the one exception, and not really an exception: their card is the <em>team&rsquo;s</em>
+              card and says so, so it carries everything the team is holding.
             </Typography>
 
             <Divider sx={{ my: 2.5 }} />
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              Who absorbs unowned saving hours
+              Projects nobody is PIC of
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
-              Projects owned by a partner team such as <strong>IT</strong>, or left unassigned, still deliver saving
-              hours. They are credited to the person accountable for the team's overall KPI rather than being lost.
+              They sit on <strong>nobody&rsquo;s</strong> card. The lead used to absorb them, which put projects on the
+              lead&rsquo;s scorecard that the lead did not own. The hours are not lost — they are still in the
+              team&rsquo;s book, and the figure below names them — but no card claims them until somebody is named to
+              the project. Filter the Projects tab by <em>missing PIC</em> to find them.
             </Typography>
-            <Select
-              fullWidth
-              size="small"
-              value={settings.fallbackPic || ''}
-              onChange={(e) => onSettings({ fallbackPic: e.target.value || null })}
-              displayEmpty
-            >
-              <MenuItem value=""><em>Nobody — leave them uncredited</em></MenuItem>
-              {people.map((p) => (
-                <MenuItem key={p.id} value={p.id}>{p.nick} — {p.name} ({p.role})</MenuItem>
-              ))}
-            </Select>
-            {totals.fallbackHours > 0 && (
+            {totals.unownedHours > 0 ? (
+              <Typography variant="caption" sx={{ display: 'block', mt: 1, fontWeight: 600, color: STATUS.warning }}>
+                {fmtHours(totals.unownedHours)} hrs across {totals.unownedCount} project
+                {totals.unownedCount === 1 ? '' : 's'} are on nobody&rsquo;s scorecard.
+              </Typography>
+            ) : (
               <Typography variant="caption" sx={{ display: 'block', mt: 1, fontWeight: 600 }}>
-                Currently absorbing {fmtHours(totals.fallbackHours)} hrs across {totals.fallbackCount} project
-                {totals.fallbackCount === 1 ? '' : 's'}.
+                Every project carrying hours has somebody named to it.
               </Typography>
             )}
 

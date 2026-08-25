@@ -1110,6 +1110,12 @@ export async function buildWorkbook(plan, state) {
         totals.outsideHours > 0
           ? ` · ${Math.round(totals.outsideHours).toLocaleString()} ${unit} owned by IT or the business and NOT counted`
           : ''
+      }${
+        // On nobody's scorecard until somebody is named to it. Said here
+        // because this is the sheet where a reader goes looking for it.
+        totals.unownedHours > 0
+          ? ` · ${Math.round(totals.unownedHours).toLocaleString()} ${unit} across ${totals.unownedCount} projects with NO PIC — on nobody's scorecard`
+          : ''
       } · effort, cost and return are on Effort_Return · source: ${state.meta?.source || 'plan'}`,
       cols.length)
     headerRow(ws, 4, cols.map((c) => c.label), cols.map((c) => c.width))

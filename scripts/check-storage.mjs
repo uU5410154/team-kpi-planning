@@ -103,14 +103,23 @@ console.log('\n--- repairing state the old PIC write already saved ---')
   const asLoaded = computePlan(damaged)
   check('the damaged state is not stale, so it really would load',
     !(damaged.version !== version || damaged.seedStamp !== stamp))
-  check('and it really is wrong before the repair',
-    asLoaded.projects.find((p) => p.key === 'FNP-379').shares.james > 0.5,
-    `${Math.round(asLoaded.projects.find((p) => p.key === 'FNP-379').shares.james * 100)}% still James`)
+  /*
+   * This state used to load WRONG: the PIC had been moved and the contributor
+   * list had not, and credit was read off the contributor list. Credit now
+   * follows the PIC alone, so the same state loads correctly with or without
+   * the repair — the class of damage the repair exists for cannot happen any
+   * more. The repair still runs, because a plan saved back then can still
+   * carry a stale contributor list, and it should be tidied.
+   */
+  check('THE DAMAGE THIS REPAIR EXISTS FOR CANNOT HAPPEN ANY MORE',
+    Math.abs((asLoaded.projects.find((p) => p.key === 'FNP-379').shares.gun || 0) - 1) < 1e-9
+    && !asLoaded.projects.find((p) => p.key === 'FNP-379').shares.james,
+    JSON.stringify(asLoaded.projects.find((p) => p.key === 'FNP-379').shares))
 
   const fixed = repairState(damaged)
   const after = computePlan(fixed)
   const one = after.projects.find((p) => p.key === 'FNP-379')
-  check('LOADING REPAIRS IT', Math.abs((one.shares.gun || 0) - 1) < 1e-9, JSON.stringify(one.shares))
+  check('and the repair leaves it right too', Math.abs((one.shares.gun || 0) - 1) < 1e-9, JSON.stringify(one.shares))
   check('the old owner no longer carries it',
     !after.people.find((p) => p.id === 'james').rows.some((r) => r.p.key === 'FNP-379'))
   check('and it stamps the state so it never runs twice', fixed.repair === REPAIR_VERSION)

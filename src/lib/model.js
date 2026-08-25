@@ -1675,36 +1675,35 @@ export function projectShares(project, roleWeights = DEFAULT_ROLE_WEIGHTS, credi
   const owners = opts.owners
   const isOwner = (id) => !owners || owners.has(id)
 
+  /*
+   * THE PIC TAKES THE PROJECT, WHOLE.
+   *
+   * Credit used to be split across the contributor record by role weight, so
+   * a developer recorded on a project could carry a share of its saving hours
+   * without being the person responsible for it. That produced a scorecard
+   * crediting somebody who was not the PIC — "AP Trade Invoice Matching has
+   * TBC on the webapp, why is it under P'Phen in Excel" — and a KPI that
+   * credits work to somebody who does not own it is a KPI nobody can defend
+   * in a review.
+   *
+   * So one project, one owner: whoever the register names as PIC. The
+   * contributor record is kept and still shown — it says who worked on the
+   * thing, which is worth knowing — but it no longer moves a single hour.
+   */
   const raw = {}
-  for (const c of project.contributors || []) {
-    if (!c.person || !isOwner(c.person)) continue
-    // A person's raw weight is their single strongest role on the project,
-    // not the sum — holding both pm and dev does not double the claim.
-    const best = Math.max(...c.roles.map((r) => roleWeights[r] ?? 0), 0)
-    if (best > 0) raw[c.person] = Math.max(raw[c.person] ?? 0, best)
-  }
-  // A PIC with no contributor record still owns the project outright.
-  if (project.pic && isOwner(project.pic) && raw[project.pic] === undefined) {
-    raw[project.pic] = roleWeights.assignee ?? 0.6
-  }
+  if (project.pic && isOwner(project.pic)) raw[project.pic] = 1
 
   /*
-   * Nothing landed on a scorecard owner. Two different situations, and they
-   * must not be treated alike:
+   * And a project NOBODY is PIC of sits on nobody's card.
    *
-   * UNASSIGNED — the team lead absorbs it. They are accountable for the team's
-   * overall KPI and these hours must not vanish.
-   *
-   * OWNED BY A PARTNER (IT, or the business user who built it themselves) —
-   * nobody absorbs it. The team did not deliver it, so claiming its hours on
-   * the lead's card would be claiming somebody else's work.
+   * The lead used to absorb these so their hours could not vanish. The rule
+   * above does not allow it: a project whose PIC is not somebody must not
+   * appear under them, and the lead is not an exception to that. The hours are
+   * not lost — they are in the team total, which is summed from the projects
+   * themselves — and an unowned project is now findable on the Projects tab
+   * rather than hidden inside a card that quietly carried it.
    */
-  const outsourced = !!project.pic && !!opts.outside && opts.outside.has(project.pic)
-  let fellBack = false
-  if (!outsourced && Object.keys(raw).length === 0 && opts.fallbackPic && isOwner(opts.fallbackPic)) {
-    raw[opts.fallbackPic] = roleWeights.assignee ?? 0.6
-    fellBack = true
-  }
+  const fellBack = false
 
   let partnerRaw = 0
   if (creditPartners) {
@@ -2467,6 +2466,21 @@ export function computePlan(state) {
   // Reported so the difference between the two totals has a name.
   const outside = perProject.filter((p) => p.outsideTeam && isInPlan(p))
   const outsideHours = outside.reduce((a, p) => a + (p.savingHours ?? 0), 0)
+
+  /*
+   * AND THE WORK NOBODY IS PIC OF.
+   *
+   * Credit goes to the PIC and to nobody else, so a project with no PIC sits
+   * on no card — including the lead's, which used to absorb it. That is the
+   * right answer to "whose is this?" and the wrong thing to leave unsaid: the
+   * hours are still in the team's book, so the book and the sum of the cards
+   * now differ by exactly this, and a difference nobody can name is how a
+   * total stops being trusted.
+   *
+   *   book = the lead's figure + outside-owned + unowned
+   */
+  const unowned = perProject.filter((p) => !p.pic && !p.outsideTeam && isInPlan(p) && isCounted(p))
+  const unownedHours = unowned.reduce((a, p) => a + (p.savingHours ?? 0), 0)
 
   // Effort and the hours it bought, measured over the SAME projects. This used
   // to divide a commit-only numerator by a commit-plus-stretch denominator,
@@ -3234,6 +3248,10 @@ export function computePlan(state) {
       nextYearCount: nextYear.length,
       timeliness,
       outsideHours,
+      // Counted, in plan, ours to do — and on nobody's card, because nobody
+      // is named to it. The gap between the book and the sum of the cards.
+      unownedHours,
+      unownedCount: unowned.length,
       outsideCount: outside.length,
       doneHours,
       doneCoverage: s.targetHours > 0 ? doneHours / s.targetHours : 0,

@@ -139,14 +139,19 @@ console.log('\n--- changing the PIC moves the project off the old owner ---')
   const jBefore = before.people.find((p) => p.id === 'james')
   const gBefore = before.people.find((p) => p.id === 'gun')
 
-  // Writing pic alone is what the UI used to do — prove it was broken, so this
-  // check fails loudly if the reassign path is ever bypassed again.
+  /*
+   * Writing `pic` alone used to leave the old owner holding the hours, because
+   * credit was read off the contributor record. It no longer can: credit is
+   * the PIC's outright. Both paths therefore agree — which is worth asserting,
+   * since the whole reason reassignPatch exists is that they once did not.
+   */
   const naive = computePlan({
     ...base,
     projects: base.projects.map((p) => (p.key === one.key ? { ...p, pic: 'gun' } : p)),
   }).projects.find((p) => p.key === one.key)
-  check('writing pic alone would leave the old owner holding it',
-    (naive.shares.james || 0) > 0.5, `${Math.round((naive.shares.james || 0) * 100)}% still James`)
+  check('writing pic alone now moves the hours too — credit follows the PIC',
+    (naive.shares.james || 0) === 0 && naive.shares.gun === 1,
+    JSON.stringify(naive.shares))
 
   // The real path.
   const patch = reassignPatch(one, 'gun')
@@ -191,7 +196,18 @@ console.log('\n--- changing the PIC moves the project off the old owner ---')
   const unPr = unassigned.projects.find((p) => p.key === one.key)
   check('unassigning takes it off the old owner',
     !(unPr.shares.james > 0), JSON.stringify(unPr.shares))
-  check('and it falls to whoever carries unowned work', unPr.fellBack === true)
+  /*
+   * And it falls to NOBODY. The lead used to absorb unowned work, which put
+   * projects on the lead's card that the lead was not PIC of. The hours stay
+   * in the team's book — totals.unownedHours names them — and no card claims
+   * them until somebody is named to the project.
+   */
+  check('and it falls to nobody at all',
+    Object.keys(unPr.shares).length === 0 && unPr.fellBack === false,
+    JSON.stringify(unPr.shares))
+  check('  while the book still counts them, under a name a reader can find',
+    unassigned.totals.unownedHours >= (one.savingHours || 0),
+    `${Math.round(unassigned.totals.unownedHours)} hrs over ${unassigned.totals.unownedCount} projects with no PIC`)
   check('the team total still does not move',
     Math.abs(before.totals.totalHours - unassigned.totals.totalHours) < 1e-9)
 

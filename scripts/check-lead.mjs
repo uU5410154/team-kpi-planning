@@ -34,17 +34,56 @@ console.log('\n--- the lead\'s number IS the headline ---')
 // The number on the lead's card and the number in the header must be the same
 // number. They diverged once by exactly the 352 objective-3 hours, which the
 // header counted and the scorecards did not.
-// The book counts every row on the register. The lead's card counts what the
-// TEAM committed to, which is the book less whatever IT or a business user
-// owns. The two figures are different questions and the difference has a name.
+/*
+ * THE BOOK, IN THREE PARTS.
+ *
+ * The book counts every row on the register. The lead's card counts what the
+ * TEAM is carrying — and since credit goes to the PIC and to nobody else,
+ * that is the book less two things: work IT or a business user owns, and work
+ * NOBODY is named to. The lead used to absorb that second bucket, which put
+ * projects on the lead's card that the lead was not PIC of. It no longer does,
+ * so the difference has two names instead of one and both are stated.
+ *
+ *   book = the lead's figure + outside-owned + unowned
+ */
 const ours = plan.totals.totalHours - plan.totals.outsideHours
-check('the lead figure equals the book less what the team does not own',
-  Math.abs(lead.scorecardHours - ours) < 0.01,
-  `lead ${lead.scorecardHours.toFixed(1)} vs ${plan.totals.totalHours.toFixed(1)} − ${plan.totals.outsideHours.toFixed(1)}`)
-check('and that difference is exactly the outside-owned work',
-  plan.totals.outsideHours > 0
-  && Math.abs((plan.totals.totalHours - lead.scorecardHours) - plan.totals.outsideHours) < 0.01,
+// What the CARDS add up to. The book still contains the unowned work; it is
+// only the cards that cannot, because no card belongs to nobody.
+const onCards = ours - plan.totals.unownedHours
+check('the lead figure equals the book less outside-owned AND unowned work',
+  Math.abs(lead.scorecardHours - onCards) < 0.01,
+  `lead ${lead.scorecardHours.toFixed(1)} vs ${plan.totals.totalHours.toFixed(1)} − ${plan.totals.outsideHours.toFixed(1)} − ${plan.totals.unownedHours.toFixed(1)}`)
+check('and the three add back up to the book, exactly',
+  Math.abs((lead.scorecardHours + plan.totals.outsideHours + plan.totals.unownedHours)
+    - plan.totals.totalHours) < 0.01,
+  `${lead.scorecardHours.toFixed(1)} + ${plan.totals.outsideHours.toFixed(1)} + ${plan.totals.unownedHours.toFixed(1)}`)
+check('the outside-owned part is real and named',
+  plan.totals.outsideHours > 0,
   `${Math.round(plan.totals.outsideHours)} hrs over ${plan.totals.outsideCount} projects`)
+check('AND SO IS THE UNOWNED PART — hours on nobody\'s card must never be silent',
+  plan.totals.unownedHours >= 0 && Number.isFinite(plan.totals.unownedHours)
+  && plan.totals.unownedCount >= 0,
+  `${Math.round(plan.totals.unownedHours)} hrs over ${plan.totals.unownedCount} projects with no PIC`)
+/*
+ * The lead's card is the TEAM's card, so it lists the team's projects — that
+ * is what aggregating means and it is stated on the card itself. Everybody
+ * else's card may only carry what they are PIC of, which is the rule that was
+ * being broken: a developer recorded on a project carried a share of hours on
+ * work somebody else owned.
+ */
+check('NOBODY ELSE\'S CARD CARRIES A PROJECT THEY ARE NOT PIC OF',
+  others.every((person) => person.scorecardRows.every(({ p }) => p.pic === person.id)),
+  others.flatMap((person) => person.scorecardRows
+    .filter(({ p }) => p.pic !== person.id)
+    .map(({ p }) => `${person.nick}: ${p.jiraKey || p.key} (pic ${p.pic || 'none'})`)).slice(0, 3).join(' | '))
+check('  and every share on every project is the whole of it, to one person',
+  plan.projects.every((p) => {
+    const ids = Object.keys(p.shares || {})
+    if (!ids.length) return !p.pic || p.outsideTeam
+    return ids.length === 1 && ids[0] === p.pic && Math.abs(p.shares[ids[0]] - 1) < 1e-9
+  }),
+  plan.projects.filter((p) => Object.keys(p.shares || {}).some((k) => k !== p.pic))
+    .slice(0, 3).map((p) => `${p.jiraKey || p.key} ${JSON.stringify(p.shares)}`).join(' | '))
 check('and the headline equals the raw source column',
   Math.abs(plan.totals.totalHours - seed.projects.reduce((a, p) => a + (p.savingHours ?? 0), 0)) < 0.01)
 check('every objective contributes its hours, including the date-gated one',
@@ -146,9 +185,11 @@ console.log('\n--- the export agrees ---')
   const sum = back.getWorksheet('Summary')
   let book = null
   sum.eachRow((row) => { if (String(row.getCell(1).value || '').startsWith('Total book')) book = row.getCell(2).value })
-  check('and the Summary book total is the lead figure plus the outside work',
-    Math.abs(book - Math.round(lead.scorecardHours) - Math.round(plan.totals.outsideHours)) < 1,
-    `${book} vs ${Math.round(lead.scorecardHours)} + ${Math.round(plan.totals.outsideHours)}`)
+  check('and the Summary book total is the lead figure plus outside plus unowned',
+    Math.abs(book - Math.round(lead.scorecardHours) - Math.round(plan.totals.outsideHours)
+      - Math.round(plan.totals.unownedHours)) < 2,
+    `${book} vs ${Math.round(lead.scorecardHours)} + ${Math.round(plan.totals.outsideHours)}`
+    + ` + ${Math.round(plan.totals.unownedHours)}`)
   unlinkSync(file)
 }
 
