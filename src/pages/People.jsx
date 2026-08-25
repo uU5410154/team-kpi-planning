@@ -26,6 +26,46 @@ import {
 import { useTheme } from '@mui/material/styles'
 
 const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
+
+/**
+ * One project's drift, spelled out as the sum it actually is.
+ *
+ * The cell has room for "+24d of 18d" and no more, and a reader who cannot see
+ * where 18 came from cannot check the verdict beside it. This is that working:
+ * the planned length, the share it allows, what was spent, and what remains.
+ */
+function driftNote(c, perProjectLimit) {
+  const pct = Math.round(perProjectLimit * 100)
+  const bits = []
+  if (!c.due) return 'No date committed yet, so there is nothing to measure against.'
+  bits.push(`Committed to ${c.due}.`)
+  if (c.plannedDays != null && c.plannedDays > 0) {
+    bits.push(`Planned to take ${c.plannedDays} days, so ${pct}% allows`
+      + ` ${Math.round(c.driftAllowance ?? 0)} days of movement`
+      + `${(c.driftAllowance ?? 0) <= 1 ? ' (the floor of one whole day)' : ''}.`)
+  } else if (c.driftAllowance == null) {
+    bits.push('No planned length to measure against, so it is judged against a whole sprint instead.')
+  }
+  if (c.drifted === null) {
+    bits.push(c.running ? 'Still running, and not yet past its date — nothing spent.' : 'Not due yet — nothing spent.')
+  } else if (c.driftDays === 0) {
+    bits.push(`Landed on the day${c.actualEnd ? ` (${c.actualEnd})` : ''}. None of the allowance used.`)
+  } else {
+    const left = (c.driftAllowance ?? 0) - c.driftDays
+    bits.push(`It ran ${c.driftDays} days past that date`
+      + `${c.driftShare != null ? `, which is ${Math.round(c.driftShare * 100)}% of its planned length` : ''}.`)
+    bits.push(left >= 0
+      ? `Within the allowance, with ${Math.round(left)} day${Math.round(left) === 1 ? '' : 's'} to spare.`
+      : `That is ${Math.abs(Math.round(left))} day${Math.abs(Math.round(left)) === 1 ? '' : 's'} beyond the allowance, so it counts against the overall limit.`)
+  }
+  if (c.overReplanned) {
+    bits.push(`Re-planned ${c.replans} times. The first was free; the rest count as drift whatever the dates say.`)
+  } else if (c.replanned) {
+    bits.push(`Re-planned once${c.baselineDue ? ` from ${c.baselineDue}` : ''} — the free re-plan, now spent.`)
+  }
+  if (c.plannedBackwards) bits.push('This plan ends before it starts: data to fix, and never scored.')
+  return bits.join(' ')
+}
 const BAND_LABEL = { lead: 'Team Lead', senior: 'Senior', analyst: 'Analyst' }
 
 /** Whole-percent input that commits on blur. Stored as a 0–1 fraction. */
@@ -591,15 +631,44 @@ export default function People({
                             }}
                             >
                               <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
-                                <strong>My commitment.</strong> Each project below lands on the date beside it. A date
-                                may move by up to <strong>{Math.round((l.perProjectLimit ?? 0.2) * 100)}%</strong> of
-                                that project&rsquo;s own planned length — about a sprint on a quarter-long piece of
-                                work — and across the <strong>{l.held}</strong> project{l.held === 1 ? '' : 's'} I hold,
-                                no more than <strong>{l.target}%</strong> may drift beyond that. Each project may be
-                                re-planned <strong>once</strong> after requirement gathering — a date set before anybody
-                                has seen the requirement is a guess, and the re-plan resets the commitment at no cost.
-                                A second move counts.
+                                <strong>My commitment.</strong> Each project below lands on the date beside it.
                               </Typography>
+                              {/*
+                                * The two limits, numbered, each with what it
+                                * comes to for THIS person. "No more than 15%"
+                                * is not something anybody can hold themselves
+                                * to while they work; "no more than 2 of your
+                                * 15" is, and it is the same rule.
+                                */}
+                              <Box component="ol" sx={{ m: 0, mt: 0.5, pl: 2, '& li': { mb: 0.4 } }}>
+                                <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
+                                  <strong>Per project — {Math.round((l.perProjectLimit ?? 0.2) * 100)}%.</strong> A date
+                                  may move by up to {Math.round((l.perProjectLimit ?? 0.2) * 100)}% of that
+                                  project&rsquo;s <em>own</em> planned length: a 90-day project may move{' '}
+                                  {Math.round(90 * (l.perProjectLimit ?? 0.2))} days, a 30-day one{' '}
+                                  {Math.round(30 * (l.perProjectLimit ?? 0.2))} — never less than a whole day. What
+                                  each project is actually allowed is beside it below.
+                                </Typography>
+                                <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
+                                  <strong>
+                                    Across everything {l.aggregatesTeam ? 'the team holds' : 'I hold'} — {l.target}%.
+                                  </strong>{' '}
+                                  Of the <strong>{l.held}</strong> project{l.held === 1 ? '' : 's'}{' '}
+                                  {l.aggregatesTeam ? 'the team is' : 'I am'} PIC of,{' '}
+                                  {l.allowedCount === 0
+                                    ? <>at {l.target}% <strong>not one</strong> may drift beyond its own allowance</>
+                                    : <>at most <strong>{l.allowedCount}</strong> may drift beyond their own allowance</>}
+                                  . Counted over everything {l.aggregatesTeam ? 'held' : 'I hold'}, not only what has
+                                  finished — otherwise one delivered project and nine untouched ones would read as
+                                  nothing drifted.
+                                </Typography>
+                                <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
+                                  <strong>One free re-plan.</strong> Each project may be re-planned once after
+                                  requirement gathering — a date set before anybody has seen the requirement is a
+                                  guess, and the re-plan resets the commitment at no cost. A second move counts as
+                                  drift whatever the dates then say.
+                                </Typography>
+                              </Box>
                               <Typography variant="caption" sx={{
                                 display: 'block',
                                 mt: 0.5,
@@ -607,9 +676,35 @@ export default function People({
                                 color: l.meetsTarget === false ? STATUS.critical : STATUS.good,
                               }}
                               >
-                                {l.driftedCount} of {l.held} have drifted beyond their allowance
-                                {' '}({fmtPct(l.creditedRatio ?? 0)}) · limit {l.target}%
+                                {l.driftedCount} of {l.held} drifted ({fmtPct(l.creditedRatio ?? 0)})
+                                {' · '}
+                                {l.headroom != null && (
+                                  l.headroom > 0
+                                    ? `${l.headroom} more may drift before the ${l.target}% limit is broken`
+                                    : l.headroom === 0
+                                      ? `at the ${l.target}% limit — one more breaks it`
+                                      : `${Math.abs(l.headroom)} over the ${l.allowedCount} allowed by the ${l.target}% limit`
+                                )}
                               </Typography>
+                              {l.judgedDrift != null && l.judgedDrift < l.held && (
+                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                                  {l.judgedDrift} of {l.held} can be judged so far — the rest are not due yet, and
+                                  none of them has spent any of its allowance.
+                                </Typography>
+                              )}
+                              {/*
+                                * The lead's line states the team's book while
+                                * the list below is the lead's own. Saying so is
+                                * the difference between a card that aggregates
+                                * and a card that contradicts itself.
+                                */}
+                              {l.aggregatesTeam && (
+                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
+                                  Those figures are the whole team&rsquo;s. The dates listed below are{' '}
+                                  {p.nick}&rsquo;s own {(p.commitments || []).length} project
+                                  {(p.commitments || []).length === 1 ? '' : 's'}.
+                                </Typography>
+                              )}
                               {(p.drift?.replanned > 0 || p.drift?.backwards > 0) && (
                                 <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
                                   {p.drift.replanned > 0 && (
@@ -650,7 +745,16 @@ export default function People({
                                     </TableCell>
                                     <TableCell sx={{ width: '46%' }}>
                                       <Tooltip title={c.summary}>
-                                        <Box component="span">{c.summary}</Box>
+                                        <Box component="span" sx={{
+                                          display: 'block',
+                                          maxWidth: '100%',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                        >
+                                          {c.summary}
+                                        </Box>
                                       </Tooltip>
                                     </TableCell>
                                     <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
@@ -685,11 +789,22 @@ export default function People({
                                         : c.drifted ? STATUS.critical : STATUS.good,
                                     }}
                                     >
-                                      {c.drifted === null
-                                        ? (c.running ? 'running' : 'not due yet')
-                                        : c.driftDays === 0
-                                          ? `on the day${c.actualEnd ? ` ${c.actualEnd}` : ''}`
-                                          : `+${c.driftDays}d${c.driftShare != null ? ` · ${fmtPct(c.driftShare)}` : ''}`}
+                                      {/*
+                                        * Used against allowed, not the overrun
+                                        * on its own. "+24d" is not something a
+                                        * reader can check; "+24d of 18d" says
+                                        * what happened and what was permitted,
+                                        * which is the whole of the rule.
+                                        */}
+                                      <Tooltip title={driftNote(c, l.perProjectLimit ?? 0.2)}>
+                                        <Box component="span" sx={{ cursor: 'help' }}>
+                                          {c.drifted === null
+                                            ? (c.running ? 'running' : 'not due yet')
+                                            : c.driftDays === 0
+                                              ? `on the day${c.actualEnd ? ` ${c.actualEnd}` : ''}`
+                                              : `+${c.driftDays}d${c.driftAllowance != null ? ` of ${Math.round(c.driftAllowance)}d` : ''}`}
+                                        </Box>
+                                      </Tooltip>
                                     </TableCell>
                                   </TableRow>
                                 ))}

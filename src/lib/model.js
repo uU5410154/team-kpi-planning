@@ -1853,8 +1853,6 @@ export function replanPatch(project, nextDue) {
 
 export function driftOf(p, maxDrift = DEFAULT_MAX_PROJECT_DRIFT) {
   const tl = (p && p.timeline) || {}
-  if (!tl.comparable || tl.lateBy == null) return { days: null, share: null, drifted: null }
-  const days = Math.max(0, tl.lateBy)
   /*
    * Against the planned duration where there is one. A project with a due date
    * and no start has no length to measure against, so its drift is judged in
@@ -1869,6 +1867,30 @@ export function driftOf(p, maxDrift = DEFAULT_MAX_PROJECT_DRIFT) {
    * number that is arithmetically true and tells a reader nothing.
    */
   const allowance = span ? Math.max(1, span * maxDrift) : null
+  /*
+   * The allowance is known from the PLAN, so it is returned whether or not
+   * there is yet anything to judge. It was computed after this guard once, and
+   * every project still running therefore showed a blank where its allowance
+   * should be — which is the number somebody most needs BEFORE the date slips,
+   * not after. What cannot be known yet is what was spent against it, and that
+   * stays null.
+   */
+  if (!tl.comparable || tl.lateBy == null) {
+    const replansOnly = Number(p?.replanCount) || 0
+    return {
+      days: null,
+      share: null,
+      drifted: null,
+      span,
+      allowance,
+      backwards: tl.plannedDays != null && tl.plannedDays < 0,
+      replans: replansOnly,
+      replanned: replansOnly > 0,
+      overReplanned: replansOnly > 1,
+      baselineDue: isDate(p?.baselineDue) ? p.baselineDue : null,
+    }
+  }
+  const days = Math.max(0, tl.lateBy)
   const share = span ? days / span : null
   /*
    * A backwards plan is NOT scored. The comment beside it says it is data to
@@ -2516,6 +2538,20 @@ export function computePlan(state) {
       limit: s.maxDriftedShare,
       perProjectLimit: s.maxProjectDrift,
       within: held ? driftedRows.length / held <= s.maxDriftedShare + 1e-9 : null,
+      /*
+       * The same limit said in projects rather than in percent.
+       *
+       * "No more than 15%" is not something anybody can hold themselves to
+       * while they work; "no more than 3 of your 22" is. Floored, because a
+       * limit rounded up is a limit that lets one more project through than
+       * the rule allows: 4 of 22 is 18%, and the rule says 15%.
+       */
+      allowedCount: held ? Math.floor(held * s.maxDriftedShare + 1e-9) : 0,
+      headroom: held ? Math.floor(held * s.maxDriftedShare + 1e-9) - driftedRows.length : null,
+      // How many are actually measurable yet — the rest have no date, or are
+      // not due. The share is still taken over everything held.
+      judged: commitments.filter((c) => c.drifted !== null).length,
+      undated: commitments.filter((c) => !c.due).length,
       worst: [...driftedRows].sort((a, b) => (b.driftShare ?? 0) - (a.driftShare ?? 0)).slice(0, 5),
       // Plans that end before they start. Data to fix, not performance to
       // judge, so it is counted separately and never scored.
@@ -2724,6 +2760,15 @@ export function computePlan(state) {
       limit: s.maxDriftedShare,
       perProjectLimit: s.maxProjectDrift,
       within: held ? drifted / held <= s.maxDriftedShare + 1e-9 : null,
+      // The limit said in projects, exactly as a person's own book says it.
+      // The lead's card showed the TEAM's 39 held beside one person's allowance
+      // of 2 for a moment, which is two different books in one sentence.
+      allowedCount: held ? Math.floor(held * s.maxDriftedShare + 1e-9) : 0,
+      headroom: held ? Math.floor(held * s.maxDriftedShare + 1e-9) - drifted : null,
+      judged: byPersonShown.filter((x) => !x.aggregatesTeam)
+        .reduce((a, x) => a + (x.drift?.judged || 0), 0),
+      undated: byPersonShown.filter((x) => !x.aggregatesTeam)
+        .reduce((a, x) => a + (x.drift?.undated || 0), 0),
       worst: byPersonShown.filter((x) => !x.aggregatesTeam)
         .flatMap((x) => x.drift?.worst || [])
         .sort((a, b) => (b.driftShare ?? 0) - (a.driftShare ?? 0))
@@ -2842,7 +2887,16 @@ export function computePlan(state) {
      * this line asks is whether the work landed when it was said it would.
      */
     const driftFigure = aggregates ? teamDrift : (p.drift || {
-      held: 0, drifted: 0, share: null, limit: s.maxDriftedShare, perProjectLimit: s.maxProjectDrift, worst: [],
+      held: 0,
+      drifted: 0,
+      share: null,
+      limit: s.maxDriftedShare,
+      perProjectLimit: s.maxProjectDrift,
+      allowedCount: 0,
+      headroom: null,
+      judged: 0,
+      undated: 0,
+      worst: [],
     })
     const delivered = aggregates ? teamDelivery : {
       share: p.onTimeShare ?? null,
@@ -2870,6 +2924,17 @@ export function computePlan(state) {
         held: driftFigure.held,
         driftedCount: driftFigure.drifted,
         perProjectLimit: driftFigure.perProjectLimit,
+        /*
+         * The overall limit as a NUMBER OF PROJECTS, taken from the same book
+         * as the held count beside it. A card that states a team's 39 and a
+         * person's allowance of 2 in one sentence is not a rule anybody can
+         * act on, and the two are different books.
+         */
+        allowedCount: driftFigure.allowedCount ?? 0,
+        headroom: driftFigure.headroom ?? null,
+        judgedDrift: driftFigure.judged ?? 0,
+        // Whose book this line states: the person's own, or the team's.
+        aggregatesTeam: aggregates,
         worstDrift: driftFigure.worst,
         // Kept beside it: how much actually landed on the day, which is the
         // question the drift limit exists to protect.

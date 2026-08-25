@@ -788,10 +788,71 @@ export async function buildWorkbook(plan, state) {
      * the way the card does.
      */
     if ((p.commitments || []).length) {
+      const dr = p.drift || {}
+      /*
+       * The overall limit is stated off the KPI LINE, not off this person's own
+       * book, because on the lead's card that line carries the whole team — and
+       * a sheet that answers "how is objective 1 going" with a different number
+       * from the card is worse than a sheet that does not answer it.
+       */
+      const dline = (p.kpiLines || []).find((l) => l.objective === 'delivery') || {}
+      const book = {
+        held: dline.held ?? dr.held ?? 0,
+        drifted: dline.driftedCount ?? dr.drifted ?? 0,
+        allowedCount: dline.allowedCount ?? dr.allowedCount ?? 0,
+        headroom: dline.headroom ?? dr.headroom ?? null,
+        judged: dline.judgedDrift ?? dr.judged ?? 0,
+        aggregates: dline.aggregatesTeam === true,
+      }
+      const perPct = Math.round((dr.perProjectLimit ?? 0.2) * 100)
+      const overallPct = Math.round((dr.limit ?? 0.15) * 100)
       r++
       sectionRow(ws, r++, `OBJECTIVE 1 — DELIVERY DATES COMMITTED (${p.commitments.length} projects)`, cols.length)
-      const dCols = [['Jira', 12], ['Project', 46], ['Committed by', 14], ['Actually landed', 15],
-        ['Planned days', 12], ['Days out', 11], ['Drift', 10], ['Within 20%', 11], [`Saving ${unit}`, 13]]
+
+      /* ---- the rule, before the table it judges ----
+       *
+       * Stated in full and with this person's own arithmetic in it, because a
+       * scorecard is read by somebody who was not in the room when the KPI was
+       * agreed. "No more than 15%" is not a rule anybody can hold themselves
+       * to while they work; "no more than 2 of your 15" is the same rule in a
+       * form somebody can act on.
+       */
+      const rule = (text, bold = false) => {
+        const row = ws.getRow(r++)
+        row.getCell(2).value = text
+        row.getCell(2).alignment = { wrapText: true, vertical: 'top' }
+        row.getCell(2).font = { name: FONT, size: 9.5, bold, color: { argb: bold ? NAVY : MUTED } }
+        ws.mergeCells(row.number, 2, row.number, Math.min(cols.length, 9))
+        row.height = 26
+        return row
+      }
+      rule('HOW THIS OBJECTIVE IS MEASURED', true)
+      rule(`1. PER PROJECT — ${perPct}%. Each project lands on the date committed to below. That date may move by up `
+        + `to ${perPct}% of the project's OWN planned length: a 90-day project may move ${Math.round(90 * (dr.perProjectLimit ?? 0.2))} days, `
+        + `a 30-day one ${Math.round(30 * (dr.perProjectLimit ?? 0.2))} — never less than one whole day. What each project is allowed is in `
+        + `the "Allowed" column; what it used is in "Days out". A project past its allowance is marked OVER.`)
+      rule(`2. ACROSS EVERYTHING HELD — ${overallPct}%. Of the ${book.held} project${book.held === 1 ? '' : 's'} `
+        + `${book.aggregates ? 'the team is' : `${p.nick} is`} PIC of, ${book.allowedCount === 0
+          ? `${overallPct}% allows NOT ONE to go past its own allowance`
+          : `at most ${book.allowedCount} may go past their own allowance`}`
+        + `. The denominator is everything held, not only what has finished — measuring drift against delivered work `
+        + `alone would let one delivered project and nine untouched ones read as 0%.`)
+      rule(`3. ONE FREE RE-PLAN. Each project may be re-planned once after requirement gathering: a date set before `
+        + `anybody has seen the requirement is a guess, and that one move re-baselines the commitment at no cost. `
+        + `A second move counts as drift whatever the dates then say. The "Re-plans" column shows which have been used.`)
+      rule(`NOT SCORED: a project with no committed date, one not yet due, and a plan that ends before it starts `
+        + `(data to fix, not performance to judge). None of those uses any allowance.`)
+      if (book.aggregates) {
+        // The lead is measured on the team's book; the dates below are still
+        // their own. Said out loud, or the table contradicts the total.
+        rule(`AS TEAM LEAD, the ${overallPct}% above is measured across the whole team's `
+          + `${book.held} projects. The dates listed below are ${p.nick}'s own `
+          + `${(p.commitments || []).length}; every other member's are on their own sheet.`)
+      }
+
+      const dCols = [['Jira', 12], ['Project', 40], ['First committed', 15], ['Committed by', 14],
+        ['Actually landed', 15], ['Planned days', 12], [`Allowed (${perPct}%)`, 13], ['Days out', 11],
+        ['Drift', 9], ['Verdict', 11], ['Re-plans', 10], [`Saving ${unit}`, 13]]
       headerRow(ws, r++, dCols.map((c) => c[0]), dCols.map((c) => c[1]))
       const dStart = r
       for (const c of p.commitments) {
@@ -799,46 +860,67 @@ export async function buildWorkbook(plan, state) {
         row.values = [
           c.jiraKey || '',
           c.summary,
+          // The date first promised, where it differs from the one standing —
+          // a commitment that quietly became a different commitment is the
+          // thing this column exists to make visible.
+          c.baselineDue && c.baselineDue !== c.due ? c.baselineDue : '',
           c.due || 'NO DATE COMMITTED',
           c.actualEnd || (c.running ? 'still running' : ''),
           c.plannedDays ?? null,
+          // The allowance in days: the rule above, applied to this project.
+          c.driftAllowance == null ? null : Math.round(c.driftAllowance),
           c.driftDays == null ? null : c.driftDays,
           // A REAL percentage, so a reader can sort by it and compare it with
           // the allowance beside it.
           c.driftShare == null ? null : Number(c.driftShare.toFixed(4)),
-          c.drifted === null ? (c.running ? 'running' : 'not due yet') : (c.drifted ? 'OVER' : 'within'),
+          c.drifted === null
+            ? (c.running ? 'running' : 'not due yet')
+            : (c.drifted
+              ? (c.overReplanned && (c.driftAllowance == null || (c.driftDays ?? 0) <= c.driftAllowance)
+                ? 'OVER (re-plans)'
+                : 'OVER')
+              : 'within'),
+          c.plannedBackwards ? 'plan backwards' : (c.replans > 0 ? `${c.replans}${c.overReplanned ? ' — OVER' : ' (free)'}` : ''),
           c.savingHours ?? null,
         ]
-        row.getCell(5).numFmt = N0
-        row.getCell(6).numFmt = '+0;-0;0'
-        row.getCell(7).numFmt = '0%'
-        row.getCell(9).numFmt = N0
-        for (const cc of [3, 4, 5, 6, 7, 8]) row.getCell(cc).alignment = { horizontal: 'center' }
+        row.getCell(6).numFmt = N0
+        row.getCell(7).numFmt = N0
+        row.getCell(8).numFmt = '+0;-0;0'
+        row.getCell(9).numFmt = '0%'
+        row.getCell(12).numFmt = N0
+        for (const cc of [3, 4, 5, 6, 7, 8, 9, 10, 11]) row.getCell(cc).alignment = { horizontal: 'center' }
         // A project with no committed date is the gap this objective exists to
         // close, so it is coloured as one rather than left blank.
-        if (!c.due) tone(row.getCell(3), WARN)
-        if (c.drifted === true) { tone(row.getCell(7), BAD); tone(row.getCell(8), BAD) }
-        if (c.drifted === false) tone(row.getCell(8), GOOD)
+        if (!c.due) tone(row.getCell(4), WARN)
+        if (c.drifted === true) { tone(row.getCell(9), BAD); tone(row.getCell(10), BAD) }
+        if (c.drifted === false) tone(row.getCell(10), GOOD)
+        if (c.overReplanned) tone(row.getCell(11), BAD)
+        if (c.plannedBackwards) tone(row.getCell(11), WARN)
       }
       styleBody(ws, dStart, r - 1, dCols.length)
+
+      /* ---- and the count, judged against the rule stated above ---- */
       const dt = ws.getRow(r++)
-      const dr = p.drift || {}
-      dt.getCell(2).value = `${dr.drifted ?? 0} of ${dr.held ?? 0} drifted beyond their allowance`
-        + ` (${Math.round((dr.share ?? 0) * 100)}%, limit ${Math.round((dr.limit ?? 0) * 100)}%)`
-        + ` · ${p.onTimeCount} of ${p.onTimeJudged} landed on the day`
-        + `${p.undatedCount ? ` · ${p.undatedCount} still with no date` : ''}`
+      dt.getCell(2).value = `${book.aggregates ? 'TEAM: ' : ''}${book.drifted} of ${book.held} drifted beyond their own allowance`
+        + ` (${book.held ? Math.round((book.drifted / book.held) * 100) : 0}%) — the ${overallPct}% limit allows ${book.allowedCount}`
+        + `${book.headroom > 0
+          ? `, so ${book.headroom} more may drift before it is broken`
+          : book.headroom === 0
+            ? ', which is exactly where this stands — one more breaks it'
+            : `, so this is ${Math.abs(book.headroom ?? 0)} over`}`
       dt.getCell(2).font = {
         name: FONT,
         size: 10,
         bold: true,
-        color: { argb: dr.within === false ? BAD : NAVY },
+        color: { argb: book.drifted > book.allowedCount ? BAD : GOOD },
       }
-      // The commitment in words, under the figures it summarises.
-      const dc = ws.getRow(r++)
-      dc.getCell(2).value = `Commitment: each project lands on its date; a date may move by up to `
-        + `${Math.round((dr.perProjectLimit ?? 0.2) * 100)}% of that project's own planned length, and across the `
-        + `${dr.held ?? 0} projects held, no more than ${Math.round((dr.limit ?? 0) * 100)}% may drift beyond that.`
-      dc.getCell(2).font = { name: FONT, size: 9, italic: true, color: { argb: MUTED } }
+      const dt2 = ws.getRow(r++)
+      dt2.getCell(2).value = `${book.judged} of ${book.held} can be judged so far (the rest are not due yet)`
+        + ` · ${p.onTimeCount} of ${p.onTimeJudged} landed on the day`
+        + `${dr.replanned ? ` · ${dr.replanned} used the free re-plan${dr.overReplanned ? `, ${dr.overReplanned} went past it` : ''}` : ''}`
+        + `${dr.backwards ? ` · ${dr.backwards} plan${dr.backwards === 1 ? '' : 's'} end before they start — data to fix, not scored` : ''}`
+        + `${p.undatedCount ? ` · ${p.undatedCount} still with no committed date` : ''}`
+      dt2.getCell(2).font = { name: FONT, size: 9, color: { argb: MUTED } }
     }
 
     r++

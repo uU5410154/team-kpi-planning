@@ -85,6 +85,114 @@ for (const p of scorecardPeople) {
   check(`Obj-${p.nick} has a portfolio table`, hasPortfolio)
 }
 
+/* ====== objective 1: the commitment rule, and the arithmetic behind it ======
+ *
+ * The two limits are the whole of this objective, so the sheet has to state
+ * them AND survive being checked against them. Every allowance is recomputed
+ * here from the planned length rather than read from the model, so a change to
+ * one and not the other cannot pass.
+ */
+console.log('\n--- objective 1: the 20% per project and 15% overall, on the sheet ---')
+for (const person of scorecardPeople) {
+  const pp = plan.people.find((x) => x.id === person.id)
+  if (!pp || !(pp.commitments || []).length) continue
+  const ws = back.getWorksheet(`Obj-${person.nick}`)
+  const text = []
+  ws.eachRow((row) => row.eachCell((c) => text.push(String(c.value?.richText ? c.value.richText.map((t) => t.text).join('') : c.value || ''))))
+  const all = text.join(' \n ')
+  const dr = pp.drift || {}
+  const perPct = Math.round((dr.perProjectLimit ?? 0.2) * 100)
+  const overallPct = Math.round((dr.limit ?? 0.15) * 100)
+  /*
+   * The book the OBJECTIVE states, which on the lead's card is the whole
+   * team's. The sheet has to quote the same one the app does, or the two
+   * answer the same question with different numbers.
+   */
+  const dline = pp.kpiLines.find((l) => l.objective === 'delivery') || {}
+
+  check(`${person.nick}: the per-project rule is stated with its percentage`,
+    all.includes(`1. PER PROJECT — ${perPct}%`))
+  check(`${person.nick}: the overall rule is stated in PROJECTS, not just percent`,
+    dline.allowedCount === 0
+      ? all.includes('NOT ONE to go past')
+      : all.includes(`at most ${dline.allowedCount} may go past their own allowance`),
+    `held ${dline.held}, ${overallPct}% allows ${dline.allowedCount}`)
+  check(`${person.nick}: THE SHEET QUOTES THE SAME BOOK AS THE CARD`,
+    all.includes(`Of the ${dline.held} project`),
+    `line says ${dline.held}, own book is ${dr.held}`)
+  if (dline.aggregatesTeam) {
+    check(`${person.nick}: and says the dates listed are their own, not the team's`,
+      all.includes('AS TEAM LEAD') && all.includes(`own ${pp.commitments.length}`),
+      `${dline.held} team vs ${pp.commitments.length} own`)
+  }
+  check(`${person.nick}: the free re-plan is stated`, all.includes('3. ONE FREE RE-PLAN'))
+  check(`${person.nick}: what is not scored is stated`, all.includes('NOT SCORED'))
+
+  // The table: find its header, then check every row against the model.
+  let hr = null
+  ws.eachRow((row) => { if (String(row.getCell(7).value || '').startsWith('Allowed (')) hr = row.number })
+  check(`${person.nick}: the commitments table has an Allowed column`, !!hr, String(hr))
+  if (!hr) continue
+  check(`${person.nick}: the Allowed header carries the per-project limit`,
+    String(ws.getRow(hr).getCell(7).value) === `Allowed (${perPct}%)`, String(ws.getRow(hr).getCell(7).value))
+
+  let checkedRows = 0
+  let allowanceOk = true
+  let verdictOk = true
+  let daysOk = true
+  const byKey = new Map(pp.commitments.map((c) => [c.jiraKey || c.summary, c]))
+  for (let n = hr + 1; n <= hr + pp.commitments.length; n++) {
+    const row = ws.getRow(n)
+    const c = byKey.get(String(row.getCell(1).value || '')) || byKey.get(String(row.getCell(2).value || ''))
+    if (!c) continue
+    checkedRows++
+    const planned = row.getCell(6).value
+    const allowed = row.getCell(7).value
+    // Recomputed from what is ON THE SHEET: 20% of the planned length, never
+    // less than one whole day. This is the rule, not a reading of the model.
+    const want = planned && planned > 0 ? Math.round(Math.max(1, planned * (dr.perProjectLimit ?? 0.2))) : null
+    if ((allowed ?? null) !== want) {
+      allowanceOk = false
+      console.log(`      ${c.jiraKey}: planned ${planned}, sheet allows ${allowed}, ${perPct}% is ${want}`)
+    }
+    if ((row.getCell(8).value ?? null) !== (c.driftDays ?? null)) daysOk = false
+    const verdict = String(row.getCell(10).value || '')
+    const wantVerdict = c.drifted === null
+      ? (c.running ? 'running' : 'not due yet')
+      : (c.drifted ? 'OVER' : 'within')
+    if (!verdict.startsWith(wantVerdict)) {
+      verdictOk = false
+      console.log(`      ${c.jiraKey}: sheet says "${verdict}", model says "${wantVerdict}"`)
+    }
+  }
+  check(`${person.nick}: every commitment is on the sheet`,
+    checkedRows === pp.commitments.length, `${checkedRows} of ${pp.commitments.length}`)
+  check(`${person.nick}: EVERY allowance IS ${perPct}% of that project's own planned length`, allowanceOk)
+  check(`${person.nick}: every days-out matches the register`, daysOk)
+  check(`${person.nick}: every verdict matches the register`, verdictOk)
+
+  // And the roll-up under the table says the same thing as the card.
+  check(`${person.nick}: the count line matches the register`,
+    all.includes(`${dline.driftedCount} of ${dline.held} drifted beyond their own allowance`),
+    `${dline.driftedCount} of ${dline.held}`)
+  check(`${person.nick}: the count line states the limit in projects`,
+    all.includes(`the ${overallPct}% limit allows ${dline.allowedCount}`))
+  check(`${person.nick}: the allowed count is that book's own ${overallPct}%`,
+    dline.allowedCount === Math.floor(dline.held * (dline.target / 100) + 1e-9),
+    `${dline.allowedCount} vs floor(${dline.held} × ${dline.target}%)`)
+  const overCount = pp.commitments.filter((c) => c.drifted === true).length
+  check(`${person.nick}: the drifted count IS the number of OVER rows`,
+    overCount === dr.drifted, `${overCount} rows vs ${dr.drifted} counted`)
+  // The arithmetic of the limit itself, done a second way.
+  check(`${person.nick}: the allowed count is the limit floored`,
+    dr.allowedCount === Math.floor(dr.held * dr.limit + 1e-9)
+    && (dr.allowedCount / dr.held <= dr.limit + 1e-9)
+    && ((dr.allowedCount + 1) / dr.held > dr.limit),
+    `${dr.allowedCount}/${dr.held} = ${(dr.allowedCount / dr.held * 100).toFixed(1)}% <= ${overallPct}%`)
+  check(`${person.nick}: within-the-limit agrees with the counts`,
+    dr.within === (dr.drifted <= dr.allowedCount), `${dr.drifted} <= ${dr.allowedCount} vs within=${dr.within}`)
+}
+
 console.log(`\nsheets (${names.length}): ${names.join(', ')}`)
 console.log(`file size: ${(readFileSync(file).length / 1024).toFixed(1)} KB`)
 unlinkSync(file)
