@@ -1489,6 +1489,15 @@ export function newProject(seq) {
     baselineDue: null,
     replanCount: 0,
     replanNote: '',
+    /*
+     * When the work underneath runs past the committed date — usually because
+     * another team held it up — this is where it now lands. Kept BESIDE the
+     * commitment, never instead of it: the plan is what was agreed, and an
+     * adjustment that quietly overwrote it would erase the fact of the delay.
+     */
+    adjustedDue: null,
+    tasksTotal: 0,
+    tasksDone: 0,
     assignee: null,
     pic: null,
     contributors: [],
@@ -1628,9 +1637,23 @@ export function timelineOf(p, asOf) {
       : actualStart ? 'started'
         : 'not started'
 
+  /*
+   * Where the work now lands, when the tasks underneath run past the date that
+   * was agreed. Only an adjustment if it is actually later — a task due before
+   * the project's own date moves nothing.
+   */
+  const adjustedEnd = isDate(p.adjustedDue) && plannedEnd && p.adjustedDue > plannedEnd
+    ? p.adjustedDue
+    : null
+  const adjustedBy = adjustedEnd ? daysBetween(plannedEnd, adjustedEnd) : null
+
   return {
     plannedStart,
     plannedEnd,
+    adjustedEnd,
+    adjustedBy,
+    tasksTotal: Number(p.tasksTotal) || 0,
+    tasksDone: Number(p.tasksDone) || 0,
     actualStart,
     actualEnd,
     running,
@@ -2127,6 +2150,7 @@ export function computePlan(state) {
       // number from a spreadsheet, an empty string — is missing, not a date.
       actualStart: isDate(raw.actualStart) ? raw.actualStart : null,
       actualEnd: isDate(raw.actualEnd) ? raw.actualEnd : null,
+      adjustedDue: isDate(raw.adjustedDue) ? raw.adjustedDue : null,
     }
     // Whose book is this on. Decided by the PIC and by the PIC alone, so the
     // answer is the same one a reader gets from the register's own column.

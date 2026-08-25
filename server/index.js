@@ -104,6 +104,23 @@ app.get('/api/jira/epics', async (req, res) => {
   }
 })
 
+/** What the tasks under each epic add up to: latest date, and whether all done. */
+app.post('/api/jira/rollup', async (req, res) => {
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys : []
+  if (keys.length > 400) {
+    return res.status(400).json({ error: 'Too many parents in one request (max 400).' })
+  }
+  try {
+    const r = await jira.rollupOf(keys)
+    if (r === jira.UNAVAILABLE) {
+      return res.status(503).json({ error: 'Jira is not configured on this server.' })
+    }
+    return res.json(r)
+  } catch (e) {
+    return res.status(502).json({ error: e.message || 'Jira request failed.' })
+  }
+})
+
 /*
  * Write the plan back to a ticket.
  *

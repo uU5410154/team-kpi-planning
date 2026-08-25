@@ -64,8 +64,9 @@ export function projectFromEpic(epic, seq) {
  * @param {object} opts     { addNew: boolean }
  * @returns {{ projects, updated, added, fromCreated, unchanged, addedKeys }}
  */
-export function mergeJira(state, { issues = [], epics = [] } = {}, { addNew = true } = {}) {
+export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {}, { addNew = true } = {}) {
   const byKey = new Map(issues.map((i) => [String(i.key).toUpperCase(), i]))
+  const under = (key) => rollups[String(key || '').toUpperCase()] || null
 
   let updated = 0
   let fromCreated = 0
@@ -76,12 +77,41 @@ export function mergeJira(state, { issues = [], epics = [] } = {}, { addNew = tr
     if (issue.startSource === 'created') fromCreated += 1
 
     const patch = {}
+    const tasks = under(issue.key)
     const actualStart = issue.start || issue.created || null
-    // Not done in Jira means not finished here either: a ticket reopened after
-    // being resolved has to be able to take its finish back.
-    const actualEnd = issue.done ? (issue.resolved || null) : null
+
+    /*
+     * A PROJECT IS FINISHED WHEN THE LAST THING UNDER IT IS.
+     *
+     * An epic can be dragged to Done while tasks are still open, and the
+     * finish that matters is the last task's resolution date, not the moment
+     * somebody moved a card. So where an epic has tasks, its finish is the
+     * latest one they resolved, and only once every one of them is resolved.
+     * An epic with no tasks has nothing to wait for and answers for itself.
+     */
+    const actualEnd = tasks && tasks.total > 0
+      ? (tasks.allDone ? (tasks.latestResolved || issue.resolved || null) : null)
+      : (issue.done ? (issue.resolved || null) : null)
+
+    /*
+     * THE ADJUSTED DATE.
+     *
+     * When another team causes a delay, a task is raised for it — "data team
+     * delayed" — carrying a date past the epic's own. That later date is when
+     * the project will now actually finish, so it is recorded beside the
+     * commitment rather than replacing it: the plan stays as it was agreed and
+     * the adjustment is visible as an adjustment.
+     */
+    const latestTaskDue = tasks?.latestDue || null
+    const adjustedDue = latestTaskDue && p.due && latestTaskDue > p.due ? latestTaskDue : null
+
     if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart
     if (actualEnd !== (p.actualEnd || null)) patch.actualEnd = actualEnd
+    if (adjustedDue !== (p.adjustedDue || null)) patch.adjustedDue = adjustedDue
+    if (tasks) {
+      if ((tasks.total || 0) !== (p.tasksTotal || 0)) patch.tasksTotal = tasks.total || 0
+      if ((tasks.done || 0) !== (p.tasksDone || 0)) patch.tasksDone = tasks.done || 0
+    }
 
     /*
      * The name follows the ticket. What a piece of work is called is settled

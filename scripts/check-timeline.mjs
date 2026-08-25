@@ -135,6 +135,92 @@ console.log('\n--- recording an outcome does not touch the plan ---')
     && after.objective === before.objective)
 }
 
+/* ---------------- the adjusted timeline, and when a project is finished ---- */
+console.log(String.fromCharCode(10) + '--- the tasks underneath decide two things ---')
+{
+  const { mergeJira } = await import('../src/lib/jiraMerge.js')
+
+  const plan = { projects: [{ key: 'P1', jiraKey: 'FNP-1', due: '2026-06-30', summary: 'x' }] }
+  const issue = {
+    key: 'FNP-1', summary: 'x', status: 'Done', done: true,
+    created: '2026-01-01', start: '2026-01-01', resolved: '2026-06-01', startSource: 'start-date',
+  }
+
+  // 1. A task dated past the project's own date is an adjustment.
+  const delayed = mergeJira(plan, {
+    issues: [issue],
+    rollups: { 'FNP-1': { total: 3, done: 3, allDone: true, latestDue: '2026-09-15', latestResolved: '2026-09-10' } },
+  }, { addNew: false }).projects[0]
+  check('A TASK DATED PAST THE PROJECT MOVES THE ADJUSTED DATE',
+    delayed.adjustedDue === '2026-09-15', String(delayed.adjustedDue))
+  check('  and the COMMITMENT is untouched', delayed.due === '2026-06-30',
+    'the plan is what was agreed; the adjustment is drawn beside it')
+
+  // 2. A task dated before it changes nothing.
+  const early = mergeJira(plan, {
+    issues: [issue],
+    rollups: { 'FNP-1': { total: 2, done: 2, allDone: true, latestDue: '2026-05-01', latestResolved: '2026-05-02' } },
+  }, { addNew: false }).projects[0]
+  // Never written rather than written as null: a merge that touches nothing
+  // should leave the row untouched, which is what the drift checks rely on.
+  check('a task due BEFORE the project date adjusts nothing', early.adjustedDue == null,
+    `${JSON.stringify(early.adjustedDue)} — and the field was not written at all`)
+  check('  but an adjustment that no longer applies IS cleared', (() => {
+    const had = { projects: [{ key: 'P1', jiraKey: 'FNP-1', due: '2026-06-30', adjustedDue: '2026-09-15' }] }
+    const now = mergeJira(had, {
+      issues: [issue],
+      rollups: { 'FNP-1': { total: 1, done: 1, allDone: true, latestDue: '2026-05-01', latestResolved: '2026-05-01' } },
+    }, { addNew: false }).projects[0]
+    return now.adjustedDue === null
+  })(), 'a delay that was resolved must stop being drawn')
+
+  // 3. Finished only when every task is.
+  const partly = mergeJira(plan, {
+    issues: [issue],
+    rollups: { 'FNP-1': { total: 4, done: 3, allDone: false, latestDue: null, latestResolved: '2026-06-20' } },
+  }, { addNew: false }).projects[0]
+  check('AN EPIC MARKED DONE WITH AN OPEN TASK HAS NOT FINISHED',
+    partly.actualEnd == null,
+    'a card moved to Done is not the last task being finished')
+
+  const allDone = mergeJira(plan, {
+    issues: [issue],
+    rollups: { 'FNP-1': { total: 4, done: 4, allDone: true, latestDue: null, latestResolved: '2026-07-20' } },
+  }, { addNew: false }).projects[0]
+  check('AND IT FINISHES ON THE LAST TASK’S DATE, NOT THE EPIC’S',
+    allDone.actualEnd === '2026-07-20',
+    `epic said ${issue.resolved}, the last task said 2026-07-20`)
+
+  // 4. An epic with no tasks answers for itself.
+  const bare = mergeJira(plan, {
+    issues: [issue],
+    rollups: { 'FNP-1': { total: 0, done: 0, allDone: false, latestDue: null, latestResolved: null } },
+  }, { addNew: false }).projects[0]
+  check('an epic with no tasks at all still finishes on its own resolution',
+    bare.actualEnd === '2026-06-01', String(bare.actualEnd))
+
+  // 5. And the model turns the adjusted date into a bar with a length.
+  const withAdj = computePlan({
+    ...base,
+    projects: [{
+      ...base.projects[0], key: 'A1', pic: 'kade', start: '2026-01-01', due: '2026-06-30',
+      adjustedDue: '2026-09-15', actualEnd: null, status: 'In Progress',
+    }],
+  }).projects[0]
+  check('the timeline reports the adjustment and its size',
+    withAdj.timeline.adjustedEnd === '2026-09-15' && withAdj.timeline.adjustedBy === 77,
+    `${withAdj.timeline.adjustedBy} days past the commitment`)
+  const noAdj = computePlan({
+    ...base,
+    projects: [{
+      ...base.projects[0], key: 'A2', pic: 'kade', start: '2026-01-01', due: '2026-06-30',
+      adjustedDue: '2026-05-01',
+    }],
+  }).projects[0]
+  check('  and an "adjustment" that is earlier is not one',
+    noAdj.timeline.adjustedEnd === null)
+}
+
 /* ---------------- it draws ---------------- */
 const exe = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',

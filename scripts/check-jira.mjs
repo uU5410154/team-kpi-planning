@@ -432,6 +432,27 @@ console.log(String.fromCharCode(10) + '--- children come back in the order Jira 
     order.join() !== [...order].sort().join(), 'a sort by anything else would have shown here')
 }
 
+/* ---------------- what the tasks add up to ---------------- */
+console.log(String.fromCharCode(10) + '--- the rollup under each epic ---')
+{
+  const r = await (await fetch(`${base}/api/jira/rollup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-1', 'FNP-2'] }),
+  })).json()
+  const one = r.byParent['FNP-1']
+  check('it counts the tasks under a parent', one.total === 4, JSON.stringify(one))
+  check('  and how many are resolved', one.done === 3, `${one.done} of ${one.total}`)
+  check('  SO IT KNOWS THE PROJECT IS NOT FINISHED', one.allDone === false,
+    'one task is still open')
+  check('  it takes the LATEST due date among them', one.latestDue === '2026-04-01', String(one.latestDue))
+  check('  and the LATEST resolution', one.latestResolved === '2026-04-01', String(one.latestResolved))
+  check('a parent with no tasks is not "all done"',
+    r.byParent['FNP-2'].total === 0 && r.byParent['FNP-2'].allDone === false,
+    'there was nothing to finish')
+  check('AND THE TOKEN IS NOT IN IT', !JSON.stringify(r).includes(TOKEN))
+}
+
 /* ---------------- writing the plan back ---------------- */
 console.log(String.fromCharCode(10) + '--- the plan can be pushed to Jira, and only the plan ---')
 {
@@ -589,8 +610,16 @@ if (!exe) {
     }
   })
 
-  check('IT WROTE THE ACTUAL DATES', after.one.actualStart === '2026-01-10' && after.one.actualEnd === '2026-04-01',
-    JSON.stringify(after.one && { s: after.one.actualStart, e: after.one.actualEnd }))
+  /*
+   * The start is written, the finish is NOT: FNP-1 has four tasks and one is
+   * still open, and a project is finished when the last thing under it is —
+   * not when somebody drags the epic to Done.
+   */
+  check('IT WROTE THE ACTUAL START', after.one.actualStart === '2026-01-10', String(after.one.actualStart))
+  check('AND HELD THE FINISH BACK WHILE A TASK IS OPEN', after.one.actualEnd == null,
+    `the epic says done, its tasks say ${after.one.tasksDone} of ${after.one.tasksTotal}`)
+  check('  while recording where the work now lands', after.one.adjustedDue === '2026-04-01',
+    'the latest date on a task underneath')
   check('an unfinished issue gets a start and no finish',
     after.two.actualStart === '2026-02-01' && !after.two.actualEnd,
     JSON.stringify({ s: after.two.actualStart, e: after.two.actualEnd }))
@@ -616,15 +645,19 @@ if (!exe) {
   full.forEach((now, i) => {
     const was = before[i]
     for (const field of new Set([...Object.keys(was), ...Object.keys(now)])) {
-      // The three a sync owns. Everything else is the register's.
-      if (field === 'actualStart' || field === 'actualEnd' || field === 'summary') continue
+      /*
+       * What a sync owns, and nothing else. Three came from the ticket itself;
+       * two come from the tasks underneath it — where the work now lands, and
+       * how much of it is finished.
+       */
+      if (['actualStart', 'actualEnd', 'summary', 'adjustedDue', 'tasksTotal', 'tasksDone'].includes(field)) continue
       if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
         drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)
       }
     }
   })
-  check('A SYNC TOUCHES THE DATES AND THE NAME, AND NOTHING ELSE', drifted.length === 0,
-    drifted.join(' | ') || `${Object.keys(before[0]).length} fields per project, all unchanged but the three`)
+  check('A SYNC TOUCHES THE DATES, THE NAME AND THE TASK COUNTS — NOTHING ELSE', drifted.length === 0,
+    drifted.join(' | ') || `${Object.keys(before[0]).length} fields per project, all unchanged but those`)
   check('  and the name it wrote is the one Jira holds',
     full.every((now) => !now.jiraKey || typeof now.summary === 'string'),
     full.map((p) => `${p.jiraKey}: ${String(p.summary).slice(0, 28)}`).join(' | '))

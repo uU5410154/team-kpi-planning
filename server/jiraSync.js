@@ -45,12 +45,22 @@ export async function runSync({ trigger = 'manual', scenario = null } = {}) {
 
   const fetched = keys.length ? await jira.issuesByKey(keys) : { issues: [], missing: [] }
   const board = await jira.epics()
-  if (fetched === jira.UNAVAILABLE || board === jira.UNAVAILABLE) {
+  /*
+   * And what the work UNDER each of them adds up to: a project finishes when
+   * its last task does, and a task dated past the epic's own date is the
+   * delay somebody else caused.
+   */
+  const rolled = keys.length ? await jira.rollupOf(keys) : { byParent: {} }
+  if (fetched === jira.UNAVAILABLE || board === jira.UNAVAILABLE || rolled === jira.UNAVAILABLE) {
     last = { at: started, trigger, ok: false, error: 'Jira became unavailable mid-sync.' }
     return last
   }
 
-  const merged = mergeJira(state, { issues: fetched.issues, epics: board.epics }, { addNew: true })
+  const merged = mergeJira(
+    state,
+    { issues: fetched.issues, epics: board.epics, rollups: rolled.byParent },
+    { addNew: true },
+  )
 
   const report = {
     at: started,
@@ -65,6 +75,8 @@ export async function runSync({ trigger = 'manual', scenario = null } = {}) {
     fromCreated: merged.fromCreated,
     missingInJira: fetched.missing || [],
     epicsOnBoard: board.epics.length,
+    tasksSeen: rolled.tasks || 0,
+    adjusted: merged.projects.filter((p) => p.adjustedDue).length,
   }
 
   if (merged.unchanged) {

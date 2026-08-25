@@ -145,11 +145,19 @@ export default function Timeline({
     setSyncing(true)
     setSyncNote(null)
     try {
-      const [fetched, board] = await Promise.all([
+      const [fetched, board, rolled] = await Promise.all([
         keyed.length
           ? api.jiraIssues(keyed.map((p) => p.jiraKey.trim()))
           : Promise.resolve({ issues: [], missing: [] }),
         api.jiraEpics(),
+        /*
+         * And what the tasks under each project add up to: when the last one
+         * was resolved, and whether anything under it is dated past the date
+         * the project committed to.
+         */
+        keyed.length
+          ? api.jiraRollup(keyed.map((p) => p.jiraKey.trim()))
+          : Promise.resolve({ byParent: {} }),
       ])
       /*
        * The RAW register, not the computed one.
@@ -160,7 +168,8 @@ export default function Timeline({
        * where it would be saved, exported and never recomputed.
        */
       const r = mergeJira({ projects: rawProjects },
-        { issues: fetched.issues, epics: board.epics }, { addNew: true })
+        { issues: fetched.issues, epics: board.epics, rollups: rolled.byParent || {} },
+        { addNew: true })
       if (r.unchanged) {
         setSyncNote({
           severity: 'success',
@@ -594,6 +603,19 @@ export default function Timeline({
     const inherited = !tl.plannedEnd && parentPlan?.end && (tl.actualStart || tl.actualEnd)
       ? bar(tl.actualStart || parentPlan.start, parentPlan.end)
       : null
+
+    /*
+     * THE ADJUSTED TIMELINE — project rows only.
+     *
+     * When another team holds a project up, a task is raised for it carrying a
+     * date past the project's own. This bar runs to that date: where the work
+     * now lands, drawn beside the plan rather than replacing it, so the
+     * commitment and the adjustment can both be read at once.
+     *
+     * Not on task rows. A task IS the thing that moved the date; giving it an
+     * adjusted bar of its own would only restate its own due date.
+     */
+    const adjusted = depth === 0 && tl.adjustedEnd ? bar(plannedLeft, tl.adjustedEnd) : null
     /*
      * The actual bar starts where the PLAN starts.
      *
@@ -767,6 +789,24 @@ export default function Timeline({
                   border: '1px dashed',
                   borderColor: 'text.disabled',
                   opacity: 0.55,
+                }}
+                />
+              </Tooltip>
+            )}
+            {adjusted && (
+              <Tooltip title={`Adjusted to ${tl.adjustedEnd} — ${tl.adjustedBy} days past the committed `
+                + `${tl.plannedEnd}, taken from the latest date on a task underneath. `
+                + 'The commitment itself has not moved.'}
+              >
+                <Box sx={{
+                  position: 'absolute',
+                  left: `${adjusted.left}%`,
+                  width: `${adjusted.width}%`,
+                  top: 12,
+                  height: 5,
+                  borderRadius: 0.5,
+                  bgcolor: STATUS.warning,
+                  opacity: 0.8,
                 }}
                 />
               </Tooltip>
@@ -1212,6 +1252,12 @@ export default function Timeline({
             }}
             />
             <Typography variant="caption">the slip itself — days past the planned finish</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 5, borderRadius: 0.5, bgcolor: STATUS.warning, opacity: 0.8 }} />
+            <Typography variant="caption">
+              adjusted — where the work now lands, from the latest task date underneath
+            </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 34, height: 9, borderRadius: 0.5, border: '1px dashed', borderColor: 'text.disabled', opacity: 0.55 }} />

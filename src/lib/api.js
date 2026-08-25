@@ -79,3 +79,11 @@ export const jiraUpdate = async (key, patch) =>
 /** Every epic in the Jira project — the app works out which are new. */
 export const jiraEpics = async (sinceDays) =>
   j(await fetch(`/api/jira/epics${sinceDays ? `?since=${encodeURIComponent(sinceDays)}` : ''}`))
+
+/** What the tasks under each epic add up to — latest dates, and whether all are done. */
+export const jiraRollup = async (keys) =>
+  j(await fetch('/api/jira/rollup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys }),
+  }))

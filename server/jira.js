@@ -217,6 +217,102 @@ export async function childrenOf(keys) {
 }
 
 /**
+ * What the work UNDER each epic adds up to.
+ *
+ * Two questions the project row cannot answer on its own:
+ *
+ *   - the LATEST due date among its tasks. When another team causes a delay,
+ *     a task is raised for it with a date past the epic's own — that later
+ *     date is what the project will actually now finish by, and it is worth
+ *     drawing rather than discovering.
+ *   - whether every task is resolved, and the latest date one was. An epic
+ *     marked Done with tasks still open has not finished; a project has
+ *     finished when the last thing under it has.
+ *
+ * Aggregates only. The Timeline needs this for every keyed project at once —
+ * a hundred and fifty of them — and shipping thousands of task records to a
+ * browser that will draw two dates from them is a waste of everybody's time.
+ *
+ * Paged properly, unlike a plain children fetch: twenty epics can easily hold
+ * more than the hundred issues one page returns, and a rollup that silently
+ * saw two thirds of the tasks would be worse than no rollup at all.
+ */
+export async function rollupOf(keys) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+
+  const parents = [...new Set((keys || [])
+    .map((k) => String(k || '').trim().toUpperCase())
+    .filter((k) => /^[A-Z][A-Z0-9_]+-\d+$/.test(k)))]
+  if (!parents.length) return { byParent: {}, parents: 0, tasks: 0 }
+
+  const byParent = {}
+  for (const k of parents) {
+    byParent[k] = { total: 0, done: 0, latestDue: null, latestResolved: null, allDone: false, truncated: false }
+  }
+
+  const later = (a, b) => (!a ? b : (!b ? a : (a > b ? a : b)))
+  const fields = ['status', 'duedate', 'resolutiondate', 'parent']
+
+  for (let i = 0; i < parents.length; i += 20) {
+    const batch = parents.slice(i, i + 20)
+    let token = null
+    for (let page = 0; page < 25; page++) {
+      const res = await fetch(`${c.base}/rest/api/3/search/jql`, {
+        method: 'POST',
+        headers: {
+          Authorization: auth(),
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jql: `parent IN (${batch.join(',')})`,
+          fields,
+          maxResults: 100,
+          ...(token ? { nextPageToken: token } : {}),
+        }),
+        signal: AbortSignal.timeout(25000),
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        const err = new Error(`Jira ${res.status}: ${text.slice(0, 200)}`)
+        err.statusCode = res.status
+        throw err
+      }
+      const data = await res.json()
+      for (const raw of data.issues || []) {
+        const parent = raw.fields?.parent?.key
+        const agg = parent && byParent[parent]
+        if (!agg) continue
+        agg.total += 1
+        agg.latestDue = later(agg.latestDue, day(raw.fields?.duedate))
+        const resolved = day(raw.fields?.resolutiondate)
+        const isDone = raw.fields?.status?.statusCategory?.key === 'done'
+        if (isDone) {
+          agg.done += 1
+          agg.latestResolved = later(agg.latestResolved, resolved)
+        }
+      }
+      token = data.nextPageToken || null
+      if (!token) break
+      // A parent with more than 2,500 tasks is not a project, and pretending
+      // to have counted them all would be the lie this guard exists to avoid.
+      if (page === 24) for (const k of batch) byParent[k].truncated = true
+    }
+  }
+
+  let tasks = 0
+  for (const k of parents) {
+    const agg = byParent[k]
+    tasks += agg.total
+    // An epic with no tasks at all has not "finished everything" — there was
+    // nothing to finish, and the project's own status is the better answer.
+    agg.allDone = agg.total > 0 && agg.done === agg.total
+  }
+  return { byParent, parents: parents.length, tasks }
+}
+
+/**
  * Write the PLAN back to Jira: the start date and the due date, and nothing
  * else.
  *
