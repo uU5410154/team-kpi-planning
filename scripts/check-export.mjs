@@ -193,6 +193,63 @@ for (const person of scorecardPeople) {
     dr.within === (dr.drifted <= dr.allowedCount), `${dr.drifted} <= ${dr.allowedCount} vs within=${dr.within}`)
 }
 
+/* ====== every row on a person's sheet says why it is there ======
+ *
+ * Credit follows the CONTRIBUTOR RECORD, not only the PIC — that is what makes
+ * a shared project shareable, and it is also why a project whose PIC column
+ * reads TBC can appear on somebody's scorecard. The sheet used to say nothing
+ * about it, and the two sheets then gave different answers to "whose is this?"
+ * with no way to reconcile them.
+ */
+console.log('\n--- every credited row says what the claim rests on ---')
+for (const person of scorecardPeople) {
+  const pp = plan.people.find((x) => x.id === person.id)
+  if (!pp || !pp.scorecardRows.length) continue
+  const ws = back.getWorksheet(`Obj-${person.nick}`)
+  let hr = null
+  ws.eachRow((row) => { if (String(row.getCell(4).value || '') === 'Why it is here') hr = row.number })
+  check(`${person.nick}: the portfolio says why each row is there`, !!hr, String(hr))
+  if (!hr) continue
+
+  const rows = []
+  for (let n = hr + 1; n <= hr + pp.scorecardRows.length; n++) {
+    const row = ws.getRow(n)
+    if (!row.getCell(2).value) break
+    rows.push({ key: String(row.getCell(1).value || ''), why: String(row.getCell(4).value || ''), name: String(row.getCell(2).value || '') })
+  }
+  check(`${person.nick}: EVERY ROW HAS A REASON`,
+    rows.length > 0 && rows.every((r) => r.why.trim().length > 0),
+    rows.filter((r) => !r.why.trim()).map((r) => r.name).slice(0, 3).join(' | ') || `${rows.length} rows`)
+
+  // And the reason has to be the true one, checked against the register.
+  const byName = new Map(pp.scorecardRows.map(({ p: pr }) => [pr.summary, pr]))
+  const wrong = rows.filter((r) => {
+    const pr = byName.get(r.name)
+    if (!pr) return false
+    if (pr.fellBack) return !/Nobody is PIC/.test(r.why)
+    if (pr.pic === person.id) return !/\bPIC\b/.test(r.why)
+    const mine = (pr.contributors || []).find((c) => c.person === person.id)
+    // Not the PIC and not a contributor: the only honest answer left is that
+    // it is a credited share, and it must not claim to be either of those.
+    return mine ? /Nobody is PIC/.test(r.why) : /^PIC$/.test(r.why)
+  })
+  check(`${person.nick}: and the reason is the true one`, wrong.length === 0,
+    wrong.slice(0, 2).map((r) => `${r.key}: "${r.why}"`).join(' | '))
+
+  /*
+   * The case that started this: a project with NO PIC on somebody's sheet. It
+   * is allowed — a developer is credited on work nobody has been named to own
+   * — but it may never appear without saying which of the two it is.
+   */
+  const picless = rows.filter((r) => {
+    const pr = byName.get(r.name)
+    return pr && !pr.pic
+  })
+  check(`${person.nick}: a row with NO PIC still explains itself`,
+    picless.every((r) => /Nobody is PIC|PM|Developer|Lead|Support|QA|Assignee|credited share/i.test(r.why)),
+    picless.slice(0, 2).map((r) => `${r.key}: "${r.why}"`).join(' | ') || 'none on this sheet')
+}
+
 console.log(`\nsheets (${names.length}): ${names.join(', ')}`)
 console.log(`file size: ${(readFileSync(file).length / 1024).toFixed(1)} KB`)
 unlinkSync(file)

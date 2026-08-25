@@ -1,8 +1,7 @@
 import ExcelJS from 'exceljs'
 import { OBJECTIVES, OBJ_BY_ID, OUT_OF_PLAN } from './palette.js'
 import {
-  SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths,
-  MONTH_LABELS, MONTHS_IN_YEAR, countsToPool, creditSummary,
+  SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths, MONTH_LABELS, MONTHS_IN_YEAR, countsToPool, creditSummary, ROLE_LABEL,
 } from './model.js'
 
 /* ------------------------------------------------------------------ */
@@ -700,6 +699,17 @@ export async function buildWorkbook(plan, state) {
      */
     const cols = [
       ['Jira', 12], ['Project', 42], ['Objective', 22],
+      /*
+       * WHY THIS ROW IS ON THIS PERSON'S SHEET.
+       *
+       * Credit follows the CONTRIBUTOR RECORD, not only the PIC — that is what
+       * makes a shared project shareable. The cost of it is that a project
+       * whose PIC column reads TBC can still appear on somebody's scorecard,
+       * and the sheet said nothing about why: "AP Trade Invoice Matching has
+       * TBC on the webapp, why is it under P'Phen in Excel". It was under
+       * P'Phen because P'Phen is its developer. Now it says so.
+       */
+      ['Why it is here', 26],
       [`Project ${unit}`, 14], ['Credited', 11],
       ['Mandays', 11], [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14],
       [`Cash benefit/yr (${cur})`, 16], ['ROI', 10], ['Status', 13],
@@ -938,10 +948,27 @@ export async function buildWorkbook(plan, state) {
       // Mirrors model.js `costedRows`, which is what p.finance sums over.
       const inTotal = counted && countsToPool(pr) && pr.investment != null && pr.monthlyBenefit != null
       const row = ws.getRow(r++)
+      /*
+       * The claim this row rests on, in the person's own terms: the roles they
+       * are recorded in, whether they are the PIC, and the one case where
+       * neither is true — an unowned project, which the lead absorbs so its
+       * hours are not lost from the team's total.
+       */
+      const mine = (pr.contributors || []).find((c) => c.person === p.id)
+      const roles = (mine?.roles || []).map((r) => ROLE_LABEL[r] || r)
+      const why = pr.fellBack
+        ? 'Nobody is PIC — absorbed by the team lead'
+        : [
+          pr.pic === p.id ? 'PIC' : null,
+          roles.length ? roles.join(' + ') : null,
+        ].filter(Boolean).join(' · ')
+          || (pr.pic ? `credited share (PIC is ${people.find((x) => x.id === pr.pic)?.nick || pr.pic})` : 'credited share')
+
       row.values = [
         pr.jiraKey || '',
         pr.summary,
         OBJ_BY_ID[pr.objective] ? `${OBJ_BY_ID[pr.objective].no}. ${OBJ_BY_ID[pr.objective].short}` : '',
+        why,
         pr.savingHours ?? null,
         !counted || pr.savingHours == null ? null : Number(((pr.savingHours ?? 0) * share).toFixed(1)),
         // `inTotal` is the SAME predicate model.js uses to build p.finance —
@@ -964,6 +991,9 @@ export async function buildWorkbook(plan, state) {
         counted ? (pr.softBenefits || []).map((b) => `• ${b}`).join('\n') : '',
       ]
       row.getCell(1).font = { name: FONT, size: 9.5, bold: true }
+      // A row nobody owns is the one to go and fix, so it is marked as such
+      // rather than sitting quietly in a column of ordinary ones.
+      if (pr.fellBack) tone(row.getCell(px('Why it is here')), WARN, false)
       row.getCell(px('Mandays')).numFmt = N1
       row.getCell(px('ROI')).numFmt = ROI
       if (inTotal && pr.roi != null) tone(row.getCell(px('ROI')), pr.gate === 'pass' ? GOOD : BAD, false)
