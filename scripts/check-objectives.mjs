@@ -287,7 +287,14 @@ console.log('\n--- the workbook states each objective in its own unit ---')
   await back.xlsx.load(await wb.xlsx.writeBuffer())
   const ws = back.getWorksheet('Overall_Objectives')
 
-  // Gun is the first person block: target / weight / actual at columns 4,5,6
+  /*
+   * Gun is the first person block: TARGET at column 4, %WEIGHT at column 5.
+   *
+   * There used to be an Actual at column 6 and it was removed on request —
+   * this sheet states what each person is measured ON, and what they have
+   * delivered is on their own sheet and on the Summary. So what is checked
+   * here is the target, in the unit that objective is stated in.
+   */
   const rows = {}
   ws.eachRow((r) => {
     const label = String(r.getCell(3).value || '')
@@ -298,16 +305,42 @@ console.log('\n--- the workbook states each objective in its own unit ---')
     const r = rows[String(o.no)]
     check(`Obj ${o.no} is on the grid`, !!r, o.name)
     if (!r) continue
-    const actual = r.getCell(6).value
-    const want = o.measure === 'money' ? (lead.benefitByObjective[o.id] || 0)
-      : o.measure === 'count' ? (lead.countByObjective[o.id] || 0)
-        : (lead.byObjective[o.id] || 0)
-    check(`  and its Actual is stated in its own unit`,
-      Math.abs(actual - Math.round(want)) <= 1, `${actual} vs ${Math.round(want)}`)
+    const line = lead.kpiLines.find((l) => l.objective === o.id && !l.custom)
+    const target = r.getCell(4).value
+    const weight = r.getCell(5).value
+    /*
+     * A percentage is held on the card as a whole number and written into the
+     * cell as a real fraction, so 15 and 0.15 are the same target. Anything
+     * else compares as it is written.
+     */
+    const same = (cell, card) => String(cell) === String(card)
+      || Number(cell) === Number(card)
+      || Math.abs(Number(cell) * 100 - Number(card)) < 1e-9
+    check(`  and its target is the one on the lead's card`,
+      line ? same(target, line.target ?? line.defaultTarget ?? '') : String(target) === '—',
+      `sheet ${JSON.stringify(target)} vs card ${JSON.stringify(line ? line.target : null)}`)
+    check(`  and it carries a weight, not an actual`,
+      typeof weight === 'number' && weight >= 0 && weight <= 1,
+      `${JSON.stringify(weight)}`)
   }
-  check('THE HOURS APPEAR ON EXACTLY ONE ROW OF THE GRID',
-    OBJECTIVES.filter((o) => (rows[String(o.no)]?.getCell(6).value || 0) === Math.round(lead.registerHours)).length === 1,
-    OBJECTIVES.map((o) => `${o.no}:${rows[String(o.no)]?.getCell(6).value}`).join(' '))
+  /*
+   * The hours used to be printed against an objective in an Actual column, and
+   * the thing worth guarding was that they appeared against exactly ONE of
+   * them — a saving counted twice is the worst bug this model can have. With
+   * that column gone the grid states targets only, so the guard moves to the
+   * TARGET: exactly one objective is stated in hours, and it is the hours one.
+   */
+  const hourly = OBJECTIVES.filter((o) => {
+    const l = lead.kpiLines.find((x) => x.objective === o.id && !x.custom)
+    return l && l.targetKind === 'hours'
+  })
+  check('EXACTLY ONE OBJECTIVE IS MEASURED IN HOURS',
+    hourly.length === 1, hourly.map((o) => `${o.no} ${o.name}`).join(' | ') || 'none')
+  check('  and the hours behind the others are counted elsewhere, not twice',
+    Math.abs(Object.values(lead.byObjective).reduce((a, b) => a + b, 0)
+      - (lead.byObjective[hourly[0].id] || 0)) < 1e-9
+    || Object.keys(lead.byObjective).length === 1,
+    Object.entries(lead.byObjective).map(([k, v]) => `${k}=${Math.round(v)}`).join(' '))
 
   let totalRow = null
   ws.eachRow((r) => { if (/TOTAL SAVING/.test(String(r.getCell(3).value || ''))) totalRow = r })

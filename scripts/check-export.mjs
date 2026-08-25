@@ -73,7 +73,8 @@ ov.eachRow((row) => { if (String(row.getCell(3).value || '').startsWith('WEIGHT 
 check('weight-total row present', !!weightRow)
 if (weightRow) {
   const sums = []
-  for (let i = 0; i < scorecardPeople.length; i++) sums.push(weightRow.getCell(4 + i * 3 + 1).value)
+  // Two columns a person — target, weight — since the Actual column was removed.
+  for (let i = 0; i < scorecardPeople.length; i++) sums.push(weightRow.getCell(4 + i * 2 + 1).value)
   check('every person totals 100%', sums.every((s) => Math.abs(s - 1) < 1e-9),
     sums.map((s) => `${Math.round(s * 100)}%`).join(', '))
 }
@@ -128,13 +129,39 @@ for (const person of scorecardPeople) {
   check(`${person.nick}: the free re-plan is stated`, all.includes('3. ONE FREE RE-PLAN'))
   check(`${person.nick}: what is not scored is stated`, all.includes('NOT SCORED'))
 
-  // The table: find its header, then check every row against the model.
+  /*
+   * The table: find its header, then check every row against the model.
+   *
+   * BY NAME, not by column number. This read column 7 and broke the day a
+   * column before it was removed — which is exactly the failure the rest of
+   * this file was written to avoid.
+   */
   let hr = null
-  ws.eachRow((row) => { if (String(row.getCell(7).value || '').startsWith('Allowed (')) hr = row.number })
+  let dc = {}
+  ws.eachRow((row) => {
+    if (hr) return
+    const head = Array.from(row.values, (v) => String(v || ''))
+    const at = head.findIndex((h) => h.startsWith('Allowed ('))
+    if (at > 0) {
+      hr = row.number
+      dc = {
+        allowed: at,
+        planned: head.findIndex((h) => h === 'Planned days'),
+        daysOut: head.findIndex((h) => h === 'Days out'),
+        verdict: head.findIndex((h) => h === 'Verdict'),
+        jira: head.findIndex((h) => h === 'Jira'),
+        project: head.findIndex((h) => h === 'Project'),
+      }
+    }
+  })
   check(`${person.nick}: the commitments table has an Allowed column`, !!hr, String(hr))
   if (!hr) continue
   check(`${person.nick}: the Allowed header carries the per-project limit`,
-    String(ws.getRow(hr).getCell(7).value) === `Allowed (${perPct}%)`, String(ws.getRow(hr).getCell(7).value))
+    String(ws.getRow(hr).getCell(dc.allowed).value) === `Allowed (${perPct}%)`,
+    String(ws.getRow(hr).getCell(dc.allowed).value))
+  check(`${person.nick}: and no First-committed column remains`,
+    !Array.from(ws.getRow(hr).values, (v) => String(v || '')).some((h) => /^first committed$/i.test(h.trim())),
+    Array.from(ws.getRow(hr).values, (v) => String(v || '')).filter(Boolean).join(' | '))
 
   let checkedRows = 0
   let allowanceOk = true
@@ -143,11 +170,12 @@ for (const person of scorecardPeople) {
   const byKey = new Map(pp.commitments.map((c) => [c.jiraKey || c.summary, c]))
   for (let n = hr + 1; n <= hr + pp.commitments.length; n++) {
     const row = ws.getRow(n)
-    const c = byKey.get(String(row.getCell(1).value || '')) || byKey.get(String(row.getCell(2).value || ''))
+    const c = byKey.get(String(row.getCell(dc.jira).value || ''))
+      || byKey.get(String(row.getCell(dc.project).value || ''))
     if (!c) continue
     checkedRows++
-    const planned = row.getCell(6).value
-    const allowed = row.getCell(7).value
+    const planned = row.getCell(dc.planned).value
+    const allowed = row.getCell(dc.allowed).value
     // Recomputed from what is ON THE SHEET: 20% of the planned length, never
     // less than one whole day. This is the rule, not a reading of the model.
     const want = planned && planned > 0 ? Math.round(Math.max(1, planned * (dr.perProjectLimit ?? 0.2))) : null
@@ -155,8 +183,8 @@ for (const person of scorecardPeople) {
       allowanceOk = false
       console.log(`      ${c.jiraKey}: planned ${planned}, sheet allows ${allowed}, ${perPct}% is ${want}`)
     }
-    if ((row.getCell(8).value ?? null) !== (c.driftDays ?? null)) daysOk = false
-    const verdict = String(row.getCell(10).value || '')
+    if ((row.getCell(dc.daysOut).value ?? null) !== (c.driftDays ?? null)) daysOk = false
+    const verdict = String(row.getCell(dc.verdict).value || '')
     const wantVerdict = c.drifted === null
       ? (c.running ? 'running' : 'not due yet')
       : (c.drifted ? 'OVER' : 'within')
@@ -628,28 +656,36 @@ console.log(String.fromCharCode(10) + '--- every ROI cell is a percentage ---')
   check('NO RETURN IS WRITTEN AS A PLAIN NUMBER', offenders.length === 0,
     offenders.slice(0, 4).join(' | ') || 'every ROI cell carries a percentage format')
 
+  /*
+   * AND THE ACTUAL COLUMN IS GONE FROM THAT SHEET.
+   *
+   * Overall_Objectives states what each person is being MEASURED ON — agreed
+   * once, at the start of the year. What they have actually delivered belongs
+   * on their own scorecard sheet and on the Summary, where there is room to
+   * state it in full rather than squeezed into a third column per head. This
+   * asserts the removal so it cannot drift back in, and that what remains is
+   * exactly two columns a person.
+   */
   const ws = backc.getWorksheet('Overall_Objectives')
-  let fr = null
   let hr = null
   for (let rr = 1; rr <= ws.rowCount; rr++) {
-    const line = [1, 2, 3].map((k) => String(ws.getRow(rr).getCell(k).value ?? '')).join(' ')
-    if (/Project management|Financial/i.test(line)) fr = fr ?? rr
-    if (/Target/.test(String(ws.getRow(rr).getCell(4).value ?? ''))) hr = hr ?? rr
+    if (/Target/.test(String(ws.getRow(rr).getCell(4).value ?? ''))) { hr = rr; break }
   }
-  const wrong = costed.people.map((p, i) => {
-    const cell = ws.getRow(fr).getCell(4 + i * 3 + 2)
-    // Objective 1 is the share delivered on time now, not the return.
-    const want = p.kpiLines.find((l) => l.targetKind === 'percent' && !l.custom)?.creditedRatio
-    if (want == null) return null
-    return Math.abs(Number(cell.value) - want) < 5e-4 ? null : `${p.nick}: sheet ${cell.value} vs ${want.toFixed(4)}`
-  }).filter(Boolean)
-  // A check that compares nothing passes for the wrong reason, so the ratios
-  // have to be real before the comparison means anything.
-  const real = costed.people.filter((p) => p.avgProjectRoi != null && Math.abs(p.avgProjectRoi) > 1e-6)
-  check('the sheet has real returns to check', real.length >= 2,
-    costed.people.map((p) => `${p.nick} ${p.avgProjectRoi == null ? 'null' : `${(p.avgProjectRoi * 100).toFixed(0)}%`}`).join(' · '))
-  check('AND IT IS THE PERSON’S OWN AVERAGE RETURN', wrong.length === 0 && real.length >= 2,
-    wrong.join(' | ') || costed.people.map((p) => `${p.nick} ${((p.avgProjectRoi || 0) * 100).toFixed(0)}%`).join(' · '))
+  check('the objectives sheet has a header row', !!hr, String(hr))
+  if (hr) {
+    const head = []
+    for (let cc = 4; cc <= 3 + costed.people.length * 3; cc++) {
+      head.push(String(ws.getRow(hr).getCell(cc).value ?? ''))
+    }
+    check('NO "ACTUAL" COLUMN ON THE OBJECTIVES SHEET',
+      !head.some((h) => /^actual$/i.test(h.trim())), head.filter(Boolean).join(' | '))
+    check('  and each person has exactly Target and %Weight',
+      head.slice(0, costed.people.length * 2).every((h, i) => (i % 2 === 0 ? h === 'Target' : h === '%Weight')),
+      head.slice(0, 6).join(' | '))
+    check('  and nothing is written past the last person\'s two columns',
+      head.slice(costed.people.length * 2).every((h) => h === ''),
+      head.slice(costed.people.length * 2).filter(Boolean).join(' | ') || 'clean')
+  }
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)

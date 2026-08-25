@@ -406,7 +406,15 @@ export async function buildWorkbook(plan, state) {
 
   /* ============ 2. Overall_Objectives ============ */
   {
-    const width = 3 + people.length * 3
+    /*
+     * TWO columns a person: the target, and the weight it carries. There was
+     * an "Actual" beside them, and it was asked for gone — this sheet is what
+     * each person is being MEASURED ON, agreed once at the start of the year.
+     * What they have actually delivered is on their own scorecard sheet and on
+     * the Summary, where it belongs and where it is stated in full rather than
+     * squeezed into a third column per head.
+     */
+    const width = 3 + people.length * 2
     const ws = wb.addWorksheet('Overall_Objectives', { properties: { tabColor: { argb: NAVY_MID } }, views: [{ state: 'frozen', xSplit: 3, ySplit: 5 }] })
     banner(ws, 'INDIVIDUAL SCORECARD — WEIGHTS AND TARGETS',
       'Every person totals 100% by construction, split across the objectives that person actually holds.', width)
@@ -414,8 +422,8 @@ export async function buildWorkbook(plan, state) {
     // person group headers
     const gRow = ws.getRow(4)
     people.forEach((p, i) => {
-      const c0 = 4 + i * 3
-      ws.mergeCells(4, c0, 4, c0 + 2)
+      const c0 = 4 + i * 2
+      ws.mergeCells(4, c0, 4, c0 + 1)
       const c = gRow.getCell(c0)
       c.value = `${p.nick}  ·  ${p.band}${p.overridden ? '  ·  MANUAL' : ''}`
       c.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
@@ -425,9 +433,9 @@ export async function buildWorkbook(plan, state) {
     gRow.height = 20
 
     const labels = ['Block', 'No.', 'KPI line']
-    people.forEach(() => labels.push('Target', '%Weight', 'Actual'))
+    people.forEach(() => labels.push('Target', '%Weight'))
     const widths = [14, 5, 44]
-    people.forEach(() => widths.push(20, 10, 11))
+    people.forEach(() => widths.push(22, 11))
     headerRow(ws, 5, labels, widths)
 
     // Targets come from each person's own KPI line, not from the guideline —
@@ -446,56 +454,22 @@ export async function buildWorkbook(plan, state) {
       row.getCell(2).alignment = { horizontal: 'center' }
       row.getCell(3).value = spec.kpi
       people.forEach((p, i) => {
-        const c0 = 4 + i * 3
+        const c0 = 4 + i * 2
         const line = p.kpiLines.find((l) => l.id === spec.id)
         if (!line) {
+          // An objective this person does not hold. A dash rather than a blank,
+          // so a reader can tell "not theirs" from "nobody filled it in".
           row.getCell(c0).value = '—'
           row.getCell(c0 + 1).value = 0
           tone(row.getCell(c0), MUTED, false)
         } else {
           writeTarget(row.getCell(c0), line, settings.savingBasis, cur)
           row.getCell(c0 + 1).value = line.weight
-          // The "Actual" column matches the target's own unit: baht a year for
-          // objective 1, saving hours for the rest.
-          if (spec.objective) {
-            // The Actual column speaks the target's own unit: baht for the
-            // money objective, a count of deliverables for a counted one, and
-            // saving hours for the one objective measured in hours. A counted
-            // objective has no hours behind it by design — its projects give
-            // their hours to objective 2 — so printing hours here would state
-            // the same saving twice.
-            const kind = line.targetKind
-            if (kind === 'percent') {
-              // A floor: the Actual is the return being carried, as a real
-              // percentage so the cell can be compared with the target above it.
-              const cell = row.getCell(c0 + 2)
-              cell.value = line.creditedRatio == null ? null : Number(line.creditedRatio.toFixed(4))
-              cell.numFmt = ROI
-              if (line.creditedRatio != null) tone(cell, line.meetsTarget ? GOOD : BAD, false)
-            } else {
-              const actual = kind === 'thb'
-                ? (p.benefitByObjective[spec.objective] || 0)
-                : kind === 'number'
-                  ? (p.countByObjective?.[spec.objective] || 0)
-                  : (p.byObjective[spec.objective] || 0)
-              row.getCell(c0 + 2).value = Math.round(actual)
-              row.getCell(c0 + 2).numFmt = kind === 'thb' ? MONEY : N0
-            }
-          }
           if (line.overridden) tone(row.getCell(c0), NAVY_MID, false)
         }
         row.getCell(c0).alignment = { horizontal: 'center' }
         row.getCell(c0 + 1).numFmt = PCT
         row.getCell(c0 + 1).alignment = { horizontal: 'center' }
-        /*
-         * The Actual column is whole numbers — hours, deliverables — EXCEPT on
-         * the objective measured as a ratio, where the cell already carries a
-         * percentage format put there ten lines above. Setting N0 here landed
-         * after it and won: a return of 1.4544 printed as "1", which reads as
-         * a return of one baht rather than 145%.
-         */
-        if (!/%/.test(String(row.getCell(c0 + 2).numFmt || ''))) row.getCell(c0 + 2).numFmt = N0
-        row.getCell(c0 + 2).alignment = { horizontal: 'right' }
       })
     })
     styleBody(ws, first, r - 1, width)
@@ -507,18 +481,18 @@ export async function buildWorkbook(plan, state) {
     tot.getCell(3).value = `TOTAL SAVING ${unit.toUpperCase()}`
     tot.getCell(3).font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } }
     people.forEach((p, i) => {
-      const c = tot.getCell(4 + i * 3)
+      const c = tot.getCell(4 + i * 2)
       c.value = Number((p.kpiTotals.savingHours || 0).toFixed(1))
       c.numFmt = N1
       c.alignment = { horizontal: 'center' }
-      tone(c, NAVY)
-      // What the register credits, beside it, where the card states something
-      // different — so a typed target is never silent on this sheet either.
-      const actual = tot.getCell(4 + i * 3 + 2)
-      actual.value = Number((p.registerHours || 0).toFixed(1))
-      actual.numFmt = N1
-      actual.alignment = { horizontal: 'right' }
-      if (Math.abs((p.kpiTotals.savingHours || 0) - (p.registerHours || 0)) > 0.5) tone(actual, WARN, false)
+      /*
+       * A card stating something different from what the register credits is
+       * worth knowing, and it used to be shown in the Actual column beside
+       * this one. With that column gone the difference is marked on the figure
+       * itself rather than dropped — the two numbers are both on the person's
+       * own sheet, where the manual figure is spelled out in the banner.
+       */
+      tone(c, Math.abs((p.kpiTotals.savingHours || 0) - (p.registerHours || 0)) > 0.5 ? WARN : NAVY)
     })
     tot.height = 18
     for (let c = 1; c <= width; c++) tot.getCell(c).border = { top: { style: 'medium', color: { argb: NAVY } }, bottom: thin }
@@ -529,7 +503,7 @@ export async function buildWorkbook(plan, state) {
     people.forEach((p, i) => {
       // Rounded so a card that adds to 100% writes 1, not 0.9999999999999999.
     const sum = Math.round(p.kpiLines.reduce((a, l) => a + l.weight, 0) * 1e6) / 1e6
-      const c = chk.getCell(4 + i * 3 + 1)
+      const c = chk.getCell(4 + i * 2 + 1)
       c.value = sum
       c.numFmt = PCT
       c.alignment = { horizontal: 'center' }
@@ -873,7 +847,15 @@ export async function buildWorkbook(plan, state) {
           + `${(p.commitments || []).length}; every other member's are on their own sheet.`)
       }
 
-      const dCols = [['Jira', 12], ['Project', 40], ['First committed', 15], ['Committed by', 14],
+      /*
+       * No "First committed" column. It stated the date a project was first
+       * promised where a re-plan had moved it since, and it was empty on all
+       * but a handful of rows — a column that is blank nine times out of ten
+       * costs every reader width and gives almost none of them anything. The
+       * fact itself is not lost: the Re-plans column says a date has moved,
+       * and the register holds the original.
+       */
+      const dCols = [['Jira', 12], ['Project', 46], ['Committed by', 14],
         ['Actually landed', 15], ['Planned days', 12], [`Allowed (${perPct}%)`, 13], ['Days out', 11],
         ['Drift', 9], ['Verdict', 11], ['Re-plans', 10], [`Saving ${unit}`, 13]]
       headerRow(ws, r++, dCols.map((c) => c[0]), dCols.map((c) => c[1]))
@@ -883,10 +865,6 @@ export async function buildWorkbook(plan, state) {
         row.values = [
           c.jiraKey || '',
           c.summary,
-          // The date first promised, where it differs from the one standing —
-          // a commitment that quietly became a different commitment is the
-          // thing this column exists to make visible.
-          c.baselineDue && c.baselineDue !== c.due ? c.baselineDue : '',
           c.due || 'NO DATE COMMITTED',
           // A held date is marked where it is read, not only in a note at the
           // bottom: a reader comparing it with Jira has to know why they
@@ -909,19 +887,19 @@ export async function buildWorkbook(plan, state) {
           c.plannedBackwards ? 'plan backwards' : (c.replans > 0 ? `${c.replans}${c.overReplanned ? ' — OVER' : ' (free)'}` : ''),
           c.savingHours ?? null,
         ]
+        row.getCell(5).numFmt = N0
         row.getCell(6).numFmt = N0
-        row.getCell(7).numFmt = N0
-        row.getCell(8).numFmt = '+0;-0;0'
-        row.getCell(9).numFmt = '0%'
-        row.getCell(12).numFmt = N0
-        for (const cc of [3, 4, 5, 6, 7, 8, 9, 10, 11]) row.getCell(cc).alignment = { horizontal: 'center' }
+        row.getCell(7).numFmt = '+0;-0;0'
+        row.getCell(8).numFmt = '0%'
+        row.getCell(11).numFmt = N0
+        for (const cc of [3, 4, 5, 6, 7, 8, 9, 10]) row.getCell(cc).alignment = { horizontal: 'center' }
         // A project with no committed date is the gap this objective exists to
         // close, so it is coloured as one rather than left blank.
-        if (!c.due) tone(row.getCell(4), WARN)
-        if (c.drifted === true) { tone(row.getCell(9), BAD); tone(row.getCell(10), BAD) }
-        if (c.drifted === false) tone(row.getCell(10), GOOD)
-        if (c.overReplanned) tone(row.getCell(11), BAD)
-        if (c.plannedBackwards) tone(row.getCell(11), WARN)
+        if (!c.due) tone(row.getCell(3), WARN)
+        if (c.drifted === true) { tone(row.getCell(8), BAD); tone(row.getCell(9), BAD) }
+        if (c.drifted === false) tone(row.getCell(9), GOOD)
+        if (c.overReplanned) tone(row.getCell(10), BAD)
+        if (c.plannedBackwards) tone(row.getCell(10), WARN)
       }
       styleBody(ws, dStart, r - 1, dCols.length)
 
