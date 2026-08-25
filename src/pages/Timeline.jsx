@@ -364,9 +364,12 @@ export default function Timeline({
    * has to live in the register and has to be able to survive the next sync.
    */
   const holdFinish = (row, date) => {
-    if (!row.projectKey) return
-    const project = rawProjects?.find((x) => x.key === row.projectKey) || { key: row.projectKey, actualEnd: row.timeline.actualEnd }
-    onUpdate(row.projectKey, date ? pinFinishPatch(project, date) : unpinFinishPatch())
+    const keys = (row.projectKeys || [row.projectKey]).filter(Boolean)
+    if (!keys.length) return
+    for (const k of keys) {
+      const project = rawProjects?.find((x) => x.key === k) || { key: k, actualEnd: row.timeline.actualEnd }
+      onUpdate(k, date ? pinFinishPatch(project, date) : unpinFinishPatch())
+    }
     setSyncNote(date
       ? {
         severity: 'success',
@@ -383,7 +386,10 @@ export default function Timeline({
     try {
       // The register first: it is the thing being reported on, and it must
       // hold the change even if Jira is unreachable.
-      if (row.projectKey) onUpdate(row.projectKey, { start: next.start || null, due: next.due || null })
+      // Every line behind this bar, not just the first: they are one epic.
+      for (const k of (row.projectKeys || [row.projectKey]).filter(Boolean)) {
+        onUpdate(k, { start: next.start || null, due: next.due || null })
+      }
       if (row.jiraKey && jira?.writable) {
         await api.jiraUpdate(row.jiraKey, { start: next.start || null, due: next.due || null })
         setSyncNote({ severity: 'success', text: `${row.jiraKey} updated here and in Jira.` })
@@ -502,6 +508,61 @@ export default function Timeline({
   }, [plan.projects, q, fPic, fState, ours])
 
   /*
+   * ONE BAR PER TICKET.
+   *
+   * The register is allowed more than one line for the same epic, and it is
+   * right that it is: FNP-1151 is carried as three lines because it delivers
+   * three separate savings, and they are costed, credited and reported apart.
+   * A TIMELINE is not about any of that. It is about when one piece of work
+   * runs, and one piece of work drawn three times is a chart that lies about
+   * how much is going on.
+   *
+   * So the lines are collapsed onto the ticket they share. The hours are added
+   * up and the objectives listed, because a reader looking at the collapsed row
+   * should see everything the lines it stands for were carrying — and every
+   * register line behind it is kept, so editing a date from here moves all of
+   * them rather than silently splitting the group apart.
+   */
+  const grouped = useMemo(() => {
+    const out = []
+    const at = new Map()
+    for (const p of rows) {
+      const key = String(p.jiraKey || '').trim().toUpperCase()
+      // No ticket: nothing to collapse onto, and two register rows with no key
+      // are two different pieces of work as far as anything here can tell.
+      if (!key) { out.push({ ...p, projectKeys: [p.key], lines: 1 }); continue }
+      const seen = at.get(key)
+      if (!seen) {
+        const row = {
+          ...p, projectKeys: [p.key], lines: 1, objectiveIds: p.objective ? [p.objective] : [],
+        }
+        at.set(key, row)
+        out.push(row)
+        continue
+      }
+      seen.lines += 1
+      seen.projectKeys.push(p.key)
+      seen.savingHours = (seen.savingHours || 0) + (p.savingHours || 0)
+      if (p.objective && !seen.objectiveIds.includes(p.objective)) seen.objectiveIds.push(p.objective)
+      /*
+       * The dates come from whichever line actually has a plan. A row added by
+       * a sync before somebody had matched it to the register line that owns
+       * the work carries no dates at all, and letting it win would blank the
+       * bar for a project that has one.
+       */
+      const better = (!seen.timeline.plannedEnd && p.timeline.plannedEnd)
+        || (!seen.timeline.plannedStart && p.timeline.plannedStart)
+      if (better) {
+        seen.timeline = p.timeline
+        seen.due = p.due
+        seen.start = p.start
+        seen.actualEndPinned = p.actualEndPinned
+      }
+    }
+    return out
+  }, [rows])
+
+  /*
    * The calendar the bars are drawn on, taken from the dates actually present
    * rather than assumed to be the plan year: a project that started in
    * December 2025 or runs into 2027 has to be visible, not clipped to keep the
@@ -509,7 +570,7 @@ export default function Timeline({
    */
   const span = useMemo(() => {
     const all = []
-    for (const p of rows) {
+    for (const p of grouped) {
       const tl = p.timeline
       for (const d of [tl.plannedStart, tl.plannedEnd, tl.actualStart, tl.actualEnd]) {
         if (isDate(d)) all.push(at(d))
@@ -1170,7 +1231,10 @@ export default function Timeline({
           <ToggleButton value="month">Month</ToggleButton>
         </ToggleButtonGroup>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          {rows.length} project{rows.length === 1 ? '' : 's'} on the chart
+          {/* The count is of BARS, which after collapsing is the number of
+              pieces of work — not the number of register lines behind them. */}
+          {grouped.length} project{grouped.length === 1 ? '' : 's'} on the chart
+          {grouped.length !== rows.length && ` · ${rows.length} register lines`}
         </Typography>
       </Paper>
 
@@ -1246,18 +1310,29 @@ export default function Timeline({
             </Box>
 
             <Box>
-          {rows.map((p) => (
+          {grouped.map((p) => (
             <RowGroup
               key={p.key}
               row={{
                 rowKey: p.key,
                 projectKey: p.key,
+                // Every register line this bar stands for. A date edited here
+                // moves all of them: they are one piece of work in Jira, and a
+                // group that can be split in half by one edit is worse than no
+                // grouping at all.
+                projectKeys: p.projectKeys || [p.key],
                 jiraKey: p.jiraKey,
                 title: p.summary,
                 sub: [
                   p.jiraKey || null,
-                  OBJ_BY_ID[p.objective] ? `Obj ${OBJ_BY_ID[p.objective].no}` : null,
+                  // Every objective the collapsed lines serve, not just the
+                  // first one's.
+                  (p.objectiveIds || [p.objective]).filter(Boolean).map((id) => (OBJ_BY_ID[id] ? `Obj ${OBJ_BY_ID[id].no}` : null))
+                    .filter(Boolean).join(' + ') || null,
                   p.savingHours ? `${fmtHours(p.savingHours)} hrs/mth` : null,
+                  // Said out loud, so a reader can go and find the lines rather
+                  // than wonder why the hours do not match the register.
+                  p.lines > 1 ? `${p.lines} register lines` : null,
                   // Said on the row, not only in the editor: a date the sync
                   // cannot touch is something a reader has to be able to see
                   // without opening anything.
@@ -1270,7 +1345,7 @@ export default function Timeline({
               depth={0}
             />
           ))}
-              {rows.length === 0 && (
+              {grouped.length === 0 && (
                 <Box sx={{ p: 4, textAlign: 'center' }}>
                   <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                     Nothing matches that filter.

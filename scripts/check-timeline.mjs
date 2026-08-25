@@ -360,6 +360,72 @@ if (!exe) {
   check('and warns against editing the plan to match reality', seen.warning)
   check('it puts projects on the chart', Number(seen.rows) > 0, `${seen.rows} rows`)
 
+  /* ---- one bar per ticket ----
+   *
+   * The register is allowed more than one line for the same epic — FNP-1151 is
+   * carried as three because it delivers three separate savings, costed and
+   * credited apart. A timeline is about when one piece of work runs, and the
+   * same work drawn three times is a chart that overstates how much is going
+   * on. So the lines collapse onto the ticket, and the hours behind them add
+   * up rather than being shown three times over.
+   */
+  await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    const donor = st.projects.filter((x) => x.start && x.due && x.jiraKey)[0]
+    // Three lines, one ticket: the same shape the live register has.
+    st.projects.push(
+      { ...donor, key: `${donor.key}#2`, savingHours: 3, objective: 'efficiency' },
+      // ...including one added by a sync before anybody matched it up: no
+      // dates, no hours, nothing. It must not win the bar.
+      {
+        ...donor, key: `${donor.key}#3`, savingHours: null, objective: 'process_automation',
+        start: null, due: null, actualStart: null, actualEnd: null, commitLevel: 'watch',
+      },
+    )
+    localStorage.setItem('fa-tech-kpi-2026', JSON.stringify(st))
+    localStorage.setItem('dup-key', donor.jiraKey)
+    localStorage.setItem('dup-hours', String(donor.savingHours || 0))
+    localStorage.setItem('dup-due', donor.due)
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await new Promise((r) => setTimeout(r, 3500))
+
+  const dup = await page.evaluate(() => {
+    const key = localStorage.getItem('dup-key')
+    // Leaf elements only, whatever tag the theme renders the sub-label as:
+    // counting every ancestor too would report one bar as several.
+    const labels = [...document.querySelectorAll('*')]
+      .filter((el) => el.children.length === 0)
+      .map((el) => el.textContent.trim())
+      .filter((t) => t.startsWith(`${key} ·`) || t === key)
+    return {
+      key,
+      count: labels.length,
+      label: labels[0] || null,
+      hours: Number(localStorage.getItem('dup-hours')),
+      due: localStorage.getItem('dup-due'),
+      onChart: (document.body.innerText.match(/(\d+) projects? on the chart/) || [])[1],
+      lines: /register lines/.test(document.body.innerText),
+    }
+  })
+  check('A TICKET APPEARS ONCE, NOT ONCE PER REGISTER LINE',
+    dup.count === 1, `${dup.key} drawn ${dup.count} times`)
+  check('  and the collapsed row says how many lines are behind it',
+    dup.lines && /register lines/.test(dup.label || ''), String(dup.label))
+  check('  and adds their hours up rather than showing one line\'s',
+    new RegExp(`${(dup.hours + 3).toFixed(1)} hrs/mth`).test(dup.label || '')
+    || new RegExp(`${Math.round(dup.hours + 3)} hrs/mth`).test(dup.label || ''),
+    `${dup.hours} + 3 vs ${dup.label}`)
+  check('  and lists every objective they serve',
+    (dup.label.match(/Obj \d/g) || []).length >= 2, String(dup.label))
+  check('  and the count is of bars, with the register lines said separately',
+    Number(dup.onChart) > 0 && /register lines/.test(await page.evaluate(() => document.body.innerText)),
+    `${dup.onChart} on the chart`)
+
+  await page.evaluate(() => localStorage.clear())
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await new Promise((r) => setTimeout(r, 2500))
+
   /* ---- a bar is evidence of work, or it is not drawn ----
    *
    * The actual bar is drawn from the PLANNED start, so a project nobody has
