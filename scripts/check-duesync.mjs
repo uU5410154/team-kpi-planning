@@ -110,6 +110,28 @@ check('a DATED epic is not overruled by a sprint it sits in',
   mergeJira(state([undated]), feed({ due: '2026-09-01', ...sprint }), {}).projects[0].due === '2026-09-01')
 check('no due date and no sprint leaves it undated',
   mergeJira(state([undated]), feed({ due: null }), {}).projects[0].due === null)
+
+/*
+ * And where the epic is in no sprint either, the sprints the work UNDER it is
+ * booked into answer for it. FNP-1691 carries no due date and no sprint, and
+ * its last task sits in Sprint 11 Week 1 ending 13 September — a date somebody
+ * scheduled, not one inferred from a deadline typed on a task.
+ */
+const taskSprints = { 'FNP-1065': { total: 4, done: 1, latestSprintEnd: '2026-09-13', latestDue: '2026-08-28' } }
+const fromTasks = mergeJira(state([undated]), feed({ due: null }, taskSprints), {}).projects[0]
+check('THE LAST SPRINT THE WORK IS BOOKED INTO ANSWERS FOR AN UNDATED EPIC',
+  fromTasks.due === '2026-09-13', String(fromTasks.due))
+check('...and NOT the latest deadline typed on a task',
+  fromTasks.due !== '2026-08-28')
+check('...and the sync says which sprint answered for it',
+  mergeJira(state([undated]), feed({ due: null }, taskSprints), {}).replans[0].fromTaskSprint === true)
+check('the epic\'s own sprint still beats the tasks\'',
+  mergeJira(state([undated]), feed({ due: null, ...sprint }, taskSprints), {}).projects[0].due === '2026-10-31')
+check('and its own due date beats both',
+  mergeJira(state([undated]), feed({ due: '2026-09-01', ...sprint }, taskSprints), {}).projects[0].due === '2026-09-01')
+check('tasks in no sprint fill nothing',
+  mergeJira(state([undated]), feed({ due: null }, { 'FNP-1065': { total: 3, done: 0, latestDue: '2026-12-31' } }), {})
+    .projects[0].due === null)
 /*
  * And NOT from the tasks underneath. That was built, applied to the live plan
  * and taken back within the hour: an epic nobody has dated is a commitment

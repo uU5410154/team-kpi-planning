@@ -590,18 +590,31 @@ console.log(String.fromCharCode(10) + '--- a task is scheduled by its sprint ---
   const dateless = rows.find((c) => c.key === 'FNP-12')
   const plain = rows.find((c) => c.key === 'FNP-13')
 
+  /*
+   * THE SPRINT ENDS ON THE DAY THE BOARD SAYS IT DOES.
+   *
+   * Sprint 2 ends at 2026-02-01T23:59:59Z. Bangkok is seven hours ahead, so
+   * that instant is the 2nd there, and Jira's own board — which renders in the
+   * viewer's timezone — says the 2nd. This took the first ten characters of
+   * the UTC string and said the 1st, reporting every sprint on the board a day
+   * early. The last sprint under FNP-1691 ends on the 13th of September in
+   * Jira and this app said the 12th.
+   */
   check('A TASK CARRIED ACROSS SPRINTS SPANS BOTH',
-    carried.sprintStart === '2026-01-05' && carried.sprintEnd === '2026-02-01',
+    carried.sprintStart === '2026-01-05' && carried.sprintEnd === '2026-02-02',
     `${carried.sprintStart} to ${carried.sprintEnd} across ${carried.sprintCount} sprints`)
+  check('  AND ITS END IS THE DAY THE BOARD SHOWS, NOT THE UTC ONE',
+    carried.sprintEnd === '2026-02-02',
+    'ends 2026-02-01T23:59:59Z, which is the 2nd in Asia/Bangkok')
   check('  and the sprint is what gets planned against, not its own dates',
-    carried.planStart === '2026-01-05' && carried.planEnd === '2026-02-01',
+    carried.planStart === '2026-01-05' && carried.planEnd === '2026-02-02',
     `own dates were ${carried.start} to ${carried.due}`)
   check('  while its own dates are still carried, so the difference is visible',
     carried.start === '2026-01-08' && carried.due === '2026-02-01')
   check('  and the sprint is named', /Sprint 2/.test(carried.sprintName || ''), carried.sprintName)
 
   check('A TASK WITH NO DATES OF ITS OWN GETS THE SPRINT’S',
-    dateless.due === null && dateless.planEnd === '2026-08-22',
+    dateless.due === null && dateless.planEnd === '2026-08-23',
     `no due date of its own, scheduled ${dateless.planStart} to ${dateless.planEnd}`)
 
   check('and a task in no sprint keeps its own dates',
@@ -925,7 +938,7 @@ if (!exe) {
     /FNP-11 · Task/.test(opened.text) && /FNP-12 · Story/.test(opened.text),
     (opened.text.match(new RegExp('FNP-1[12][^' + String.fromCharCode(10) + ']*', 'g')) || []).join(' | '))
   check('  and a late task carries its own slip',
-    /\+42d/.test(opened.text), 'FNP-11 was due 2026-02-01 and finished 2026-03-15')
+    /\+41d/.test(opened.text), 'FNP-11 was due 2026-02-02 (its sprint) and finished 2026-03-15')
 
   // ---- both bars start on the same day ----
   const aligned = await page.evaluate(() => {
@@ -1069,10 +1082,10 @@ if (!exe) {
   })
   const chipFor = (label) => finishes.chips.find((c) => c.label === label)
   check('A LATE FINISH, AN EARLY ONE AND AN ON-TIME ONE ARE ALL SHOWN',
-    !!chipFor('+42d') && !!chipFor('-19d') && !!chipFor('0d'),
+    !!chipFor('+41d') && !!chipFor('-19d') && !!chipFor('0d'),
     finishes.chips.map((c) => c.label).join(' | '))
   check('  and they are three different colours, not two',
-    new Set([chipFor('+42d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour]).size === 3,
+    new Set([chipFor('+41d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour]).size === 3,
     [chipFor('+42d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour].join(' | '))
   check('  the legend names all three outcomes',
     /ahead of schedule/.test(finishes.text) && /on schedule/.test(finishes.text)

@@ -74,7 +74,34 @@ const fresh = (key) => {
 }
 
 /** A Jira timestamp to the plain date the register speaks. */
-const day = (v) => (typeof v === 'string' && v.length >= 10 ? v.slice(0, 10) : null)
+/*
+ * WHICH DAY A JIRA TIMESTAMP FALLS ON, WHERE THE BOARD IS.
+ *
+ * Sprint dates come back in UTC: "Sprint 11 Week 1" ends at
+ * 2026-09-12T23:59:59.000Z, which in Bangkok is seven hours later — the 13th.
+ * Jira's own board renders it in the viewer's timezone and says the 13th, and
+ * for months this took the first ten characters of the UTC string and said the
+ * 12th. Every sprint on the board was reported a day early.
+ *
+ * A plain date — a due date, a start date — has no time in it and belongs to
+ * no timezone, so it is returned exactly as it was written. Only a real
+ * timestamp is converted, and it is converted to the timezone the board is run
+ * in rather than to wherever this server happens to be.
+ */
+const TZ = process.env.JIRA_TZ || process.env.JIRA_SYNC_TZ || 'Asia/Bangkok'
+const dayFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+})
+const day = (v) => {
+  if (typeof v !== 'string' || v.length < 10) return null
+  // No time part: a calendar date somebody typed, not an instant.
+  if (!/[T ]\d{2}:/.test(v)) return v.slice(0, 10)
+  const t = Date.parse(v)
+  // Unparseable but date-shaped: the leading ten characters are still the best
+  // answer available, and better than dropping the date on the floor.
+  if (Number.isNaN(t)) return v.slice(0, 10)
+  return dayFmt.format(new Date(t))
+}
 
 /**
  * The window a task is actually scheduled in.
@@ -287,6 +314,14 @@ export async function rollupOf(keys) {
       total: 0,
       done: 0,
       latestDue: null,
+      /*
+       * The end of the LAST SPRINT any of this work is scheduled into, kept
+       * apart from latestDue. A task's due date is a deadline somebody typed;
+       * a sprint end is when the fortnight it is booked into finishes, and for
+       * an epic carrying no date of its own that is the only scheduled date
+       * that exists.
+       */
+      latestSprintEnd: null,
       latestResolved: null,
       // The latest date among the tasks LABELLED as somebody else's delay, and
       // which task said so. Kept apart from latestDue: one is what the work
@@ -343,6 +378,7 @@ export async function rollupOf(keys) {
         const sp = sprintWindow(raw.fields?.[c.sprintField])
         const when = sp.end || day(raw.fields?.duedate)
         agg.latestDue = later(agg.latestDue, when)
+        agg.latestSprintEnd = later(agg.latestSprintEnd, sp.end)
 
         if (['indeterminate', 'done'].includes(raw.fields?.status?.statusCategory?.key)) agg.started += 1
 

@@ -185,16 +185,26 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
      * a dated epic has been committed to deliberately, and a sprint it happens
      * to sit in does not overrule that.
      *
-     * NOT the latest date on the tasks underneath. That was tried and taken
-     * back: an epic nobody has dated is a commitment nobody has made, and
-     * rolling its tasks up would put a date on somebody's objective that no
-     * person had agreed to.
+     * Where the epic is in no sprint either, the sprints the work UNDER it is
+     * booked into answer for it: FNP-1691 carries no due date and no sprint,
+     * and its last task sits in Sprint 11 Week 1, which ends on 13 September.
+     * That is a scheduled date somebody set, not an inference.
+     *
+     * NOT the latest DUE DATE on those tasks. That was tried and taken back: a
+     * deadline typed on a task is not a commitment made for the project, and
+     * rolling those up moved six live commitments on the strength of undated
+     * tickets. A sprint is a fortnight the work is actually booked into.
      */
-    const jiraDue = issue.due || issue.sprintEnd || null
+    const jiraDue = issue.due || issue.sprintEnd || tasks?.latestSprintEnd || null
     if (jiraDue && jiraDue !== (p.due || null)) {
       Object.assign(patch, replanPatch(p, jiraDue))
       replanned.push({
-        key: issue.key, from: p.due || null, to: jiraDue, fromSprint: !issue.due,
+        key: issue.key,
+        from: p.due || null,
+        to: jiraDue,
+        fromSprint: !issue.due,
+        // Which sprint answered for it: the epic's own, or the work under it.
+        fromTaskSprint: !issue.due && !issue.sprintEnd,
       })
     }
 
