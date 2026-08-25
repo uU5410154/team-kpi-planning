@@ -19,6 +19,7 @@ import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
 import { fmtHours, isDate, timelineOf, pinFinishPatch, unpinFinishPatch } from '../lib/model.js'
+import { syncStatus } from '../lib/storage.js'
 
 const DAY = 86400000
 const at = (d) => Date.parse(`${d}T00:00:00Z`)
@@ -200,6 +201,36 @@ export default function Timeline({
     setSyncing(true)
     setSyncNote(null)
     try {
+      /*
+       * NOT OVER A REGISTER THE SHARED PLAN HAS MOVED PAST.
+       *
+       * This merge rewrites the whole register from what THIS browser holds.
+       * If somebody else has saved since this browser last loaded — excluded a
+       * project, changed a commit level, added hours — merging over the stale
+       * copy and saving puts every one of those decisions back the way it was.
+       * That is how four projects marked Excluded came back as Watch.
+       *
+       * Jira is not the problem and neither is the merge: the input is. So the
+       * input is checked first, and a browser that is behind is told to load
+       * the shared plan rather than quietly overwrite it.
+       */
+      const mark = syncStatus()
+      const list = await api.listScenarios().catch(() => null)
+      const latest = Array.isArray(list) && list.length
+        ? [...list].sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0]
+        : null
+      if (latest && mark.syncedAt && String(latest.updatedAt || '') > String(mark.syncedAt)) {
+        setSyncNote({
+          severity: 'warning',
+          text: `The shared plan was saved ${new Date(latest.updatedAt).toLocaleString()} by ${latest.updatedBy || 'somebody'}, `
+            + 'after this browser last had it. Syncing now would rewrite the register from this older copy and undo '
+            + 'whatever has changed since.',
+          note: 'Reload the page to take the shared plan first, then sync — or use “Sync for everyone”, which runs '
+            + 'against the shared plan itself and cannot go stale.',
+        })
+        return
+      }
+
       const [fetched, board, rolled] = await Promise.all([
         keyed.length
           ? api.jiraIssues(keyed.map((p) => p.jiraKey.trim()))

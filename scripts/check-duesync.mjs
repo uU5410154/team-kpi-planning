@@ -215,6 +215,21 @@ check('  and reports nothing else about it',
   JSON.stringify({ updated: untouched.updated, reassigned: untouched.reassigned }))
 check('  running it twice still changes nothing',
   JSON.stringify(mergeJira(state([still]), loud, { addNew: false }).projects[0]) === JSON.stringify(dropped))
+/*
+ * AND NO COMMIT LEVEL IS EVER WRITTEN ON AN EXISTING ROW.
+ *
+ * Excluded is the one somebody notices when it flips, but the guarantee is
+ * wider and cheaper to state: whether a project counts this year is a decision
+ * a person makes, and a sync has no opinion about it. Checked for every level
+ * there is, so a new one cannot arrive without this rule applying to it.
+ */
+for (const level of ['commit', 'stretch', 'watch', 'nextyear', 'excluded']) {
+  const row = { ...dropped, commitLevel: level }
+  const out = mergeJira(state([row]), loud, { addNew: false }).projects[0]
+  check(`  a ${level} row keeps its commit level through a sync`,
+    out.commitLevel === level, `${level} -> ${out.commitLevel}`)
+}
+
 check('AND THE SAME ROW, NOT EXCLUDED, DOES CHANGE — so this is the flag doing it',
   mergeJira(state([{ ...dropped, commitLevel: 'commit' }]), loud, { addNew: false }).updated === 1)
 check('  putting it back in the plan lets the sync have it again',
