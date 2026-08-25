@@ -214,6 +214,39 @@ export const PROJECT_COLUMNS = [
   },
   { key: 'start', label: 'Start', width: 12, match: /^start$/i, field: 'start', read: (p) => p.start || '', parse: (raw) => parseDate(raw) },
   { key: 'due', label: 'Due', width: 12, match: /^due$/i, field: 'due', read: (p) => p.due || '', parse: (raw) => parseDate(raw) },
+  /*
+   * WHAT ACTUALLY HAPPENED, and whether the register is holding it.
+   *
+   * The finish date normally follows Jira — it is the resolution date of the
+   * last task — and this column is here so it can be read, corrected in bulk
+   * and put back. "Finish held" is the switch that stops the next sync taking
+   * the correction away again: yes on the sheet is the same flag the dialog
+   * sets, so a hundred projects can be marked in Excel rather than one at a
+   * time in a dialog.
+   */
+  {
+    key: 'actualEnd', label: 'Finished', width: 12, match: /^finish(ed)?$/i, field: 'actualEnd',
+    read: (p) => p.actualEnd || '',
+    parse: (raw) => parseDate(raw),
+  },
+  {
+    key: 'actualEndPinned', label: 'Finish held', width: 12, match: /^finish held$/i, field: 'actualEndPinned',
+    read: (p) => (p.actualEndPinned ? 'yes' : ''),
+    /*
+     * Anything a person would write to mean yes, and anything they would write
+     * to mean no. A BLANK is neither: it is a cell nobody touched, and every
+     * other column in this sheet treats that as "leave it alone" — a flag that
+     * silently cleared itself on every import would undo a hundred holds the
+     * first time somebody re-imported the register to change one saving hour.
+     * To let one go, write "no".
+     */
+    parse: (raw) => {
+      const t = String(raw ?? '').trim().toLowerCase()
+      if (t === '') return undefined
+      if (['no', 'n', 'false', '0', '-'].includes(t)) return false
+      return ['yes', 'y', 'true', 'held', 'hold', '1', 'x', '✓'].includes(t)
+    },
+  },
   {
     key: 'notes', label: 'Remark', width: 40, match: /^remark$/i, field: 'notes',
     read: (p) => p.notes || '',

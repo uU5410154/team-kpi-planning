@@ -75,6 +75,9 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
   const under = (key) => rollups[String(key || '').toUpperCase()] || null
 
   let updated = 0
+  // How many projects held their own finish date through this sync. Reported
+  // so a morning run says what it did NOT do as well as what it did.
+  let pinned = 0
   let fromCreated = 0
   const renamed = []
   const projects = (state.projects || []).map((p) => {
@@ -144,7 +147,24 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     if (issue.start && issue.start !== (p.start || null)) patch.start = issue.start
 
     if (actualStart !== (p.actualStart || null)) patch.actualStart = actualStart
-    if (actualEnd !== (p.actualEnd || null)) patch.actualEnd = actualEnd
+    /*
+     * A HELD FINISH DATE IS NOT SYNCED.
+     *
+     * Jira's resolution date is when the last card was dragged, which on the
+     * projects marked here is months after the work actually landed — and Jira
+     * will not let it be corrected. Writing it back every morning would put
+     * the drift straight back on somebody's objective, so where a person has
+     * deliberately held this one field, the sync leaves it alone and touches
+     * everything else about the project as usual.
+     *
+     * Deliberate, per project, and never inferred: a project is only held
+     * because somebody said so.
+     */
+    if (p.actualEndPinned === true) {
+      pinned += 1
+    } else if (actualEnd !== (p.actualEnd || null)) {
+      patch.actualEnd = actualEnd
+    }
     if (adjustedDue !== (p.adjustedDue || null)) patch.adjustedDue = adjustedDue
     if (tasks) {
       if ((tasks.total || 0) !== (p.tasksTotal || 0)) patch.tasksTotal = tasks.total || 0
@@ -200,6 +220,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
   return {
     projects,
     updated,
+    // Projects whose finish date this sync deliberately left alone.
+    pinned,
     added: addedKeys.length,
     addedKeys,
     renamed: renamed.length,

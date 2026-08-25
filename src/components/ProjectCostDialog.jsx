@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography, Button, IconButton,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, Select, MenuItem, Tooltip,
-  Divider, Chip, Alert, InputAdornment, Link,
+  Divider, Chip, Alert, InputAdornment, Link, Switch, FormControlLabel,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
@@ -12,6 +12,7 @@ import {
   MONTH_LABELS, MONTHS_IN_YEAR, newOpexLine, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtHours,
   normalizeTasks, mandayToMoney, moneyToManday,
   ROLE_ORDER, ROLE_LABEL, setRolesPatch, creditRows, reassignPatch,
+  pinFinishPatch, unpinFinishPatch,
 } from '../lib/model.js'
 
 /**
@@ -323,6 +324,80 @@ function TeamRoles({ p, people, onUpdate }) {
           Nobody on the team holds a role here, so these hours sit with the team lead rather than vanishing.
         </Alert>
       ) : null}
+    </>
+  )
+}
+
+
+/**
+ * The finish date, and whether the register is holding its own.
+ *
+ * Jira's resolution date is the moment somebody dragged the last card. On work
+ * that was delivered months before anybody closed it off, that reads as drift
+ * nobody caused — and Jira will not let the date be corrected. So the register
+ * can hold this one field: the sync then leaves it alone and keeps everything
+ * else about the project up to date.
+ *
+ * Deliberate and per project. Nothing is ever held automatically, because a
+ * finish date that quietly stops following the board is worse than one that is
+ * wrong in a way you can see.
+ */
+function FinishDate({ p, onUpdate }) {
+  const held = p.actualEndPinned === true
+  const tl = p.timeline || {}
+  const due = tl.plannedEnd || p.due || null
+  const finish = p.actualEnd || null
+  // What the drift would be, said in the same words the scorecard uses.
+  const lateBy = tl.lateBy
+  return (
+    <>
+      <Divider sx={{ my: 3 }} />
+      <Typography variant="h4" sx={{ mb: 0.5 }}>Finish date</Typography>
+      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
+        Committed to <strong>{due || 'no date'}</strong>
+        {finish
+          ? <> · finished <strong>{finish}</strong>{lateBy != null && lateBy > 0 ? ` — ${lateBy} days past the commitment` : lateBy != null ? ' — on or ahead of the commitment' : ''}</>
+          : ' · not finished yet'}
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <TextField
+          size="small"
+          type="date"
+          label="Finished on"
+          disabled={!held}
+          value={finish || ''}
+          onChange={(e) => onUpdate(p.key, pinFinishPatch(p, e.target.value || null))}
+          InputLabelProps={{ shrink: true }}
+          sx={{ width: 190 }}
+        />
+        <FormControlLabel
+          control={(
+            <Switch
+              size="small"
+              checked={held}
+              onChange={(e) => onUpdate(p.key, e.target.checked
+                // Holding with nothing to hold would be a project waiting on a
+                // sync that will never come, so the commitment stands in.
+                ? pinFinishPatch(p, finish || due)
+                : unpinFinishPatch())}
+            />
+          )}
+          label={(
+            <Typography variant="caption">
+              Hold this date — the Jira sync will not touch it
+            </Typography>
+          )}
+        />
+      </Box>
+      <Alert severity={held ? 'warning' : 'info'} sx={{ mt: 1.5, py: 0.5 }}>
+        <Typography variant="caption">
+          {held
+            ? <>Held. The daily sync updates everything else on this project — start date, name, tasks — but leaves
+              the finish date exactly as it is above. Turn this off and the next sync takes it back from Jira.</>
+            : <>Following Jira. The finish date is the resolution date of the last task under this epic, rewritten
+              every morning. Hold it only where Jira&rsquo;s date is not the day the work actually landed.</>}
+        </Typography>
+      </Alert>
     </>
   )
 }
@@ -710,6 +785,9 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
         </Alert>
         {/* ---------- who is credited, and for what ---------- */}
         <TeamRoles p={p} people={plan.people} onUpdate={onUpdate} />
+
+        {/* ---------- the finish date, and who owns it ---------- */}
+        <FinishDate p={p} onUpdate={onUpdate} />
 
         {/* ---------- comments ---------- */}
         <Divider sx={{ my: 3 }} />

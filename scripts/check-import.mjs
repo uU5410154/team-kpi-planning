@@ -252,6 +252,10 @@ console.log('\n--- every editable column actually imports ---')
     start: '2026-03-01',
     due: '2026-09-30',
     notes: 'imported remark',
+    // What happened, and the switch that stops the next sync taking the
+    // correction back — both round-trip, so a hundred can be marked in Excel.
+    actualEnd: '2026-08-14',
+    actualEndPinned: 'yes',
   }
   const parsed = await roundTrip(rows, (ws, ix) => {
     for (const [k, v] of Object.entries(edits)) ws.getRow(5).getCell(ix[k]).value = v
@@ -266,6 +270,8 @@ console.log('\n--- every editable column actually imports ---')
       const cur = target[c.field]
       if (c.key === 'pic') return (cur ?? null) !== 'kade'
       if (c.key === 'objective') return cur !== 'efficiency'
+      // A flag reads back as a word, not as the word that was typed.
+      if (c.key === 'actualEndPinned') return cur !== true
       return String(cur ?? '') !== String(edits[c.key] ?? '')
     })
   check('EVERY EDITABLE COLUMN LANDS', missed.length === 0, missed.map((c) => c.label).join(', '))

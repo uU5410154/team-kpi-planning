@@ -1292,6 +1292,24 @@ export function repairAsOfDate(settings) {
  * with their free re-plan unspent, which is the fair reading: nobody should
  * lose an allowance for moves made before the allowance existed.
  */
+/**
+ * A finish date held against the sync, with no date to hold.
+ *
+ * The flag says "do not let the sync write this field". On a project with no
+ * finish date that is not a correction — it is a project waiting for a sync
+ * that will never come, and it would sit unfinished for the rest of the year
+ * however many times its tasks were closed. Only a real date can be held.
+ */
+export function repairHeldFinish(projects) {
+  let cleared = 0
+  const out = (projects || []).map((p) => {
+    if (!p || p.actualEndPinned !== true || isDate(p.actualEnd)) return p
+    cleared += 1
+    return { ...p, actualEndPinned: false }
+  })
+  return { projects: out, cleared }
+}
+
 export function repairBaselineDates(projects) {
   let stamped = 0
   const out = (projects || []).map((p) => {
@@ -1438,7 +1456,8 @@ export function repairState(s) {
   }
   const { projects: owned } = repairOwnership(s.projects, s.people)
   const { projects: renamed } = repairObjectiveIds(owned)
-  const { projects } = repairBaselineDates(renamed)
+  const { projects: based } = repairBaselineDates(renamed)
+  const { projects } = repairHeldFinish(based)
   const { people: retargeted } = repairTargetUnits(s.people)
   const { people: rostered } = repairRoster(retargeted)
   const { people } = repairKpiIds(rostered)
@@ -1535,6 +1554,20 @@ export function newProject(seq) {
      */
     actualStart: null,
     actualEnd: null,
+    /*
+     * THE FINISH DATE, HELD BY HAND.
+     *
+     * Jira's resolution date is the moment somebody dragged the last card, and
+     * that is not always the day the work landed: a project delivered in March
+     * and closed off in June reads as three months late through no fault of
+     * anybody's. Jira will not let that date be corrected, so the register has
+     * to be able to hold its own — and say that it is doing so.
+     *
+     * Held means the sync leaves this ONE field alone. Everything else about
+     * the project still follows Jira, and nothing is held unless somebody has
+     * deliberately said so, project by project.
+     */
+    actualEndPinned: false,
     /*
      * The date first committed to, and how many times it has been moved since.
      *
@@ -1802,6 +1835,8 @@ export function deliveryCommitments(
         // The date committed to, and the date it actually landed.
         due: tl.plannedEnd || null,
         actualEnd: tl.actualEnd || null,
+        // Whether that date is the register's own, held against the sync.
+        actualEndPinned: p.actualEndPinned === true,
         lateBy: tl.lateBy ?? null,
         running: !!tl.running,
         overdue: !!tl.overdue,
@@ -1849,6 +1884,31 @@ export function replanPatch(project, nextDue) {
     baselineDue: project?.baselineDue || current,
     replanCount: (Number(project?.replanCount) || 0) + 1,
   }
+}
+
+/**
+ * Hold a project's finish date against the sync, or let go of it.
+ *
+ * One door for the dialog, the timeline editor, the importer and any script,
+ * so a held date always means the same thing and can always be found by the
+ * same flag. Holding a blank is refused: there is nothing to protect, and a
+ * project with no finish and no sync to give it one would simply stop.
+ */
+export function pinFinishPatch(project, date) {
+  const next = isDate(date) ? date : (isDate(project?.actualEnd) ? project.actualEnd : null)
+  if (!next) return { actualEndPinned: false }
+  return { actualEnd: next, actualEndPinned: true }
+}
+
+/**
+ * Let the sync have it back.
+ *
+ * The date itself is left as it stands rather than blanked: the next sync
+ * overwrites it from Jira, and until then the register should show the last
+ * thing somebody actually knew rather than a hole.
+ */
+export function unpinFinishPatch() {
+  return { actualEndPinned: false }
 }
 
 export function driftOf(p, maxDrift = DEFAULT_MAX_PROJECT_DRIFT) {
@@ -2247,6 +2307,9 @@ export function computePlan(state) {
       // number from a spreadsheet, an empty string — is missing, not a date.
       actualStart: isDate(raw.actualStart) ? raw.actualStart : null,
       actualEnd: isDate(raw.actualEnd) ? raw.actualEnd : null,
+      // Only ever true where there is a date to hold. A held blank is not a
+      // correction, it is a project waiting for a sync that will never come.
+      actualEndPinned: raw.actualEndPinned === true && isDate(raw.actualEnd),
       adjustedDue: isDate(raw.adjustedDue) ? raw.adjustedDue : null,
     }
     // Whose book is this on. Decided by the PIC and by the PIC alone, so the

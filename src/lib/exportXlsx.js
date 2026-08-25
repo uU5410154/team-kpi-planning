@@ -865,7 +865,10 @@ export async function buildWorkbook(plan, state) {
           // thing this column exists to make visible.
           c.baselineDue && c.baselineDue !== c.due ? c.baselineDue : '',
           c.due || 'NO DATE COMMITTED',
-          c.actualEnd || (c.running ? 'still running' : ''),
+          // A held date is marked where it is read, not only in a note at the
+          // bottom: a reader comparing it with Jira has to know why they
+          // differ before they go and "correct" the register.
+          c.actualEnd ? `${c.actualEnd}${c.actualEndPinned ? ' (held)' : ''}` : (c.running ? 'still running' : ''),
           c.plannedDays ?? null,
           // The allowance in days: the rule above, applied to this project.
           c.driftAllowance == null ? null : Math.round(c.driftAllowance),

@@ -18,7 +18,7 @@ import * as api from '../lib/api.js'
 import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
-import { fmtHours, isDate, timelineOf } from '../lib/model.js'
+import { fmtHours, isDate, timelineOf, pinFinishPatch, unpinFinishPatch } from '../lib/model.js'
 
 const DAY = 86400000
 const at = (d) => Date.parse(`${d}T00:00:00Z`)
@@ -31,10 +31,16 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * keystroke: a half-typed year is not a date, and this one is pushed to a real
  * ticket that other people are looking at.
  */
-function PlanEditor({ row, onSave, saving, jira }) {
+function PlanEditor({ row, onSave, onHold, saving, jira }) {
   const [start, setStart] = useState(row.timeline.plannedStart || '')
   const [due, setDue] = useState(row.timeline.plannedEnd || '')
   const bad = !!start && !!due && start > due
+  // Only a project can hold its finish date: a task's resolution is the raw
+  // fact the project's is rolled up FROM, and holding one of those would put
+  // the register and its own arithmetic in disagreement.
+  const canHold = !!row.projectKey
+  const held = row.actualEndPinned === true
+  const [finish, setFinish] = useState(row.timeline.actualEnd || '')
 
   return (
     <Box sx={{ p: 2, width: 290 }}>
@@ -68,10 +74,59 @@ function PlanEditor({ row, onSave, saving, jira }) {
         helperText={bad ? 'The finish is before the start.' : ' '}
       />
       <Divider sx={{ my: 1 }} />
-      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 1.5 }}>
-        The actual dates are not editable: Jira stamps a resolution date when an issue is resolved and will not accept
-        one as a field, so outcomes are read from there and never written back.
-      </Typography>
+      {/*
+        * THE FINISH DATE, AND WHO OWNS IT.
+        *
+        * Normally Jira does: it stamps a resolution date when the last task is
+        * resolved, and nothing here writes one back. But that date is when
+        * somebody dragged the card, and on work delivered long before anybody
+        * closed it off it reads as drift nobody caused — with no way to correct
+        * it in Jira. So the register can hold its own copy, deliberately, one
+        * project at a time, and the sync then leaves that one field alone.
+        */}
+      {canHold ? (
+        <>
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>Finish date</Typography>
+          <FormControlLabel
+            sx={{ mb: held ? 1 : 0 }}
+            control={(
+              <Switch
+                size="small"
+                checked={held}
+                disabled={saving}
+                onChange={(e) => onHold(row, e.target.checked
+                  ? (finish || row.timeline.actualEnd || due || null)
+                  : null)}
+              />
+            )}
+            label={<Typography variant="caption">Hold it — the Jira sync will not touch it</Typography>}
+          />
+          {held ? (
+            <TextField
+              size="small"
+              fullWidth
+              type="date"
+              label="Finished on"
+              value={finish}
+              onChange={(e) => setFinish(e.target.value)}
+              onBlur={() => { if (finish && finish !== (row.timeline.actualEnd || '')) onHold(row, finish) }}
+              InputLabelProps={{ shrink: true }}
+              helperText="Held by hand. Everything else on this project still follows Jira."
+            />
+          ) : (
+            <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 1.5 }}>
+              Following Jira: the resolution date of the last task under this project, read every morning and never
+              written back. Hold it only where that is not the day the work landed.
+            </Typography>
+          )}
+          <Divider sx={{ my: 1.5 }} />
+        </>
+      ) : (
+        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mb: 1.5 }}>
+          The actual dates are not editable: Jira stamps a resolution date when an issue is resolved and will not
+          accept one as a field, so outcomes are read from there and never written back.
+        </Typography>
+      )}
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
         <Button size="small" onClick={() => { setStart(''); setDue('') }} disabled={saving}>Clear both</Button>
         <Button
@@ -300,6 +355,28 @@ export default function Timeline({
    */
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
+
+  /**
+   * Hold a project's finish date against the sync, or hand it back.
+   *
+   * Register only — there is nothing to write to Jira here. That is the whole
+   * point: Jira will not accept a resolution date, which is why the correction
+   * has to live in the register and has to be able to survive the next sync.
+   */
+  const holdFinish = (row, date) => {
+    if (!row.projectKey) return
+    const project = rawProjects?.find((x) => x.key === row.projectKey) || { key: row.projectKey, actualEnd: row.timeline.actualEnd }
+    onUpdate(row.projectKey, date ? pinFinishPatch(project, date) : unpinFinishPatch())
+    setSyncNote(date
+      ? {
+        severity: 'success',
+        text: `${row.jiraKey || row.projectKey}: finish held at ${date}. The sync will keep updating everything else.`,
+      }
+      : {
+        severity: 'info',
+        text: `${row.jiraKey || row.projectKey}: finish released — the next sync takes it back from Jira.`,
+      })
+  }
 
   const savePlan = async (row, next) => {
     setSaving(true)
@@ -1168,8 +1245,13 @@ export default function Timeline({
                   p.jiraKey || null,
                   OBJ_BY_ID[p.objective] ? `Obj ${OBJ_BY_ID[p.objective].no}` : null,
                   p.savingHours ? `${fmtHours(p.savingHours)} hrs/mth` : null,
+                  // Said on the row, not only in the editor: a date the sync
+                  // cannot touch is something a reader has to be able to see
+                  // without opening anything.
+                  p.actualEndPinned ? 'finish held' : null,
                 ].filter(Boolean).join(' · '),
                 timeline: p.timeline,
+                actualEndPinned: p.actualEndPinned,
                 outsideTeam: p.outsideTeam,
               }}
               depth={0}
@@ -1249,7 +1331,9 @@ export default function Timeline({
         onClose={() => setEditing(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       >
-        {editing && <PlanEditor row={editing.row} onSave={savePlan} saving={saving} jira={jira} />}
+        {editing && (
+          <PlanEditor row={editing.row} onSave={savePlan} onHold={holdFinish} saving={saving} jira={jira} />
+        )}
       </Popover>
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>
