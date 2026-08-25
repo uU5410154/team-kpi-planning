@@ -791,7 +791,7 @@ export async function buildWorkbook(plan, state) {
       r++
       sectionRow(ws, r++, `OBJECTIVE 1 — DELIVERY DATES COMMITTED (${p.commitments.length} projects)`, cols.length)
       const dCols = [['Jira', 12], ['Project', 46], ['Committed by', 14], ['Actually landed', 15],
-        ['Days out', 11], ['Status', 14], [`Saving ${unit}`, 13]]
+        ['Planned days', 12], ['Days out', 11], ['Drift', 10], ['Within 20%', 11], [`Saving ${unit}`, 13]]
       headerRow(ws, r++, dCols.map((c) => c[0]), dCols.map((c) => c[1]))
       const dStart = r
       for (const c of p.commitments) {
@@ -801,24 +801,44 @@ export async function buildWorkbook(plan, state) {
           c.summary,
           c.due || 'NO DATE COMMITTED',
           c.actualEnd || (c.running ? 'still running' : ''),
-          c.lateBy == null ? null : c.lateBy,
-          c.met === null ? (c.running ? 'running' : 'not due yet') : (c.met ? 'met' : 'missed'),
+          c.plannedDays ?? null,
+          c.driftDays == null ? null : c.driftDays,
+          // A REAL percentage, so a reader can sort by it and compare it with
+          // the allowance beside it.
+          c.driftShare == null ? null : Number(c.driftShare.toFixed(4)),
+          c.drifted === null ? (c.running ? 'running' : 'not due yet') : (c.drifted ? 'OVER' : 'within'),
           c.savingHours ?? null,
         ]
-        row.getCell(5).numFmt = '+0;-0;0'
-        row.getCell(7).numFmt = N0
-        for (const cc of [3, 4, 5, 6]) row.getCell(cc).alignment = { horizontal: 'center' }
+        row.getCell(5).numFmt = N0
+        row.getCell(6).numFmt = '+0;-0;0'
+        row.getCell(7).numFmt = '0%'
+        row.getCell(9).numFmt = N0
+        for (const cc of [3, 4, 5, 6, 7, 8]) row.getCell(cc).alignment = { horizontal: 'center' }
         // A project with no committed date is the gap this objective exists to
         // close, so it is coloured as one rather than left blank.
         if (!c.due) tone(row.getCell(3), WARN)
-        if (c.met === false) tone(row.getCell(6), BAD)
-        if (c.met === true) tone(row.getCell(6), GOOD)
+        if (c.drifted === true) { tone(row.getCell(7), BAD); tone(row.getCell(8), BAD) }
+        if (c.drifted === false) tone(row.getCell(8), GOOD)
       }
       styleBody(ws, dStart, r - 1, dCols.length)
       const dt = ws.getRow(r++)
-      dt.getCell(2).value = `${p.onTimeCount} of ${p.onTimeJudged} delivered on the date committed`
+      const dr = p.drift || {}
+      dt.getCell(2).value = `${dr.drifted ?? 0} of ${dr.held ?? 0} drifted beyond their allowance`
+        + ` (${Math.round((dr.share ?? 0) * 100)}%, limit ${Math.round((dr.limit ?? 0) * 100)}%)`
+        + ` · ${p.onTimeCount} of ${p.onTimeJudged} landed on the day`
         + `${p.undatedCount ? ` · ${p.undatedCount} still with no date` : ''}`
-      dt.getCell(2).font = { name: FONT, size: 10, bold: true, color: { argb: NAVY } }
+      dt.getCell(2).font = {
+        name: FONT,
+        size: 10,
+        bold: true,
+        color: { argb: dr.within === false ? BAD : NAVY },
+      }
+      // The commitment in words, under the figures it summarises.
+      const dc = ws.getRow(r++)
+      dc.getCell(2).value = `Commitment: each project lands on its date; a date may move by up to `
+        + `${Math.round((dr.perProjectLimit ?? 0.2) * 100)}% of that project's own planned length, and across the `
+        + `${dr.held ?? 0} projects held, no more than ${Math.round((dr.limit ?? 0) * 100)}% may drift beyond that.`
+      dc.getCell(2).font = { name: FONT, size: 9, italic: true, color: { argb: MUTED } }
     }
 
     r++

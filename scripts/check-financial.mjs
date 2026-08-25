@@ -614,22 +614,32 @@ console.log(String.fromCharCode(10) + '--- the financial target starts where the
    * commit to a timeline; a target defaulted to what somebody already achieves
    * is not a commitment.
    */
-  check('EVERY CARD STATES THE SAME DELIVERY STANDARD',
-    p2.people.every((x) => lineOf(x).target === Math.round(p2.settings.onTimeGate * 100)),
-    p2.people.map((x) => `${x.nick} ${lineOf(x).target}%`).join(' · '))
+  check('EVERY CARD STATES THE SAME DRIFT LIMIT',
+    p2.people.every((x) => lineOf(x).target === Math.round(p2.settings.maxDriftedShare * 100)),
+    p2.people.map((x) => `${x.nick} max ${lineOf(x).target}%`).join(' · '))
   check('  and it is not a readout of what they already do',
     p2.people.some((x) => lineOf(x).creditedRatio != null
       && Math.round(lineOf(x).creditedRatio * 100) !== lineOf(x).target),
     p2.people.map((x) => `${x.nick} ${lineOf(x).creditedRatio == null ? '—' : `${Math.round(lineOf(x).creditedRatio * 100)}%`}`).join(' · '))
-  check('  a card is met only when the share reaches the standard',
+  check('  a card is met only while the drift stays UNDER the limit',
     p2.people.every((x) => {
       const l = lineOf(x)
       if (l.creditedRatio == null) return l.meetsTarget === null
-      return l.meetsTarget === (l.creditedRatio * 100 >= l.target - 1e-9)
+      return l.meetsTarget === (l.creditedRatio * 100 <= l.target + 1e-9)
     }))
-  check('  and nobody is judged on work that cannot be judged yet',
-    p2.people.every((x) => lineOf(x).judged <= (x.scorecardRows || []).length),
-    p2.people.map((x) => `${x.nick} ${lineOf(x).judged}/${(x.scorecardRows || []).length}`).join(' · '))
+  check('  and the denominator is what they HOLD, not what they finished',
+    p2.people.filter((x) => !x.aggregatesTeam)
+      .every((x) => lineOf(x).held === (x.commitments || []).length),
+    p2.people.map((x) => `${x.nick} ${lineOf(x).driftedCount}/${lineOf(x).held}`).join(' · '))
+  // The lead's card is the team's, so its denominator is the team's book.
+  check('  while the lead is measured on the whole team’s book', (() => {
+    const lead = p2.people.find((x) => x.aggregatesTeam)
+    const members = p2.people.filter((x) => !x.aggregatesTeam)
+    return lineOf(lead).held === members.reduce((a, x) => a + lineOf(x).held, 0)
+      && lineOf(lead).driftedCount === members.reduce((a, x) => a + lineOf(x).driftedCount, 0)
+  })(),
+  `${lineOf(p2.people.find((x) => x.aggregatesTeam)).driftedCount} of `
+    + `${lineOf(p2.people.find((x) => x.aggregatesTeam)).held} across the team`)
 
   // A typed target still beats the standard, and is still judged against.
   const person = p2.people.find((x) => lineOf(x).creditedRatio != null) || p2.people[0]
@@ -643,8 +653,8 @@ console.log(String.fromCharCode(10) + '--- the financial target starts where the
   check('A TYPED TARGET STILL WINS', Number(t.target) === 100 && t.overridden === true,
     `${person.nick}: ${t.target}%, overridden ${t.overridden}`)
   check('  and it is judged against, not ignored',
-    t.creditedRatio == null ? t.meetsTarget === null : t.meetsTarget === (t.creditedRatio >= 1),
-    `${t.creditedRatio == null ? '—' : `${Math.round(t.creditedRatio * 100)}%`} against a typed 100%`)
+    t.creditedRatio == null ? t.meetsTarget === null : t.meetsTarget === (t.creditedRatio * 100 <= 100),
+    `${t.creditedRatio == null ? '—' : `${Math.round(t.creditedRatio * 100)}%`} against a typed limit of 100%`)
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)

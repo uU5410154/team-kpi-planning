@@ -16,7 +16,9 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import ScenarioDialog from './components/ScenarioDialog.jsx'
 
 import { buildTheme } from './theme.js'
-import { computePlan, newProject, rebalanceWeights, reassignPatch } from './lib/model.js'
+import {
+  computePlan, newProject, rebalanceWeights, reassignPatch, replanPatch,
+} from './lib/model.js'
 import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import {
@@ -387,7 +389,15 @@ export default function App() {
       ...s,
       projects: s.projects.map((p) => {
         if (p.key !== key) return p
-        const full = 'pic' in patch ? { ...patch, ...reassignPatch(p, patch.pic) } : patch
+        let full = 'pic' in patch ? { ...patch, ...reassignPatch(p, patch.pic) } : patch
+        /*
+         * Moving a committed finish date is not a plain field write: the first
+         * move after a date exists is the free re-plan everybody gets once the
+         * requirement is known, and every move after it is counted. Recorded
+         * on BOTH edit paths — one row or a hundred — because a rule enforced
+         * in only some of them is not a rule.
+         */
+        if ('due' in patch) full = { ...full, ...replanPatch(p, patch.due) }
         return { ...p, ...full }
       }),
     }))
@@ -654,7 +664,15 @@ export default function App() {
       // contributor record too, or every project stays with its old owner.
       projects: s.projects.map((p) => {
         if (!set.has(p.key)) return p
-        const full = 'pic' in patch ? { ...patch, ...reassignPatch(p, patch.pic) } : patch
+        let full = 'pic' in patch ? { ...patch, ...reassignPatch(p, patch.pic) } : patch
+        /*
+         * Moving a committed finish date is not a plain field write: the first
+         * move after a date exists is the free re-plan everybody gets once the
+         * requirement is known, and every move after it is counted. Recorded
+         * on BOTH edit paths — one row or a hundred — because a rule enforced
+         * in only some of them is not a rule.
+         */
+        if ('due' in patch) full = { ...full, ...replanPatch(p, patch.due) }
         return { ...p, ...full }
       }),
     }))

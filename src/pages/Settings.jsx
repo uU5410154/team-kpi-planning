@@ -150,21 +150,50 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
 
             {/* ---- objective 1: delivering on the committed timeline ---- */}
             <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              Objective 1 — deliver {Math.round((settings.onTimeGate ?? 0.8) * 100)}% of projects within{' '}
-              {settings.sprintDays ?? 14} days of plan
+              Objective 1 — a project may drift {Math.round((settings.maxProjectDrift ?? 0.2) * 100)}% of its own
+              length, and {Math.round((settings.maxDriftedShare ?? 0.15) * 100)}% of a person&rsquo;s book may drift
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-              Each person commits to a timeline and is measured on how much of their work lands on it. A date may move
-              by up to <strong>one sprint</strong> without counting against anybody — a plan that may not move at all is
-              not a plan, and a team punished for a two-day slip learns to pad every estimate. Below that tolerance, the
-              share of a person&rsquo;s finished projects that landed inside it is the figure on their card. A project
-              with no due date, or one still running with time left, is not counted either way: it has not been asked yet.
+              Each person commits to a date for every project they are PIC of. Two limits then apply, and both are here
+              because both are decisions. A single project may drift by a share of <strong>its own planned length</strong> —
+              a fortnight lost on a three-week job is not the failure a fortnight lost on a nine-month one is, and on a
+              quarter-long project 20% is about a sprint. Across everything a person <strong>holds</strong>, only so much
+              may drift beyond that allowance at all; the denominator is what they hold rather than what they have
+              finished, or somebody with one delivered project and nine untouched ones would read as perfect. A project
+              still running with time left is not counted either way, and a plan whose start falls after its own due date
+              is flagged as data to fix rather than scored.
             </Typography>
             <Box sx={{ display: 'flex', gap: 2, mb: 2.5, flexWrap: 'wrap' }}>
               <TextField
                 size="small"
                 type="number"
-                label="Tolerance"
+                label="One project may drift"
+                value={Math.round((settings.maxProjectDrift ?? 0.2) * 100)}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (Number.isFinite(n)) onSettings({ maxProjectDrift: Math.min(200, Math.max(0, n)) / 100 })
+                }}
+                InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                inputProps={{ step: 5, min: 0, max: 200, style: { width: 70 } }}
+                helperText="of its own planned length"
+              />
+              <TextField
+                size="small"
+                type="number"
+                label="And of a person's book"
+                value={Math.round((settings.maxDriftedShare ?? 0.15) * 100)}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (Number.isFinite(n)) onSettings({ maxDriftedShare: Math.min(100, Math.max(0, n)) / 100 })
+                }}
+                InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                inputProps={{ step: 5, min: 0, max: 100, style: { width: 70 } }}
+                helperText="may drift beyond that allowance"
+              />
+              <TextField
+                size="small"
+                type="number"
+                label="A sprint is"
                 value={settings.sprintDays ?? 14}
                 onChange={(e) => {
                   const n = Number(e.target.value)
@@ -172,20 +201,7 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
                 }}
                 InputProps={{ endAdornment: <InputAdornment position="end">days</InputAdornment> }}
                 inputProps={{ step: 1, min: 0, style: { width: 70 } }}
-                helperText="one sprint"
-              />
-              <TextField
-                size="small"
-                type="number"
-                label="Must land on time"
-                value={Math.round((settings.onTimeGate ?? 0.8) * 100)}
-                onChange={(e) => {
-                  const n = Number(e.target.value)
-                  if (Number.isFinite(n)) onSettings({ onTimeGate: Math.min(100, Math.max(0, n)) / 100 })
-                }}
-                InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
-                inputProps={{ step: 5, min: 0, max: 100, style: { width: 70 } }}
-                helperText="of the projects each person holds"
+                helperText="used where a plan has no length"
               />
             </Box>
             <Divider sx={{ mb: 2 }} />

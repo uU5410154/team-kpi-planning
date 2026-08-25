@@ -391,6 +391,25 @@ export const totalInvestment = (buildCost, capex) =>
  */
 export const DEFAULT_SPRINT_DAYS = 14
 
+/**
+ * How far ONE project's timeline may drift: 20% of its own planned length.
+ *
+ * A share of the project rather than a flat number of days, because a fortnight
+ * lost on a three-week job is a different failure from a fortnight lost on a
+ * nine-month one. On a typical quarter-long project 20% is about a sprint,
+ * which is where the rule came from.
+ */
+export const DEFAULT_MAX_PROJECT_DRIFT = 0.2
+
+/**
+ * And how much of somebody's book may drift at all: 15% of what they hold.
+ *
+ * The first limit alone would let every project slip by a fifth. This one caps
+ * how many are allowed to slip at all, so the commitment is about the book and
+ * not about each row in isolation.
+ */
+export const DEFAULT_MAX_DRIFTED_SHARE = 0.15
+
 /** The share of a person's judged projects that must land inside it. */
 export const DEFAULT_ONTIME_GATE = 0.8
 
@@ -419,6 +438,10 @@ export const DEFAULT_SETTINGS = {
    */
   sprintDays: DEFAULT_SPRINT_DAYS,
   onTimeGate: DEFAULT_ONTIME_GATE,
+  // Objective 1's two limits: how far one project may drift, and how much of
+  // somebody's book may drift at all.
+  maxProjectDrift: DEFAULT_MAX_PROJECT_DRIFT,
+  maxDriftedShare: DEFAULT_MAX_DRIFTED_SHARE,
 }
 
 /**
@@ -762,7 +785,7 @@ export function scorecardWeights(person, settings, credited = {}, creditedMoney 
            * a standard the whole team is held to alike, which is the point of
            * the boss asking each person to commit to one.
            */
-          const gate = settings?.onTimeGate ?? DEFAULT_ONTIME_GATE
+          const gate = settings?.maxDriftedShare ?? DEFAULT_MAX_DRIFTED_SHARE
           /*
            * Never below the gate. The objective reads "the return must not be
            * less than X", so a person returning −4% cannot have a target of
@@ -1205,7 +1228,25 @@ export function repairOwnership(projects, people, roleWeights = DEFAULT_ROLE_WEI
  * 1: a PIC change used to write only `pic`, leaving the project on the old
  *    owner's scorecard at 77%.
  */
-export const REPAIR_VERSION = 4
+export const REPAIR_VERSION = 5
+
+/**
+ * Give every already-committed project a baseline date.
+ *
+ * The register keeps no history, so the date it holds today is the earliest
+ * one that can honestly be called the commitment. Everybody therefore starts
+ * with their free re-plan unspent, which is the fair reading: nobody should
+ * lose an allowance for moves made before the allowance existed.
+ */
+export function repairBaselineDates(projects) {
+  let stamped = 0
+  const out = (projects || []).map((p) => {
+    if (!p || p.baselineDue || !isDate(p.due)) return p
+    stamped += 1
+    return { ...p, baselineDue: p.due, replanCount: Number(p.replanCount) || 0 }
+  })
+  return { projects: out, stamped }
+}
 
 /**
  * Objective 1 stopped being Financial and became Project management, and an
@@ -1342,7 +1383,8 @@ export function repairState(s) {
     return { ...s, repair: REPAIR_VERSION }
   }
   const { projects: owned } = repairOwnership(s.projects, s.people)
-  const { projects } = repairObjectiveIds(owned)
+  const { projects: renamed } = repairObjectiveIds(owned)
+  const { projects } = repairBaselineDates(renamed)
   const { people: retargeted } = repairTargetUnits(s.people)
   const { people: rostered } = repairRoster(retargeted)
   const { people } = repairKpiIds(rostered)
@@ -1436,6 +1478,17 @@ export function newProject(seq) {
      */
     actualStart: null,
     actualEnd: null,
+    /*
+     * The date first committed to, and how many times it has been moved since.
+     *
+     * Everybody gets ONE re-plan per project, after requirement gathering:
+     * a date set before anybody has seen the requirement is a guess, and
+     * holding somebody to a guess teaches them to pad the next one. The
+     * re-plan resets the commitment and costs nothing. A second move is drift.
+     */
+    baselineDue: null,
+    replanCount: 0,
+    replanNote: '',
     assignee: null,
     pic: null,
     contributors: [],
@@ -1627,13 +1680,30 @@ export function onTimeOf(p, sprintDays = DEFAULT_SPRINT_DAYS) {
  * how a KPI stops being taken seriously. Whoever the register names as PIC
  * owns the date.
  */
-export function deliveryCommitments(personId, projects, sprintDays = DEFAULT_SPRINT_DAYS) {
+export function deliveryCommitments(
+  personId,
+  projects,
+  sprintDays = DEFAULT_SPRINT_DAYS,
+  maxDrift = DEFAULT_MAX_PROJECT_DRIFT,
+) {
   return (projects || [])
     .filter((p) => p.pic === personId && isInPlan(p))
     .map((p) => {
       const tl = p.timeline || {}
       const met = onTimeOf(p, sprintDays)
+      const drift = driftOf(p, maxDrift)
       return {
+        driftDays: drift.days,
+        driftShare: drift.share,
+        driftAllowance: drift.allowance,
+        plannedBackwards: drift.backwards,
+        replans: drift.replans,
+        replanned: drift.replanned,
+        overReplanned: drift.overReplanned,
+        baselineDue: drift.baselineDue,
+        // Beyond what this project was allowed to move.
+        drifted: drift.drifted,
+        plannedDays: tl.plannedDays ?? null,
         key: p.key,
         jiraKey: p.jiraKey || null,
         summary: p.summary,
@@ -1656,6 +1726,89 @@ export function deliveryCommitments(personId, projects, sprintDays = DEFAULT_SPR
       }
     })
     .sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')))
+}
+
+/**
+ * How far one project drifted, as a share of the time it was given.
+ *
+ * Null while there is nothing to measure: no committed date, no planned
+ * duration, or still running with time left. Null is not zero — a project
+ * nobody has judged has not drifted, it has not been asked.
+ */
+/**
+ * Move a project's committed finish date, and record what that cost.
+ *
+ * The FIRST move after a date exists is the free re-plan everybody gets once
+ * the requirement is actually known — it re-baselines the commitment and is
+ * not drift. Every move after that is counted, because a commitment that can
+ * be rewritten indefinitely is not a commitment.
+ *
+ * Returns the patch to apply, so the register, the Timeline editor and any
+ * future caller all record a date change the same way.
+ */
+export function replanPatch(project, nextDue) {
+  const current = isDate(project?.due) ? project.due : null
+  const next = isDate(nextDue) ? nextDue : null
+  if (current === next) return { due: next }
+  // No date before: this is the first commitment, not a re-plan.
+  if (!current) return { due: next, baselineDue: project?.baselineDue || next, replanCount: project?.replanCount || 0 }
+  return {
+    due: next,
+    baselineDue: project?.baselineDue || current,
+    replanCount: (Number(project?.replanCount) || 0) + 1,
+  }
+}
+
+export function driftOf(p, maxDrift = DEFAULT_MAX_PROJECT_DRIFT) {
+  const tl = (p && p.timeline) || {}
+  if (!tl.comparable || tl.lateBy == null) return { days: null, share: null, drifted: null }
+  const days = Math.max(0, tl.lateBy)
+  /*
+   * Against the planned duration where there is one. A project with a due date
+   * and no start has no length to measure against, so its drift is judged in
+   * days against the allowance a whole sprint would give — the only honest
+   * fallback that does not silently pass everything.
+   */
+  const span = tl.plannedDays && tl.plannedDays > 0 ? tl.plannedDays : null
+  /*
+   * The allowance is 20% of the planned length, but never less than a day.
+   * A project planned to take one day has an allowance of 0.2 days, which no
+   * calendar can express, and it reported a 210-day overrun as 21,000% — a
+   * number that is arithmetically true and tells a reader nothing.
+   */
+  const allowance = span ? Math.max(1, span * maxDrift) : null
+  const share = span ? days / span : null
+  /*
+   * A backwards plan is NOT scored. The comment beside it says it is data to
+   * fix rather than performance to judge, and it has to actually behave that
+   * way: counting it as drift would mark somebody down for a typo in a date.
+   */
+  const backwards = tl.plannedDays != null && tl.plannedDays < 0
+  /*
+   * One re-plan is free. Two is drift, whatever the dates then say: the
+   * allowance exists so a guess made before requirement gathering can be
+   * corrected once, not so a date can be walked forward all year.
+   */
+  const replans = Number(p?.replanCount) || 0
+  const overReplanned = replans > 1
+  const drifted = backwards
+    ? null
+    : (overReplanned
+      || (allowance != null ? days > allowance + 1e-9 : days > DEFAULT_SPRINT_DAYS))
+  return {
+    days,
+    share,
+    drifted,
+    span,
+    allowance,
+    // A start after its own due date: a plan nobody can deliver against.
+    backwards,
+    replans,
+    // The free one, used. Worth showing: it is not a fault, but it is spent.
+    replanned: replans > 0,
+    overReplanned,
+    baselineDue: isDate(p?.baselineDue) ? p.baselineDue : null,
+  }
 }
 
 export function onTimeShare(rows, sprintDays = DEFAULT_SPRINT_DAYS) {
@@ -2244,7 +2397,34 @@ export function computePlan(state) {
      * Built from what they are PIC of rather than from their credited share —
      * a delivery date belongs to whoever runs the project.
      */
-    const commitments = deliveryCommitments(person.id, perProject, s.sprintDays)
+    const commitments = deliveryCommitments(person.id, perProject, s.sprintDays, s.maxProjectDrift)
+    /*
+     * The commitment, in two parts, as agreed:
+     *
+     *   - no single project may drift by more than its share of its own length;
+     *   - and no more than a set share of what somebody HOLDS may drift at all.
+     *
+     * The denominator is everything they hold, not just what has been judged.
+     * Measuring drift against only the finished work would let somebody with
+     * one delivered project and nine unstarted ones read as 0%.
+     */
+    const held = commitments.length
+    const driftedRows = commitments.filter((c) => c.drifted === true)
+    const drift = {
+      held,
+      drifted: driftedRows.length,
+      share: held ? driftedRows.length / held : null,
+      limit: s.maxDriftedShare,
+      perProjectLimit: s.maxProjectDrift,
+      within: held ? driftedRows.length / held <= s.maxDriftedShare + 1e-9 : null,
+      worst: [...driftedRows].sort((a, b) => (b.driftShare ?? 0) - (a.driftShare ?? 0)).slice(0, 5),
+      // Plans that end before they start. Data to fix, not performance to
+      // judge, so it is counted separately and never scored.
+      backwards: commitments.filter((c) => c.plannedBackwards).length,
+      // The free re-plan: how many have used theirs, and how many went past it.
+      replanned: commitments.filter((c) => c.replanned).length,
+      overReplanned: commitments.filter((c) => c.overReplanned).length,
+    }
     const delivery = onTimeShare(commitments.filter((c) => c.judged).map((c) => ({ timeline: { comparable: true, lateBy: c.lateBy } })), s.sprintDays)
     const roiRows = costedRows.filter((r) => r.p.roi != null)
     const avgProjectRoi = roiRows.length
@@ -2313,6 +2493,7 @@ export function computePlan(state) {
       onTimeJudged: delivery.judged,
       onTimeLate: delivery.late,
       commitments,
+      drift,
       // Worth its own figure: a project somebody owns with no date on it is
       // the gap this objective exists to close.
       undatedCount: commitments.filter((c) => !c.due).length,
@@ -2427,6 +2608,29 @@ export function computePlan(state) {
 
   // The lead's average is over the whole book, each project once.
   const teamDelivery = onTimeShare(teamCounted, s.sprintDays)
+  /*
+   * The team's drift is the sum of its members' books, not a re-derivation
+   * from the register: the lead's card has to be the cards it aggregates, or
+   * the two disagree the moment somebody's PIC changes.
+   */
+  const teamDrift = (() => {
+    const held = byPersonShown.filter((x) => !x.aggregatesTeam)
+      .reduce((a, x) => a + (x.drift?.held || 0), 0)
+    const drifted = byPersonShown.filter((x) => !x.aggregatesTeam)
+      .reduce((a, x) => a + (x.drift?.drifted || 0), 0)
+    return {
+      held,
+      drifted,
+      share: held ? drifted / held : null,
+      limit: s.maxDriftedShare,
+      perProjectLimit: s.maxProjectDrift,
+      within: held ? drifted / held <= s.maxDriftedShare + 1e-9 : null,
+      worst: byPersonShown.filter((x) => !x.aggregatesTeam)
+        .flatMap((x) => x.drift?.worst || [])
+        .sort((a, b) => (b.driftShare ?? 0) - (a.driftShare ?? 0))
+        .slice(0, 5),
+    }
+  })()
   const teamRoiRows = teamCounted.filter((pr) => pr.roi != null && countsToPool(pr))
   const teamAvgRoi = teamRoiRows.length
     ? teamRoiRows.reduce((a, pr) => a + pr.roi, 0) / teamRoiRows.length
@@ -2538,6 +2742,9 @@ export function computePlan(state) {
      * sheet and on Effort_Return, where a cost question belongs — but what
      * this line asks is whether the work landed when it was said it would.
      */
+    const driftFigure = aggregates ? teamDrift : (p.drift || {
+      held: 0, drifted: 0, share: null, limit: s.maxDriftedShare, perProjectLimit: s.maxProjectDrift, worst: [],
+    })
     const delivered = aggregates ? teamDelivery : {
       share: p.onTimeShare ?? null,
       onTime: p.onTimeCount || 0,
@@ -2552,7 +2759,21 @@ export function computePlan(state) {
         // counts once. The portfolio return is kept beside it, because a
         // ฿5k project at 900% moves an average a long way and moves the
         // portfolio hardly at all.
-        creditedRatio: delivered.share,
+        /*
+         * A LIMIT, not a floor: this is the share of somebody's book that
+         * drifted, and it is met by staying UNDER the number rather than over
+         * it. Every other percentage line on a card reads the other way, so
+         * the direction travels with the line rather than being assumed by
+         * whatever renders it.
+         */
+        creditedRatio: driftFigure.share,
+        lowerIsBetter: true,
+        held: driftFigure.held,
+        driftedCount: driftFigure.drifted,
+        perProjectLimit: driftFigure.perProjectLimit,
+        worstDrift: driftFigure.worst,
+        // Kept beside it: how much actually landed on the day, which is the
+        // question the drift limit exists to protect.
         onTime: delivered.onTime,
         judged: delivered.judged,
         lateCount: delivered.late,
@@ -2562,9 +2783,9 @@ export function computePlan(state) {
         avgRoi,
         roiRowCount: aggregates ? teamRoiRows.length : (p.roiRowCount || 0),
         creditedMoney: scFinance.annualBenefit,
-        meetsTarget: delivered.share == null
+        meetsTarget: driftFigure.share == null
           ? null
-          : delivered.share * 100 >= Number(l.target) - 1e-9,
+          : driftFigure.share * 100 <= Number(l.target) + 1e-9,
       }
       : l))
 

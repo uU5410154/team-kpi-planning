@@ -15,7 +15,8 @@ import {
   PROJECT_COLUMNS, EDITABLE_COLUMNS, SHEET_NAME, HEADER_ROW, columnFor,
   null_hours, null_pic,
 } from './projectSheet.js'
-import { reassignPatch, normalizeTasks, MONTHS_IN_YEAR } from './model.js'
+import { reassignPatch, normalizeTasks, MONTHS_IN_YEAR, RENAMED_OBJECTIVES,
+} from './model.js'
 
 const FONT = 'Calibri'
 const NAVY = 'FF051C2C'
@@ -348,7 +349,15 @@ export function planImport(parsed, state, plan) {
 
       // ---- everything else is a plain field ----
       const next = parsedValue === null_hours ? null : parsedValue
-      const current = stored[col.field] ?? null
+      /*
+       * Read through the rename map. An objective that changed id — Financial
+       * became Project management — is normalised everywhere the plan is
+       * COMPUTED, but this compares against what is STORED, and a row that
+       * still names the old id would look like a change on every import of a
+       * file it had just produced.
+       */
+      const raw = stored[col.field] ?? null
+      const current = col.key === 'objective' ? (RENAMED_OBJECTIVES[raw] || raw) : raw
       if (same(current, next)) continue
       const from = col.key === 'objective' ? col.read(shown, ctx) : showValue(current)
       const to = col.key === 'objective'

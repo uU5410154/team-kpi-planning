@@ -40,6 +40,8 @@ export function projectFromEpic(epic, seq) {
      */
     start: epic.start || null,
     due: epic.due || null,
+    // Its first committed date, so a later move is measured from here.
+    baselineDue: epic.due || null,
     actualStart: epic.start || epic.created || null,
     actualEnd: epic.done ? (epic.resolved || null) : null,
     status: epic.done ? 'Done' : (/progress/i.test(epic.status || '') ? 'In Progress' : 'Not Start'),

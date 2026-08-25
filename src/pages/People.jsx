@@ -545,8 +545,8 @@ export default function People({
                           }}>
                             {l.creditedRatio == null
                               ? 'nothing finished yet that had a date to meet'
-                              : `${l.onTime} of ${l.judged} delivered on the date committed`
-                                + `${l.meetsTarget ? '' : ' — below the standard'}`}
+                              : `${l.driftedCount} of ${l.held} drifted — ${fmtPct(l.creditedRatio)}`
+                                + `${l.meetsTarget ? ', within the limit' : ` — OVER the ${l.target}% allowed`}`}
                           </Typography>
                         )}
                         {/*
@@ -560,6 +560,58 @@ export default function People({
                           */}
                         {l.targetKind === 'percent' && (p.commitments || []).length > 0 && (
                           <Box sx={{ mt: 0.75, mb: 0.5 }}>
+                            {/*
+                              * The commitment itself, in words, above the list
+                              * it applies to. A KPI somebody cannot recite is a
+                              * KPI somebody is not managing to.
+                              */}
+                            <Box sx={{
+                              p: 1,
+                              mb: 0.75,
+                              borderRadius: 1,
+                              bgcolor: 'action.hover',
+                              borderLeft: 3,
+                              borderColor: l.meetsTarget === false ? STATUS.critical : STATUS.good,
+                            }}
+                            >
+                              <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
+                                <strong>My commitment.</strong> Each project below lands on the date beside it. A date
+                                may move by up to <strong>{Math.round((l.perProjectLimit ?? 0.2) * 100)}%</strong> of
+                                that project&rsquo;s own planned length — about a sprint on a quarter-long piece of
+                                work — and across the <strong>{l.held}</strong> project{l.held === 1 ? '' : 's'} I hold,
+                                no more than <strong>{l.target}%</strong> may drift beyond that. Each project may be
+                                re-planned <strong>once</strong> after requirement gathering — a date set before anybody
+                                has seen the requirement is a guess, and the re-plan resets the commitment at no cost.
+                                A second move counts.
+                              </Typography>
+                              <Typography variant="caption" sx={{
+                                display: 'block',
+                                mt: 0.5,
+                                fontWeight: 700,
+                                color: l.meetsTarget === false ? STATUS.critical : STATUS.good,
+                              }}
+                              >
+                                {l.driftedCount} of {l.held} have drifted beyond their allowance
+                                {' '}({fmtPct(l.creditedRatio ?? 0)}) · limit {l.target}%
+                              </Typography>
+                              {(p.drift?.replanned > 0 || p.drift?.backwards > 0) && (
+                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
+                                  {p.drift.replanned > 0 && (
+                                    <>
+                                      {p.drift.replanned} re-planned once (allowed)
+                                      {p.drift.overReplanned > 0 && `, ${p.drift.overReplanned} more than once`}
+                                    </>
+                                  )}
+                                  {p.drift.backwards > 0 && (
+                                    <Box component="span" sx={{ color: STATUS.warning }}>
+                                      {p.drift.replanned > 0 ? ' · ' : ''}
+                                      {p.drift.backwards} plan{p.drift.backwards === 1 ? '' : 's'} start after their own
+                                      due date — data to fix, not scored
+                                    </Box>
+                                  )}
+                                </Typography>
+                              )}
+                            </Box>
                             <Table size="small" sx={{
                               '& td': { border: 0, px: 0.75, py: 0.15, fontSize: '0.68rem' },
                             }}
@@ -579,18 +631,37 @@ export default function People({
                                           no date committed
                                         </Box>
                                       )}
+                                      {c.replans > 0 && (
+                                        <Tooltip title={c.baselineDue
+                                          ? `First committed to ${c.baselineDue}, re-planned ${c.replans} time${c.replans === 1 ? '' : 's'}`
+                                          : `Re-planned ${c.replans} times`}
+                                        >
+                                          <Box
+                                            component="span"
+                                            sx={{
+                                              ml: 0.5,
+                                              fontSize: '0.6rem',
+                                              cursor: 'help',
+                                              color: c.overReplanned ? STATUS.critical : 'text.disabled',
+                                            }}
+                                          >
+                                            {c.overReplanned ? `re-planned ×${c.replans}` : 're-planned'}
+                                          </Box>
+                                        </Tooltip>
+                                      )}
                                     </TableCell>
                                     <TableCell align="right" sx={{
                                       whiteSpace: 'nowrap',
                                       fontWeight: 700,
-                                      color: c.met === null ? 'text.disabled' : c.met ? STATUS.good : STATUS.critical,
+                                      color: c.drifted === null ? 'text.disabled'
+                                        : c.drifted ? STATUS.critical : STATUS.good,
                                     }}
                                     >
-                                      {c.met === null
+                                      {c.drifted === null
                                         ? (c.running ? 'running' : 'not due yet')
-                                        : c.met
-                                          ? `met${c.actualEnd ? ` ${c.actualEnd}` : ''}`
-                                          : `${c.lateBy > 0 ? '+' : ''}${c.lateBy}d`}
+                                        : c.driftDays === 0
+                                          ? `on the day${c.actualEnd ? ` ${c.actualEnd}` : ''}`
+                                          : `+${c.driftDays}d${c.driftShare != null ? ` · ${fmtPct(c.driftShare)}` : ''}`}
                                     </TableCell>
                                   </TableRow>
                                 ))}

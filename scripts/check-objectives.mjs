@@ -126,13 +126,13 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
    * which it does not choose. What it does choose is whether it lands what it
    * said it would, when it said it would.
    */
-  check('its target is the delivery standard, stated as a percentage',
+  check('its target is the drift limit, stated as a percentage',
     line1.targetKind === 'percent'
-    && Math.abs(line1.target - plain.settings.onTimeGate * 100) < 1e-9,
-    `${line1.target}% vs the standard ${plain.settings.onTimeGate * 100}%`)
-  check('ITS ACTUAL IS THE SHARE THAT LANDED ON TIME, NOT A RETURN',
-    line1.creditedRatio === (line1.judged ? line1.onTime / line1.judged : null),
-    `${line1.onTime} of ${line1.judged} within ${line1.sprintDays} days`)
+    && Math.abs(line1.target - plain.settings.maxDriftedShare * 100) < 1e-9,
+    `${line1.target}% vs the limit ${plain.settings.maxDriftedShare * 100}%`)
+  check('ITS ACTUAL IS THE SHARE OF THE BOOK THAT DRIFTED, NOT A RETURN',
+    line1.creditedRatio === (line1.held ? line1.driftedCount / line1.held : null),
+    `${line1.driftedCount} of ${line1.held} held`)
   check('and it is not the return, which measures something else entirely',
     line1.creditedRatio !== lead.avgProjectRoi || lead.avgProjectRoi == null,
     `delivery ${line1.creditedRatio} vs return ${lead.avgProjectRoi}`)
@@ -163,8 +163,8 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
    * objective 1, and a project landing late does.
    */
   check('AND IT RECALCULATES WHEN A DELIVERY DATE CHANGES', (() => {
-    // Every dated project finishes on its due date, then every one finishes a
-    // year later. The first is perfect delivery, the second is none of it.
+    // Everything lands on its date, then everything lands a year late. The
+    // first is no drift at all, the second is drift on everything dated.
     const onTime = computePlan({
       ...base,
       projects: base.projects.map((p) => (p.due ? { ...p, actualEnd: p.due, status: 'Done' } : p)),
@@ -175,8 +175,8 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
         ? { ...p, actualEnd: '2027-12-31', status: 'Done' }
         : p)),
     }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
-    return onTime.judged > 0 && onTime.creditedRatio === 1 && onTime.meetsTarget === true
-      && slipped.creditedRatio === 0 && slipped.meetsTarget === false
+    return onTime.creditedRatio === 0 && onTime.meetsTarget === true
+      && slipped.creditedRatio > onTime.creditedRatio && slipped.meetsTarget === false
   })())
   check('  while a cost estimate changing leaves it exactly where it was', (() => {
     const heavier = computePlan({
@@ -185,12 +185,12 @@ console.log('\n--- objective 1 prices the same hours, it does not repeat them --
     }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
     return heavier.creditedRatio === line1.creditedRatio
   })(), 'a Tech team is not measured on how profitable its handed work happens to be')
-  check('and the target follows the standard when the standard is changed', (() => {
+  check('and the target follows the limit when the limit is changed', (() => {
     const strict = computePlan({
       ...base,
-      settings: { ...DEFAULT_SETTINGS, onTimeGate: 0.95 },
+      settings: { ...DEFAULT_SETTINGS, maxDriftedShare: 0.05 },
     }).people.find((x) => x.id === 'gun').kpiLines.find((l) => l.targetKind === 'percent')
-    return strict.target === 95
+    return strict.target === 5
   })())
   check('and the tolerance moves what counts as on time', (() => {
     const tight = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, sprintDays: 0 } })
@@ -400,6 +400,135 @@ console.log(String.fromCharCode(10) + '--- objective 1 names every project a per
   const polHas = moved.people.find((x) => x.id === 'pol').commitments.some((c) => c.due === '2026-05-05')
   check('A DATE FOLLOWS THE PIC WHEN THE PIC CHANGES', polHas,
     'whoever runs the project owns the date')
+}
+
+/* ====== the two drift limits ====== */
+console.log(String.fromCharCode(10) + '--- a project may drift 20% of its own length; a person 15% of their book ---')
+{
+  const at = (d) => d
+  const proj = (key, pic, start, due, end, extra = {}) => ({
+    key, jiraKey: key, summary: key, pic, start: at(start), due: at(due), actualEnd: end,
+    status: end ? 'Done' : 'In Progress', commitLevel: 'commit', objective: 'process_automation',
+    savingHours: 10, contributors: [{ person: pic, roles: ['dev'] }], ...extra,
+  })
+
+  // A hundred-day project: 20% is twenty days.
+  const plan = computePlan({
+    ...base,
+    settings: { ...DEFAULT_SETTINGS, maxProjectDrift: 0.2, maxDriftedShare: 0.15 },
+    projects: [
+      proj('A-1', 'kade', '2026-01-01', '2026-04-11', '2026-04-11'),      // on the day
+      proj('A-2', 'kade', '2026-01-01', '2026-04-11', '2026-04-30'),      // 19 days, inside 20%
+      proj('A-3', 'kade', '2026-01-01', '2026-04-11', '2026-05-05'),      // 24 days, over
+      proj('A-4', 'kade', '2026-04-11', '2026-01-01', '2026-05-05'),      // plan runs backwards
+    ],
+  })
+  const kade = plan.people.find((x) => x.id === 'kade')
+  const by = (k) => kade.commitments.find((c) => c.key === k)
+
+  check('a project that lands on the day has not drifted', by('A-1').drifted === false,
+    `${by('A-1').driftDays} days out`)
+  check('NINETEEN DAYS ON A HUNDRED-DAY PLAN IS WITHIN 20%', by('A-2').drifted === false,
+    `${by('A-2').driftDays}d of ${by('A-2').plannedDays}d = ${Math.round(by('A-2').driftShare * 100)}%`)
+  check('TWENTY-FOUR IS NOT', by('A-3').drifted === true,
+    `${by('A-3').driftDays}d of ${by('A-3').plannedDays}d = ${Math.round(by('A-3').driftShare * 100)}%`)
+  check('  so the limit is a share of the project, not a flat number of days',
+    by('A-2').driftAllowance === by('A-3').driftAllowance && by('A-2').driftAllowance === 20,
+    `allowance ${by('A-2').driftAllowance} days on a ${by('A-2').plannedDays}-day plan`)
+
+  check('A PLAN THAT ENDS BEFORE IT STARTS IS FLAGGED, NOT DIVIDED BY',
+    by('A-4').plannedBackwards === true && by('A-4').driftShare === null,
+    'data to fix, not performance to judge')
+
+  // The book: 1 of 4 over is 25%, above the 15% allowed.
+  const line = kade.kpiLines.find((l) => l.targetKind === 'percent' && !l.custom)
+  check('THE CARD COUNTS DRIFTED PROJECTS AGAINST EVERYTHING HELD',
+    line.held === 4 && line.driftedCount === kade.commitments.filter((c) => c.drifted).length,
+    `${line.driftedCount} of ${line.held}`)
+  check('  and it is met by staying UNDER the limit, not over it',
+    line.lowerIsBetter === true
+    && line.meetsTarget === (line.creditedRatio * 100 <= line.target + 1e-9),
+    `${Math.round(line.creditedRatio * 100)}% against a limit of ${line.target}%`)
+  check('  the limit defaults to the share the settings name', line.target === 15)
+
+  // Held, not judged: unfinished work still counts in the denominator.
+  const withPending = computePlan({
+    ...base,
+    settings: { ...DEFAULT_SETTINGS, maxProjectDrift: 0.2, maxDriftedShare: 0.15 },
+    projects: [
+      proj('B-1', 'kade', '2026-01-01', '2026-04-11', '2026-06-30'),
+      ...Array.from({ length: 9 }, (_, i) => proj(`B-${i + 2}`, 'kade', '2026-01-01', '2026-12-31', null)),
+    ],
+  }).people.find((x) => x.id === 'kade')
+  const l2 = withPending.kpiLines.find((l) => l.targetKind === 'percent' && !l.custom)
+  check('ONE DRIFT IN TEN HELD IS 10%, NOT 100%',
+    l2.held === 10 && Math.abs(l2.creditedRatio - 0.1) < 1e-9,
+    `${l2.driftedCount} of ${l2.held} = ${Math.round(l2.creditedRatio * 100)}%`)
+  check('  because measuring only finished work would flatter a full pipeline',
+    l2.meetsTarget === true, 'within 15%')
+
+  // Both limits move from the Model tab.
+  const strict = computePlan({
+    ...base,
+    settings: { ...DEFAULT_SETTINGS, maxProjectDrift: 0.05, maxDriftedShare: 0.5 },
+    projects: [proj('C-1', 'kade', '2026-01-01', '2026-04-11', '2026-04-30')],
+  }).people.find((x) => x.id === 'kade')
+  check('TIGHTENING THE PER-PROJECT LIMIT CATCHES MORE',
+    strict.commitments[0].drifted === true,
+    '19 days is inside 20% and outside 5%')
+  check('  and the book limit is what the card is judged against',
+    strict.kpiLines.find((l) => l.targetKind === 'percent' && !l.custom).target === 50)
+}
+
+/* ====== one free re-plan, after requirement gathering ====== */
+console.log(String.fromCharCode(10) + '--- everybody may re-plan a project once ---')
+{
+  const { replanPatch, driftOf } = await import('../src/lib/model.js')
+
+  let p = { key: 'R-1', due: null, replanCount: 0 }
+  p = { ...p, ...replanPatch(p, '2026-06-30') }
+  check('SETTING THE FIRST DATE IS NOT A RE-PLAN',
+    p.replanCount === 0 && p.baselineDue === '2026-06-30',
+    'a commitment made is not a commitment moved')
+
+  p = { ...p, ...replanPatch(p, '2026-08-31') }
+  check('MOVING IT ONCE AFTER REQUIREMENTS IS THE FREE ONE',
+    p.replanCount === 1 && p.baselineDue === '2026-06-30' && p.due === '2026-08-31',
+    'the baseline remembers where it started')
+
+  p = { ...p, ...replanPatch(p, '2026-10-31') }
+  check('  and a second move is counted', p.replanCount === 2)
+  const same = { ...p, ...replanPatch(p, '2026-10-31') }
+  check('  while setting the same date again is not a move', same.replanCount === 2)
+
+  // Delivered exactly on the re-planned date: the free re-plan costs nothing.
+  const clean = driftOf({
+    replanCount: 1,
+    timeline: { comparable: true, lateBy: 0, plannedDays: 100 },
+  })
+  check('A PROJECT DELIVERED ON ITS RE-PLANNED DATE HAS NOT DRIFTED',
+    clean.drifted === false && clean.replanned === true,
+    'the allowance exists to be used')
+
+  const twice = driftOf({
+    replanCount: 2,
+    timeline: { comparable: true, lateBy: 0, plannedDays: 100 },
+  })
+  check('BUT RE-PLANNING TWICE IS DRIFT, EVEN IF IT THEN LANDS ON THE DAY',
+    twice.drifted === true && twice.overReplanned === true,
+    'a commitment that can be rewritten indefinitely is not a commitment')
+
+  // And it flows through a real plan, on both edit paths.
+  const plan = computePlan({
+    ...base,
+    projects: base.projects.map((x, i) => (i === 0
+      ? { ...x, pic: 'kade', start: '2026-01-01', due: '2026-04-11', baselineDue: '2026-02-01', replanCount: 2, actualEnd: '2026-04-11', status: 'Done' }
+      : x)),
+  })
+  const row = plan.people.find((x) => x.id === 'kade').commitments.find((c) => c.replans === 2)
+  check('the card shows a twice-moved project as drifted',
+    !!row && row.drifted === true && row.overReplanned === true,
+    row ? `${row.jiraKey || row.key}: baseline ${row.baselineDue}, now ${row.due}` : 'not found')
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
