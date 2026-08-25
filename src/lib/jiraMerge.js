@@ -42,7 +42,13 @@ export function projectFromEpic(epic, seq) {
     due: epic.due || null,
     // Its first committed date, so a later move is measured from here.
     baselineDue: epic.due || null,
-    actualStart: epic.start || epic.created || null,
+    /*
+     * The same rule the refresh applies: a start date is a plan, not an event.
+     * An epic arriving from the backlog has not begun, whatever date it
+     * carries — and an add path that disagreed with the refresh path would
+     * flip the row back and forth on every sync.
+     */
+    actualStart: epic.started ? (epic.start || epic.created || null) : null,
     actualEnd: epic.done ? (epic.resolved || null) : null,
     status: epic.done ? 'Done' : (/progress/i.test(epic.status || '') ? 'In Progress' : 'Not Start'),
     /*
@@ -78,7 +84,21 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
 
     const patch = {}
     const tasks = under(issue.key)
-    const actualStart = issue.start || issue.created || null
+
+    /*
+     * NOTHING HAS ACTUALLY STARTED UNTIL SOMETHING IS IN FLIGHT.
+     *
+     * A start date is a plan, not an event: a Backlog task can carry one for a
+     * sprint three weeks away, and a creation date only records that somebody
+     * typed the ticket. Drawing an actual bar from either claimed work had
+     * begun on projects nobody had touched.
+     *
+     * A project has begun when its epic is in flight or finished, OR when any
+     * task under it has — an epic can sit in Selected for Development while
+     * the first task is already being worked.
+     */
+    const begun = issue.started || !!tasks?.anyStarted
+    const actualStart = begun ? (issue.start || issue.created || null) : null
 
     /*
      * A PROJECT IS FINISHED WHEN THE LAST THING UNDER IT IS.

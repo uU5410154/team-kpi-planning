@@ -52,6 +52,18 @@ const ISSUES = {
       customfield_10015: null,
     },
   },
+  'FNP-4': {
+    key: 'FNP-4',
+    fields: {
+      summary: 'Selected for development, untouched',
+      status: { name: 'Selected for Development', statusCategory: { key: 'new' } },
+      created: '2026-05-24T09:00:00.000+0700',
+      updated: '2026-08-18T09:00:00.000+0700',
+      duedate: '2026-10-31',
+      resolutiondate: null,
+      customfield_10015: '2026-08-16',
+    },
+  },
   'FNP-3': {
     key: 'FNP-3',
     fields: {
@@ -67,6 +79,24 @@ const ISSUES = {
 }
 
 const CHILDREN = {
+  // Nothing here has begun: a plan, not work in progress.
+  'FNP-4': [
+    {
+      key: 'FNP-41',
+      fields: {
+        summary: 'Planned, not started',
+        status: { name: 'Backlog', statusCategory: { key: 'new' } },
+        issuetype: { name: 'Task' },
+        parent: { key: 'FNP-4' },
+        created: '2026-08-18T09:00:00.000+0700',
+        updated: '2026-08-18T09:00:00.000+0700',
+        duedate: '2026-09-05',
+        resolutiondate: null,
+        // A start date three weeks out. A plan, not an event.
+        customfield_10015: '2026-08-24',
+      },
+    },
+  ],
   'FNP-1': [
     {
       key: 'FNP-11',
@@ -331,7 +361,7 @@ console.log(String.fromCharCode(10) + '--- an epic breaks down into its tasks --
 console.log(String.fromCharCode(10) + '--- new epics can be found and brought in ---')
 {
   const r = await (await fetch(`${base}/api/jira/epics`)).json()
-  check('every epic in the project comes back', r.epics.length === 3,
+  check('every epic in the project comes back', r.epics.length === 4,
     r.epics.map((e) => e.key).join(', '))
   check('  under a query the CLIENT never supplied',
     /project = FNP AND issuetype = "Epic"/.test(r.jql), r.jql)
@@ -485,6 +515,54 @@ console.log(String.fromCharCode(10) + '--- children come back in the order Jira 
     order.join(', '))
   check('  which is neither key order nor date order',
     order.join() !== [...order].sort().join(), 'a sort by anything else would have shown here')
+}
+
+/* ---------------- nothing has started until something is in flight ------- */
+console.log(String.fromCharCode(10) + '--- a plan is not work in progress ---')
+{
+  const { mergeJira } = await import('../src/lib/jiraMerge.js')
+
+  const r = await (await fetch(`${base}/api/jira/issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-4'] }),
+  })).json()
+  const epic = r.issues[0]
+  check('AN EPIC IN THE BACKLOG HAS NOT STARTED, WHATEVER DATE IT CARRIES',
+    epic.started === false && epic.start === '2026-08-16',
+    `status ${epic.status}, start date ${epic.start}`)
+
+  const kids = await (await fetch(`${base}/api/jira/rollup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: ['FNP-4', 'FNP-1'] }),
+  })).json()
+  check('  nor has anything under it', kids.byParent['FNP-4'].anyStarted === false,
+    `${kids.byParent['FNP-4'].started} of ${kids.byParent['FNP-4'].total} started`)
+  check('  while a project with work in flight HAS', kids.byParent['FNP-1'].anyStarted === true,
+    `${kids.byParent['FNP-1'].started} of ${kids.byParent['FNP-1'].total} started`)
+
+  const merged = mergeJira(
+    { projects: [{ key: 'P4', jiraKey: 'FNP-4', due: '2026-10-31' }] },
+    { issues: [epic], rollups: { 'FNP-4': kids.byParent['FNP-4'] } },
+    { addNew: false },
+  ).projects[0]
+  check('SO NO ACTUAL BAR IS DRAWN FOR IT', merged.actualStart == null && merged.actualEnd == null,
+    'a start date three weeks out is a plan, not an event')
+
+  // And a task that has begun still gets one.
+  const started = mergeJira(
+    { projects: [{ key: 'P1', jiraKey: 'FNP-2', due: '2026-10-31' }] },
+    {
+      issues: [{
+        key: 'FNP-2', summary: 'x', status: 'In Progress', started: true, done: false,
+        created: '2026-02-01', start: '2026-02-01', resolved: null,
+      }],
+      rollups: {},
+    },
+    { addNew: false },
+  ).projects[0]
+  check('  while work actually in flight still gets its bar', started.actualStart === '2026-02-01')
 }
 
 /* ---------------- the sprint is the plan ---------------- */
@@ -670,7 +748,10 @@ if (!exe) {
       : { ...p, jiraKey: '' }))
     localStorage.setItem(K, JSON.stringify(st))
     // The whole row, so what comes back can be compared field by field.
-    return st.projects.slice(0, 3).map((p) => JSON.parse(JSON.stringify(p)))
+    return ['FNP-1', 'FNP-2', 'FNP-3']
+      .map((k) => st.projects.find((p) => p.jiraKey === k))
+      .filter(Boolean)
+      .map((p) => JSON.parse(JSON.stringify(p)))
   })
   await page.goto(`${base}/?synced=1#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 3500))
@@ -690,10 +771,18 @@ if (!exe) {
 
   const after = await page.evaluate(() => {
     const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
-    const byKey = Object.fromEntries(st.projects.slice(0, 3).map((p) => [p.jiraKey, p]))
+    /*
+     * BY KEY, not by position. The sync adds any epic the register lacks at
+     * the TOP of the list, so the first three rows are no longer the three
+     * this test set up — and a check that silently read the wrong rows would
+     * be worse than one that failed.
+     */
+    const want = ['FNP-1', 'FNP-2', 'FNP-3']
+    const mine = want.map((k) => st.projects.find((p) => p.jiraKey === k)).filter(Boolean)
+    const byKey = Object.fromEntries(mine.map((p) => [p.jiraKey, p]))
     return {
       note: (document.body.innerText.match(new RegExp('[0-9]+ projects? updated[^' + String.fromCharCode(10) + ']*')) || [''])[0],
-      rows: st.projects.slice(0, 3).map((p) => ({
+      rows: mine.map((p) => ({
         jira: p.jiraKey, start: p.start, due: p.due, actualStart: p.actualStart, actualEnd: p.actualEnd,
       })),
       one: byKey['FNP-1'],
@@ -734,8 +823,12 @@ if (!exe) {
    * than by spot-check, so a field added later is covered without anybody
    * remembering to add it here.
    */
-  const full = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem('fa-tech-kpi-2026')).projects.slice(0, 3))
+  const full = await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
+    return ['FNP-1', 'FNP-2', 'FNP-3']
+      .map((k) => st.projects.find((p) => p.jiraKey === k))
+      .filter(Boolean)
+  })
   const drifted = []
   full.forEach((now, i) => {
     const was = before[i]

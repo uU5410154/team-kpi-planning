@@ -276,7 +276,12 @@ export default function Timeline({
        */
       start: issue.sprintStart || null,
       due: issue.planEnd || issue.due || null,
-      actualStart: issue.sprintStart || issue.start || issue.created,
+      /*
+       * Only once it has actually started. A Backlog task carrying a sprint
+       * date three weeks out has not begun, and drawing a bar from that date
+       * to today claimed work was under way on everything anybody had planned.
+       */
+      actualStart: issue.started ? (issue.sprintStart || issue.start || issue.created) : null,
       actualEnd: issue.done ? issue.resolved : null,
       status: issue.done ? 'Done' : issue.status,
     }, asOf),

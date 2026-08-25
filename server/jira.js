@@ -294,6 +294,10 @@ export async function rollupOf(keys) {
       latestDelayDue: null,
       delayKey: null,
       delayCount: 0,
+      // Whether any task underneath has actually begun. A project has started
+      // when its first task has, whatever the epic's own column says.
+      started: 0,
+      anyStarted: false,
       allDone: false,
       truncated: false,
     }
@@ -340,6 +344,8 @@ export async function rollupOf(keys) {
         const when = sp.end || day(raw.fields?.duedate)
         agg.latestDue = later(agg.latestDue, when)
 
+        if (['indeterminate', 'done'].includes(raw.fields?.status?.statusCategory?.key)) agg.started += 1
+
         const labels = (raw.fields?.labels || []).map((x) => String(x).toLowerCase())
         if (labels.includes(c.delayLabel)) {
           agg.delayCount += 1
@@ -370,6 +376,7 @@ export async function rollupOf(keys) {
     // An epic with no tasks at all has not "finished everything" — there was
     // nothing to finish, and the project's own status is the better answer.
     agg.allDone = agg.total > 0 && agg.done === agg.total
+    agg.anyStarted = agg.started > 0
   }
   return { byParent, parents: parents.length, tasks, delayLabel: c.delayLabel }
 }
@@ -508,6 +515,17 @@ function shape(raw, c) {
     // Done, in flight, or not begun — read from the CATEGORY, so a board that
     // renames its columns does not silently stop reporting finishes.
     done: f.status?.statusCategory?.key === 'done',
+    /*
+     * HAS IT ACTUALLY STARTED.
+     *
+     * Not "does it have a start date" — a Backlog task can carry a start date
+     * for a sprint three weeks away, and a creation date only says somebody
+     * typed the ticket. Only the status can say work has begun: in flight, or
+     * finished. Everything in To Do, Backlog or Selected for Development has
+     * not started, whatever dates it carries.
+     */
+    started: ['indeterminate', 'done'].includes(f.status?.statusCategory?.key),
+    statusCategory: f.status?.statusCategory?.key || null,
     created: day(f.created),
     updated: day(f.updated),
     due: day(f.duedate),
