@@ -1,4 +1,4 @@
-import { newProject, replanPatch } from './model.js'
+import { newProject, replanPatch, reassignPatch, personForJiraName } from './model.js'
 
 /**
  * Fold what Jira knows into a plan.
@@ -31,11 +31,18 @@ import { newProject, replanPatch } from './model.js'
 export const JIRA_KEY = /^[A-Za-z][A-Za-z0-9_]+-\d+$/
 
 /** A Jira epic, as a project the register can hold. */
-export function projectFromEpic(epic, seq) {
+export function projectFromEpic(epic, seq, people = []) {
   return {
     ...newProject(seq),
     jiraKey: epic.key,
     summary: epic.summary || epic.key,
+    /*
+     * On whoever holds the ticket, where the roster knows the name. It arrives
+     * as WATCH and counts toward nothing either way, but arriving on the right
+     * person's list is the difference between somebody seeing it and nobody
+     * seeing it.
+     */
+    pic: personForJiraName(people, epic.assignee),
     /*
      * Jira's dates ARE the plan for a project the register is meeting for the
      * first time — there is no earlier commitment for them to overwrite. It is
@@ -75,6 +82,8 @@ export function projectFromEpic(epic, seq) {
  * @returns {{ projects, updated, added, fromCreated, unchanged, addedKeys }}
  */
 export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {}, { addNew = true } = {}) {
+  // The roster, for turning a Jira display name into somebody on this plan.
+  const people = Array.isArray(state?.people) ? state.people : []
   const byKey = new Map(issues.map((i) => [String(i.key).toUpperCase(), i]))
   const under = (key) => rollups[String(key || '').toUpperCase()] || null
 
@@ -85,6 +94,9 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
   // Commitments the board moved. Reported by name: a date that changed under
   // somebody's objective is the last thing that should arrive as a number.
   const replanned = []
+  // Projects that changed hands. Reported by name: a project moving between
+  // two people's objectives is the last thing that should arrive as a number.
+  const reassigned = []
   let fromCreated = 0
   const renamed = []
   const projects = (state.projects || []).map((p) => {
@@ -252,6 +264,31 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
       renamed.push({ key: issue.key, from: p.summary, to: title })
     }
 
+    /*
+     * AND WHO RUNS IT.
+     *
+     * Jira says "Nakittapon Imjaijaroenying" and the register says "Pol", and
+     * for as long as those were kept apart by nothing but an unfetched field,
+     * a project reassigned on the board stayed on the wrong person's objective
+     * here. The PIC is who objective 1 measures, so it follows the ticket.
+     *
+     * Only where the name is one the roster CLAIMS. An unrecognised assignee
+     * leaves the PIC exactly as it is — a guess at who somebody is would put a
+     * project on the wrong person's KPI, which is worse than not knowing. And
+     * an unassigned ticket says nothing at all: a blank in Jira is an absence
+     * of information, never an instruction to clear the register, the same
+     * rule the dates already follow.
+     *
+     * Through reassignPatch, the same door the Projects tab uses, so the
+     * credited share moves with the ownership instead of being left behind on
+     * whoever used to hold it.
+     */
+    const owner = personForJiraName(people, issue.assignee)
+    if (owner && owner !== (p.pic || null)) {
+      Object.assign(patch, reassignPatch(p, owner))
+      reassigned.push({ key: issue.key, from: p.pic || null, to: owner, name: issue.assignee })
+    }
+
     if (!Object.keys(patch).length) return p
     updated += 1
     return { ...p, ...patch }
@@ -269,8 +306,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
       const key = String(epic.key || '').toUpperCase()
       if (!key || have.has(key)) continue
       have.add(key)
-      let made = projectFromEpic(epic, ++seq)
-      while (taken.has(made.key)) made = projectFromEpic(epic, ++seq)
+      let made = projectFromEpic(epic, ++seq, people)
+      while (taken.has(made.key)) made = projectFromEpic(epic, ++seq, people)
       taken.add(made.key)
       fresh.push(made)
       addedKeys.push(key)
@@ -286,6 +323,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
     pinned,
     replanned: replanned.length,
     replans: replanned.slice(0, 20),
+    reassigned: reassigned.length,
+    reassignments: reassigned.slice(0, 20),
     added: addedKeys.length,
     addedKeys,
     renamed: renamed.length,

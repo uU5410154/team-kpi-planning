@@ -153,7 +153,10 @@ export async function issuesByKey(keys) {
     else stillWanted.push(k)
   }
 
-  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', c.startField, c.sprintField]
+  // The assignee comes down too: whoever a ticket is on in Jira is who the
+  // register should say runs it, and the two had been kept apart by nothing
+  // more than this field never being asked for.
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', c.startField, c.sprintField]
   for (let i = 0; i < stillWanted.length; i += 50) {
     const batch = stillWanted.slice(i, i + 50)
     const body = {
@@ -581,6 +584,10 @@ function shape(raw, c) {
     sprintCount: sprint.count,
     // What the app should draw and measure: the sprint if there is one, the
     // issue's own dates otherwise.
+    // Whoever holds the ticket, by display name. Never the email or the
+    // account id: a display name is what a person recognises, and the roster
+    // is matched against it by hand rather than guessed.
+    assignee: f.assignee?.displayName || null,
     planStart: sprint.start || startField || null,
     planEnd: sprint.end || day(f.duedate) || null,
     /*

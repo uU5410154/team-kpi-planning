@@ -1387,6 +1387,53 @@ export function repairKpiIds(people) {
 }
 
 /**
+ * What each person is called in Jira.
+ *
+ * Jira has no idea who "Pol" is: the tickets say "Nakittapon Imjaijaroenying",
+ * and one board has the same team recorded as a display name, a username and a
+ * shouted surname all at once. So the roster carries every name a person
+ * answers to, and the sync matches on those rather than guessing from a string
+ * distance — a guess that puts a project on the wrong person's objective is
+ * worse than no match at all.
+ *
+ * Confirmed one by one with the team lead, not inferred. `Panadda` and
+ * `Ronnatouch Pomee` hold tickets under Thapanee and Gun respectively; a name
+ * nobody has claimed is left unmatched and the register's own PIC stands.
+ */
+export const DEFAULT_JIRA_NAMES = {
+  gun: ['Wisarut Gunjarueg', 'Ronnatouch Pomee'],
+  james: ['pipat.singhasiri', 'Pipat Singhasiri'],
+  pphen: ['chanphen', 'Chanphen Manu'],
+  kade: ['Jarinya Phosri'],
+  tha: ['THAPANEE', 'Thapanee', 'Panadda'],
+  pol: ['Nakittapon Imjaijaroenying'],
+}
+
+/** Fold a Jira display name to something two spellings of it share. */
+export const jiraNameKey = (name) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+/**
+ * Who a Jira assignee is on this plan, or null.
+ *
+ * Null is a real answer: an unrecognised name means the register keeps
+ * whatever PIC it has, which is the only safe thing to do with somebody
+ * else's objective.
+ */
+export function personForJiraName(people, name) {
+  const want = jiraNameKey(name)
+  if (!want) return null
+  for (const p of people || []) {
+    const names = Array.isArray(p.jiraNames) && p.jiraNames.length
+      ? p.jiraNames
+      : (DEFAULT_JIRA_NAMES[p.id] || [])
+    if (names.some((n) => jiraNameKey(n) === want)) return p.id
+    // Their own name, spelled as the register spells it.
+    if (jiraNameKey(p.name) === want) return p.id
+  }
+  return null
+}
+
+/**
  * Add any assignable-but-unmeasured entry the stored roster is missing.
  *
  * The roster travels with the plan, so a plan saved before "User" existed has
