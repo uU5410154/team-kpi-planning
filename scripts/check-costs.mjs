@@ -641,12 +641,20 @@ console.log('\n--- the exported workbook carries the same numbers ---')
       col('Project ') > 0 && col('Credited') > 0 && col('Mandays') > 0
       && col('Build cost') > 0 && col('Investment') > 0 && col('ROI') > 0,
       head.filter(Boolean).join(' | '))
-    // Role, share, CAPEX, OPEX, payback and commit stay off: they are stated
-    // once elsewhere, and a sheet that repeats them is a sheet that can
-    // disagree with itself.
+    /*
+     * Role, share, CAPEX, OPEX and payback stay off: they are stated once
+     * elsewhere, and a sheet that repeats them is a sheet that can disagree
+     * with itself.
+     *
+     * COMMIT is now on, deliberately. A Watch row carries hours and credits
+     * none of them, and without the level beside it the sheet showed 171 in
+     * one column and a blank in the next with no way to tell why.
+     */
     check(`${p.nick}: and drops the ones that live elsewhere`,
-      ['Role', 'Share', 'CAPEX', 'OPEX', 'Payback', 'Commit'].every((l) => col(l) < 0),
+      ['Role', 'Share', 'CAPEX', 'OPEX', 'Payback'].every((l) => col(l) < 0),
       head.filter(Boolean).join(' | '))
+    check(`${p.nick}: but keeps the commit level, which explains an uncredited row`,
+      col('Commit') > 0, head.filter(Boolean).join(' | '))
   }
 
   unlinkSync(file)

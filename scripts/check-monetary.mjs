@@ -174,16 +174,22 @@ console.log('\n--- credited on the same share as the project ---')
   const kadeBefore = control.people.find((p) => p.id === 'kade')
   const jamesBefore = control.people.find((p) => p.id === 'james')
 
-  check('the project splits 83/17', Math.abs(jamesShare - 1 / 1.2) < 1e-9)
-  check('THE CASH IS CREDITED ON THAT SAME SPLIT',
-    Math.abs(james.finance.monetaryAnnualBenefit - CASH * jamesShare) < 0.01
-    && Math.abs(kade.finance.monetaryAnnualBenefit - CASH * kadeShare) < 0.01,
+  /*
+   * The cash follows the same rule the hours do: it goes to the PIC, whole.
+   * It used to be split across the contributor record by role weight, so a QA
+   * recorded on a project carried a share of its cash benefit — the same fault
+   * that put projects on scorecards their owner did not run.
+   */
+  check('the project is not split at all', jamesShare === 1 && !kadeShare,
+    JSON.stringify(pr.shares))
+  check('THE CASH IS CREDITED WHOLLY TO THE PIC',
+    Math.abs(james.finance.monetaryAnnualBenefit - CASH) < 0.01
+    && !(kade.finance.monetaryAnnualBenefit > 0),
     `${Math.round(james.finance.monetaryAnnualBenefit)} + ${Math.round(kade.finance.monetaryAnnualBenefit)} of ${CASH}`)
-  check('the two credited halves add back to the whole',
-    Math.abs(james.finance.monetaryAnnualBenefit + kade.finance.monetaryAnnualBenefit - CASH) < 0.01)
-  check('their value released rose by exactly their share of it',
-    Math.abs((james.finance.annualBenefit - jamesBefore.finance.annualBenefit)
-      - CASH * jamesShare) < 1,
+  check('and a contributor who is not the PIC gets none of it',
+    Math.abs(kade.finance.monetaryAnnualBenefit - kadeBefore.finance.monetaryAnnualBenefit) < 0.01)
+  check("the PIC's value released rose by the whole of it",
+    Math.abs((james.finance.annualBenefit - jamesBefore.finance.annualBenefit) - CASH) < 1,
     `${Math.round(jamesBefore.finance.annualBenefit)} -> ${Math.round(james.finance.annualBenefit)}`)
   check('and their FTE released did not', Math.abs(kade.finance.fteReleased - kadeBefore.finance.fteReleased) < 1e-9)
   check('the lead carries the whole of it',

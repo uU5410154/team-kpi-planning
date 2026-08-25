@@ -242,18 +242,30 @@ console.log('\n--- the annual basis does not multiply anything by twelve ---')
      * outside-owned work and by nothing else: any other gap is hours falling
      * through a crack, which is the failure this check exists to catch.
      */
-    const outside = plan2.projects.filter((x) => x.outsideTeam
-      && x.commitLevel !== 'nextyear' && x.commitLevel !== 'excluded')
+    const inPlan = (x) => x.commitLevel !== 'nextyear' && x.commitLevel !== 'excluded'
+    const outside = plan2.projects.filter((x) => x.outsideTeam && inPlan(x))
     const outsideFte = outside.reduce((a, x) => a + (x.fteReleased || 0), 0)
     const outsideBenefit = outside.reduce((a, x) => a + (x.monthlyBenefit || 0), 0)
-    check(`${b}: the lead scorecard FTE is the portfolio FTE less what the team does not own`,
-      near(lead.finance.fteReleased, plan2.finance.fteReleased - outsideFte, 1e-6),
-      `${lead.finance.fteReleased.toFixed(3)} vs ${plan2.finance.fteReleased.toFixed(3)} − ${outsideFte.toFixed(3)}`)
-    check(`${b}: the per-person benefits sum to the portfolio benefit less the same`,
+    /*
+     * AND THE WORK NOBODY IS PIC OF, which is on no card either.
+     *
+     * Credit follows the PIC and nobody else, so a project with no PIC reaches
+     * no scorecard — the lead used to absorb those and no longer does. The
+     * portfolio still counts them, so the cards fall short of it by exactly
+     * two named amounts rather than one.
+     */
+    const unowned = plan2.projects.filter((x) => !x.pic && !x.outsideTeam && inPlan(x))
+    const unownedFte = unowned.reduce((a, x) => a + (x.fteReleased || 0), 0)
+    const unownedBenefit = unowned.reduce((a, x) => a + (x.monthlyBenefit || 0), 0)
+    check(`${b}: the lead scorecard FTE is the portfolio FTE less outside-owned and unowned`,
+      near(lead.finance.fteReleased, plan2.finance.fteReleased - outsideFte - unownedFte, 1e-6),
+      `${lead.finance.fteReleased.toFixed(3)} vs ${plan2.finance.fteReleased.toFixed(3)} − ${outsideFte.toFixed(3)} − ${unownedFte.toFixed(3)}`)
+    check(`${b}: the per-person benefits sum to the portfolio benefit less the same two`,
       near(plan2.people.reduce((a, p) => a + p.monthlyBenefit, 0),
-        plan2.finance.monthlyBenefit - outsideBenefit, 1e-6),
-      `${Math.round(plan2.people.reduce((a, p) => a + p.monthlyBenefit, 0))} vs ${Math.round(plan2.finance.monthlyBenefit)} − ${Math.round(outsideBenefit)}`)
-    check(`${b}: and the gap is real, not zero by accident`, outsideFte > 0 && outsideBenefit > 0,
+        plan2.finance.monthlyBenefit - outsideBenefit - unownedBenefit, 1e-6),
+      `${Math.round(plan2.people.reduce((a, p) => a + p.monthlyBenefit, 0))} vs ${Math.round(plan2.finance.monthlyBenefit)} − ${Math.round(outsideBenefit)} − ${Math.round(unownedBenefit)}`)
+    check(`${b}: and the outside-owned gap is real, not zero by accident`,
+      outsideFte > 0 && outsideBenefit > 0,
       `${outside.length} projects owned outside the team`)
   }
 }

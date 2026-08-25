@@ -250,6 +250,74 @@ for (const person of scorecardPeople) {
     picless.slice(0, 2).map((r) => `${r.key}: "${r.why}"`).join(' | ') || 'none on this sheet')
 }
 
+/* ====== the two totals on a person's sheet must reconcile ======
+ *
+ * A row can carry hours and credit none of them: Watch and Deferred count
+ * toward nothing this year, deliberately, so an epic nobody has costed cannot
+ * move a KPI by arriving. The sheet showed 171 hours in one column and a blank
+ * in the next, with no total on the first column and no explanation of the
+ * difference — which reads as the export having lost the number.
+ */
+console.log('\n--- the hours on the rows and the hours credited both add up ---')
+for (const person of scorecardPeople) {
+  const pp = plan.people.find((x) => x.id === person.id)
+  if (!pp || !pp.scorecardRows.length) continue
+  const ws = back.getWorksheet(`Obj-${person.nick}`)
+  let hr = null
+  ws.eachRow((row, n) => {
+    if (String(row.getCell(1).value || '') === 'Jira' && String(row.getCell(2).value || '') === 'Project') hr = n
+  })
+  if (!hr) continue
+  // row.values is sparse — index 0 is a hole, and .map leaves holes alone.
+  const head = Array.from(ws.getRow(hr).values, (v) => String(v || ''))
+  const cProj = head.findIndex((h) => h.startsWith('Project hrs'))
+  const cCred = head.findIndex((h) => h === 'Credited')
+  const cCommit = head.findIndex((h) => h === 'Commit')
+  check(`${person.nick}: the portfolio names the commit level`, cCommit > 0, head.join(' | '))
+
+  let onRows = 0
+  let credited = 0
+  let totalRow = null
+  let note = null
+  for (let n = hr + 1; n <= ws.rowCount; n++) {
+    const row = ws.getRow(n)
+    const label = String(row.getCell(2).value || '')
+    if (/^TOTAL/.test(label)) { totalRow = row; continue }
+    if (/sit on these projects/.test(label)) { note = label; continue }
+    if (totalRow) break
+    onRows += Number(row.getCell(cProj).value) || 0
+    credited += Number(row.getCell(cCred).value) || 0
+  }
+  // A person carrying no hours at all has a legitimate zero; what must never
+  // happen is the cell being EMPTY, which is what made the column look
+  // untotalled beside a credited figure.
+  check(`${person.nick}: the rows carry a total of their own`,
+    !!totalRow && Number.isFinite(Number(totalRow.getCell(cProj).value)),
+    String(totalRow && totalRow.getCell(cProj).value))
+  if (!totalRow) continue
+  check(`${person.nick}: AND IT IS THE SUM OF THE COLUMN ABOVE IT`,
+    Math.abs(Number(totalRow.getCell(cProj).value) - onRows) <= 1,
+    `${totalRow.getCell(cProj).value} vs ${Math.round(onRows)} added up`)
+  check(`${person.nick}: the credited total is the sum of the credited column`,
+    Math.abs(Number(totalRow.getCell(cCred).value) - credited) <= 1,
+    `${totalRow.getCell(cCred).value} vs ${Math.round(credited)}`)
+  check(`${person.nick}: and it is the figure the app shows`,
+    Math.abs(Number(totalRow.getCell(cCred).value) - pp.scorecardHours) <= 1,
+    `${totalRow.getCell(cCred).value} vs ${Math.round(pp.scorecardHours)}`)
+
+  /* Where the two differ, the sheet must say why — in hours, on the row. */
+  const gap = Math.round(onRows - credited)
+  if (gap > 0) {
+    check(`${person.nick}: THE DIFFERENCE IS EXPLAINED, NOT LEFT TO BE GUESSED`,
+      !!note && note.includes(String(gap.toLocaleString())),
+      note || `no note for a ${gap} hr difference`)
+    check(`${person.nick}: and it names the projects behind it`,
+      !!note && /FNP-[0-9]+/.test(note), note || '')
+  } else {
+    check(`${person.nick}: nothing to explain — every hour on the sheet is credited`, !note)
+  }
+}
+
 console.log(`\nsheets (${names.length}): ${names.join(', ')}`)
 console.log(`file size: ${(readFileSync(file).length / 1024).toFixed(1)} KB`)
 unlinkSync(file)

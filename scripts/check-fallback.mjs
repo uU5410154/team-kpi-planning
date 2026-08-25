@@ -4,9 +4,13 @@
  *   - A project THEY own is not the team's: nobody is credited, its hours are
  *     not in the commitment, and the lead does NOT absorb it. Claiming it
  *     would be claiming somebody else's work.
- *   - Saving hours that land on no scorecard owner because the project is
- *     UNASSIGNED are still credited to the team lead, who carries the team's
- *     overall KPI. Unowned and owned-by-someone-else are not the same thing.
+ *   - Saving hours on a project NOBODY is PIC of land on nobody. The lead used
+ *     to absorb them, which put projects on the lead's card that the lead did
+ *     not own — the same fault as crediting a contributor. They are not lost:
+ *     the book still counts them and `totals.unownedHours` names them.
+ *
+ * Unowned and owned-by-someone-else are still not the same thing: one is a gap
+ * to close, the other is work this team did not do.
  *
  * Run with: node scripts/check-fallback.mjs
  */
@@ -59,31 +63,55 @@ check('none of it reaches the team commitment',
   itProjects.every((p) => p.poolHours === 0))
 
 const unassigned = plan.projects.filter((p) => !p.pic)
-check('every unassigned project is credited to the lead',
-  unassigned.every((p) => Math.abs((p.shares[lead.id] || 0) - 1) < 1e-9),
-  `${unassigned.length} projects`)
+check('NO UNASSIGNED PROJECT IS CREDITED TO ANYBODY',
+  unassigned.every((p) => Object.keys(p.shares || {}).length === 0),
+  unassigned.filter((p) => Object.keys(p.shares || {}).length)
+    .slice(0, 3).map((p) => `${p.jiraKey || p.key} ${JSON.stringify(p.shares)}`).join(' | ')
+  || `${unassigned.length} projects, none credited`)
+check('  not even to the lead, who used to absorb them',
+  unassigned.every((p) => !(p.shares || {})[lead.id]))
+check('  and none of them claims to be a fallback',
+  unassigned.every((p) => p.fellBack !== true))
 
-check('nothing is left credited to nobody', plan.totals.orphanHours === 0,
-  String(plan.totals.orphanHours))
-console.log(`  fallback: ${Math.round(plan.totals.fallbackHours)} hrs across ${plan.totals.fallbackCount} projects`)
+/*
+ * They are not lost, though. The hours are in the book and the difference has
+ * a name, because a total that quietly stops matching the sum of its parts is
+ * a total nobody can use.
+ */
+check('THE HOURS ARE STILL COUNTED, UNDER A NAME',
+  plan.totals.unownedHours > 0 && plan.totals.unownedCount > 0,
+  `${Math.round(plan.totals.unownedHours)} hrs across ${plan.totals.unownedCount} projects with no PIC`)
+check('  and that name covers exactly the counted, in-plan, ours-to-do ones',
+  Math.abs(plan.totals.unownedHours - unassigned
+    .filter((p) => !p.outsideTeam && (p.commitLevel === 'commit' || p.commitLevel === 'stretch'))
+    .reduce((a, p) => a + (p.savingHours ?? 0), 0)) < 0.01,
+  String(Math.round(plan.totals.unownedHours)))
+check('  the book, the cards and the unowned add back up',
+  Math.abs((lead.scorecardHours + plan.totals.outsideHours + plan.totals.unownedHours)
+    - plan.totals.totalHours) < 0.01,
+  `${Math.round(lead.scorecardHours)} + ${Math.round(plan.totals.outsideHours)} + ${Math.round(plan.totals.unownedHours)} vs ${Math.round(plan.totals.totalHours)}`)
 
-/* ---------------- it is additive, not a rewrite ---------------- */
-console.log('\n--- the rule only adds, never moves owned work ---')
-const noFallback = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, fallbackPic: null } })
-for (const p of noFallback.people) {
-  const withF = plan.people.find((x) => x.id === p.id)
-  if (p.id === lead.id) {
-    check(`${p.nick} gains the unowned hours`, withF.hours > p.hours,
-      `${Math.round(p.hours)} -> ${Math.round(withF.hours)}`)
-  } else {
-    check(`${p.nick} is unchanged`, Math.abs(withF.hours - p.hours) < 1e-9,
-      `${Math.round(p.hours)}`)
-  }
+/* ---------------- naming somebody is what moves it ---------------- */
+console.log('\n--- and naming a PIC is what puts it on a card ---')
+const orphan = unassigned.find((p) => (p.savingHours ?? 0) > 0)
+check('there is an unowned project carrying hours to test with', !!orphan,
+  orphan && `${orphan.jiraKey || orphan.key} ${orphan.savingHours} hrs`)
+if (orphan) {
+  const named = computePlan({
+    ...base,
+    projects: base.projects.map((p) => (p.key === orphan.key ? { ...p, pic: 'kade' } : p)),
+  })
+  const was = plan.people.find((x) => x.id === 'kade')
+  const now = named.people.find((x) => x.id === 'kade')
+  check('naming a PIC puts it on THEIR card, and only theirs',
+    now.hours > was.hours,
+    `${Math.round(was.hours)} -> ${Math.round(now.hours)}`)
+  check('  and takes it out of the unowned bucket',
+    named.totals.unownedHours < plan.totals.unownedHours,
+    `${Math.round(plan.totals.unownedHours)} -> ${Math.round(named.totals.unownedHours)}`)
+  check('  while the book does not move',
+    Math.abs(named.totals.totalHours - plan.totals.totalHours) < 0.01)
 }
-check('the gain equals what was previously orphaned',
-  Math.abs((plan.people.find((x) => x.id === lead.id).hours - noFallback.people.find((x) => x.id === lead.id).hours)
-    - noFallback.totals.orphanHours) < 0.01,
-  `gain ${Math.round(plan.people.find((x) => x.id === lead.id).hours - noFallback.people.find((x) => x.id === lead.id).hours)} vs orphaned ${Math.round(noFallback.totals.orphanHours)}`)
 
 /* ---------------- totals stay sound ---------------- */
 console.log('\n--- totals and shares stay sound ---')
@@ -97,9 +125,16 @@ for (const p of seed.projects) {
   const { shares, partnerShare } = projectShares(p, DEFAULT_SETTINGS.roleWeights, false,
     { owners, fallbackPic: 'gun' })
   const sum = Object.values(shares).reduce((a, b) => a + b, 0) + partnerShare
-  if (Math.abs(sum - 1) > 1e-9) bad.push(`${p.key}=${sum.toFixed(4)}`)
+  /*
+   * A project is credited 100% or 0%: whole to its PIC, or to nobody at all
+   * where it has none or its PIC holds no scorecard. What must never happen is
+   * a fraction — that would be the split coming back.
+   */
+  const ok = Math.abs(sum - 1) < 1e-9 || sum === 0
+  if (!ok) bad.push(`${p.key}=${sum.toFixed(4)}`)
 }
-check('every project still totals 100% of its hours', bad.length === 0, bad.slice(0, 5).join(', '))
+check('EVERY PROJECT IS CREDITED WHOLE OR NOT AT ALL — never a fraction',
+  bad.length === 0, bad.slice(0, 5).join(', '))
 check('no credit ever lands on a non-scorecard id',
   plan.projects.every((p) => Object.keys(p.shares).every((k) => owners.has(k))))
 
@@ -122,13 +157,19 @@ check('and the team commitment grows by exactly that project',
 check('while the book total does not move — the row was always on the register',
   Math.abs(moved.totals.totalHours - plan.totals.totalHours) < 0.01)
 
-/* ---------------- a configurable fallback ---------------- */
+/* ---------------- and the old setting decides nothing ----------------
+ *
+ * `fallbackPic` used to name whoever absorbed unowned work. Nobody absorbs it
+ * any more, so the setting must be inert — a stored value from an older plan
+ * cannot be allowed to quietly put projects back on somebody's card.
+ */
 const toJames = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, fallbackPic: 'james' } })
-check('the fallback owner is configurable',
-  toJames.people.find((p) => p.id === 'james').hours > plan.people.find((p) => p.id === 'james').hours &&
-  toJames.people.find((p) => p.id === 'gun').hours < plan.people.find((p) => p.id === 'gun').hours)
-check('an unknown fallback id is ignored rather than crashing',
-  computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, fallbackPic: 'nope' } }).totals.orphanHours > 0)
+check('SETTING A FALLBACK OWNER MOVES NOTHING AT ALL',
+  JSON.stringify(toJames.people.map((p) => Math.round(p.hours)))
+  === JSON.stringify(plan.people.map((p) => Math.round(p.hours))),
+  `${Math.round(toJames.people.find((p) => p.id === 'james').hours)} vs ${Math.round(plan.people.find((p) => p.id === 'james').hours)}`)
+check('  and an unknown one is still ignored rather than crashing',
+  Number.isFinite(computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, fallbackPic: 'nope' } }).totals.unownedHours))
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`)
 process.exit(failures === 0 ? 0 : 1)

@@ -17,12 +17,20 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
-// Transcribed from KPI_Guideline_FA Tech_2026.xlsx, columns:
-//   Objective | Objective detail | F&A Tech
+/*
+ * Transcribed from KPI_Guideline_FA Tech_2026.xlsx, columns:
+ *   Objective | Objective detail | F&A Tech
+ *
+ * Row 1 is NOT the original. Objective 1 was Financial — the average return on
+ * whatever work the team was handed — and P'Puu replaced it with project
+ * management: commit a delivery date and hold to it. The wording below is the
+ * replacement as agreed, and the rest of the sheet is still the guideline
+ * verbatim.
+ */
 const EXPECTED = [
-  ['Financial',
-    'Activities which improve PL, BS, Cash flow',
-    'FTEs management เช่น การนำเสนอ project sprint vs. man-hour ที่ทีม invest vs. benefits ที่ได้ ว่าคุ้มค่าหรือไม่'],
+  ['Project management',
+    'Commit a timeline and deliver against it',
+    'Commit timeline ของตนเอง: ปรับ timeline ได้ไม่เกิน 1 sprint และไม่เกินสัดส่วนที่ตกลงไว้ ของจำนวน report + project ที่ถืออยู่'],
   ['F&A process automation',
     'to transform all manual work to automation',
     '3,000 hrs.'],

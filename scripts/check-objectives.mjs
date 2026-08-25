@@ -210,9 +210,15 @@ console.log('\n--- a counted objective counts deliverables ---')
   const lead = who(plain, 'gun')
   for (const id of COUNT_OBJECTIVES) {
     const line = lead.kpiLines.find((l) => l.objective === id && !l.custom)
-    // Not `outsideTeam`: a dashboard IT built is a dashboard, but it is not
-    // one of OUR deliverables, so it cannot sit on our card.
-    const counted = plain.projects.filter((p) => servesObjective(p, id) && !p.outsideTeam
+    /*
+     * Not `outsideTeam`: a dashboard IT built is a dashboard, but it is not
+     * one of OUR deliverables, so it cannot sit on our card.
+     *
+     * And not one with no PIC either. The lead's card is the sum of the
+     * members' cards, and a project nobody is named to reaches none of them —
+     * it is counted in the book and named in totals.unownedHours instead.
+     */
+    const counted = plain.projects.filter((p) => servesObjective(p, id) && !p.outsideTeam && p.pic
       && (p.commitLevel === 'commit' || p.commitLevel === 'stretch')).length
     check(`${OBJ_BY_ID[id].no}: the target is a number of ${OBJ_BY_ID[id].countUnit}`,
       line?.targetKind === 'number' && line.unit === OBJ_BY_ID[id].countUnit,
@@ -267,7 +273,7 @@ console.log('\n--- tagging a project to more objectives adds no hours ---')
     `${Math.round(who(all, 'gun').kpiTotals.savingHours)}`)
   check('while every counted objective now counts the whole of the team\'s book',
     COUNT_OBJECTIVES.every((id) => who(all, 'gun').countByObjective[id]
-      === plain.projects.filter((p) => !p.outsideTeam
+      === plain.projects.filter((p) => !p.outsideTeam && p.pic
         && (p.commitLevel === 'commit' || p.commitLevel === 'stretch')).length),
     COUNT_OBJECTIVES.map((id) => `${id}:${who(all, 'gun').countByObjective[id]}`).join(' '))
   check('and nothing is blocked from saving', all.invalid.length === 0)

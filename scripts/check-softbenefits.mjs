@@ -127,13 +127,23 @@ console.log('\n--- everyone credited on the project sees them ---')
   }
   check('the owner\'s scorecard carries them',
     JSON.stringify(on(shared.pic)) === JSON.stringify(BULLETS), JSON.stringify(on(shared.pic)))
-  check('AND SO DOES THE SECOND CONTRIBUTOR\'S, IN FULL',
-    JSON.stringify(on('kade')) === JSON.stringify(BULLETS), JSON.stringify(on('kade')))
+  /*
+   * A contributor's sheet does NOT, because the project is not on it: credit
+   * follows the PIC and nobody else, so a person recorded as QA on somebody
+   * else's project has no row there to carry the soft benefits either.
+   */
+  check('A CONTRIBUTOR WHO IS NOT THE PIC HAS NO ROW TO CARRY THEM',
+    on('kade') === null, JSON.stringify(on('kade')))
   check('the team lead sees them too',
     JSON.stringify(on('gun')) === JSON.stringify(BULLETS))
-  check('a soft benefit is not divided by the share it sits on',
-    on('kade').length === BULLETS.length,
-    `${on('kade').length} of ${BULLETS.length} at ${Math.round((plan.projects.find((p) => p.key === shared.key).shares.kade || 0) * 100)}% share`)
+  /*
+   * And where it DOES appear, it appears whole. A soft benefit is not
+   * divisible: the person who runs the project delivers all of it, not a
+   * fraction weighted by anything.
+   */
+  check('a soft benefit is never divided',
+    on(shared.pic).length === BULLETS.length && on('gun').length === BULLETS.length,
+    `${on(shared.pic).length} of ${BULLETS.length} on the PIC's sheet`)
 
   // a deferred project delivers nothing this year
   const deferred = computePlan({

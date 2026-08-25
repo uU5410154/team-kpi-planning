@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { OBJECTIVES, OBJ_BY_ID, OUT_OF_PLAN } from './palette.js'
+import { OBJECTIVES, OBJ_BY_ID, OUT_OF_PLAN, COMMIT_LEVELS } from './palette.js'
 import {
   SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths, MONTH_LABELS, MONTHS_IN_YEAR, countsToPool, creditSummary, ROLE_LABEL,
 } from './model.js'
@@ -14,6 +14,9 @@ const RULE = 'FFD7E2EA'
 const ZEBRA = 'FFF7F9FB'
 const INK = 'FF0B0B0B'
 const MUTED = 'FF52514E'
+
+// What a commit level is called on screen, so the workbook says the same word.
+const COMMIT_LABEL = Object.fromEntries(COMMIT_LEVELS.map((c) => [c.id, c.label]))
 const GOOD = 'FF0CA30C'
 const WARN = 'FFB57A00'
 const BAD = 'FFD03B3B'
@@ -710,6 +713,16 @@ export async function buildWorkbook(plan, state) {
        * P'Phen because P'Phen is its developer. Now it says so.
        */
       ['Why it is here', 26],
+      /*
+       * WHY A ROW WITH HOURS ON IT CREDITS NOTHING.
+       *
+       * Watch and Deferred rows count toward no total this year — deliberately,
+       * so an epic nobody has costed cannot move a KPI by arriving. The sheet
+       * showed 171 hours in one column and a blank in the next with no
+       * explanation, which reads as the export losing the number rather than
+       * as the register saying it is not committed yet.
+       */
+      ['Commit', 11],
       [`Project ${unit}`, 14], ['Credited', 11],
       ['Mandays', 11], [`Build cost (${cur})`, 14], [`Investment (${cur})`, 14],
       [`Cash benefit/yr (${cur})`, 16], ['ROI', 10], ['Status', 13],
@@ -969,6 +982,7 @@ export async function buildWorkbook(plan, state) {
         pr.summary,
         OBJ_BY_ID[pr.objective] ? `${OBJ_BY_ID[pr.objective].no}. ${OBJ_BY_ID[pr.objective].short}` : '',
         why,
+        COMMIT_LABEL[pr.commitLevel] || pr.commitLevel || '',
         pr.savingHours ?? null,
         !counted || pr.savingHours == null ? null : Number(((pr.savingHours ?? 0) * share).toFixed(1)),
         // `inTotal` is the SAME predicate model.js uses to build p.finance —
@@ -994,6 +1008,10 @@ export async function buildWorkbook(plan, state) {
       // A row nobody owns is the one to go and fix, so it is marked as such
       // rather than sitting quietly in a column of ordinary ones.
       if (pr.fellBack) tone(row.getCell(px('Why it is here')), WARN, false)
+      if (!counted) {
+        tone(row.getCell(px('Commit')), MUTED, false)
+        tone(row.getCell(px(`Project ${unit}`)), MUTED, false)
+      }
       row.getCell(px('Mandays')).numFmt = N1
       row.getCell(px('ROI')).numFmt = ROI
       if (inTotal && pr.roi != null) tone(row.getCell(px('ROI')), pr.gate === 'pass' ? GOOD : BAD, false)
@@ -1020,6 +1038,16 @@ export async function buildWorkbook(plan, state) {
       c.numFmt = fmt
     }
     total('Credited', Math.round(p.scorecardHours), N0)
+    /*
+     * AND THE COLUMN BESIDE IT GETS A TOTAL TOO.
+     *
+     * It had none, so a reader added up the hours they could see, got a bigger
+     * number than the TOTAL CREDITED beside it, and reasonably concluded the
+     * export had lost some. Both totals are now on the row, and the line under
+     * it says what the difference is.
+     */
+    const onRows = p.scorecardRows.reduce((a, { p: pr }) => a + (pr.savingHours ?? 0), 0)
+    total(`Project ${unit}`, Math.round(onRows), N0)
     total('Mandays', Number((p.scorecardManday || 0).toFixed(1)), N1)
     // The AVERAGE of the ROI column above it, which is what objective 1 on the
     // scorecard reads. The portfolio return — total net benefit over total
@@ -1030,6 +1058,32 @@ export async function buildWorkbook(plan, state) {
     if (p.hoursOverridden) tone(tr.getCell(px('Credited')), WARN)
     total('Build cost', p.finance.buildCost == null ? null : Math.round(p.finance.buildCost), MONEY)
     total('Investment', p.finance.investment == null ? null : Math.round(p.finance.investment), MONEY)
+    /*
+     * The difference between the two totals, named, on the rows it comes from.
+     * Watch and Deferred count toward nothing this year by design — an epic
+     * nobody has costed must not move a KPI by arriving — and a difference
+     * nobody can account for is how a total stops being believed.
+     */
+    const notCounted = p.scorecardRows
+      .filter(({ p: pr }) => !(pr.commitLevel === 'commit' || pr.commitLevel === 'stretch'))
+      .filter(({ p: pr }) => (pr.savingHours ?? 0) > 0)
+    if (notCounted.length) {
+      const gap = notCounted.reduce((a, { p: pr }) => a + (pr.savingHours ?? 0), 0)
+      const note = ws.getRow(r + 1)
+      note.getCell(2).value = `${Math.round(onRows).toLocaleString()} ${unit} sit on these projects; `
+        + `${Math.round(p.scorecardHours).toLocaleString()} are credited. The other `
+        + `${Math.round(gap).toLocaleString()} are on ${notCounted.length} project`
+        + `${notCounted.length === 1 ? '' : 's'} marked `
+        + `${[...new Set(notCounted.map(({ p: pr }) => COMMIT_LABEL[pr.commitLevel] || pr.commitLevel))].join(' or ')}`
+        + `, which count toward nothing this year until somebody commits them`
+        + ` (${notCounted.slice(0, 3).map(({ p: pr }) => pr.jiraKey || pr.key).join(', ')}`
+        + `${notCounted.length > 3 ? '…' : ''}).`
+      note.getCell(2).font = { name: FONT, size: 9, italic: true, color: { argb: MUTED } }
+      note.getCell(2).alignment = { wrapText: true, vertical: 'top' }
+      ws.mergeCells(note.number, 2, note.number, Math.min(cols.length, 10))
+      note.height = 26
+    }
+
     for (let c = 1; c <= cols.length; c++) {
       const cell = tr.getCell(c)
       cell.font = { name: FONT, size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
