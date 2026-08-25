@@ -54,6 +54,18 @@ export const jiraIssues = async (keys) =>
     body: JSON.stringify({ keys }),
   }))
 
+/**
+ * Run the sync ON THE SERVER, against the SHARED plan.
+ *
+ * The difference from reading issues and merging in the browser is who ends up
+ * with the result: this writes the scenario everybody loads, which is what the
+ * 07:00 job does every morning. A merge done in one browser stays in that
+ * browser until somebody saves it, and a colleague who synced on their own
+ * machine has not changed anything anybody else can see.
+ */
+export const jiraSyncShared = async () =>
+  j(await fetch('/api/jira/sync', { method: 'POST' }))
+
 /** The tasks under an epic, or the epics under an initiative. */
 export const jiraChildren = async (keys) =>
   j(await fetch('/api/jira/children', {

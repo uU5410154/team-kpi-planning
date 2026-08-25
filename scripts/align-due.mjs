@@ -34,17 +34,23 @@ const state = doc.payload?.state || doc.payload
 console.log(`plan "${doc.name}" saved ${doc.updatedAt} by ${doc.updatedBy}: ${state.projects.length} projects\n`)
 
 const keys = state.projects.map((p) => String(p.jiraKey || '').trim()).filter((k) => JIRA_KEY.test(k))
-const { issues } = await post('/api/jira/issues', { keys })
+const [{ issues }, rolled] = await Promise.all([
+  post('/api/jira/issues', { keys }),
+  // The sprints the work under each epic is booked into, for the epics that
+  // carry neither a due date nor a sprint of their own.
+  post('/api/jira/rollup', { keys }),
+])
 const jira = new Map(issues.map((i) => [i.key, i]))
+const tasks = rolled.byParent || {}
 console.log(`${issues.length} of ${keys.length} keys found on the board`)
 
 /*
  * The date this project is committed to, by the same rule the sync uses: the
- * epic's own date, or the end of the sprint it has been scheduled into. Never
- * the latest date on the tasks underneath — an epic nobody has dated is a
- * commitment nobody has made.
+ * epic's own due date, then the sprint the epic is in, then the last sprint
+ * the work under it is booked into. Never the latest DEADLINE typed on a task
+ * — a deadline on a task is not a commitment made for the project.
  */
-const dueFor = (raw, j) => (j && (j.due || j.sprintEnd)) || null
+const dueFor = (raw, j) => (j && (j.due || j.sprintEnd || tasks[raw.jiraKey]?.latestSprintEnd)) || null
 
 const before = computePlan(repairState({ ...state }))
 const rowOf = new Map(before.projects.map((p) => [p.key, p]))

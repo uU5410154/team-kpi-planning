@@ -251,6 +251,16 @@ export default function Timeline({
             ? `${r.fromCreated} start${r.fromCreated === 1 ? '' : 's'} taken from when the ticket was raised`
             : null,
         ].filter(Boolean).join(' · '),
+        /*
+         * WHERE IT LANDED, said out loud.
+         *
+         * This merge is in this browser. It said "3 projects updated" and
+         * nothing about who could see them, so somebody synced on their
+         * machine, watched a delay bar appear, and a colleague opening the app
+         * saw nothing — which reads as the app being broken rather than as the
+         * change never having left the room.
+         */
+        note: 'This is in your browser. Use “Sync for everyone” to run it against the shared plan.',
       })
     } catch (e) {
       setSyncNote({ severity: 'error', text: e.message })
@@ -355,6 +365,42 @@ export default function Timeline({
    */
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
+
+  /**
+   * Run the sync on the server, against the plan everybody loads.
+   *
+   * The same merge, run in the place where the result is visible to the team
+   * rather than to one browser. Nothing local is touched: the shared plan is
+   * rewritten, and this browser picks it up the way it picks up any other
+   * change to it — on the next load.
+   */
+  const [sharing, setSharing] = useState(false)
+  const syncShared = async () => {
+    setSharing(true)
+    setSyncNote(null)
+    try {
+      const r = await api.jiraSyncShared()
+      if (!r.ok) {
+        setSyncNote({ severity: 'error', text: r.error || 'The server could not run the sync.' })
+        return
+      }
+      setSyncNote({
+        severity: 'success',
+        text: [
+          r.wrote ? 'The SHARED plan has been updated' : 'The shared plan was already up to date',
+          r.updated ? `${r.updated} project${r.updated === 1 ? '' : 's'} changed` : null,
+          r.added ? `${r.added} new epic${r.added === 1 ? '' : 's'} added as Watch` : null,
+          r.adjusted ? `${r.adjusted} carrying an adjusted date from a delay elsewhere` : null,
+          r.pinned ? `${r.pinned} finish date${r.pinned === 1 ? '' : 's'} left alone as held` : null,
+        ].filter(Boolean).join(' · '),
+        note: r.wrote ? 'Reload the page to see it — everyone else will get it when they do.' : null,
+      })
+    } catch (e) {
+      setSyncNote({ severity: 'error', text: e.message })
+    } finally {
+      setSharing(false)
+    }
+  }
 
   /**
    * Hold a project's finish date against the sync, or hand it back.
@@ -1149,14 +1195,30 @@ export default function Timeline({
           >
             {finding ? 'Looking…' : 'Find new epics'}
           </Button>
-          <Button
-            variant="outlined"
-            startIcon={<SyncIcon />}
-            disabled={!jira?.configured || syncing}
-            onClick={sync}
-          >
-            {syncing ? 'Reading Jira…' : 'Sync with Jira'}
-          </Button>
+          <Tooltip title="Reads Jira and updates YOUR copy of the register. Nobody else sees it until you save.">
+            <span>
+              <Button
+                variant="outlined"
+                startIcon={<SyncIcon />}
+                disabled={!jira?.configured || syncing || sharing}
+                onClick={sync}
+              >
+                {syncing ? 'Reading Jira…' : 'Sync with Jira'}
+              </Button>
+            </span>
+          </Tooltip>
+          <Tooltip title="Runs the same sync on the server against the SHARED plan — the one everybody loads. This is what the 07:00 job does every morning.">
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<SyncIcon />}
+                disabled={!jira?.configured || syncing || sharing}
+                onClick={syncShared}
+              >
+                {sharing ? 'Syncing for everyone…' : 'Sync for everyone'}
+              </Button>
+            </span>
+          </Tooltip>
           <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5 }}>
             {jira == null ? 'checking…'
               : jira.configured ? `${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account}`
@@ -1166,7 +1228,18 @@ export default function Timeline({
       </Box>
       {syncing && <LinearProgress />}
       {syncNote && (
-        <Alert severity={syncNote.severity} onClose={() => setSyncNote(null)}>{syncNote.text}</Alert>
+        <Alert severity={syncNote.severity} onClose={() => setSyncNote(null)}>
+          {syncNote.text}
+          {/* Where the change landed, and who can see it. A sync that says
+              "3 projects updated" and nothing about whose copy they are in is
+              how one person watches a bar appear and a colleague opening the
+              same app sees nothing. */}
+          {syncNote.note && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, opacity: 0.9 }}>
+              {syncNote.note}
+            </Typography>
+          )}
+        </Alert>
       )}
       {jira && !jira.configured && (
         <Alert severity="info">
