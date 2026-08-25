@@ -11,7 +11,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import puppeteer from 'puppeteer-core'
 import {
-  computePlan, DEFAULT_SETTINGS, timelineOf, daysBetween, isDate, repairAsOfDate, STALE_AS_OF,
+  computePlan, DEFAULT_SETTINGS, timelineOf, daysBetween, isDate, repairAsOfDate, STALE_AS_OF, asOfOf,
 } from '../src/lib/model.js'
 
 let failures = 0
@@ -283,16 +283,26 @@ console.log(String.fromCharCode(10) + '--- nothing unfinished draws an actual ba
    * read as minus nine days — and delayed everything becoming overdue.
    */
   const today = new Date().toISOString().slice(0, 10)
-  check('THE AS-OF DATE IS TODAY BY DEFAULT', DEFAULT_SETTINGS.asOfDate === today,
-    `${DEFAULT_SETTINGS.asOfDate} vs ${today}`)
-  check('  a plan holding the old hard-coded default is moved on', (() => {
+  check('"AS OF TODAY" IS NOT STORED AT ALL', DEFAULT_SETTINGS.asOfDate === null,
+    `default is ${JSON.stringify(DEFAULT_SETTINGS.asOfDate)} — a stored today is wrong tomorrow`)
+  check('  it is DERIVED, every time it is asked', asOfOf({}) === today
+    && asOfOf({ asOfDate: STALE_AS_OF }) === today,
+    `${asOfOf({ asOfDate: STALE_AS_OF })} even when the plan holds ${STALE_AS_OF}`)
+  check('  a stale stored date is un-pinned rather than rewritten', (() => {
     const { settings, moved } = repairAsOfDate({ asOfDate: STALE_AS_OF })
-    return moved === true && settings.asOfDate === today
+    // Nothing is written in its place: writing today would be stale tomorrow,
+    // which is the bug this ends.
+    return moved === true && settings.asOfDate === null && asOfOf(settings) === today
   })())
-  check('  BUT A DATE SOMEBODY CHOSE IS LEFT ALONE', (() => {
-    const { settings, moved } = repairAsOfDate({ asOfDate: '2026-03-31' })
-    return moved === false && settings.asOfDate === '2026-03-31'
-  })(), 'a pinned as-of date is how a figure reported last month is reproduced')
+  check('  BUT A PINNED DATE IS HONOURED AND LEFT ALONE', (() => {
+    const pinned = { asOfDate: '2026-03-31', asOfPinned: true }
+    const { settings, moved } = repairAsOfDate(pinned)
+    return moved === false && settings.asOfDate === '2026-03-31' && asOfOf(settings) === '2026-03-31'
+  })(), 'how somebody reproduces a figure they reported last month')
+  check('  and a plan computes against the derived date', (() => {
+    const p2 = computePlan({ ...base, settings: { ...DEFAULT_SETTINGS, asOfDate: STALE_AS_OF } })
+    return p2.settings.asOfDate === today
+  })(), 'the effective date travels with the plan, so every screen agrees')
 
   // No negative durations, whatever the dates say.
   const backwards = timelineOf({
