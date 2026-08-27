@@ -22,9 +22,7 @@ import {
 import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import {
-  loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState,
-  markSynced, syncStatus,
-  hasNothingOfItsOwn,
+  loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState, markSynced, syncStatus, hasNothingOfItsOwn, sharedPayload, applyShared,
 } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
@@ -145,11 +143,10 @@ export default function App() {
     let taken = null
     setState((s) => {
       const next = repairState({
-        ...s,
-        people: doc.payload.people,
-        projects: doc.payload.projects,
-        settings: { ...s.settings, ...doc.payload.settings },
-        repair: doc.payload.repair,
+        // The mirror of what was saved. Taking named fields back was the other
+        // half of the same bug: even once the Apps page reached the database,
+        // a list of four field names here would never have read it out again.
+        ...applyShared(s, doc.payload),
         scenarioName: entry.name,
       })
       // Stamped as agreeing with the database, so the next visit can tell
@@ -286,7 +283,9 @@ export default function App() {
     try {
       const r = await api.saveScenario(
         name,
-        { people: state.people, projects: state.projects, settings: state.settings, repair: state.repair },
+        // Everything that is the plan — see sharedPayload. Listing the fields
+        // here by hand is what left the Apps page on one machine.
+        sharedPayload(state),
         localStorage.getItem('fa-kpi-author') || '',
       )
       setDirty(false)
@@ -351,12 +350,7 @@ export default function App() {
       try {
         const r = await api.saveScenario(
           name,
-          {
-            people: state.people,
-            projects: state.projects,
-            settings: state.settings,
-            repair: state.repair,
-          },
+          sharedPayload(state),
           localStorage.getItem('fa-kpi-author') || '',
         )
         setDirty(false)

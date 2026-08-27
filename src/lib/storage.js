@@ -92,6 +92,59 @@ export const freshState = () => ({
   scenarioName: 'Baseline',
 })
 
+/*
+ * WHAT BELONGS TO THE PLAN, AND WHAT BELONGS TO THIS BROWSER.
+ *
+ * Everything in the state is shared EXCEPT the few things below, which are
+ * this browser's own bookkeeping. Stated as a denylist on purpose: it used to
+ * be an allowlist, written out by hand in three separate places, and the Apps
+ * page was added to the state and to none of them — so a home screen everybody
+ * was meant to share never left the machine it was arranged on.
+ *
+ * An allowlist forgets. A denylist cannot: a new field is shared the moment it
+ * exists, and anything that genuinely should not be has to be named here,
+ * deliberately, where the reason is written next to it.
+ */
+export const LOCAL_ONLY_KEYS = [
+  // Cache-invalidation stamps. They say what THIS browser last read from the
+  // bundled seed, and sharing them would tell everybody else's cache it was
+  // fresh when it is not.
+  'version',
+  'seedStamp',
+  // Which scenario this browser is looking at. The plan is the document; the
+  // name is where you happen to have it open.
+  'scenarioName',
+  // Marks left by the sharing machinery itself, never part of a plan.
+  'syncedAt',
+  'syncHash',
+]
+
+/** The plan, as it should be stored and shared. */
+export function sharedPayload(state) {
+  const out = {}
+  for (const [k, v] of Object.entries(state || {})) {
+    if (!LOCAL_ONLY_KEYS.includes(k)) out[k] = v
+  }
+  return out
+}
+
+/**
+ * A shared plan, folded into this browser's state.
+ *
+ * The mirror of sharedPayload, and it has to stay the mirror: whatever is
+ * saved is taken back. Settings merge over the defaults rather than replacing
+ * them, so a plan saved before a setting existed does not blank it.
+ */
+export function applyShared(state, payload) {
+  const next = { ...state }
+  for (const [k, v] of Object.entries(payload || {})) {
+    if (LOCAL_ONLY_KEYS.includes(k)) continue
+    if (v === undefined) continue
+    next[k] = k === 'settings' ? { ...state.settings, ...v } : v
+  }
+  return next
+}
+
 /** True when cached state predates the current seed and has to be dropped. */
 export function isStale(parsed) {
   return (
