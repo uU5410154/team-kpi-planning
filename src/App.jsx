@@ -33,19 +33,35 @@ import Team from './pages/Team.jsx'
 import Timeline from './pages/Timeline.jsx'
 import Apps from './pages/Apps.jsx'
 import Settings from './pages/Settings.jsx'
+import SignIn from './pages/SignIn.jsx'
+import Users from './pages/Users.jsx'
+import * as authApi from './lib/authApi.js'
 
+/*
+ * WHAT EACH ROLE SEES.
+ *
+ * A team member gets the five tabs that describe the work: the register, the
+ * scorecards, the team, the timeline and the home screen. An administrator
+ * gets those and everything behind them — the dashboard, the model that prices
+ * a manday, and the list of who may open the app at all.
+ *
+ * Written on the tabs themselves rather than as a list somewhere else, so a
+ * tab added tomorrow has to say who it is for. `roles: undefined` would be a
+ * tab nobody could reach, which is the safe way round for a mistake.
+ */
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'people', label: 'Scorecards' },
+  { id: 'dashboard', label: 'Dashboard', roles: ['admin'] },
+  { id: 'projects', label: 'Projects', roles: ['admin', 'user'] },
+  { id: 'people', label: 'Scorecards', roles: ['admin', 'user'] },
   // Beside the individual cards, not instead of them: one answers what a
   // person is measured on, the other whether the team adds up.
-  { id: 'team', label: 'Overall team' },
+  { id: 'team', label: 'Overall team', roles: ['admin', 'user'] },
   // Beside the register rather than inside it: the register answers what a
   // project is worth, this answers when it was supposed to land.
-  { id: 'timeline', label: 'Timeline' },
-  { id: 'apps', label: 'Apps' },
-  { id: 'settings', label: 'Model' },
+  { id: 'timeline', label: 'Timeline', roles: ['admin', 'user'] },
+  { id: 'apps', label: 'Apps', roles: ['admin', 'user'] },
+  { id: 'settings', label: 'Model', roles: ['admin'] },
+  { id: 'users', label: 'Access', roles: ['admin'] },
 ]
 
 /*
@@ -74,6 +90,14 @@ export default function App() {
   const [menuEl, setMenuEl] = useState(null)
   const [scenario, setScenario] = useState(null) // 'save' | 'open' | null
   const [dirty, setDirty] = useState(false)
+  /*
+   * Who is signed in. `undefined` means the question has not been answered
+   * yet — distinct from null, which means nobody is, and is what puts the
+   * sign-in page up. Showing the app for a frame and then snatching it away
+   * would be worse than a moment of nothing.
+   */
+  const [me, setMe] = useState(undefined)
+  const [authConfig, setAuthConfig] = useState(null)
   // The home screen writes itself to the shared plan on a short delay of its
   // own, apart from the register's save.
   const appsSaveTimer = useRef(null)
@@ -92,6 +116,27 @@ export default function App() {
    * happened — anything else races the very write it is trying to describe.
    */
   const pendingSync = useRef(null)
+  /*
+   * A tab this role cannot open — from a bookmark, or from being demoted while
+   * looking at it — becomes the first one they can.
+   */
+  useEffect(() => {
+    if (!me) return
+    const mine = TABS.filter((t) => (t.roles || []).includes(me.role))
+    if (mine.length && !mine.some((t) => t.id === tab)) setTab(mine[0].id)
+  }, [me, tab])
+
+  useEffect(() => {
+    let stop = false
+    Promise.all([authApi.me().catch(() => null), authApi.authConfig().catch(() => null)])
+      .then(([who, cfg]) => {
+        if (stop) return
+        setMe(who)
+        setAuthConfig(cfg)
+      })
+    return () => { stop = true }
+  }, [])
+
   useEffect(() => {
     stateRef.current = state
     saveState(state)
@@ -807,8 +852,49 @@ export default function App() {
     }
   }
 
+  /*
+   * The tabs this person may open, and nothing else.
+   *
+   * A hash in the address bar names a tab, so the list is also the guard: a
+   * link to #settings from somebody who is not an administrator lands on the
+   * first tab they DO have rather than on a page they should not see.
+   */
+  const visibleTabs = TABS.filter((t) => (t.roles || []).includes(me?.role))
+  const allowed = visibleTabs.some((t) => t.id === tab)
+
   const cov = plan.totals.totalCoverage
   const covTone = cov >= 1 ? 'success' : cov >= 0.9 ? 'warning' : 'error'
+
+  /*
+   * NOTHING OF THE APP BEFORE WE KNOW WHO IS ASKING.
+   *
+   * Ahead of the loading screen on purpose: waking the server to fetch a plan
+   * a stranger will never see is work for nobody, and a flash of somebody
+   * else's appraisal data before the sign-in page appears would be worse than
+   * either.
+   */
+  if (me === undefined) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box sx={{
+          minHeight: '100vh', display: 'grid', placeItems: 'center',
+        }}
+        >
+          <CircularProgress size={28} />
+        </Box>
+      </ThemeProvider>
+    )
+  }
+
+  if (!me) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <SignIn config={authConfig} onSignedIn={setMe} />
+      </ThemeProvider>
+    )
+  }
 
   if (bootstrapping) {
     return (
@@ -870,6 +956,37 @@ export default function App() {
 
             <Box sx={{ flex: 1 }} />
 
+            {/*
+              * Who is signed in, and the way out. Beside the export rather
+              * than hidden in a menu: on a shared machine the most important
+              * thing this bar can say is whose session it is.
+              */}
+            <Tooltip title={me.local
+              ? 'No database is configured, so there are no accounts and nothing shared to protect. This is your browser’s own copy of the plan.'
+              : me.role === 'admin'
+                ? 'Signed in as an administrator — you can see everything, including who has access'
+                : 'Signed in as a team member'}
+            >
+              <Chip
+                size="small"
+                label={me.local ? 'local — no accounts' : `${me.email.split('@')[0]}${me.role === 'admin' ? ' · admin' : ''}`}
+                variant="outlined"
+                sx={{ mr: 1 }}
+              />
+            </Tooltip>
+            {/* Nothing to sign out of when there are no accounts. */}
+            {!me.local && (
+              <Button
+                size="small"
+                onClick={async () => {
+                  try { await authApi.signOut() } finally { setMe(null) }
+                }}
+                sx={{ mr: 1 }}
+              >
+                Sign out
+              </Button>
+            )}
+
             <Button
               variant="contained"
               size="small"
@@ -916,13 +1033,18 @@ export default function App() {
             onChange={(_e, v) => setTab(v)}
             sx={{ px: 2, minHeight: 40, '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontWeight: 600 } }}
           >
-            {TABS.map((t) => <Tab key={t.id} value={t.id} label={t.label} />)}
+            {visibleTabs.map((t) => <Tab key={t.id} value={t.id} label={t.label} />)}
           </Tabs>
         </AppBar>
 
         <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, md: 3 }, py: 3 }}>
-          {tab === 'dashboard' && <Dashboard plan={plan} onGoTo={setTab} />}
-          {tab === 'projects' && (
+          {/*
+            * `allowed` gates every panel, not just the tab strip. The strip is
+            * what somebody clicks; this is what a bookmarked hash reaches.
+            */}
+          {allowed && tab === 'users' && <Users me={me} />}
+          {allowed && tab === 'dashboard' && <Dashboard plan={plan} onGoTo={setTab} />}
+          {allowed && tab === 'projects' && (
             <Projects
               plan={plan}
               onUpdate={updateProject}
@@ -939,9 +1061,9 @@ export default function App() {
               onGoTo={setTab}
             />
           )}
-          {tab === 'team' && <Team plan={plan} />}
-          {tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
-          {tab === 'timeline' && (
+          {allowed && tab === 'team' && <Team plan={plan} />}
+          {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
+          {allowed && tab === 'timeline' && (
             <Timeline
               plan={plan}
               settings={plan.settings}
@@ -952,7 +1074,7 @@ export default function App() {
             />
           )}
 
-          {tab === 'people' && (
+          {allowed && tab === 'people' && (
             <People
               plan={plan}
               onPersonKpi={updatePersonKpi}
@@ -968,7 +1090,7 @@ export default function App() {
               onUpdate={updateProject}
             />
           )}
-          {tab === 'settings' && (
+          {allowed && tab === 'settings' && (
             <Settings
               plan={plan}
               state={state}

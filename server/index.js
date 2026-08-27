@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import * as store from './db.js'
 import * as jira from './jira.js'
+import * as auth from './auth.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -239,6 +240,157 @@ app.delete('/api/scenarios/:name', async (req, res) => {
   const r = await store.deleteScenario(cleanName(req.params.name))
   if (r === store.UNAVAILABLE) return unavailable(res)
   res.json(r)
+})
+
+/* ----------------------------- accounts ----------------------------- */
+
+/*
+ * Who is asking. Read from a signed cookie and checked against the account
+ * itself on every request, so switching somebody off ends their session now
+ * rather than whenever it would have expired.
+ */
+const COOKIE = 'kpi_session'
+const readCookie = (req, name) => {
+  const raw = req.headers.cookie || ''
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=')
+    if (k === name) return decodeURIComponent(v.join('='))
+  }
+  return null
+}
+const setCookie = (res, token) => {
+  const bits = [
+    `${COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Number(process.env.AUTH_SESSION_DAYS || 30) * 86400}`,
+  ]
+  // Render terminates TLS in front of the app, so the cookie is only marked
+  // Secure where the request actually arrived over https.
+  if (process.env.NODE_ENV === 'production') bits.push('Secure')
+  res.setHeader('Set-Cookie', bits.join('; '))
+}
+
+const whoIs = async (req) => auth.currentUser(readCookie(req, COOKIE))
+
+/** Admin-only routes go through here. */
+const mustBeAdmin = async (req, res) => {
+  const me = await whoIs(req)
+  if (!me) { res.status(401).json({ error: 'Sign in first.' }); return null }
+  if (me.role !== 'admin') { res.status(403).json({ error: 'Administrators only.' }); return null }
+  return me
+}
+
+app.get('/api/auth/config', (_req, res) => res.json({
+  ...auth.status(),
+  // Whether accounts can work at all: without a database there is nowhere to
+  // keep them, and the app says so rather than failing at the login box.
+  store: store.isConfigured(),
+}))
+
+app.post('/api/auth/register', async (req, res) => {
+  const { email, password } = req.body || {}
+  if (!auth.emailAllowed(email)) {
+    return res.status(400).json({ error: `Use your work address — it has to end ${auth.status().domain}.` })
+  }
+  const bad = auth.passwordProblem(password)
+  if (bad) return res.status(400).json({ error: bad })
+  const r = await auth.register(email, password)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(409).json({ error: r.error })
+  return res.json({
+    user: r.user,
+    // Said here rather than left to be discovered at the login box.
+    message: r.user.status === 'active'
+      ? 'Account created. You can sign in now.'
+      : 'Account created. An administrator has to approve it before you can sign in.',
+  })
+})
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {}
+  const r = await auth.login(email, password)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(401).json({ error: r.error })
+  setCookie(res, r.token)
+  return res.json({ user: r.user })
+})
+
+app.post('/api/auth/logout', (_req, res) => {
+  res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+  res.json({ ok: true })
+})
+
+app.get('/api/auth/me', async (req, res) => {
+  /*
+   * NO ACCOUNT STORE, NO LOCK.
+   *
+   * Accounts live in the same database as the plan. Without one there is
+   * nowhere to keep them, nothing shared to protect — the register is this
+   * browser's own local copy — and no way for anybody to ever be approved. A
+   * sign-in page there would be a door with no key, in front of an empty room.
+   *
+   * So the app opens, as it did before there were accounts at all, and says
+   * which mode it is in rather than pretending. On Render, where MONGODB_URI
+   * is set, this branch never runs.
+   */
+  if (!store.isConfigured()) {
+    return res.json({
+      user: {
+        email: 'local', role: 'admin', status: 'active', local: true,
+      },
+    })
+  }
+  const me = await whoIs(req)
+  return res.json({ user: me })
+})
+
+app.get('/api/auth/users', async (req, res) => {
+  if (!await mustBeAdmin(req, res)) return undefined
+  const rows = await auth.listUsers()
+  if (rows === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ users: rows })
+})
+
+app.put('/api/auth/users/:email', async (req, res) => {
+  const me = await mustBeAdmin(req, res)
+  if (!me) return undefined
+  const email = auth.cleanEmail(req.params.email)
+  const patch = req.body || {}
+
+  /*
+   * THE LAST ADMIN CANNOT LOCK THE DOOR BEHIND THEMSELVES.
+   *
+   * Demoting or switching off the only active administrator would leave an app
+   * nobody can administer and no way back in except the server's environment.
+   * Refused, with the reason, rather than done and regretted.
+   */
+  const losing = patch.role === 'user' || (patch.status && patch.status !== 'active')
+  if (losing) {
+    const admins = await auth.activeAdmins()
+    if (admins === store.UNAVAILABLE) return unavailable(res)
+    const rows = await auth.listUsers()
+    const target = rows === store.UNAVAILABLE ? null : rows.find((u) => u.email === email)
+    if (target && target.role === 'admin' && target.status === 'active' && admins <= 1) {
+      return res.status(409).json({ error: 'This is the only administrator who can still sign in. Grant somebody else the role first.' })
+    }
+  }
+
+  const r = await auth.updateUser(email, patch, me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(400).json({ error: r.error })
+  return res.json(r)
+})
+
+app.delete('/api/auth/users/:email', async (req, res) => {
+  const me = await mustBeAdmin(req, res)
+  if (!me) return undefined
+  const email = auth.cleanEmail(req.params.email)
+  if (email === me.email) return res.status(409).json({ error: 'You cannot delete your own account.' })
+  const r = await auth.removeUser(email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
 })
 
 /* --------------------------- client -------------------------- */
