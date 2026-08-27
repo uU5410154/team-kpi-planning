@@ -196,6 +196,45 @@ app.put('/api/scenarios/:name', async (req, res) => {
   res.json(saved)
 })
 
+/*
+ * THE HOME SCREEN, ON ITS OWN.
+ *
+ * The Apps page is not the register. It has nothing to do with saving hours or
+ * commitments, and it was being held hostage by the rules that protect them: a
+ * browser only saves the plan once it has linked to the database this session,
+ * and it now stands down entirely when it is behind — both correct for the
+ * register, and both meant the home screen never left the machine it was
+ * arranged on, three attempts running.
+ *
+ * So it reads and writes through here instead. A read-modify-write of ONE
+ * field on the server: it cannot overwrite anybody's register, cannot lose a
+ * project, and does not care whether the browser is up to date on anything
+ * else. Arranging icons is not an edit that needs protecting from itself.
+ */
+app.get('/api/scenarios/:name/apps', async (req, res) => {
+  const doc = await store.getScenario(cleanName(req.params.name))
+  if (doc === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ apps: Array.isArray(doc?.payload?.apps) ? doc.payload.apps : [] })
+})
+
+app.put('/api/scenarios/:name/apps', async (req, res) => {
+  const name = cleanName(req.params.name)
+  if (!name) return res.status(400).json({ error: 'A scenario name is required.' })
+  const { apps } = req.body || {}
+  if (!Array.isArray(apps)) return res.status(400).json({ error: 'apps must be an array.' })
+  // A home screen is small by construction. A cap so a bug in the browser
+  // cannot post a megabyte of icons into the plan every keystroke.
+  if (JSON.stringify(apps).length > 2_000_000) {
+    return res.status(413).json({ error: 'That home screen is too large to store.' })
+  }
+  const doc = await store.getScenario(name)
+  if (doc === store.UNAVAILABLE) return unavailable(res)
+  if (!doc?.payload) return res.status(404).json({ error: `No scenario "${name}".` })
+  const saved = await store.saveScenario(name, { ...doc.payload, apps }, 'home screen')
+  if (saved === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ ...saved, apps: apps.length })
+})
+
 app.delete('/api/scenarios/:name', async (req, res) => {
   const r = await store.deleteScenario(cleanName(req.params.name))
   if (r === store.UNAVAILABLE) return unavailable(res)

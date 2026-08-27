@@ -74,6 +74,10 @@ export default function App() {
   const [menuEl, setMenuEl] = useState(null)
   const [scenario, setScenario] = useState(null) // 'save' | 'open' | null
   const [dirty, setDirty] = useState(false)
+  // The home screen writes itself to the shared plan on a short delay of its
+  // own, apart from the register's save.
+  const appsSaveTimer = useRef(null)
+  const stateRef = useRef(null)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
   const fileRef = useRef(null)
@@ -89,12 +93,46 @@ export default function App() {
    */
   const pendingSync = useRef(null)
   useEffect(() => {
+    stateRef.current = state
     saveState(state)
     if (pendingSync.current !== null) {
       markSynced(pendingSync.current)
       pendingSync.current = null
     }
   }, [state])
+
+  /*
+   * The shared home screen, taken on open.
+   *
+   * Independent of whether this browser takes the shared PLAN — it may be
+   * holding edits it has not saved, and the notice for that is a decision for
+   * a person. The icons are not: they are the same for everybody, they carry
+   * no numbers, and a second machine should show them without anybody being
+   * asked anything.
+   *
+   * A stored home screen wins over the local one, EXCEPT where the database
+   * has none at all and this browser does — that is the machine the icons were
+   * arranged on, before any of this synced, and its copy is the only one there
+   * is. It goes up rather than being wiped.
+   */
+  useEffect(() => {
+    let stop = false
+    const name = (state.scenarioName || '').trim()
+    if (!name) return undefined
+    api.loadApps(name).then((r) => {
+      if (stop || !r || !Array.isArray(r.apps)) return
+      const mine = stateRef.current?.apps || []
+      if (r.apps.length === 0 && mine.length > 0) {
+        api.saveApps(name, mine).catch(() => {})
+        return
+      }
+      setState((s) => (JSON.stringify(s.apps || []) === JSON.stringify(r.apps)
+        ? s
+        : { ...s, apps: r.apps }))
+    }).catch(() => {})
+    return () => { stop = true }
+    // Once, on open: the name does not change without a reload.
+  }, [])
   useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
 
   /*
@@ -437,7 +475,29 @@ export default function App() {
    * half-arranged if one of them lost a race.
    */
   const updateApps = useCallback((apps) => {
-    setState((s) => ({ ...s, apps: Array.isArray(apps) ? apps : [] }))
+    const next = Array.isArray(apps) ? apps : []
+    setState((s) => ({ ...s, apps: next }))
+    /*
+     * AND STRAIGHT TO THE SHARED PLAN.
+     *
+     * Not through the register's save, which waits for this browser to have
+     * linked to the database and stands down when it is behind — both right
+     * for projects and hours, and both meant a home screen never left the
+     * machine it was arranged on. This writes one field, server-side, so it
+     * cannot overwrite anybody's register whatever state this browser is in.
+     *
+     * Debounced, because a drag is a hundred small changes and each one would
+     * otherwise be a request.
+     */
+    const name = (stateRef.current?.scenarioName || '').trim()
+    if (!name) return
+    clearTimeout(appsSaveTimer.current)
+    appsSaveTimer.current = setTimeout(() => {
+      api.saveApps(name, next).catch(() => {
+        // Offline, or no database. The browser copy stands and the next change
+        // tries again; nothing is lost locally either way.
+      })
+    }, 800)
   }, [])
 
   const updateSettings = useCallback((patch) => {

@@ -66,6 +66,23 @@ export const jiraIssues = async (keys) =>
 export const jiraSyncShared = async () =>
   j(await fetch('/api/jira/sync', { method: 'POST' }))
 
+/**
+ * The shared home screen, read and written on its own.
+ *
+ * Deliberately not part of the plan payload: the Apps page is not the register
+ * and must not wait on the rules that protect it. One field, read-modify-write
+ * on the server, so it can never touch a project.
+ */
+export const loadApps = async (name) =>
+  j(await fetch(`/api/scenarios/${encodeURIComponent(name)}/apps`))
+
+export const saveApps = async (name, apps) =>
+  j(await fetch(`/api/scenarios/${encodeURIComponent(name)}/apps`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apps }),
+  }))
+
 /** The tasks under an epic, or the epics under an initiative. */
 export const jiraChildren = async (keys) =>
   j(await fetch('/api/jira/children', {

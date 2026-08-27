@@ -114,6 +114,102 @@ try {
   // SPA routes still work alongside the API
   r = await fetch(`${base}/projects`)
   check('SPA deep link still served', r.status === 200 && (await r.text()).includes('<div id="root">'))
+
+/* ---------------- the home screen syncs on its own ---------------- */
+console.log('\n--- the shared home screen ---')
+{
+  /*
+   * The Apps page is not the register, and must not wait on the rules that
+   * protect it: a browser only saves the plan once it has linked to the
+   * database, and it stands down entirely when it is behind. Both are right
+   * for projects and hours. Both meant a home screen never left the machine it
+   * was arranged on — three times over.
+   */
+  const name = 'Baseline'
+  await fetch(`${base}/api/scenarios/${name}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      payload: { people: seed.people, projects: seed.projects.slice(0, 2), settings: {} },
+      updatedBy: 'test',
+    }),
+  })
+
+  const empty = await (await fetch(`${base}/api/scenarios/${name}/apps`)).json()
+  check('a plan with no home screen answers with an empty one',
+    Array.isArray(empty.apps) && empty.apps.length === 0, JSON.stringify(empty))
+
+  const apps = [
+    { id: 'app-1', type: 'app', name: 'Sharepoint', url: 'https://sharepoint.test', icon: null },
+    {
+      id: 'folder-1',
+      type: 'folder',
+      name: 'CFO Script',
+      items: [
+        { id: 'app-2', type: 'app', name: 'Gen', url: 'https://a.test', icon: null },
+        { id: 'app-3', type: 'app', name: 'Input', url: 'https://b.test', icon: null },
+      ],
+    },
+  ]
+  const put = await fetch(`${base}/api/scenarios/${name}/apps`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apps }),
+  })
+  check('ONE MACHINE WRITES THE HOME SCREEN', put.ok, String(put.status))
+
+  const read = await (await fetch(`${base}/api/scenarios/${name}/apps`)).json()
+  check('ANOTHER MACHINE READS IT BACK, WHOLE',
+    JSON.stringify(read.apps) === JSON.stringify(apps),
+    JSON.stringify(read.apps?.map((a) => a.name)))
+  check('  including the apps inside a folder',
+    read.apps[1].items.length === 2 && read.apps[1].items[0].name === 'Gen')
+
+  /* And it lands in the plan itself, so a full load carries it too. */
+  const doc = await (await fetch(`${base}/api/scenarios/${name}`)).json()
+  check('  and it is part of the stored plan, not kept beside it',
+    JSON.stringify(doc.payload.apps) === JSON.stringify(apps))
+  check('  WITHOUT DISTURBING THE REGISTER',
+    doc.payload.projects.length === 2 && doc.payload.people.length === seed.people.length,
+    `${doc.payload.projects.length} projects, ${doc.payload.people.length} people`)
+
+  /* Rearranging replaces it wholly — a drag is not a patch. */
+  const rearranged = [apps[1], apps[0]]
+  await fetch(`${base}/api/scenarios/${name}/apps`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apps: rearranged }),
+  })
+  const after = await (await fetch(`${base}/api/scenarios/${name}/apps`)).json()
+  check('rearranging replaces the whole screen',
+    after.apps[0].name === 'CFO Script' && after.apps[1].name === 'Sharepoint',
+    after.apps.map((a) => a.name).join(' | '))
+  check('  and clearing it really clears it', await (async () => {
+    await fetch(`${base}/api/scenarios/${name}/apps`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apps: [] }),
+    })
+    const r = await (await fetch(`${base}/api/scenarios/${name}/apps`)).json()
+    return r.apps.length === 0
+  })())
+
+  /* What it refuses. */
+  const bad = await fetch(`${base}/api/scenarios/${name}/apps`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apps: 'nope' }),
+  })
+  check('a home screen that is not a list is refused', bad.status === 400, String(bad.status))
+  const missing = await fetch(`${base}/api/scenarios/No Such Plan/apps`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apps: [] }),
+  })
+  check('a plan that does not exist is refused rather than created',
+    missing.status === 404, String(missing.status))
+}
+
 } finally {
   server.kill()
   await mongod.stop()
