@@ -222,9 +222,13 @@ try {
 
     await signInAs('staff@lotuss.com', 'brand-new-1')
     const memberTabs = await tabs()
-    check('A TEAM MEMBER GETS THE FIVE TABS OF THE WORK',
-      JSON.stringify(memberTabs) === JSON.stringify(['Projects', 'Scorecards', 'Overall team', 'Timeline', 'Apps']),
+    check('A TEAM MEMBER GETS WHAT THE TEAM IS CARRYING, AND WHEN IT LANDS',
+      JSON.stringify(memberTabs) === JSON.stringify(['Overall team', 'Timeline', 'Apps']),
       memberTabs.join(' | '))
+    check('  and NOT the register, where the numbers are typed',
+      !memberTabs.includes('Projects'))
+    check('  and NOT the scorecards, which are what one person is appraised on',
+      !memberTabs.includes('Scorecards'))
     check('  and not the model, the dashboard or the access list',
       !memberTabs.includes('Model') && !memberTabs.includes('Dashboard') && !memberTabs.includes('Access'))
 
@@ -235,6 +239,32 @@ try {
     check('A BOOKMARKED ADMIN TAB LANDS SOMEWHERE SAFE',
       !/Contribution weights|Who a project|Working days a month/.test(bookmarked),
       'the hash names a tab, so the tab list has to be the guard as well')
+    /*
+     * And the register and the scorecards, which are the pages with the
+     * numbers in them.
+     *
+     * Checked on WHICH TAB IS SELECTED rather than on words in the page: the
+     * page a team member lands on legitimately says "KPI line" and "scorecard"
+     * all over it, and matching those found the safe page and called it a
+     * leak. What matters is that the tab they asked for is not the tab they
+     * got, and that the one they got is one they are allowed.
+     */
+    const landedOn = async (hash) => {
+      await page.goto(`${base}/${hash}`, { waitUntil: 'networkidle2' })
+      await new Promise((r) => setTimeout(r, 2500))
+      return page.evaluate(() => {
+        const sel = [...document.querySelectorAll('[role="tab"]')].find((t) => t.getAttribute('aria-selected') === 'true')
+        return sel ? sel.textContent.trim() : null
+      })
+    }
+    check('  A BOOKMARKED REGISTER LANDS ON AN ALLOWED TAB INSTEAD',
+      (await landedOn('#projects')) === 'Overall team',
+      await landedOn('#projects'))
+    check('  and so does a bookmarked scorecard',
+      (await landedOn('#people')) === 'Overall team')
+    check('  and the register\'s own editable grid is nowhere on the page',
+      !(await page.evaluate(() => !!document.querySelector('input[placeholder="FNP-000"], [aria-label="open cost breakdown"]'))),
+      'the Projects table edits in place, so its inputs are the thing to look for')
 
     await signInAs('boss@lotuss.com', 'bosspass1')
     const adminTabs = await tabs()

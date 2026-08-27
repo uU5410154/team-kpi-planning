@@ -51,8 +51,17 @@ import * as authApi from './lib/authApi.js'
  */
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', roles: ['admin'] },
-  { id: 'projects', label: 'Projects', roles: ['admin', 'user'] },
-  { id: 'people', label: 'Scorecards', roles: ['admin', 'user'] },
+  /*
+   * The register and the individual scorecards are ADMIN ONLY.
+   *
+   * Both are edited in place: the register is where saving hours, effort and
+   * commitment levels are typed, and a scorecard is what one person is
+   * appraised on. A team member reads what the team is carrying and when it
+   * lands — the Overall team page and the timeline — without the row-by-row
+   * numbers behind somebody else's appraisal.
+   */
+  { id: 'projects', label: 'Projects', roles: ['admin'] },
+  { id: 'people', label: 'Scorecards', roles: ['admin'] },
   // Beside the individual cards, not instead of them: one answers what a
   // person is measured on, the other whether the team adds up.
   { id: 'team', label: 'Overall team', roles: ['admin', 'user'] },
