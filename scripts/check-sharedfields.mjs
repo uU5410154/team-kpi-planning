@@ -150,5 +150,42 @@ check('both saves go through sharedPayload',
   `${(appSrc.match(/sharedPayload\(state\)/g) || []).length} call sites`)
 check('the load goes through applyShared', /applyShared\(s, doc\.payload\)/.test(appSrc))
 
+/*
+ * AND THE SECOND LIST, WHICH WAS THE OTHER HALF OF THE SAME BUG.
+ *
+ * Carrying a field to the database is no use if nothing notices it changed:
+ * the dirty flag watched projects, people, settings and scenarioName by name,
+ * so arranging the home screen never marked the plan unsaved and the automatic
+ * save never ran for it. Two hand-written lists, in two files, both of which
+ * had to be remembered. Neither is written by hand any more.
+ */
+check('NOTHING WATCHES ITS OWN LIST OF PLAN FIELDS EITHER',
+  !/\}, \[state\.projects, state\.people, state\.settings/.test(appSrc),
+  'the dirty flag must watch SHARED_KEYS, not a list somebody typed')
+check('  the dirty flag watches every shared field',
+  /SHARED_KEYS\.map\(\(k\) => state\[k\]\)/.test(appSrc),
+  'so a field added to the plan is watched from the moment it exists')
+check('  and SHARED_KEYS is derived from the plan, not typed out',
+  /SHARED_KEYS = Object\.keys\(freshState\(\)\)/.test(src))
+check('  and it is computed ONCE, so it is safe as a dependency list',
+  /^export const SHARED_KEYS = /m.test(src),
+  'a list rebuilt per render would change size and break the hook')
+
+/*
+ * The reason it cannot simply watch the whole state object: a save replaces
+ * the state with a copy to force a re-render, and watching the object would
+ * read that as a fresh edit and save again, forever.
+ */
+/*
+ * Scoped to the DIRTY effect. Writing the whole state to local storage on every
+ * change is right and watches `[state]` on purpose — it sets no state of its
+ * own, so it cannot loop. The dirty flag can, and must not.
+ */
+const fromSetDirty = appSrc.slice(appSrc.indexOf('setDirty(true)'))
+const dirtyDeps = fromSetDirty.slice(0, fromSetDirty.indexOf('])') + 2)
+check('  and the dirty flag does NOT watch the state object itself',
+  !/\}, \[state\]/.test(dirtyDeps),
+  'a save replaces the object to re-render; watching it would save in a loop')
+
 console.log(failures ? `\n${failures} failed` : '\nall good')
 process.exit(failures ? 1 : 0)

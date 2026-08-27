@@ -22,7 +22,7 @@ import {
 import { applyImport } from './lib/projectIO.js'
 import * as api from './lib/api.js'
 import {
-  loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState, markSynced, syncStatus, hasNothingOfItsOwn, sharedPayload, applyShared,
+  loadState, saveState, freshState, downloadScenario, readScenarioFile, loadWasReset, repairState, markSynced, syncStatus, hasNothingOfItsOwn, sharedPayload, applyShared, SHARED_KEYS,
 } from './lib/storage.js'
 import { exportWorkbook } from './lib/exportXlsx.js'
 
@@ -240,12 +240,26 @@ export default function App() {
     }
   }, [wasReset])
 
-  // Anything that changes the plan marks it unsaved. Skip the first render so
-  // simply opening the app does not look like a pending edit.
+  /*
+   * Anything that changes the plan marks it unsaved.
+   *
+   * Watched field by field, off SHARED_KEYS, rather than by naming them here.
+   * This was a hand-written list — projects, people, settings, scenarioName —
+   * and the Apps page was not on it, so arranging the home screen never marked
+   * the plan unsaved and the automatic save never ran for it. The page saved
+   * nothing, on any machine, for the same reason the payload carried nothing:
+   * somebody had to remember, twice, in two different files.
+   *
+   * Not the whole `state` object: a save deliberately replaces it with a copy
+   * to force a re-render, and watching the object itself would read that as a
+   * fresh edit and save again, forever.
+   *
+   * Skip the first render so simply opening the app is not a pending edit.
+   */
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
     setDirty(true)
-  }, [state.projects, state.people, state.settings, state.scenarioName])
+  }, [...SHARED_KEYS.map((k) => state[k]), state.scenarioName])
 
   // Don't let a closing tab silently drop unsaved edits.
   useEffect(() => {

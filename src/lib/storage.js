@@ -119,6 +119,15 @@ export const LOCAL_ONLY_KEYS = [
   'syncHash',
 ]
 
+/*
+ * The plan's own fields, worked out from freshState rather than typed again.
+ *
+ * Computed once, so it is safe as a React dependency list: the size never
+ * changes between renders. Anything watching "has the plan changed" watches
+ * THIS, and a field added to the plan is watched from the moment it exists.
+ */
+export const SHARED_KEYS = Object.keys(freshState()).filter((k) => !LOCAL_ONLY_KEYS.includes(k))
+
 /** The plan, as it should be stored and shared. */
 export function sharedPayload(state) {
   const out = {}
