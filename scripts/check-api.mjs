@@ -8,6 +8,12 @@
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import crypto from 'node:crypto'
+// Every /api route needs a sign-in now. This suite exercises the plan routes,
+// so it carries the service token the ops scripts use; check-auth is where
+// who-may-do-what is proved.
+import './service-auth.mjs'
+process.env.KPI_SERVICE_TOKEN = crypto.randomBytes(24).toString('hex')
 
 const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
 

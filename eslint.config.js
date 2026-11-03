@@ -51,7 +51,14 @@ export default [
   {
     // The browser-driving suites evaluate code INSIDE the page, so they
     // legitimately name document and window alongside the Node globals.
-    files: ['scripts/check-ui.mjs', 'scripts/check-sharedload.mjs'],
+    // Every suite that drives a browser, not just the first two — the other six
+    // used `document` inside page.evaluate and failed lint, which stopped
+    // `npm test` at its first step.
+    files: [
+      'scripts/check-ui.mjs', 'scripts/check-sharedload.mjs', 'scripts/check-apps.mjs',
+      'scripts/check-auth.mjs', 'scripts/check-commitment.mjs', 'scripts/check-heldfinish.mjs',
+      'scripts/check-jira.mjs', 'scripts/check-timeline.mjs',
+    ],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 ]

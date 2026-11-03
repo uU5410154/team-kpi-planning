@@ -16,6 +16,7 @@ import ExcelJS from 'exceljs'
 import { fileURLToPath } from 'node:url'
 import { newProject, computePlan, repairState, fmtHours } from '../src/lib/model.js'
 import { OBJECTIVES } from '../src/lib/palette.js'
+import './service-auth.mjs' // every /api route needs a sign-in: send KPI_SERVICE_TOKEN
 
 const BASE = process.env.KPI_BASE || 'https://team-kpi-planning.onrender.com'
 const SCENARIO = process.env.KPI_SCENARIO || 'Baseline'

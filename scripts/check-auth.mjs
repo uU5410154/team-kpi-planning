@@ -11,7 +11,7 @@
  */
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import puppeteer from 'puppeteer-core'
 
 let failures = 0
@@ -24,6 +24,7 @@ console.log('starting a real mongod…')
 const mongod = await MongoMemoryServer.create()
 const PORT = 5341
 const base = `http://127.0.0.1:${PORT}`
+const SERVICE_TOKEN = 'test-service-token-'.padEnd(48, '7')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 
 const server = spawn(process.execPath, ['server/index.js'], {
@@ -35,6 +36,7 @@ const server = spawn(process.execPath, ['server/index.js'], {
     MONGODB_DB: 'team_kpi_planning',
     AUTH_SECRET: 'a-test-secret',
     AUTH_ADMIN_EMAILS: 'boss@lotuss.com',
+    KPI_SERVICE_TOKEN: SERVICE_TOKEN,
   },
   stdio: ['ignore', 'ignore', 'pipe'],
 })
@@ -49,7 +51,8 @@ const post = async (path, body, cookie) => {
     headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) },
     body: JSON.stringify(body),
   })
-  return { status: res.status, body: await res.json().catch(() => ({})), cookie: (res.headers.get('set-cookie') || '').split(';')[0] }
+  const raw = res.headers.get('set-cookie') || ''
+  return { status: res.status, body: await res.json().catch(() => ({})), cookie: raw.split(';')[0], raw }
 }
 const get = async (path, cookie) => {
   const res = await fetch(base + path, { headers: cookie ? { cookie } : {} })
@@ -107,7 +110,9 @@ try {
   const session = await post('/api/auth/login', { email: 'boss@lotuss.com', password: 'bosspass1' })
   check('the administrator signs in', session.status === 200)
   const admin = session.cookie
-  check('  and gets an httpOnly cookie', /HttpOnly/i.test(admin) || true, admin.split('=')[0])
+  // On the header itself: `admin` keeps only name=value, which is why this
+  // check used to end in `|| true` and could never fail.
+  check('  and gets an httpOnly cookie', /HttpOnly/i.test(session.raw), session.raw.replace(/=[^;]+/, '=…'))
   check('  and is recognised on the next request',
     (await get('/api/auth/me', admin)).body.user?.email === 'boss@lotuss.com')
   check('nobody is recognised without one', (await get('/api/auth/me')).body.user === null)
@@ -173,6 +178,116 @@ try {
       .find((u) => u.email === 'staff@lotuss.com').password === 'brand-new-1')
   check('a short one is refused',
     (await put('/api/auth/users/staff@lotuss.com', { password: 'short' }, admin)).status === 400)
+
+  /* ---------------- the plan itself is behind the door ---------------- */
+  console.log('\n--- the plan and Jira need a sign-in, and writes need an administrator ---')
+  const call = async (method, path, cookie, body, headers = {}) => {
+    const res = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}), ...headers },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+    return { status: res.status, body: await res.json().catch(() => ({})) }
+  }
+  // The real seed, so the browser half below can open it like any plan, with
+  // a marker on the first project to prove WHICH plan a browser ended up with.
+  const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
+  const plan = { ...seed, projects: seed.projects.map((p, i) => (i ? p : { ...p, summary: 'SECURITY-MARKER' })) }
+
+  // Every route a stranger used to be able to reach.
+  const OPEN_BEFORE = [
+    ['GET', '/api/scenarios'],
+    ['GET', '/api/scenarios/Baseline'],
+    ['PUT', '/api/scenarios/Baseline', { payload: plan }],
+    ['DELETE', '/api/scenarios/Baseline'],
+    ['GET', '/api/scenarios/Baseline/apps'],
+    ['PUT', '/api/scenarios/Baseline/apps', { apps: [] }],
+    ['GET', '/api/jira/status'],
+    ['POST', '/api/jira/issues', { keys: ['FNP-1'] }],
+    ['POST', '/api/jira/sync'],
+    ['GET', '/api/jira/sync'],
+    ['GET', '/api/jira/epics'],
+    ['POST', '/api/jira/rollup', { keys: ['FNP-1'] }],
+    ['POST', '/api/jira/children', { keys: ['FNP-1'] }],
+    ['PUT', '/api/jira/issue/FNP-1', { due: '2026-12-31' }],
+  ]
+  const strangers = []
+  for (const [m, path, body] of OPEN_BEFORE) {
+    const r = await call(m, path, null, body)
+    if (r.status !== 401) strangers.push(`${m} ${path} -> ${r.status}`)
+  }
+  check('A STRANGER GETS 401 FROM EVERY PLAN AND JIRA ROUTE', strangers.length === 0,
+    strangers.join(', ') || `${OPEN_BEFORE.length} routes`)
+  check('  and the health check Render calls still answers',
+    (await call('GET', '/api/health')).status === 200)
+  check('  and an unknown /api address is a 404, not the app\'s HTML',
+    (await call('GET', '/api/no-such-thing', admin)).status === 404)
+
+  check('AN ADMINISTRATOR CAN SAVE THE PLAN',
+    (await call('PUT', '/api/scenarios/Baseline', admin, { payload: plan, updatedBy: 'boss' })).status === 200)
+  const memberRead = await call('GET', '/api/scenarios/Baseline', member)
+  check('A TEAM MEMBER CAN READ IT — the Overall team page and the Timeline are built from it',
+    memberRead.status === 200 && memberRead.body.payload?.projects?.[0]?.summary === 'SECURITY-MARKER')
+  check('  BUT CANNOT OVERWRITE IT',
+    (await call('PUT', '/api/scenarios/Baseline', member, { payload: { people: [], projects: [] } })).status === 403)
+  check('  nor delete it', (await call('DELETE', '/api/scenarios/Baseline', member)).status === 403)
+  check('  nor run the Jira sync over everybody\'s plan', (await call('POST', '/api/jira/sync', member)).status === 403)
+  check('  nor write to a Jira ticket',
+    (await call('PUT', '/api/jira/issue/FNP-1', member, { due: '2026-12-31' })).status === 403)
+  check('  but CAN arrange the shared home screen, which is everybody\'s',
+    (await call('PUT', '/api/scenarios/Baseline/apps', member, { apps: [{ id: 'a1', name: 'Mail', url: 'https://outlook.office.com' }] })).status === 200)
+  check('  and the plan survived all of that',
+    (await call('GET', '/api/scenarios/Baseline', admin)).body.payload?.projects?.[0]?.summary === 'SECURITY-MARKER')
+
+  console.log('\n--- the service token the ops scripts carry ---')
+  const svc = (await call('GET', '/api/scenarios', null, null, { authorization: `Bearer ${SERVICE_TOKEN}` }))
+  check('THE SERVICE TOKEN READS THE PLAN', svc.status === 200, String(svc.status))
+  check('  and may write it, as the scripts do',
+    (await call('PUT', '/api/scenarios/Baseline', null, { payload: plan }, { authorization: `Bearer ${SERVICE_TOKEN}` })).status === 200)
+  check('A WRONG TOKEN IS NOBODY',
+    (await call('GET', '/api/scenarios', null, null, { authorization: `Bearer ${SERVICE_TOKEN}x` })).status === 401)
+  check('  and neither is an empty one',
+    (await call('GET', '/api/scenarios', null, null, { authorization: 'Bearer ' })).status === 401)
+
+  const cfg = (await call('GET', '/api/auth/config')).body
+  check('THE SIGN-IN PAGE NO LONGER PUBLISHES WHO THE ADMINISTRATORS ARE',
+    !('bootstrap' in cfg) && !JSON.stringify(cfg).includes('boss@lotuss.com'), JSON.stringify(cfg))
+
+  /* ---------------- production without a secret ---------------- */
+  console.log('\n--- production with no AUTH_SECRET keeps the door shut ---')
+  {
+    const P2 = PORT + 1
+    const b2 = `http://127.0.0.1:${P2}`
+    const env2 = { ...process.env, PORT: String(P2), MONGODB_URI: mongod.getUri(), MONGODB_DB: 'team_kpi_planning', NODE_ENV: 'production', AUTH_ADMIN_EMAILS: 'boss@lotuss.com' }
+    delete env2.AUTH_SECRET
+    delete env2.KPI_SERVICE_TOKEN
+    const s2 = spawn(process.execPath, ['server/index.js'], { cwd: root, env: env2, stdio: ['ignore', 'ignore', 'pipe'] })
+    try {
+      for (let i = 0; i < 60; i++) {
+        try { if ((await fetch(`${b2}/api/health`, { signal: AbortSignal.timeout(1500) })).ok) break } catch { /* wait */ }
+        await new Promise((r) => setTimeout(r, 400))
+      }
+      // Exactly what a forger holds: a session signed with the constant that is
+      // in the public repository.
+      const { signSession } = await import('../server/auth.js')
+      const forged = `kpi_session=${encodeURIComponent(signSession('boss@lotuss.com'))}`
+      const r2 = async (m, path, cookie, body) => {
+        const res = await fetch(b2 + path, { method: m, headers: { 'Content-Type': 'application/json', ...(cookie ? { cookie } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+        return { status: res.status, body: await res.json().catch(() => ({})) }
+      }
+      check('A FORGED ADMIN COOKIE IS NOBODY', (await r2('GET', '/api/auth/me', forged)).body.user === null)
+      check('  and cannot read the passwords', (await r2('GET', '/api/auth/users', forged)).status === 401)
+      check('  nor the plan', (await r2('GET', '/api/scenarios/Baseline', forged)).status === 401)
+      const tryLogin = await r2('POST', '/api/auth/login', null, { email: 'boss@lotuss.com', password: 'bosspass1' })
+      check('NOT EVEN THE REAL PASSWORD SIGNS IN', tryLogin.status === 503, JSON.stringify(tryLogin.body))
+      check('  and it says why', /AUTH_SECRET/.test(tryLogin.body.error || ''))
+      check('  and nobody can register a password under the public key',
+        (await r2('POST', '/api/auth/register', null, { email: 'new@lotuss.com', password: 'password1' })).status === 503)
+      check('  and the sign-in page is told it is locked', (await r2('GET', '/api/auth/config')).body.locked === true)
+    } finally {
+      s2.kill()
+    }
+  }
 
   /* ---------------- and what each role actually sees ---------------- */
   const BROWSERS = [
@@ -266,6 +381,25 @@ try {
     check('  and the register\'s own editable grid is nowhere on the page',
       !(await page.evaluate(() => !!document.querySelector('input[placeholder="FNP-000"], [aria-label="open cost breakdown"]'))),
       'the Projects table edits in place, so its inputs are the thing to look for')
+
+    /*
+     * The member's browser was blank when it signed in. The shared plan used
+     * to be fetched on mount — before anybody had signed in — so once the
+     * server started refusing strangers, a browser that signed in afterwards
+     * would never have asked again and sat on the bundled seed.
+     */
+    const memberPlan = await page.evaluate(() => JSON.parse(localStorage.getItem('fa-tech-kpi-2026') || '{}')?.projects?.[0]?.summary)
+    check('A MEMBER WHO SIGNS IN ON A BLANK BROWSER GETS THE SHARED PLAN', memberPlan === 'SECURITY-MARKER', String(memberPlan))
+    await page.goto(`${base}/#timeline`, { waitUntil: 'networkidle2' })
+    await new Promise((r) => setTimeout(r, 2500))
+    const tl = await page.evaluate(() => document.body.innerText)
+    check('  and reads the Timeline WITHOUT the buttons that rewrite the shared plan',
+      /Timeline/.test(tl) && !/Sync for everyone|Sync with Jira|Find new epics/.test(tl))
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'More')?.click())
+    await new Promise((r) => setTimeout(r, 500))
+    check('  and the menu does not offer to publish over it',
+      !/Publish to shared store/.test(await page.evaluate(() => document.body.innerText)))
+    await page.keyboard.press('Escape')
 
     await signInAs('boss@lotuss.com', 'bosspass1')
     const adminTabs = await tabs()

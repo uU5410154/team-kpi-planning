@@ -31,6 +31,88 @@ const app = express()
 app.use(compression())
 app.use(express.json({ limit: '8mb' }))
 
+/* ------------------------- who is asking ------------------------- */
+
+/*
+ * Who is asking. Read from a signed cookie and checked against the account
+ * itself on every request, so switching somebody off ends their session now
+ * rather than whenever it would have expired.
+ */
+const COOKIE = 'kpi_session'
+const readCookie = (req, name) => {
+  const raw = req.headers.cookie || ''
+  for (const part of raw.split(';')) {
+    const [k, ...v] = part.trim().split('=')
+    if (k === name) return decodeURIComponent(v.join('='))
+  }
+  return null
+}
+const setCookie = (res, token) => {
+  const bits = [
+    `${COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Number(process.env.AUTH_SESSION_DAYS || 30) * 86400}`,
+  ]
+  // Render terminates TLS in front of the app, so the cookie is only marked
+  // Secure where the request actually arrived over https.
+  if (process.env.NODE_ENV === 'production') bits.push('Secure')
+  res.setHeader('Set-Cookie', bits.join('; '))
+}
+
+/*
+ * The person behind a request, or null.
+ *
+ * Three ways to be somebody: no database at all (a local run, where there are
+ * no accounts and nothing shared to protect — the same rule /api/auth/me has
+ * always applied), the service token the ops scripts carry, or a session.
+ */
+const LOCAL_ADMIN = { email: 'local', role: 'admin', status: 'active', local: true }
+const whoIs = async (req) => {
+  if (!store.isConfigured()) return LOCAL_ADMIN
+  return auth.serviceUser(req.headers.authorization) || auth.currentUser(readCookie(req, COOKIE))
+}
+
+/*
+ * DENY BY DEFAULT.
+ *
+ * Every /api route needs somebody signed in, except the handful a stranger
+ * needs to become somebody — and the health check, which Render calls with no
+ * credentials. Until this existed every plan and Jira route was open to the
+ * internet: anybody could read every scorecard, overwrite the shared plan, or
+ * delete it. Listing what is PUBLIC rather than what is protected means a route
+ * added tomorrow is shut until somebody decides otherwise.
+ *
+ * Which ROLE may do what is then said on the route itself, with `adminOnly`.
+ */
+const PUBLIC = new Set([
+  'GET /api/health',
+  'GET /api/auth/config',
+  'GET /api/auth/me',
+  'POST /api/auth/register',
+  'POST /api/auth/login',
+  'POST /api/auth/logout',
+])
+app.use('/api', async (req, res, next) => {
+  if (PUBLIC.has(`${req.method} ${req.baseUrl}${req.path}`.replace(/\/$/, ''))) return next()
+  try {
+    const me = await whoIs(req)
+    if (!me) {
+      return res.status(401).json({ error: auth.locked() ? auth.LOCKED_MESSAGE : 'Sign in first.' })
+    }
+    req.me = me
+    return next()
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Could not check who is asking.' })
+  }
+})
+
+/** Writes to the plan, Jira and the account list: administrators only. */
+const adminOnly = (req, res, next) => (req.me?.role === 'admin'
+  ? next()
+  : res.status(403).json({ error: 'Administrators only.' }))
+
 /* ---------------------------- api ---------------------------- */
 
 app.get('/api/health', async (_req, res) => {
@@ -80,7 +162,7 @@ app.post('/api/jira/issues', async (req, res) => {
  * The same merge the button uses, but it does not need a browser open — which
  * is what makes a schedule worth having.
  */
-app.post('/api/jira/sync', async (_req, res) => {
+app.post('/api/jira/sync', adminOnly, async (_req, res) => {
   try {
     const r = await runSync({ trigger: 'manual' })
     return res.status(r.ok ? 200 : 400).json(r)
@@ -129,7 +211,7 @@ app.post('/api/jira/rollup', async (req, res) => {
  * credentials and is reachable by anyone who can open the app, so it stays off
  * until somebody turns it on deliberately in the Render dashboard.
  */
-app.put('/api/jira/issue/:key', async (req, res) => {
+app.put('/api/jira/issue/:key', adminOnly, async (req, res) => {
   if (String(process.env.JIRA_ALLOW_WRITES || '').toLowerCase() !== 'true') {
     return res.status(403).json({
       error: 'Writing to Jira is switched off. Set JIRA_ALLOW_WRITES=true on the server to enable it.',
@@ -185,7 +267,9 @@ app.get('/api/scenarios/:name', async (req, res) => {
   res.json(doc)
 })
 
-app.put('/api/scenarios/:name', async (req, res) => {
+// The whole plan, replaced. A team member reads it (the Overall team page and
+// the Timeline are built from it) but changes reach it through an administrator.
+app.put('/api/scenarios/:name', adminOnly, async (req, res) => {
   const name = cleanName(req.params.name)
   if (!name) return res.status(400).json({ error: 'A scenario name is required.' })
   const { payload, updatedBy } = req.body || {}
@@ -236,51 +320,13 @@ app.put('/api/scenarios/:name/apps', async (req, res) => {
   return res.json({ ...saved, apps: apps.length })
 })
 
-app.delete('/api/scenarios/:name', async (req, res) => {
+app.delete('/api/scenarios/:name', adminOnly, async (req, res) => {
   const r = await store.deleteScenario(cleanName(req.params.name))
   if (r === store.UNAVAILABLE) return unavailable(res)
   res.json(r)
 })
 
 /* ----------------------------- accounts ----------------------------- */
-
-/*
- * Who is asking. Read from a signed cookie and checked against the account
- * itself on every request, so switching somebody off ends their session now
- * rather than whenever it would have expired.
- */
-const COOKIE = 'kpi_session'
-const readCookie = (req, name) => {
-  const raw = req.headers.cookie || ''
-  for (const part of raw.split(';')) {
-    const [k, ...v] = part.trim().split('=')
-    if (k === name) return decodeURIComponent(v.join('='))
-  }
-  return null
-}
-const setCookie = (res, token) => {
-  const bits = [
-    `${COOKIE}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Max-Age=${Number(process.env.AUTH_SESSION_DAYS || 30) * 86400}`,
-  ]
-  // Render terminates TLS in front of the app, so the cookie is only marked
-  // Secure where the request actually arrived over https.
-  if (process.env.NODE_ENV === 'production') bits.push('Secure')
-  res.setHeader('Set-Cookie', bits.join('; '))
-}
-
-const whoIs = async (req) => auth.currentUser(readCookie(req, COOKIE))
-
-/** Admin-only routes go through here. */
-const mustBeAdmin = async (req, res) => {
-  const me = await whoIs(req)
-  if (!me) { res.status(401).json({ error: 'Sign in first.' }); return null }
-  if (me.role !== 'admin') { res.status(403).json({ error: 'Administrators only.' }); return null }
-  return me
-}
 
 app.get('/api/auth/config', (_req, res) => res.json({
   ...auth.status(),
@@ -296,6 +342,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
   const bad = auth.passwordProblem(password)
   if (bad) return res.status(400).json({ error: bad })
+  if (auth.locked()) return res.status(503).json({ error: auth.LOCKED_MESSAGE })
   const r = await auth.register(email, password)
   if (r === store.UNAVAILABLE) return unavailable(res)
   if (r.error) return res.status(409).json({ error: r.error })
@@ -310,6 +357,7 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {}
+  if (auth.locked()) return res.status(503).json({ error: auth.LOCKED_MESSAGE })
   const r = await auth.login(email, password)
   if (r === store.UNAVAILABLE) return unavailable(res)
   if (r.error) return res.status(401).json({ error: r.error })
@@ -335,27 +383,18 @@ app.get('/api/auth/me', async (req, res) => {
    * which mode it is in rather than pretending. On Render, where MONGODB_URI
    * is set, this branch never runs.
    */
-  if (!store.isConfigured()) {
-    return res.json({
-      user: {
-        email: 'local', role: 'admin', status: 'active', local: true,
-      },
-    })
-  }
-  const me = await whoIs(req)
-  return res.json({ user: me })
+  // whoIs answers the local admin itself when there is no store.
+  return res.json({ user: await whoIs(req) })
 })
 
-app.get('/api/auth/users', async (req, res) => {
-  if (!await mustBeAdmin(req, res)) return undefined
+app.get('/api/auth/users', adminOnly, async (_req, res) => {
   const rows = await auth.listUsers()
   if (rows === store.UNAVAILABLE) return unavailable(res)
   return res.json({ users: rows })
 })
 
-app.put('/api/auth/users/:email', async (req, res) => {
-  const me = await mustBeAdmin(req, res)
-  if (!me) return undefined
+app.put('/api/auth/users/:email', adminOnly, async (req, res) => {
+  const { me } = req
   const email = auth.cleanEmail(req.params.email)
   const patch = req.body || {}
 
@@ -383,15 +422,18 @@ app.put('/api/auth/users/:email', async (req, res) => {
   return res.json(r)
 })
 
-app.delete('/api/auth/users/:email', async (req, res) => {
-  const me = await mustBeAdmin(req, res)
-  if (!me) return undefined
+app.delete('/api/auth/users/:email', adminOnly, async (req, res) => {
+  const { me } = req
   const email = auth.cleanEmail(req.params.email)
   if (email === me.email) return res.status(409).json({ error: 'You cannot delete your own account.' })
   const r = await auth.removeUser(email)
   if (r === store.UNAVAILABLE) return unavailable(res)
   return res.json(r)
 })
+
+// An /api address that matches no route is an error, not the app's HTML page
+// with a 200 — which is what a typo in a script used to get back and parse.
+app.all('/api/*', (_req, res) => res.status(404).json({ error: 'No such API route.' }))
 
 /* --------------------------- client -------------------------- */
 
@@ -401,6 +443,9 @@ app.get('*', (_req, res) => res.sendFile(path.join(root, 'dist', 'index.html')))
 const port = process.env.PORT || 5000
 app.listen(port, async () => {
   console.log(`team-kpi-planning listening on :${port}`)
+  if (store.isConfigured() && auth.locked()) {
+    console.error(`[auth] ${auth.LOCKED_MESSAGE} Nobody can sign in until it is.`)
+  }
   const s = await store.status()
   console.log(
     s.connected

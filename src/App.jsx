@@ -147,8 +147,27 @@ export default function App() {
         setMe(who)
         setAuthConfig(cfg)
       })
-    return () => { stop = true }
+    // The server said this session is over: back to the sign-in page.
+    const out = () => setMe(null)
+    window.addEventListener(api.SIGNED_OUT, out)
+    return () => { stop = true; window.removeEventListener(api.SIGNED_OUT, out) }
   }, [])
+
+  /*
+   * Signed in, and allowed to change the shared plan.
+   *
+   * The server refuses a team member's write to the plan, so their browser
+   * must not try: an automatic save that can only fail would leave "unsaved
+   * changes" hanging over a page they cannot save from.
+   */
+  const canWrite = me?.role === 'admin'
+  /*
+   * The shared plan is only asked for once somebody is signed in. The server
+   * refuses a stranger now, and a browser that signed in AFTER these effects
+   * ran on mount would otherwise never fetch it at all. Keyed on the address
+   * so signing in as somebody else asks again.
+   */
+  const signedInAs = me ? me.email : null
 
   useEffect(() => {
     stateRef.current = state
@@ -175,6 +194,7 @@ export default function App() {
    */
   useEffect(() => {
     let stop = false
+    if (!signedInAs) return undefined
     const name = (state.scenarioName || '').trim()
     if (!name) return undefined
     api.loadApps(name).then((r) => {
@@ -189,8 +209,8 @@ export default function App() {
         : { ...s, apps: r.apps }))
     }).catch(() => {})
     return () => { stop = true }
-    // Once, on open: the name does not change without a reload.
-  }, [])
+    // Once per sign-in: the name does not change without a reload.
+  }, [signedInAs])
   useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
 
   /*
@@ -262,6 +282,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!signedInAs) return undefined
     let cancelled = false
     const blank = startedBlank.current
     // Never stuck on the spinner. Whatever happens to the request — a slow
@@ -325,7 +346,7 @@ export default function App() {
       }
     })()
     return () => { cancelled = true; clearTimeout(cap) }
-  }, [takeShared])
+  }, [takeShared, signedInAs])
 
   useEffect(() => {
     if (wasReset) {
@@ -436,6 +457,7 @@ export default function App() {
   const autoSaveTimer = useRef(null)
   useEffect(() => {
     if (!dirty || !linkedToDb.current) return undefined
+    if (!canWrite) return undefined
     if (plan.invalid.length) return undefined
     const name = (state.scenarioName || '').trim()
     if (!name) return undefined
@@ -477,7 +499,7 @@ export default function App() {
       }
     }, 4000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [dirty, state, plan.invalid.length, dbNotice])
+  }, [dirty, state, plan.invalid.length, dbNotice, canWrite])
 
   // Keep the tab in the URL hash so a view can be linked or bookmarked.
   useEffect(() => {
@@ -1058,9 +1080,12 @@ export default function App() {
                 </MenuItem>
               )}
               {phone && <Divider />}
-              <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
-                <CloudUploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Publish to shared store
-              </MenuItem>
+              {/* Writing the shared plan is an administrator's; the server refuses anybody else. */}
+              {canWrite && (
+                <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
+                  <CloudUploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Publish to shared store
+                </MenuItem>
+              )}
               <MenuItem onClick={() => { setScenario('open'); setMenuEl(null) }}>
                 <CloudDownloadIcon fontSize="small" sx={{ mr: 1.5 }} /> Open shared scenario
               </MenuItem>
@@ -1129,6 +1154,9 @@ export default function App() {
               onAddProjects={addProjects}
               onReplaceProjects={replaceProjects}
               rawProjects={state.projects}
+              // A team member reads the timeline. Moving a date is a re-plan
+              // against somebody's scorecard, and goes through an administrator.
+              readOnly={!canWrite}
             />
           )}
 

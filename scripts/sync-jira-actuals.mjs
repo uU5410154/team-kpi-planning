@@ -14,6 +14,7 @@
  *   node scripts/sync-jira-actuals.mjs --write  # save it
  */
 import { computePlan, repairState } from '../src/lib/model.js'
+import './service-auth.mjs' // every /api route needs a sign-in: send KPI_SERVICE_TOKEN
 
 const BASE = process.env.KPI_BASE || 'https://team-kpi-planning.onrender.com'
 const SCENARIO = process.env.KPI_SCENARIO || 'Baseline'

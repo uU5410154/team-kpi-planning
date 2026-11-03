@@ -157,7 +157,7 @@ function PlanEditor({ row, onSave, onHold, saving, jira }) {
  * happened. It is never coloured as though it were on time.
  */
 export default function Timeline({
-  plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects,
+  plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -914,7 +914,7 @@ export default function Timeline({
      * child is editable only when this server is allowed to write, since there
      * is nothing here to save it into — the ticket IS the record.
      */
-    const canEdit = !!row.projectKey || (!!row.jiraKey && !!jira?.writable)
+    const canEdit = !readOnly && (!!row.projectKey || (!!row.jiraKey && !!jira?.writable))
     const isOpen = open.has(key)
     const under = kids.get(key)
 
@@ -1232,6 +1232,9 @@ export default function Timeline({
             between their right-hand edges is the slip.
           </Typography>
         </Box>
+        {/* Reading Jira into the plan, or syncing it for everyone, changes the
+            shared plan — an administrator's job. A team member reads. */}
+        {!readOnly && (
         <Box sx={{ textAlign: 'right' }}>
           <Button
             variant="outlined"
@@ -1272,6 +1275,7 @@ export default function Timeline({
                 : 'not configured on the server'}
           </Typography>
         </Box>
+        )}
       </Box>
       {syncing && <LinearProgress />}
       {syncNote && (

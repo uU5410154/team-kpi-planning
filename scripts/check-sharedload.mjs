@@ -65,9 +65,17 @@ await client.db('team_kpi_planning').collection('kpi_scenarios').insertOne({
 await client.close()
 
 const PORT = 5324
+/*
+ * The server wants a sign-in for every plan route now. This suite is about
+ * what a browser does with the shared plan, not about signing in (check-auth
+ * covers that), so each page carries the service token as a header and the app
+ * opens as an administrator.
+ */
+const SERVICE = 'svc-'.padEnd(48, 'x')
+const asAdmin = (pg) => pg.setExtraHTTPHeaders({ authorization: `Bearer ${SERVICE}` })
 const server = spawn(process.execPath, ['server/index.js'], {
   cwd: root,
-  env: { ...process.env, PORT: String(PORT), MONGODB_URI: uri },
+  env: { ...process.env, PORT: String(PORT), MONGODB_URI: uri, KPI_SERVICE_TOKEN: SERVICE },
   stdio: ['ignore', 'ignore', 'pipe'],
 })
 const base = `http://127.0.0.1:${PORT}`
@@ -84,6 +92,7 @@ const browser = await puppeteer.launch({ executablePath: exe, headless: 'new', a
 try {
   /* ---------- 1. a browser that has never held a plan ---------- */
   const page = await browser.newPage()
+  await asAdmin(page)
   await page.setViewport({ width: 1500, height: 1000 })
   page.on('dialog', (d) => d.accept())
   await page.goto(`${base}/#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
@@ -271,6 +280,7 @@ try {
     await new Promise((r) => setTimeout(r, 500))
   }
   const p2 = await browser.newPage()
+  await asAdmin(p2)
   await p2.goto(`${noDbBase}/#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await p2.evaluate(() => localStorage.clear())
   await p2.goto(`${noDbBase}/?nodb=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })

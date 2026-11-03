@@ -46,10 +46,25 @@ const cfg = () => ({
 })
 
 /*
+ * NO SECRET IN PRODUCTION, NO SESSIONS AT ALL.
+ *
+ * Without AUTH_SECRET the keys below come from a constant that is in the
+ * repository — and the repository is public. Anybody could then sign a cookie
+ * for the bootstrap admin, and through it read every stored password. Warning
+ * about that on startup was not enough: it ran in production for weeks.
+ *
+ * So in production the door stays shut until the secret is set: no session
+ * is honoured, no login issues one, and nothing new is sealed under the public
+ * key. A local run (no NODE_ENV=production) keeps the constant, so development
+ * and the test suites need no setup.
+ */
+export const locked = () => process.env.NODE_ENV === 'production' && !cfg().secret
+export const LOCKED_MESSAGE = 'Sign-in is switched off: the server has no AUTH_SECRET. '
+  + 'An administrator has to set it in the Render dashboard.'
+
+/*
  * The key material. Derived from AUTH_SECRET where it is set; where it is not,
- * from a constant, and the server says so loudly on startup — an unset secret
- * means the stored ciphertext is readable by anybody with the code, which is
- * most of the value gone.
+ * from a constant — tolerated only outside production (see `locked`).
  */
 let warned = false
 const keys = () => {
@@ -120,6 +135,7 @@ export function verify(record, password) {
  * happened to expire.
  */
 export function signSession(email) {
+  if (locked()) throw new Error(LOCKED_MESSAGE)
   const until = Date.now() + cfg().ttlDays * 86400000
   const body = Buffer.from(JSON.stringify({ email, until })).toString('base64url')
   const sig = crypto.createHmac('sha256', keys().mac).update(body).digest('base64url')
@@ -127,6 +143,8 @@ export function signSession(email) {
 }
 
 export function readSession(token) {
+  // A cookie signed with the public constant is exactly what a forger holds.
+  if (locked()) return null
   const [body, sig] = String(token || '').split('.')
   if (!body || !sig) return null
   const want = crypto.createHmac('sha256', keys().mac).update(body).digest('base64url')
@@ -183,6 +201,8 @@ export const publicUser = (u, { withPassword = false } = {}) => (u ? {
 } : null)
 
 export async function register(email, password) {
+  // Sealing a password under the public key would store it readable to anyone.
+  if (locked()) return { error: LOCKED_MESSAGE }
   const c = await coll()
   if (!c) return UNAVAILABLE
   const e = cleanEmail(email)
@@ -208,6 +228,7 @@ export async function register(email, password) {
 }
 
 export async function login(email, password) {
+  if (locked()) return { error: LOCKED_MESSAGE }
   const c = await coll()
   if (!c) return UNAVAILABLE
   const u = await c.findOne({ email: cleanEmail(email) })
@@ -258,6 +279,7 @@ export async function updateUser(email, patch, by) {
     }
   }
   if (patch.password !== undefined) {
+    if (locked()) return { error: LOCKED_MESSAGE }
     const bad = passwordProblem(patch.password)
     if (bad) return { error: bad }
     Object.assign(set, seal(patch.password))
@@ -282,9 +304,34 @@ export async function activeAdmins() {
   return c.countDocuments({ role: 'admin', status: 'active' })
 }
 
+/*
+ * A SERVICE TOKEN, for the scripts in scripts/ that read and write the shared
+ * plan from a terminal. They have no browser to hold a cookie.
+ *
+ * Off unless KPI_SERVICE_TOKEN is set, and ignored if it is short enough to
+ * guess. Compared in constant time. It acts as an administrator, so it lives
+ * where AUTH_SECRET does — the Render dashboard — and never in the repository.
+ */
+const MIN_TOKEN = 32
+export function serviceUser(authorization) {
+  const want = String(process.env.KPI_SERVICE_TOKEN || '')
+  if (want.length < MIN_TOKEN) return null
+  const m = /^Bearer\s+(.+)$/i.exec(String(authorization || '').trim())
+  if (!m) return null
+  const a = crypto.createHash('sha256').update(m[1]).digest()
+  const b = crypto.createHash('sha256').update(want).digest()
+  return crypto.timingSafeEqual(a, b)
+    ? { email: 'service', role: 'admin', status: 'active', service: true }
+    : null
+}
+
+/*
+ * What the sign-in page is told. Not the bootstrap list: that published the
+ * team lead's address to anybody who asked, and the page never used it.
+ */
 export const status = () => ({
   configured: true,
   domain: cfg().domain,
   secretSet: !!cfg().secret,
-  bootstrap: cfg().bootstrap,
+  locked: locked(),
 })

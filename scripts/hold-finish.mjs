@@ -18,6 +18,7 @@
  *   node scripts/hold-finish.mjs --release --keys A   # hand one back to the sync
  */
 import { computePlan, repairState, driftOf, pinFinishPatch, unpinFinishPatch } from '../src/lib/model.js'
+import './service-auth.mjs' // every /api route needs a sign-in: send KPI_SERVICE_TOKEN
 
 const BASE = process.env.KPI_BASE || 'https://team-kpi-planning.onrender.com'
 const SCENARIO = process.env.KPI_SCENARIO || 'Baseline'

@@ -5,3 +5,11 @@ dist/
 *.log
 .DS_Store
 .vite/
+
+# Local notes that must never reach this PUBLIC repository: one holds an API
+# credential, the other describes security issues in detail.
+lotus-llm.md
+HANDOVER.md
+
+# Written by the check scripts; left behind when one crashes.
+*-selftest.xlsx

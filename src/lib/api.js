@@ -4,8 +4,18 @@
  * browser-local storage, so a Mongo outage can never block planning work.
  */
 
+/*
+ * A 401 here means the session ended under the page — it expired, the account
+ * was switched off, or the server's secret changed. The app listens for this
+ * and puts the sign-in page back, rather than every later save failing with a
+ * message nobody can act on. (Not in authApi: a wrong password is a 401 too,
+ * and that is the sign-in page's own business.)
+ */
+export const SIGNED_OUT = 'kpi:signed-out'
+
 const j = async (res) => {
   const body = await res.json().catch(() => ({}))
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
   if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`)
   return body
 }
