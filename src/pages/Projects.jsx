@@ -654,7 +654,7 @@ export default function Projects({
           </FormControl>
         </Stack>
 
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 1.5 }}>
+        <Stack direction="row" spacing={{ xs: 1, sm: 2 }} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             Showing {rows.length} of {projects.length} projects
           </Typography>
@@ -931,7 +931,11 @@ export default function Projects({
                   click target, and an accidental popup mid-edit is worse. */}
               <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }} />
               {head('jiraKey', 'Jira', 'left', 88)}
-              {head('summary', 'Project')}
+              {/* A floor on a phone only: there the table squeezed this column
+                  to the width of its smallest input, and the team / programme
+                  fields under each name were a few letters wide. Wider
+                  screens keep the column-width balance tuned below. */}
+              {head('summary', 'Project', 'left', { xs: 220, md: 0 })}
               <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
               <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>
               {head('savingHours', 'Saving hrs/mth', 'right')}

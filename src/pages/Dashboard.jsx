@@ -14,9 +14,11 @@ import { useTheme } from '@mui/material/styles'
 
 function Section({ title, subtitle, children, action }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2.5, height: '100%' }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 2 }}>
-        <Box>
+    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, height: '100%', minWidth: 0 }}>
+      {/* Wraps, so on a phone a view toggle drops under the title instead of
+          squeezing the subtitle into a column three words wide. */}
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '1 1 220px', minWidth: 0 }}>
           <Typography variant="h4">{title}</Typography>
           {subtitle && (
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
@@ -535,7 +537,9 @@ export default function Dashboard({ plan, onGoTo }) {
             title="Concentration risk"
             subtitle={`The five largest projects carry ${fmtPct(totals.topProjects.reduce((a, p) => a + (p.savingHours ?? 0), 0) / (totals.headlineHours || 1))} of the committed pool.`}
           >
-            <Table size="small">
+            {/* scrolls on a phone rather than widening the whole page */}
+            <Box sx={{ overflowX: 'auto' }}>
+            <Table size="small" sx={{ minWidth: 560 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Jira</TableCell>
@@ -574,6 +578,7 @@ export default function Dashboard({ plan, onGoTo }) {
                 })}
               </TableBody>
             </Table>
+            </Box>
           </Section>
         </Grid>
       </Grid>

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
   Grid, Chip, Tabs, Tab, Alert, Tooltip, TextField, InputAdornment, Button, IconButton,
-  Select, MenuItem,
+  Select, MenuItem, useMediaQuery,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
@@ -229,6 +229,7 @@ export default function People({
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
+  const narrow = useMediaQuery(theme.breakpoints.down('sm'))
   const { people, settings, totals, finance: fin } = plan
   const sym = fin.symbol
   const [who, setWho] = useState(people[0]?.id)
@@ -468,12 +469,19 @@ export default function People({
               * any width the button can still be reached.
               */}
             <Box sx={{ overflowX: 'auto' }}>
-            <Table size="small" sx={{ '& th, & td': { px: 1 } }}>
+            {/* Fixed layout on a phone, sized to the 116px target field and
+                the 80px weight field: under auto layout the full-width
+                commitment row below sized the table past the card, and the
+                card cut its right edge off. */}
+            <Table size="small" sx={narrow
+              ? { tableLayout: 'fixed', width: '100%', '& th, & td': { px: 0.75 } }
+              : { '& th, & td': { px: 1 } }}
+            >
               <TableHead>
                 <TableRow>
                   <TableCell>KPI line</TableCell>
-                  <TableCell sx={{ minWidth: 116 }}>Target</TableCell>
-                  <TableCell align="right" sx={{ width: 84 }}>Weight</TableCell>
+                  <TableCell sx={{ minWidth: 116, width: narrow ? 128 : undefined }}>Target</TableCell>
+                  <TableCell align="right" sx={{ width: narrow ? 92 : 84 }}>Weight</TableCell>
                   <TableCell padding="none" sx={{ width: 34 }} />
                 </TableRow>
               </TableHead>
@@ -483,9 +491,234 @@ export default function People({
                   const idx = o ? OBJECTIVES.findIndex((x) => x.id === o.id) : -1
                   const selectable = !!l.objective
                   const active = selectable && focus === l.objective
+                  // On a phone the Target column is a third of 360px and the list of dated
+                  // commitments became a column ten words wide, so there it gets a
+                  // full-width row of its own under the line. Wider screens keep it in the cell.
+                  const commitBlock = l.targetKind === 'percent' && (p.commitments || []).length > 0 ? (
+                    <Box sx={{
+                      mt: 0.75,
+                      mb: 0.5,
+                      /*
+                       * The list must not widen the card.
+                       *
+                       * A table sizes itself to its content, and thirty
+                       * project names pushed this one to 740px inside a
+                       * 451px card — which shoved the delete button back
+                       * outside the frame, the exact fault this card had
+                       * once before. Fixed layout and a hard maximum
+                       * keep the names inside their column instead.
+                       */
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                    }}
+                    >
+                      {/*
+                        * The commitment itself, in words, above the list
+                        * it applies to. A KPI somebody cannot recite is a
+                        * KPI somebody is not managing to.
+                        */}
+                      <Box sx={{
+                        p: 1,
+                        mb: 0.75,
+                        borderRadius: 1,
+                        bgcolor: 'action.hover',
+                        borderLeft: 3,
+                        borderColor: l.meetsTarget === false ? STATUS.critical : STATUS.good,
+                      }}
+                      >
+                        <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
+                          <strong>My commitment.</strong> Each project below lands on the date beside it.
+                        </Typography>
+                        {/*
+                          * The two limits, numbered, each with what it
+                          * comes to for THIS person. "No more than 15%"
+                          * is not something anybody can hold themselves
+                          * to while they work; "no more than 2 of your
+                          * 15" is, and it is the same rule.
+                          */}
+                        <Box component="ol" sx={{ m: 0, mt: 0.5, pl: 2, '& li': { mb: 0.4 } }}>
+                          <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
+                            <strong>Per project — {Math.round((l.perProjectLimit ?? 0.2) * 100)}%.</strong> A date
+                            may move by up to {Math.round((l.perProjectLimit ?? 0.2) * 100)}% of that
+                            project&rsquo;s <em>own</em> planned length: a 90-day project may move{' '}
+                            {Math.round(90 * (l.perProjectLimit ?? 0.2))} days, a 30-day one{' '}
+                            {Math.round(30 * (l.perProjectLimit ?? 0.2))} — never less than a whole day. What
+                            each project is actually allowed is beside it below.
+                          </Typography>
+                          <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
+                            <strong>
+                              Across everything {l.aggregatesTeam ? 'the team holds' : 'I hold'} — {l.target}%.
+                            </strong>{' '}
+                            Of the <strong>{l.held}</strong> project{l.held === 1 ? '' : 's'}{' '}
+                            {l.aggregatesTeam ? 'the team is' : 'I am'} PIC of,{' '}
+                            {l.allowedCount === 0
+                              ? <>at {l.target}% <strong>not one</strong> may drift beyond its own allowance</>
+                              : <>at most <strong>{l.allowedCount}</strong> may drift beyond their own allowance</>}
+                            . Counted over everything {l.aggregatesTeam ? 'held' : 'I hold'}, not only what has
+                            finished — otherwise one delivered project and nine untouched ones would read as
+                            nothing drifted.
+                          </Typography>
+                          <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
+                            <strong>One free re-plan.</strong> Each project may be re-planned once after
+                            requirement gathering — a date set before anybody has seen the requirement is a
+                            guess, and the re-plan resets the commitment at no cost. A second move counts as
+                            drift whatever the dates then say.
+                          </Typography>
+                        </Box>
+                        <Typography variant="caption" sx={{
+                          display: 'block',
+                          mt: 0.5,
+                          fontWeight: 700,
+                          color: l.meetsTarget === false ? STATUS.critical : STATUS.good,
+                        }}
+                        >
+                          {l.driftedCount} of {l.held} drifted ({fmtPct(l.creditedRatio ?? 0)})
+                          {' · '}
+                          {l.headroom != null && (
+                            l.headroom > 0
+                              ? `${l.headroom} more may drift before the ${l.target}% limit is broken`
+                              : l.headroom === 0
+                                ? `at the ${l.target}% limit — one more breaks it`
+                                : `${Math.abs(l.headroom)} over the ${l.allowedCount} allowed by the ${l.target}% limit`
+                          )}
+                        </Typography>
+                        {l.judgedDrift != null && l.judgedDrift < l.held && (
+                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                            {l.judgedDrift} of {l.held} can be judged so far — the rest are not due yet, and
+                            none of them has spent any of its allowance.
+                          </Typography>
+                        )}
+                        {/*
+                          * The lead's line states the team's book while
+                          * the list below is the lead's own. Saying so is
+                          * the difference between a card that aggregates
+                          * and a card that contradicts itself.
+                          */}
+                        {l.aggregatesTeam && (
+                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
+                            Those figures are the whole team&rsquo;s. The dates listed below are{' '}
+                            {p.nick}&rsquo;s own {(p.commitments || []).length} project
+                            {(p.commitments || []).length === 1 ? '' : 's'}.
+                          </Typography>
+                        )}
+                        {(p.drift?.replanned > 0 || p.drift?.backwards > 0) && (
+                          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
+                            {p.drift.replanned > 0 && (
+                              <>
+                                {p.drift.replanned} re-planned once (allowed)
+                                {p.drift.overReplanned > 0 && `, ${p.drift.overReplanned} more than once`}
+                              </>
+                            )}
+                            {p.drift.backwards > 0 && (
+                              <Box component="span" sx={{ color: STATUS.warning }}>
+                                {p.drift.replanned > 0 ? ' · ' : ''}
+                                {p.drift.backwards} plan{p.drift.backwards === 1 ? '' : 's'} start after their own
+                                due date — data to fix, not scored
+                              </Box>
+                            )}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Table size="small" sx={{
+                        tableLayout: 'fixed',
+                        width: '100%',
+                        '& td': {
+                          border: 0,
+                          px: 0.75,
+                          py: 0.15,
+                          fontSize: '0.68rem',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        },
+                      }}
+                      >
+                        <TableBody>
+                          {p.commitments.map((c) => (
+                            <TableRow key={c.key}>
+                              {/* On a phone the name gives up room so the date and the verdict —
+                                  the point of the list — show whole, not as \"by 202…\" and \"+136d …\". */}
+                              <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap', width: narrow ? '19%' : undefined }}>
+                                {c.jiraKey || '—'}
+                              </TableCell>
+                              <TableCell sx={{ width: narrow ? '31%' : '46%' }}>
+                                <Tooltip title={c.summary}>
+                                  <Box component="span" sx={{
+                                    display: 'block',
+                                    maxWidth: '100%',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  >
+                                    {c.summary}
+                                  </Box>
+                                </Tooltip>
+                              </TableCell>
+                              <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', width: narrow ? '25%' : undefined }}>
+                                {c.due ? (narrow ? c.due : `by ${c.due}`) : (
+                                  <Box component="span" sx={{ color: STATUS.warning, fontWeight: 700 }}>
+                                    no date committed
+                                  </Box>
+                                )}
+                                {c.replans > 0 && (
+                                  <Tooltip title={c.baselineDue
+                                    ? `First committed to ${c.baselineDue}, re-planned ${c.replans} time${c.replans === 1 ? '' : 's'}`
+                                    : `Re-planned ${c.replans} times`}
+                                  >
+                                    <Box
+                                      component="span"
+                                      sx={{
+                                        ml: 0.5,
+                                        fontSize: '0.6rem',
+                                        cursor: 'help',
+                                        color: c.overReplanned ? STATUS.critical : 'text.disabled',
+                                      }}
+                                    >
+                                      {c.overReplanned ? `re-planned ×${c.replans}` : 're-planned'}
+                                    </Box>
+                                  </Tooltip>
+                                )}
+                              </TableCell>
+                              <TableCell align="right" sx={{
+                                whiteSpace: 'nowrap',
+                                fontWeight: 700,
+                                color: c.drifted === null ? 'text.disabled'
+                                  : c.drifted ? STATUS.critical : STATUS.good,
+                              }}
+                              >
+                                {/*
+                                  * Used against allowed, not the overrun
+                                  * on its own. "+24d" is not something a
+                                  * reader can check; "+24d of 18d" says
+                                  * what happened and what was permitted,
+                                  * which is the whole of the rule.
+                                  */}
+                                <Tooltip title={driftNote(c, l.perProjectLimit ?? 0.2)}>
+                                  <Box component="span" sx={{ cursor: 'help' }}>
+                                    {c.drifted === null
+                                      ? (c.running ? 'running' : 'not due yet')
+                                      : c.driftDays === 0
+                                        ? `on the day${c.actualEnd ? ` ${c.actualEnd}` : ''}`
+                                        : `+${c.driftDays}d${c.driftAllowance != null ? ` of ${Math.round(c.driftAllowance)}d` : ''}`}
+                                  </Box>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      {p.undatedCount > 0 && (
+                        <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', mt: 0.25 }}>
+                          {p.undatedCount} project{p.undatedCount === 1 ? '' : 's'} with no committed date —
+                          objective 1 is not complete until every one has one.
+                        </Typography>
+                      )}
+                    </Box>
+                  ) : null
                   return (
+                    <Fragment key={l.id}>
                     <TableRow
-                      key={l.id}
                       hover
                       selected={active}
                       onClick={selectable ? () => setFocus(active ? null : l.objective) : undefined}
@@ -598,226 +831,7 @@ export default function People({
                           * the date they said it would land, so that is what
                           * the card shows.
                           */}
-                        {l.targetKind === 'percent' && (p.commitments || []).length > 0 && (
-                          <Box sx={{
-                            mt: 0.75,
-                            mb: 0.5,
-                            /*
-                             * The list must not widen the card.
-                             *
-                             * A table sizes itself to its content, and thirty
-                             * project names pushed this one to 740px inside a
-                             * 451px card — which shoved the delete button back
-                             * outside the frame, the exact fault this card had
-                             * once before. Fixed layout and a hard maximum
-                             * keep the names inside their column instead.
-                             */
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                          }}
-                          >
-                            {/*
-                              * The commitment itself, in words, above the list
-                              * it applies to. A KPI somebody cannot recite is a
-                              * KPI somebody is not managing to.
-                              */}
-                            <Box sx={{
-                              p: 1,
-                              mb: 0.75,
-                              borderRadius: 1,
-                              bgcolor: 'action.hover',
-                              borderLeft: 3,
-                              borderColor: l.meetsTarget === false ? STATUS.critical : STATUS.good,
-                            }}
-                            >
-                              <Typography variant="caption" sx={{ display: 'block', lineHeight: 1.5 }}>
-                                <strong>My commitment.</strong> Each project below lands on the date beside it.
-                              </Typography>
-                              {/*
-                                * The two limits, numbered, each with what it
-                                * comes to for THIS person. "No more than 15%"
-                                * is not something anybody can hold themselves
-                                * to while they work; "no more than 2 of your
-                                * 15" is, and it is the same rule.
-                                */}
-                              <Box component="ol" sx={{ m: 0, mt: 0.5, pl: 2, '& li': { mb: 0.4 } }}>
-                                <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
-                                  <strong>Per project — {Math.round((l.perProjectLimit ?? 0.2) * 100)}%.</strong> A date
-                                  may move by up to {Math.round((l.perProjectLimit ?? 0.2) * 100)}% of that
-                                  project&rsquo;s <em>own</em> planned length: a 90-day project may move{' '}
-                                  {Math.round(90 * (l.perProjectLimit ?? 0.2))} days, a 30-day one{' '}
-                                  {Math.round(30 * (l.perProjectLimit ?? 0.2))} — never less than a whole day. What
-                                  each project is actually allowed is beside it below.
-                                </Typography>
-                                <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
-                                  <strong>
-                                    Across everything {l.aggregatesTeam ? 'the team holds' : 'I hold'} — {l.target}%.
-                                  </strong>{' '}
-                                  Of the <strong>{l.held}</strong> project{l.held === 1 ? '' : 's'}{' '}
-                                  {l.aggregatesTeam ? 'the team is' : 'I am'} PIC of,{' '}
-                                  {l.allowedCount === 0
-                                    ? <>at {l.target}% <strong>not one</strong> may drift beyond its own allowance</>
-                                    : <>at most <strong>{l.allowedCount}</strong> may drift beyond their own allowance</>}
-                                  . Counted over everything {l.aggregatesTeam ? 'held' : 'I hold'}, not only what has
-                                  finished — otherwise one delivered project and nine untouched ones would read as
-                                  nothing drifted.
-                                </Typography>
-                                <Typography component="li" variant="caption" sx={{ display: 'list-item', lineHeight: 1.5 }}>
-                                  <strong>One free re-plan.</strong> Each project may be re-planned once after
-                                  requirement gathering — a date set before anybody has seen the requirement is a
-                                  guess, and the re-plan resets the commitment at no cost. A second move counts as
-                                  drift whatever the dates then say.
-                                </Typography>
-                              </Box>
-                              <Typography variant="caption" sx={{
-                                display: 'block',
-                                mt: 0.5,
-                                fontWeight: 700,
-                                color: l.meetsTarget === false ? STATUS.critical : STATUS.good,
-                              }}
-                              >
-                                {l.driftedCount} of {l.held} drifted ({fmtPct(l.creditedRatio ?? 0)})
-                                {' · '}
-                                {l.headroom != null && (
-                                  l.headroom > 0
-                                    ? `${l.headroom} more may drift before the ${l.target}% limit is broken`
-                                    : l.headroom === 0
-                                      ? `at the ${l.target}% limit — one more breaks it`
-                                      : `${Math.abs(l.headroom)} over the ${l.allowedCount} allowed by the ${l.target}% limit`
-                                )}
-                              </Typography>
-                              {l.judgedDrift != null && l.judgedDrift < l.held && (
-                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
-                                  {l.judgedDrift} of {l.held} can be judged so far — the rest are not due yet, and
-                                  none of them has spent any of its allowance.
-                                </Typography>
-                              )}
-                              {/*
-                                * The lead's line states the team's book while
-                                * the list below is the lead's own. Saying so is
-                                * the difference between a card that aggregates
-                                * and a card that contradicts itself.
-                                */}
-                              {l.aggregatesTeam && (
-                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
-                                  Those figures are the whole team&rsquo;s. The dates listed below are{' '}
-                                  {p.nick}&rsquo;s own {(p.commitments || []).length} project
-                                  {(p.commitments || []).length === 1 ? '' : 's'}.
-                                </Typography>
-                              )}
-                              {(p.drift?.replanned > 0 || p.drift?.backwards > 0) && (
-                                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
-                                  {p.drift.replanned > 0 && (
-                                    <>
-                                      {p.drift.replanned} re-planned once (allowed)
-                                      {p.drift.overReplanned > 0 && `, ${p.drift.overReplanned} more than once`}
-                                    </>
-                                  )}
-                                  {p.drift.backwards > 0 && (
-                                    <Box component="span" sx={{ color: STATUS.warning }}>
-                                      {p.drift.replanned > 0 ? ' · ' : ''}
-                                      {p.drift.backwards} plan{p.drift.backwards === 1 ? '' : 's'} start after their own
-                                      due date — data to fix, not scored
-                                    </Box>
-                                  )}
-                                </Typography>
-                              )}
-                            </Box>
-                            <Table size="small" sx={{
-                              tableLayout: 'fixed',
-                              width: '100%',
-                              '& td': {
-                                border: 0,
-                                px: 0.75,
-                                py: 0.15,
-                                fontSize: '0.68rem',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              },
-                            }}
-                            >
-                              <TableBody>
-                                {p.commitments.map((c) => (
-                                  <TableRow key={c.key}>
-                                    <TableCell sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                                      {c.jiraKey || '—'}
-                                    </TableCell>
-                                    <TableCell sx={{ width: '46%' }}>
-                                      <Tooltip title={c.summary}>
-                                        <Box component="span" sx={{
-                                          display: 'block',
-                                          maxWidth: '100%',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          whiteSpace: 'nowrap',
-                                        }}
-                                        >
-                                          {c.summary}
-                                        </Box>
-                                      </Tooltip>
-                                    </TableCell>
-                                    <TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                                      {c.due ? `by ${c.due}` : (
-                                        <Box component="span" sx={{ color: STATUS.warning, fontWeight: 700 }}>
-                                          no date committed
-                                        </Box>
-                                      )}
-                                      {c.replans > 0 && (
-                                        <Tooltip title={c.baselineDue
-                                          ? `First committed to ${c.baselineDue}, re-planned ${c.replans} time${c.replans === 1 ? '' : 's'}`
-                                          : `Re-planned ${c.replans} times`}
-                                        >
-                                          <Box
-                                            component="span"
-                                            sx={{
-                                              ml: 0.5,
-                                              fontSize: '0.6rem',
-                                              cursor: 'help',
-                                              color: c.overReplanned ? STATUS.critical : 'text.disabled',
-                                            }}
-                                          >
-                                            {c.overReplanned ? `re-planned ×${c.replans}` : 're-planned'}
-                                          </Box>
-                                        </Tooltip>
-                                      )}
-                                    </TableCell>
-                                    <TableCell align="right" sx={{
-                                      whiteSpace: 'nowrap',
-                                      fontWeight: 700,
-                                      color: c.drifted === null ? 'text.disabled'
-                                        : c.drifted ? STATUS.critical : STATUS.good,
-                                    }}
-                                    >
-                                      {/*
-                                        * Used against allowed, not the overrun
-                                        * on its own. "+24d" is not something a
-                                        * reader can check; "+24d of 18d" says
-                                        * what happened and what was permitted,
-                                        * which is the whole of the rule.
-                                        */}
-                                      <Tooltip title={driftNote(c, l.perProjectLimit ?? 0.2)}>
-                                        <Box component="span" sx={{ cursor: 'help' }}>
-                                          {c.drifted === null
-                                            ? (c.running ? 'running' : 'not due yet')
-                                            : c.driftDays === 0
-                                              ? `on the day${c.actualEnd ? ` ${c.actualEnd}` : ''}`
-                                              : `+${c.driftDays}d${c.driftAllowance != null ? ` of ${Math.round(c.driftAllowance)}d` : ''}`}
-                                        </Box>
-                                      </Tooltip>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                            {p.undatedCount > 0 && (
-                              <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', mt: 0.25 }}>
-                                {p.undatedCount} project{p.undatedCount === 1 ? '' : 's'} with no committed date —
-                                objective 1 is not complete until every one has one.
-                              </Typography>
-                            )}
-                          </Box>
-                        )}
+                        {!narrow && commitBlock}
                         {l.creditedHours > 0 && l.targetKind !== 'hours' && (
                           <Tooltip title="The saving hours behind this line. Its target is stated in another unit, but the hours still count toward the total below.">
                             <Typography variant="caption" sx={{ color: 'text.secondary', cursor: 'help', display: 'block', mt: 0.25 }}>
@@ -849,6 +863,12 @@ export default function People({
                         </Tooltip>
                       </TableCell>
                     </TableRow>
+                    {narrow && commitBlock && (
+                      <TableRow>
+                        <TableCell colSpan={4} sx={{ pt: 0 }}>{commitBlock}</TableCell>
+                      </TableRow>
+                    )}
+                    </Fragment>
                   )
                 })}
                 <TableRow>

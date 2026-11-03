@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, AppBar, Toolbar, Typography, Tabs, Tab,
   Button, IconButton, Tooltip, Snackbar, Alert, Chip, Divider, Menu, MenuItem,
-  CircularProgress,
+  CircularProgress, useMediaQuery,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import DarkModeIcon from '@mui/icons-material/DarkModeOutlined'
@@ -117,6 +117,10 @@ export default function App() {
   const firstRender = useRef(true)
 
   const theme = useMemo(() => buildTheme(mode), [mode])
+  // A phone. Written as the raw query because this component sits OUTSIDE its
+  // own ThemeProvider, so theme.breakpoints is not reachable from here; 600px
+  // is MUI's `sm`, the same line every page below draws.
+  const phone = useMediaQuery('(max-width:599.95px)')
   const plan = useMemo(() => computePlan(state), [state])
 
   /*
@@ -934,12 +938,19 @@ export default function App() {
       <CssBaseline />
       <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
         <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-          <Toolbar sx={{ gap: 2, minHeight: { xs: 56, sm: 60 } }}>
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.25, minWidth: 0 }}>
+          {/*
+            * On a phone the bar held seven things in one unbreakable row and
+            * pushed the export and the menu off the right edge, which made
+            * Safari zoom the whole app out to fit them. There the subtitle
+            * goes, export becomes an icon, and who is signed in moves into
+            * the ⋮ menu.
+            */}
+          <Toolbar sx={{ gap: { xs: 1, sm: 2 }, px: { xs: 1.5, sm: 3 }, minHeight: { xs: 56, sm: 60 } }}>
+            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.25, minWidth: 0, flexShrink: 0 }}>
               <Typography variant="h4" noWrap sx={{ fontWeight: 700, letterSpacing: '-0.01em' }}>
                 F&amp;A Tech
               </Typography>
-              <Typography variant="body2" noWrap sx={{ color: 'text.secondary' }}>
+              <Typography variant="body2" noWrap sx={{ color: 'text.secondary', display: { xs: 'none', md: 'block' } }}>
                 2026 Objective &amp; KPI Planning
               </Typography>
             </Box>
@@ -948,15 +959,17 @@ export default function App() {
               size="small"
               color={covTone}
               variant="outlined"
-              label={`${Math.round(plan.totals.totalHours).toLocaleString()} / ${plan.totals.target.toLocaleString()} hrs`}
-              sx={{ fontVariantNumeric: 'tabular-nums' }}
+              label={phone
+                ? `${Math.round(plan.totals.totalHours).toLocaleString()} / ${plan.totals.target.toLocaleString()}`
+                : `${Math.round(plan.totals.totalHours).toLocaleString()} / ${plan.totals.target.toLocaleString()} hrs`}
+              sx={{ fontVariantNumeric: 'tabular-nums', minWidth: 0 }}
             />
             {plan.invalid.length > 0 && (
               <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')} — saving is blocked until every scorecard totals 100%`}>
                 <Chip
                   size="small"
                   color="error"
-                  label={`${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} ≠ 100%`}
+                  label={phone ? `${plan.invalid.length} ≠ 100%` : `${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} ≠ 100%`}
                   onClick={() => setTab('people')}
                   sx={{ cursor: 'pointer' }}
                 />
@@ -968,23 +981,26 @@ export default function App() {
             {/*
               * Who is signed in, and the way out. Beside the export rather
               * than hidden in a menu: on a shared machine the most important
-              * thing this bar can say is whose session it is.
+              * thing this bar can say is whose session it is. A phone is not
+              * a shared machine, and has no room — there both go in the menu.
               */}
-            <Tooltip title={me.local
-              ? 'No database is configured, so there are no accounts and nothing shared to protect. This is your browser’s own copy of the plan.'
-              : me.role === 'admin'
-                ? 'Signed in as an administrator — you can see everything, including who has access'
-                : 'Signed in as a team member'}
-            >
-              <Chip
-                size="small"
-                label={me.local ? 'local — no accounts' : `${me.email.split('@')[0]}${me.role === 'admin' ? ' · admin' : ''}`}
-                variant="outlined"
-                sx={{ mr: 1 }}
-              />
-            </Tooltip>
+            {!phone && (
+              <Tooltip title={me.local
+                ? 'No database is configured, so there are no accounts and nothing shared to protect. This is your browser’s own copy of the plan.'
+                : me.role === 'admin'
+                  ? 'Signed in as an administrator — you can see everything, including who has access'
+                  : 'Signed in as a team member'}
+              >
+                <Chip
+                  size="small"
+                  label={me.local ? 'local — no accounts' : `${me.email.split('@')[0]}${me.role === 'admin' ? ' · admin' : ''}`}
+                  variant="outlined"
+                  sx={{ mr: 1 }}
+                />
+              </Tooltip>
+            )}
             {/* Nothing to sign out of when there are no accounts. */}
-            {!me.local && (
+            {!me.local && !phone && (
               <Button
                 size="small"
                 onClick={async () => {
@@ -996,15 +1012,26 @@ export default function App() {
               </Button>
             )}
 
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<DownloadIcon />}
-              onClick={handleExport}
-              disabled={exporting}
-            >
-              {exporting ? 'Building…' : 'Export Excel'}
-            </Button>
+            {phone ? (
+              <Tooltip title="Export Excel">
+                <span>
+                  <IconButton color="primary" onClick={handleExport} disabled={exporting} aria-label="Export Excel">
+                    {exporting ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<DownloadIcon />}
+                onClick={handleExport}
+                disabled={exporting}
+                sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
+              >
+                {exporting ? 'Building…' : 'Export Excel'}
+              </Button>
+            )}
 
             <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
               <IconButton size="small" onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}>
@@ -1012,10 +1039,25 @@ export default function App() {
               </IconButton>
             </Tooltip>
 
-            <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)}>
+            <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More">
               <MoreVertIcon fontSize="small" />
             </IconButton>
             <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
+              {phone && (
+                <MenuItem disabled sx={{ opacity: '1 !important', fontSize: '0.8125rem' }}>
+                  {me.local ? 'local — no accounts' : `${me.email}${me.role === 'admin' ? ' · admin' : ''}`}
+                </MenuItem>
+              )}
+              {phone && !me.local && (
+                <MenuItem onClick={async () => {
+                  setMenuEl(null)
+                  try { await authApi.signOut() } finally { setMe(null) }
+                }}
+                >
+                  Sign out
+                </MenuItem>
+              )}
+              {phone && <Divider />}
               <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
                 <CloudUploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Publish to shared store
               </MenuItem>
@@ -1040,13 +1082,20 @@ export default function App() {
           <Tabs
             value={tab}
             onChange={(_e, v) => setTab(v)}
-            sx={{ px: 2, minHeight: 40, '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontWeight: 600 } }}
+            // Scrolls on a narrow screen rather than clipping the last tabs.
+            variant="scrollable"
+            scrollButtons={false}
+            sx={{
+              px: { xs: 0, sm: 2 },
+              minHeight: 40,
+              '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontWeight: 600, px: { xs: 1.5, sm: 2 }, minWidth: { xs: 0, sm: 90 } },
+            }}
           >
             {visibleTabs.map((t) => <Tab key={t.id} value={t.id} label={t.label} />)}
           </Tabs>
         </AppBar>
 
-        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, md: 3 }, py: 3 }}>
+        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.

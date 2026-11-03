@@ -23,6 +23,7 @@ const BROWSERS = [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
   'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
 ]
 const exe = BROWSERS.find((p) => existsSync(p))

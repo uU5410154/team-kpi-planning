@@ -42,6 +42,20 @@ const shared = {
     },
     MuiChip: { styleOverrides: { root: { fontWeight: 600, fontSize: '0.6875rem' } } },
     MuiTooltip: { styleOverrides: { tooltip: { fontSize: '0.75rem', lineHeight: 1.5, maxWidth: 320 } } },
+    // On a phone a dialog keeps a 12px margin instead of 32px, so a 390px
+    // screen gives it 366px to work with rather than 326px.
+    MuiDialog: {
+      styleOverrides: {
+        paper: ({ theme }) => ({
+          [theme.breakpoints.down('sm')]: {
+            margin: 12,
+            width: 'calc(100% - 24px)',
+            maxWidth: 'calc(100% - 24px)',
+            maxHeight: 'calc(100% - 24px)',
+          },
+        }),
+      },
+    },
   },
 }
 

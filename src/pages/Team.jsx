@@ -49,6 +49,17 @@ export default function Team({ plan }) {
   }
 
   const cell = { fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+  // The pinned first column. 230px on a phone left the six people's figures a
+  // 130px window to be scrolled through one number at a time; there it narrows
+  // and wraps, and a rule marks where the scrolling part begins.
+  const stick = {
+    position: 'sticky', left: 0, bgcolor: 'background.paper',
+    minWidth: { xs: 128, sm: 230 }, maxWidth: { xs: 150, sm: 'none' },
+    // "dashboards/reports/portals" is one word to a browser, and at 150px
+    // it spilled over the first person's column.
+    overflowWrap: 'anywhere',
+    boxShadow: (t) => `inset -1px 0 0 ${t.palette.divider}`,
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -64,7 +75,7 @@ export default function Team({ plan }) {
         <Table size="small" sx={{ '& th, & td': { px: 1.25 } }}>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ minWidth: 230, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 2 }}>
+              <TableCell sx={{ ...stick, zIndex: 2 }}>
                 KPI line
               </TableCell>
               {people.map((p) => (
@@ -79,7 +90,7 @@ export default function Team({ plan }) {
               ))}
             </TableRow>
             <TableRow>
-              <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 2 }} />
+              <TableCell sx={{ ...stick, zIndex: 2 }} />
               {people.map((p) => [
                 <TableCell key={`${p.id}-t`} align="right" sx={{ ...cell, borderLeft: 1, borderColor: 'divider' }}>Target</TableCell>,
                 <TableCell key={`${p.id}-w`} align="right" sx={cell}>Weight</TableCell>,
@@ -91,7 +102,7 @@ export default function Team({ plan }) {
           <TableBody>
             {OBJECTIVES.map((o, i) => (
               <TableRow key={o.id} hover>
-                <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>
+                <TableCell sx={{ ...stick, zIndex: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <Box sx={{ width: 9, height: 9, borderRadius: '2px', bgcolor: CHART[mode].series[i], flexShrink: 0 }} />
                     <Box>
@@ -137,7 +148,7 @@ export default function Team({ plan }) {
 
             {/* the two totals the sheet carries, for the same reason */}
             <TableRow>
-              <TableCell sx={{ borderTop: 2, borderColor: 'divider', fontWeight: 700, position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
+              <TableCell sx={{ ...stick, zIndex: 1, borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
                 TOTAL SAVING HRS/MONTH
               </TableCell>
               {people.map((p) => [
@@ -155,7 +166,7 @@ export default function Team({ plan }) {
               ])}
             </TableRow>
             <TableRow>
-              <TableCell sx={{ fontWeight: 700, position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
+              <TableCell sx={{ ...stick, zIndex: 1, fontWeight: 700 }}>
                 WEIGHT TOTAL — must be 100%
               </TableCell>
               {people.map((p) => {

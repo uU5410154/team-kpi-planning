@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Chip, TextField, Select, MenuItem, FormControl, InputLabel,
-  FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress,
+  FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress, useMediaQuery,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import SyncIcon from '@mui/icons-material/Sync'
@@ -161,6 +161,15 @@ export default function Timeline({
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
+  /*
+   * The two pinned columns. 300 + 96 is wider than a phone, so the month view
+   * — whose track takes whatever is left — drew its bars in 0px. On a phone
+   * the columns narrow, and the month track keeps a floor and scrolls instead.
+   */
+  const phone = useMediaQuery(theme.breakpoints.down('sm'))
+  const NAME_W = phone ? 150 : 300
+  const SLIP_W = phone ? 72 : 96
+  const PINNED_W = NAME_W + SLIP_W
   const asOf = settings.asOfDate
   const t = plan.totals.timeliness
 
@@ -680,7 +689,7 @@ export default function Timeline({
   const PER_UNIT = { month: 0, week: 46, day: 26 }
   const days = Math.max(1, Math.round((span.to - span.from) / DAY))
   const trackPx = scale === 'month'
-    ? null
+    ? (phone ? 560 : null)
     : Math.max(720, Math.round(days * (scale === 'day' ? PER_UNIT.day : PER_UNIT.week / 7)))
 
   const pct = (ms) => ((ms - span.from) / (span.to - span.from)) * 100
@@ -770,12 +779,12 @@ export default function Timeline({
    */
   useEffect(() => {
     const el = scrollRef.current
-    if (!el || scale === 'month') return
+    if (!el || (scale === 'month' && !trackPx)) return
     const width = el.scrollWidth - el.clientWidth
     if (width <= 0) return
-    const at01 = (pct(at(asOf)) / 100) * (el.scrollWidth - 396)
+    const at01 = (pct(at(asOf)) / 100) * (el.scrollWidth - PINNED_W)
     el.scrollLeft = Math.max(0, Math.min(width, at01 - el.clientWidth / 2))
-  }, [scale, asOf, span.from, span.to])
+  }, [scale, asOf, span.from, span.to, trackPx, PINNED_W])
 
   const picks = [{ id: 'all', nick: 'All PICs' }, ...plan.assignees.map((p) => ({ id: p.id, nick: p.nick }))]
 
@@ -924,7 +933,7 @@ export default function Timeline({
           }}
         >
           <Box sx={{
-            width: 300,
+            width: NAME_W,
             flexShrink: 0,
             px: 1.5,
             py: 0.5,
@@ -1151,7 +1160,7 @@ export default function Timeline({
           </Box>
 
           <Box sx={{
-            width: 96,
+            width: SLIP_W,
             flexShrink: 0,
             px: 1,
             textAlign: 'right',
@@ -1216,7 +1225,7 @@ export default function Timeline({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: 1, minWidth: 320 }}>
+        <Box sx={{ flex: 1, minWidth: { xs: '100%', sm: 320 } }}>
           <Typography variant="h2">Timeline</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             What was planned, and what actually happened. The outline is the plan; the solid bar is the outcome. The gap
@@ -1287,7 +1296,7 @@ export default function Timeline({
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ p: 2.5, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, display: 'flex', gap: { xs: 2.5, sm: 4 }, flexWrap: 'wrap' }}>
         {stat('with a plan', t.planned)}
         {stat('finished', t.finished, STATUS.good)}
         {stat('running now', t.running)}
@@ -1304,7 +1313,7 @@ export default function Timeline({
           placeholder="Search key, project, programme"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          sx={{ minWidth: 260 }}
+          sx={{ minWidth: { xs: '100%', sm: 260 } }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
         />
         <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -1351,7 +1360,7 @@ export default function Timeline({
 
       <Paper variant="outlined">
         <Box ref={scrollRef} sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '62vh' }}>
-          <Box sx={{ minWidth: trackPx ? trackPx + 396 : 'auto' }}>
+          <Box sx={{ minWidth: trackPx ? trackPx + PINNED_W : 'auto' }}>
             <Box sx={{
               display: 'flex',
               borderBottom: 1,
@@ -1363,7 +1372,7 @@ export default function Timeline({
             }}
             >
               <Box sx={{
-                width: 300,
+                width: NAME_W,
                 flexShrink: 0,
                 px: 1.5,
                 py: 0.75,
@@ -1405,7 +1414,7 @@ export default function Timeline({
                 ))}
               </Box>
               <Box sx={{
-                width: 96,
+                width: SLIP_W,
                 flexShrink: 0,
                 px: 1,
                 py: 0.75,

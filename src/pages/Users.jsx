@@ -78,8 +78,9 @@ export default function Users({ me }) {
         </Alert>
       )}
 
-      <Paper variant="outlined">
-        <Table size="small">
+      {/* Scrolls sideways on a phone rather than widening the whole page. */}
+      <Paper variant="outlined" sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ minWidth: 900 }}>
           <TableHead>
             <TableRow>
               <TableCell>Email</TableCell>
