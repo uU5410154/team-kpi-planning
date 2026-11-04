@@ -131,6 +131,27 @@ export async function saveMyWeek(week, body) {
   return out
 }
 
+/* Date proposals: a slipped task asking to move its project's due date. */
+export const proposals = async (status = 'pending') =>
+  j(await fetch(`/api/weekly/proposals?status=${encodeURIComponent(status)}`))
+
+export const approveProposal = async (id, due) =>
+  j(await fetch(`/api/weekly/proposals/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ due: due || null }),
+  }))
+
+export const rejectProposal = async (id, reason) =>
+  j(await fetch(`/api/weekly/proposals/${encodeURIComponent(id)}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  }))
+
+/** Each project's last eight weeks, its blockers and its proposals — for the Timeline. */
+export const weeklyByProject = async () => j(await fetch('/api/weekly/projects'))
+
 /** The tasks under an epic, or the epics under an initiative. */
 export const jiraChildren = async (keys) =>
   j(await fetch('/api/jira/children', {

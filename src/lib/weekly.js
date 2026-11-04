@@ -230,6 +230,44 @@ export function slipImpact(task, projectDue) {
 }
 
 /*
+ * WHEN A SLIP BECOMES A PROPOSAL.
+ *
+ * A task reported not finished, on a project, with a new date — and EITHER
+ * that date lands after the project's committed due date, OR the member says
+ * it pushes the deadline. Both ways in, as agreed: the dates are not trusted
+ * over the member, nor the member over the dates.
+ *
+ * The date proposed for the PROJECT is the task's new date when that is past
+ * the project's due. When the member says it pushes the deadline but their
+ * date still falls inside it, there is no honest date to propose — moving the
+ * project to the task's date would move it EARLIER — so `proposedDue` is null
+ * and the administrator who approves it picks the date.
+ *
+ * Returns null when the task does not make a proposal.
+ */
+export function proposalFor(task, project) {
+  if (!task || task.done !== false || !task.projectKey || !task.newDate || !project) return null
+  const due = isDay(project.due) ? project.due : null
+  const late = !due || task.newDate > due
+  if (!(due && task.newDate > due) && task.affects !== true) return null
+  const impact = slipImpact(task, due)
+  return {
+    proposedDue: late ? task.newDate : null,
+    currentDue: due,
+    byDate: impact.byDate,
+    says: task.affects,
+    disagree: impact.disagree,
+  }
+}
+
+/** One proposal per task per week: the same task re-saved updates it. */
+export const proposalId = (week, person, taskId) => `${week}.${person}.${taskId}`
+
+export const PROPOSAL_LABEL = {
+  pending: 'Waiting for approval', approved: 'Approved', rejected: 'Rejected', withdrawn: 'Withdrawn',
+}
+
+/*
  * MONDAY OPENS WITH LAST WEEK'S UNFINISHED WORK.
  *
  * Carried, not copied: the report fields are wiped, the expected date becomes

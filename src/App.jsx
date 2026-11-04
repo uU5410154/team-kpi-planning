@@ -950,6 +950,30 @@ export default function App() {
     setTab(o.tab)
     setNavOpen(false)
   }
+  /*
+   * An approval moved a project's due date on the SERVER. The same fields go
+   * into this browser's copy exactly as the server saved them — not through
+   * replanPatch again, which would count the re-plan a second time — so this
+   * browser's next automatic save carries the new date instead of quietly
+   * putting the old one back.
+   */
+  const applyServerProjects = (changed) => {
+    const by = Object.fromEntries((changed || []).map((x) => [x.key, x]))
+    if (!Object.keys(by).length) return
+    setState((s) => ({
+      ...s,
+      projects: s.projects.map((p) => {
+        if (!by[p.key]) return p
+        const { key: _k, ...fields } = by[p.key]
+        return { ...p, ...fields }
+      }),
+    }))
+  }
+  // From a weekly task to its project's bar on the Timeline, highlighted.
+  const showOnTimeline = (projectKey) => {
+    const p = state.projects.find((x) => x.key === projectKey)
+    goTo({ tab: 'timeline', q: (p?.jiraKey || projectKey).trim(), focus: projectKey })
+  }
   const signOut = async () => {
     try { await authApi.signOut() } finally { setMe(null) }
   }
@@ -1202,7 +1226,15 @@ export default function App() {
               jump={jump?.tab === 'projects' ? jump : null}
             />
           )}
-          {allowed && tab === 'weekly' && <Weekly plan={plan} me={me} hello={hello} />}
+          {allowed && tab === 'weekly' && (
+            <Weekly
+              plan={plan}
+              me={me}
+              hello={hello}
+              onProjectsChanged={applyServerProjects}
+              onShowTimeline={showOnTimeline}
+            />
+          )}
           {allowed && tab === 'team' && <Team plan={plan} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
           {allowed && tab === 'timeline' && (
@@ -1217,6 +1249,7 @@ export default function App() {
               // against somebody's scorecard, and goes through an administrator.
               readOnly={!canWrite}
               jump={jump?.tab === 'timeline' ? jump : null}
+              onOpenWeekly={() => setTab('weekly')}
             />
           )}
 

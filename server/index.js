@@ -353,6 +353,78 @@ app.put('/api/weekly/settings', adminOnly, async (req, res) => {
   return res.json(r)
 })
 
+/*
+ * DATE PROPOSALS.
+ *
+ * A team member sees their own — so they know whether their new date was
+ * accepted and, if not, why. An administrator sees everybody's and decides.
+ * Registered before /api/weekly/:week, which would otherwise read "proposals"
+ * as the name of a week.
+ */
+const withNames = async (rows) => {
+  const r = await weekly.roster()
+  const nick = Object.fromEntries((r === store.UNAVAILABLE ? [] : r.people).map((p) => [p.id, p.nick]))
+  const proj = Object.fromEntries((r === store.UNAVAILABLE ? [] : r.projects).map((p) => [p.key, p]))
+  return rows.map(({ _id, ...p }) => ({
+    id: _id,
+    ...p,
+    nick: nick[p.person] || p.person,
+    projectSummary: proj[p.projectKey]?.summary || '',
+    // Where the project stands NOW, which after an earlier approval may no
+    // longer be the date the proposal was raised against.
+    projectDueNow: proj[p.projectKey]?.due || null,
+  }))
+}
+
+app.get('/api/weekly/proposals', async (req, res) => {
+  const { me } = req
+  const admin = me.role === 'admin'
+  if (!admin && !me.person) return res.json({ proposals: [] })
+  const rows = await weekly.listProposals({ status: req.query.status || 'pending', person: admin ? undefined : me.person })
+  if (rows === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ proposals: await withNames(rows), jiraWritable: String(process.env.JIRA_ALLOW_WRITES || '').toLowerCase() === 'true' })
+})
+
+const decided = (res, r) => {
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(r.status || 400).json({ error: r.error })
+  return null
+}
+
+app.post('/api/weekly/proposals/:id/approve', adminOnly, async (req, res) => {
+  try {
+    const r = await weekly.approve(req.params.id, { due: req.body?.due || null }, req.me.email)
+    if (decided(res, r)) return undefined
+    const [proposal] = await withNames([r.proposal])
+    return res.json({ proposal, projects: r.projects, savedAt: r.savedAt })
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Could not approve it.' })
+  }
+})
+
+app.post('/api/weekly/proposals/:id/reject', adminOnly, async (req, res) => {
+  const r = await weekly.reject(req.params.id, { reason: req.body?.reason }, req.me.email)
+  if (decided(res, r)) return undefined
+  const [proposal] = await withNames([r.proposal])
+  return res.json({ proposal })
+})
+
+/* The weekly story of every project, for the Timeline: one's own, or everybody's for an administrator. */
+app.get('/api/weekly/projects', async (req, res) => {
+  const { me } = req
+  const admin = me.role === 'admin'
+  if (!admin && !me.person) return res.json({ byProject: {} })
+  const r = await weekly.byProject({ person: admin ? undefined : me.person })
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  const ro = await weekly.roster()
+  const nick = Object.fromEntries((ro === store.UNAVAILABLE ? [] : ro.people).map((p) => [p.id, p.nick]))
+  for (const k of Object.keys(r)) {
+    for (const list of ['history', 'blockers']) r[k][list] = r[k][list].map((x) => ({ ...x, nick: nick[x.person] || x.person }))
+    r[k].proposals = await withNames(r[k].proposals)
+  }
+  return res.json({ byProject: r })
+})
+
 app.get('/api/weekly/:week', async (req, res) => {
   const week = req.params.week === 'current' ? weekOf() : req.params.week
   if (!isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
@@ -363,6 +435,12 @@ app.get('/api/weekly/:week', async (req, res) => {
 
   const mine = me.person ? await weekly.entryOrDraft(week, me.person) : null
   if (mine === store.UNAVAILABLE) return unavailable(res)
+  // The proposals raised this week: everybody's for an administrator, one's
+  // own for a member — so each task can say whether its new date was taken.
+  const props = admin || me.person
+    ? await weekly.listProposals({ week, status: 'all', person: admin ? undefined : me.person })
+    : []
+  if (props === store.UNAVAILABLE) return unavailable(res)
 
   const now = Date.now()
   const nick = Object.fromEntries(r.people.map((p) => [p.id, p.nick]))
@@ -388,6 +466,7 @@ app.get('/api/weekly/:week', async (req, res) => {
     mineStanding: mine ? weekly.standing(week, mine.draft ? null : mine, now) : null,
     team,
     submitters: settings.submitters,
+    proposals: await withNames(props),
   })
 })
 

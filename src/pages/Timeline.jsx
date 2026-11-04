@@ -20,6 +20,16 @@ import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
 import { fmtHours, isDate, timelineOf, pinFinishPatch, unpinFinishPatch } from '../lib/model.js'
 import { syncStatus } from '../lib/storage.js'
+import { alpha } from '@mui/material/styles'
+import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
+import HourglassIcon from '@mui/icons-material/HourglassTopOutlined'
+import { Pill } from '../components/Brand.jsx'
+import { weekLabel, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
+
+const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
+const FORECAST = '#a855f7'
+const fmtD = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '—')
+const PROPOSAL_TONE = { pending: 'violet', approved: 'good', rejected: 'bad', deciding: 'violet' }
 
 const DAY = 86400000
 const at = (d) => Date.parse(`${d}T00:00:00Z`)
@@ -158,6 +168,7 @@ function PlanEditor({ row, onSave, onHold, saving, jira }) {
  */
 export default function Timeline({
   plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false, jump = null,
+  onOpenWeekly,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -188,6 +199,51 @@ export default function Timeline({
     api.jiraStatus().then((s) => { if (!dead) setJira(s) }).catch(() => setJira({ configured: false }))
     return () => { dead = true }
   }, [])
+
+  /*
+   * WHAT THE WEEKLY CHECK-INS SAY ABOUT EACH PROJECT: the tasks people
+   * reported against it, what is blocking them, and any request to move its
+   * date. The server sends an administrator everybody's, a team member only
+   * their own. Nothing here is required — with no database, or an older
+   * server, the chart simply has no markers.
+   */
+  const [weekly, setWeekly] = useState({})
+  const [story, setStory] = useState(null)
+  useEffect(() => {
+    let dead = false
+    api.weeklyByProject().then((r) => { if (!dead) setWeekly(r.byProject || {}) }).catch(() => {})
+    return () => { dead = true }
+  }, [])
+  /** Everything the check-ins say about the register lines behind one bar. */
+  const weeklyOf = (keys) => {
+    const out = { history: [], blockers: [], proposals: [] }
+    for (const k of keys || []) {
+      const w = weekly[k]
+      if (!w) continue
+      out.history.push(...w.history)
+      out.blockers.push(...w.blockers)
+      out.proposals.push(...w.proposals)
+    }
+    out.pending = out.proposals.filter((p) => p.status === 'pending' || p.status === 'deciding')
+    // The furthest date anybody has asked for: where the work lands if it is approved.
+    out.forecast = out.pending.map((p) => p.proposedDue).filter(Boolean).sort().pop() || null
+    return out
+  }
+
+  /*
+   * ARRIVING FROM A WEEKLY TASK: the bar it belongs to is scrolled to and lit
+   * for a few seconds, so the eye lands on it rather than hunting a list.
+   */
+  const [flash, setFlash] = useState(null)
+  useEffect(() => {
+    if (!jump?.focus) return undefined
+    setFlash(jump.focus)
+    const t1 = setTimeout(() => {
+      document.querySelector(`[data-keys~="${CSS.escape(jump.focus)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 250)
+    const t2 = setTimeout(() => setFlash(null), 5000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [jump?.n])
 
   const keyed = useMemo(
     () => plan.projects.filter((p) => JIRA_KEY.test(String(p.jiraKey || '').trim())),
@@ -670,7 +726,7 @@ export default function Timeline({
     const all = []
     for (const p of grouped) {
       const tl = p.timeline
-      for (const d of [tl.plannedStart, tl.plannedEnd, tl.actualStart, tl.actualEnd]) {
+      for (const d of [tl.plannedStart, tl.plannedEnd, tl.actualStart, tl.actualEnd, weeklyOf(p.projectKeys).forecast]) {
         if (isDate(d)) all.push(at(d))
       }
     }
@@ -680,7 +736,7 @@ export default function Timeline({
     const max = Math.max(...all)
     const pad = Math.max(DAY * 7, (max - min) * 0.02)
     return { from: min - pad, to: max + pad }
-  }, [rows, asOf])
+  }, [rows, asOf, weekly])
 
   /*
    * Months, weeks or days.
@@ -922,10 +978,15 @@ export default function Timeline({
     const canEdit = !readOnly && (!!row.projectKey || (!!row.jiraKey && !!jira?.writable))
     const isOpen = open.has(key)
     const under = kids.get(key)
+    // The check-ins, on project rows only: Jira tasks underneath have none.
+    const wk = depth === 0 ? weeklyOf(row.projectKeys) : null
+    const forecast = wk?.forecast && tl.plannedEnd && wk.forecast > tl.plannedEnd ? bar(tl.plannedEnd, wk.forecast) : null
+    const lit = depth === 0 && flash && (row.projectKeys || []).includes(flash)
 
     return (
       <>
         <Box
+          data-keys={depth === 0 ? (row.projectKeys || []).join(' ') : undefined}
           sx={{
             display: 'flex',
             alignItems: 'center',
@@ -933,7 +994,9 @@ export default function Timeline({
             borderBottom: 1,
             borderColor: 'divider',
             opacity: row.outsideTeam ? 0.6 : 1,
-            bgcolor: depth ? 'action.hover' : undefined,
+            bgcolor: lit ? (t) => alpha(t.palette.primary.main, 0.22) : depth ? 'action.hover' : undefined,
+            boxShadow: lit ? (t) => `inset 3px 0 0 ${t.palette.primary.main}` : undefined,
+            transition: 'background-color .4s',
             '&:hover': { bgcolor: 'action.selected' },
           }}
         >
@@ -967,7 +1030,13 @@ export default function Timeline({
             ) : (
               <Box sx={{ width: 21, flexShrink: 0 }} />
             )}
-            <Box sx={{ overflow: 'hidden' }}>
+            <Box
+              sx={{ overflow: 'hidden', flex: 1, cursor: depth === 0 ? 'pointer' : 'default' }}
+              // A project's name opens what the weekly check-ins say about it.
+              onClick={depth === 0 ? () => setStory(row) : undefined}
+              role={depth === 0 ? 'button' : undefined}
+              aria-label={depth === 0 ? `weekly updates for ${row.jiraKey || row.projectKey}` : undefined}
+            >
               <Typography variant="body2" noWrap sx={{ fontSize: depth ? '0.72rem' : '0.78rem', fontWeight: depth ? 400 : 600 }}>
                 {row.title}
               </Typography>
@@ -975,6 +1044,17 @@ export default function Timeline({
                 {row.sub}
               </Typography>
             </Box>
+            {/* The markers: something is blocking it, or it is asking to move. */}
+            {wk?.blockers.length > 0 && (
+              <Tooltip title={`${wk.blockers.length} open blocker${wk.blockers.length === 1 ? '' : 's'} from the weekly check-in — click the name to read`}>
+                <ReportProblemIcon aria-label="blocked" sx={{ fontSize: 16, color: STATUS.warning, flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            {wk?.pending.length > 0 && (
+              <Tooltip title={`${wk.pending.length} date change${wk.pending.length === 1 ? '' : 's'} waiting for approval`}>
+                <HourglassIcon aria-label="date change waiting" sx={{ fontSize: 16, color: FORECAST, flexShrink: 0 }} />
+              </Tooltip>
+            )}
           </Box>
 
           <Box sx={{
@@ -1078,6 +1158,27 @@ export default function Timeline({
                   bgcolor: STATUS.warning,
                   opacity: 0.8,
                 }}
+                />
+              </Tooltip>
+            )}
+            {forecast && (
+              <Tooltip title={`Asked to move to ${wk.forecast} — waiting for approval. Drawn from the committed `
+                + `${tl.plannedEnd}; the commitment itself has not moved.`}
+              >
+                <Box
+                  aria-label="forecast"
+                  onClick={() => setStory(row)}
+                  sx={{
+                    position: 'absolute',
+                    left: `${forecast.left}%`,
+                    width: `${forecast.width}%`,
+                    top: 6,
+                    height: 9,
+                    borderRadius: 0.5,
+                    border: `1.5px dashed ${FORECAST}`,
+                    bgcolor: alpha(FORECAST, 0.18),
+                    cursor: 'pointer',
+                  }}
                 />
               </Tooltip>
             )}
@@ -1486,6 +1587,117 @@ export default function Timeline({
         </Box>
       </Paper>
 
+      {/*
+        * A PROJECT'S WEEKLY STORY: what is waiting to be decided, what is in
+        * the way, and the last eight weeks of tasks against it, newest first.
+        */}
+      <Dialog open={!!story} onClose={() => setStory(null)} maxWidth="sm" fullWidth>
+        {story && (() => {
+          const wk = weeklyOf(story.projectKeys)
+          const byWeek = {}
+          for (const h of wk.history) (byWeek[h.week] = byWeek[h.week] || []).push(h)
+          const weeks = Object.keys(byWeek).sort().reverse()
+          /*
+           * Every decision, including the ones a later date reopened: an
+           * approval that was asked again is still something that happened
+           * to this project, and the reason it was asked again.
+           */
+          const decided = wk.proposals.flatMap((p) => [
+            ...(p.earlier || []).map((e, i) => ({ ...p, ...e, id: `${p.id}:${i}` })),
+            ...(p.status === 'approved' || p.status === 'rejected' ? [p] : []),
+          ])
+          return (
+            <>
+              <DialogTitle sx={{ pb: 0.5 }}>
+                {story.title}
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                  {[story.jiraKey, `due ${fmtD(story.timeline.plannedEnd)}`].filter(Boolean).join(' · ')}
+                  {readOnly ? ' · only your own weeks are shown' : ' · the weekly check-ins, last eight weeks'}
+                </Typography>
+              </DialogTitle>
+              <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {wk.pending.length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Waiting for approval</Typography>
+                    {wk.pending.map((p) => (
+                      <Box key={p.id} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 1 }}>
+                        <Pill label={p.proposedDue ? `to ${fmtD(p.proposedDue)}` : 'date to pick'} tone="violet" />
+                        <Typography variant="body2" sx={{ flex: 1 }}>
+                          <strong>{p.nick}</strong> · {p.taskTitle}
+                          {p.blocker ? <Typography component="span" variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>{p.blocker}</Typography> : null}
+                        </Typography>
+                      </Box>
+                    ))}
+                    {!readOnly && onOpenWeekly && (
+                      <Button size="small" variant="contained" onClick={() => { setStory(null); onOpenWeekly() }}>Decide on the Weekly page</Button>
+                    )}
+                  </Box>
+                )}
+                {wk.blockers.length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>In the way</Typography>
+                    {wk.blockers.map((b) => (
+                      <Box key={`${b.week}${b.person}${b.title}`} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mb: 1 }}>
+                        <Pill label={CATEGORY_LABEL[b.blockerCategory] || 'blocked'} tone="warn" />
+                        <Typography variant="body2" sx={{ flex: 1 }}>
+                          <strong>{b.nick}</strong> · {b.title}
+                          <Typography component="span" variant="caption" sx={{ display: 'block', color: 'text.secondary', whiteSpace: 'pre-wrap' }}>
+                            {b.blocker} · new date {fmtD(b.newDate)}
+                          </Typography>
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+                {decided.length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Decided</Typography>
+                    {decided.map((p) => (
+                      <Box key={p.id} sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 0.75, flexWrap: 'wrap' }}>
+                        <Pill label={PROPOSAL_LABEL[p.status]} tone={PROPOSAL_TONE[p.status]} />
+                        <Typography variant="caption">
+                          {p.status === 'approved'
+                            ? `${fmtD(p.fromDue)} → ${fmtD(p.decidedDue)} for ${p.nick}'s “${p.taskTitle}”`
+                            : `${p.nick}'s ${fmtD(p.newDate)} — “${p.reason}”`}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>Week by week</Typography>
+                  {weeks.length === 0 && (
+                    <Typography variant="body2" sx={{ color: 'text.disabled' }}>
+                      Nobody has put a task against this project in a weekly check-in yet.
+                    </Typography>
+                  )}
+                  {weeks.map((w) => (
+                    <Box key={w} sx={{ mb: 1.25 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>Week of {weekLabel(w)}</Typography>
+                      {byWeek[w].map((h) => (
+                        <Box key={`${h.person}${h.title}`} sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+                          <Pill
+                            label={h.done === true ? 'finished' : h.done === false ? `${h.pct ?? '?'}%` : 'planned'}
+                            tone={h.done === true ? 'good' : h.done === false ? 'warn' : 'neutral'}
+                          />
+                          <Typography variant="body2" sx={{ flex: '1 1 200px' }}>
+                            <strong>{h.nick}</strong> · {h.title}
+                            <Typography component="span" variant="caption" sx={{ color: 'text.secondary' }}>
+                              {h.done === false && h.newDate ? ` · now ${fmtD(h.newDate)}` : h.expected ? ` · expected ${fmtD(h.expected)}` : ''}
+                            </Typography>
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                  ))}
+                </Box>
+              </DialogContent>
+              <DialogActions><Button onClick={() => setStory(null)}>Close</Button></DialogActions>
+            </>
+          )
+        })()}
+      </Dialog>
+
       <Dialog open={!!candidates} onClose={() => setCandidates(null)} maxWidth="md" fullWidth>
         <DialogTitle>
           {candidates?.rows.length} epic{candidates?.rows.length === 1 ? '' : 's'} in {candidates?.project} that the
@@ -1588,6 +1800,19 @@ export default function Timeline({
             <Box sx={{ width: 34, height: 5, borderRadius: 0.5, bgcolor: STATUS.warning, opacity: 0.8 }} />
             <Typography variant="caption">
               adjusted — where the work now lands, from the latest task date underneath
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 34, height: 9, borderRadius: 0.5, border: `1.5px dashed ${FORECAST}`, bgcolor: alpha(FORECAST, 0.18) }} />
+            <Typography variant="caption">
+              forecast — a new date asked for in a weekly report, waiting for approval
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ReportProblemIcon sx={{ fontSize: 16, color: STATUS.warning }} />
+            <HourglassIcon sx={{ fontSize: 16, color: FORECAST }} />
+            <Typography variant="caption">
+              blocked, or a date change waiting — click a project&rsquo;s name for its weekly updates
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

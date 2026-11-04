@@ -11,6 +11,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import LockIcon from '@mui/icons-material/LockOutlined'
+import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import { STATUS } from '../lib/palette.js'
 import {
   Pill, IconTile, WelcomeBanner, personColor,
@@ -18,7 +19,7 @@ import {
 import * as api from '../lib/api.js'
 import {
   addWeeks, weekLabel, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
-  planProblems, reportProblems, cleanEntry, slipImpact,
+  planProblems, reportProblems, cleanEntry, slipImpact, PROPOSAL_LABEL,
 } from '../lib/weekly.js'
 
 /**
@@ -54,6 +55,152 @@ function PriorityPill({ priority }) {
   return <Pill label={PRIORITY_LABEL[priority]} tone={PRIORITY_TONE[priority]} />
 }
 
+const PROPOSAL_TONE = {
+  pending: 'violet', approved: 'good', rejected: 'bad', withdrawn: 'neutral', deciding: 'violet',
+}
+
+/*
+ * What became of a task's request to move its project — on the task itself,
+ * so the member sees the answer where they gave the date.
+ */
+function ProposalNote({ proposal }) {
+  if (!proposal || proposal.status === 'withdrawn') return null
+  const p = proposal
+  const text = {
+    pending: p.proposedDue
+      ? `Asks to move ${p.projectKey} from ${fmtDay(p.currentDue)} to ${fmtDay(p.proposedDue)}.`
+      : `Says ${p.projectKey}'s deadline (${fmtDay(p.currentDue)}) moves; the approver will pick the new date.`,
+    deciding: 'Being decided now.',
+    approved: `${p.projectKey} moved from ${fmtDay(p.fromDue)} to ${fmtDay(p.decidedDue)} by ${p.decidedBy || 'an administrator'}`
+      + `${p.jira?.written ? `, and in Jira (${p.jira.key})` : ''}.`,
+    rejected: `${p.projectKey} stays due ${fmtDay(p.currentDue)}. ${p.decidedBy || 'The approver'}: “${p.reason}”`,
+  }[p.status]
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
+      <Pill label={PROPOSAL_LABEL[p.status] || p.status} tone={PROPOSAL_TONE[p.status]} />
+      <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 220px' }}>{text}</Typography>
+    </Box>
+  )
+}
+
+/** A small link from a task to its project's bar on the Timeline. */
+function TimelineLink({ projectKey, onShow }) {
+  if (!projectKey || !onShow) return null
+  return (
+    <Button
+      size="small"
+      startIcon={<TimelineIcon sx={{ fontSize: '16px !important' }} />}
+      onClick={() => onShow(projectKey)}
+      sx={{ py: 0, minHeight: 0, fontSize: '0.72rem' }}
+    >
+      Timeline
+    </Button>
+  )
+}
+
+/*
+ * ONE PROPOSAL, AS THE APPROVER SEES IT.
+ *
+ * Everything needed to decide without opening anything else: who, which task,
+ * the project's date now and the date asked for, what is in the way, and
+ * whether the dates and the member agree. Then a date (filled in with the one
+ * asked for, and changeable), Approve, and Reject — which asks for a reason,
+ * because a member told "no" without one cannot do anything with it.
+ */
+function DecisionCard({
+  p, people, jira, onApprove, onReject, busy, onShowTimeline,
+}) {
+  const [due, setDue] = useState(p.proposedDue || '')
+  const [rejecting, setRejecting] = useState(false)
+  const [reason, setReason] = useState('')
+  const now = p.projectDueNow
+  const moved = now && p.currentDue && now !== p.currentDue
+  const days = due && now ? Math.round((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${now}T00:00:00Z`)) / 86400000) : null
+  const blockedJira = p.epicKey && jira?.configured && !jira?.writable
+  return (
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
+        <IconTile text={(p.nick || '?').slice(0, 2)} color={personColor(people, p.person)} size={32} />
+        <Box sx={{ minWidth: 0, flex: '1 1 200px' }}>
+          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            {p.nick} · {p.taskTitle}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+            {p.projectKey}{p.projectSummary ? ` · ${p.projectSummary}` : ''} · week of {weekLabel(p.week)}
+          </Typography>
+        </Box>
+        {p.disagree && <Pill label="dates and member disagree" tone="warn" />}
+        <TimelineLink projectKey={p.projectKey} onShow={onShowTimeline} />
+      </Box>
+
+      <Typography variant="body2">
+        Project due <strong>{fmtDay(now)}</strong>
+        {moved && <Box component="span" sx={{ color: 'text.secondary' }}> (was {fmtDay(p.currentDue)} when this was raised)</Box>}
+        {p.proposedDue
+          ? <> · task now lands <strong>{fmtDay(p.newDate)}</strong>{p.byDate ? `, ${p.byDate} day${p.byDate === 1 ? '' : 's'} late` : ''}</>
+          : <> · task now lands {fmtDay(p.newDate)}, inside the due date — but {p.nick} says the deadline moves</>}
+      </Typography>
+      {p.blocker && (
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          {p.blockerCategory && <Pill label={CATEGORY_LABEL[p.blockerCategory]} tone="neutral" />}
+          <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', flex: '1 1 220px' }}>{p.blocker}</Typography>
+        </Box>
+      )}
+
+      {!rejecting ? (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <TextField
+            size="small"
+            type="date"
+            label="New project due date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ width: 190 }}
+            inputProps={{ 'aria-label': `new due date for ${p.projectKey}` }}
+          />
+          <Button variant="contained" disabled={!!busy || !due} onClick={() => onApprove(p, due)}>
+            {busy === `approve:${p.id}` ? 'Approving…' : 'Approve'}
+          </Button>
+          <Button color="error" disabled={!!busy} onClick={() => setRejecting(true)}>Reject</Button>
+          {days !== null && (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {days > 0 ? `moves it ${days} day${days === 1 ? '' : 's'} later` : days < 0 ? `moves it ${-days} days EARLIER` : 'no change'}
+            </Typography>
+          )}
+        </Box>
+      ) : (
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
+          <TextField
+            size="small"
+            label="Why not? The member sees this."
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            multiline
+            minRows={1}
+            sx={{ flex: '1 1 260px' }}
+            autoFocus
+          />
+          <Button color="error" variant="contained" disabled={!!busy || reason.trim().length < 3} onClick={() => onReject(p, reason)}>
+            {busy === `reject:${p.id}` ? 'Rejecting…' : 'Reject'}
+          </Button>
+          <Button disabled={!!busy} onClick={() => setRejecting(false)}>Cancel</Button>
+        </Box>
+      )}
+      <Typography variant="caption" sx={{ color: blockedJira ? STATUS.warning : 'text.secondary' }}>
+        {p.epicKey
+          ? (blockedJira
+            ? `${p.epicKey} is in Jira and this server is not allowed to write to Jira, so approving is refused until `
+              + 'JIRA_ALLOW_WRITES=true is set in the Render dashboard — otherwise the 07:00 sync would put the old date back.'
+            : jira?.configured
+              ? `Approving also writes the new due date to ${p.epicKey} in Jira. It counts as a re-plan: the first one on a project is free.`
+              : 'Approving moves the project here. It counts as a re-plan: the first one on a project is free.')
+          : 'This project has no Jira epic, so approving moves it here only. It counts as a re-plan: the first one is free.'}
+      </Typography>
+    </Paper>
+  )
+}
+
 const blankTask = () => ({
   id: newTaskId(), title: '', projectKey: null, jiraKey: null, expected: null, effort: null, priority: null,
   carriedFrom: null, done: null, pct: null, blocker: '', blockerCategory: null, newDate: null, affects: null,
@@ -63,6 +210,7 @@ const blankTask = () => ({
 
 function TaskEditor({
   task, index, projects, projectByKey, onChange, onRemove, readOnly, showReport, jiraTasks, onNeedJira, jiraHint,
+  proposal, onShowTimeline,
 }) {
   const set = (patch) => onChange({ ...task, ...patch })
   const project = task.projectKey ? projectByKey[task.projectKey] : null
@@ -175,15 +323,19 @@ function TaskEditor({
       </Box>
 
       {project && (
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          Project due {fmtDay(project.due)}
-          {task.expected && project.due && task.expected > project.due && (
-            <Box component="span" sx={{ color: STATUS.warning, fontWeight: 600 }}>
-              {' '}· this task is expected after the project&rsquo;s due date
-            </Box>
-          )}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            Project due {fmtDay(project.due)}
+            {task.expected && project.due && task.expected > project.due && (
+              <Box component="span" sx={{ color: STATUS.warning, fontWeight: 600 }}>
+                {' '}· this task is expected after the project&rsquo;s due date
+              </Box>
+            )}
+          </Typography>
+          <TimelineLink projectKey={project.key} onShow={onShowTimeline} />
+        </Box>
       )}
+      <ProposalNote proposal={proposal} />
 
       {showReport && (
         <>
@@ -296,7 +448,9 @@ function TaskEditor({
 /* ------------------------------------------------- one week, read only */
 
 /** An administrator's view of somebody else's week. */
-function WeekSummary({ entry, projectByKey }) {
+function WeekSummary({
+  entry, projectByKey, proposals = {}, onShowTimeline,
+}) {
   if (!entry) {
     return <Typography variant="body2" sx={{ color: 'text.disabled' }}>Nothing saved for this week.</Typography>
   }
@@ -314,6 +468,7 @@ function WeekSummary({ entry, projectByKey }) {
               <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.title}</Typography>
               <PriorityPill priority={t.priority} />
               {t.carriedFrom && <Pill label="carried" tone="violet" />}
+              <TimelineLink projectKey={t.projectKey} onShow={onShowTimeline} />
             </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
               {[
@@ -346,6 +501,7 @@ function WeekSummary({ entry, projectByKey }) {
                     The dates and the member disagree on whether the deadline moves.
                   </Typography>
                 )}
+                <Box sx={{ mt: 0.5 }}><ProposalNote proposal={proposals[t.id]} /></Box>
               </Box>
             )}
           </Box>
@@ -367,7 +523,9 @@ function WeekSummary({ entry, projectByKey }) {
 
 /* ------------------------------------------------------------ the page */
 
-export default function Weekly({ plan, me, hello = 'there' }) {
+export default function Weekly({
+  plan, me, hello = 'there', onProjectsChanged, onShowTimeline,
+}) {
   const theme = useTheme()
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
   const admin = me?.role === 'admin'
@@ -384,6 +542,23 @@ export default function Weekly({ plan, me, hello = 'there' }) {
   const [jiraDone, setJiraDone] = useState({})
   const asked = useRef(new Set())
   const myWeekRef = useRef(null)
+  /*
+   * WAITING FOR A DECISION — an administrator's list, across every week, not
+   * only the one on screen: a proposal raised last Friday is still waiting on
+   * Monday.
+   */
+  const [pending, setPending] = useState(null)
+  const [jira, setJira] = useState(null)
+  const [deciding, setDeciding] = useState(null)
+  const loadPending = useCallback(async () => {
+    if (!admin) return
+    try { setPending((await api.proposals('pending')).proposals) } catch { setPending(null) }
+  }, [admin])
+  useEffect(() => {
+    if (!admin) return
+    loadPending()
+    api.jiraStatus().then(setJira).catch(() => setJira({ configured: false }))
+  }, [admin, loadPending])
 
   const projects = useMemo(
     () => (plan?.projects || []).filter((p) => !p.deleted).map((p) => ({
@@ -461,6 +636,29 @@ export default function Weekly({ plan, me, hello = 'there' }) {
   const edit = (patch) => { setDraft((d) => ({ ...d, ...patch })); setDirty(true) }
   const editTask = (i, t) => edit({ tasks: draft.tasks.map((x, j) => (j === i ? t : x)) })
 
+  const decide = async (kind, p, arg) => {
+    setDeciding(`${kind}:${p.id}`)
+    setError(null)
+    try {
+      if (kind === 'approve') {
+        const r = await api.approveProposal(p.id, arg)
+        // The plan in THIS browser moves too, with exactly what the server
+        // saved, so the next automatic save does not put the old date back.
+        onProjectsChanged?.(r.projects || [])
+        setNotice(`${p.projectKey} is now due ${fmtDay(r.proposal.decidedDue)}`
+          + `${r.proposal.jira?.written ? ` — written to ${r.proposal.jira.key} in Jira too` : ''}.`)
+      } else {
+        await api.rejectProposal(p.id, arg)
+        setNotice(`Rejected — ${p.nick} will see your reason.`)
+      }
+      await Promise.all([loadPending(), data ? load(data.week) : null])
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setDeciding(null)
+    }
+  }
+
   const save = async (submit) => {
     const body = { ...draft, ...(submit ? { submit } : {}) }
     // Checked here first so every missing answer is listed at once; the server
@@ -508,6 +706,12 @@ export default function Weekly({ plan, me, hello = 'there' }) {
    * how the team is doing instead.
    */
   const toMyWeek = () => myWeekRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // This week's proposals, by person and task, for the notes on each task.
+  const propsBy = {}
+  for (const p of data?.proposals || []) {
+    propsBy[p.person] = propsBy[p.person] || {}
+    propsBy[p.person][p.taskId] = p
+  }
   const required = (data?.team || []).filter((r) => r.required)
   const plansIn = required.filter((r) => r.entry?.planSubmittedAt).length
   const next = (() => {
@@ -568,6 +772,9 @@ export default function Weekly({ plan, me, hello = 'there' }) {
       </Box>
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+      {/* Here as well as under My week: an administrator with no week of
+          their own still needs to see that a decision went through. */}
+      {notice && !draft && <Alert severity="success" onClose={() => setNotice(null)}>{notice}</Alert>}
 
       {data && !data.person && (
         <Alert severity="info">
@@ -575,6 +782,32 @@ export default function Weekly({ plan, me, hello = 'there' }) {
             ? 'Your account is not linked to anybody on the team, so there is no week of your own to fill in. Link it on the Access tab if you submit too.'
             : 'Your account is not linked to your name on the team yet, so the app cannot tell which week is yours. Ask an administrator to link it on the Access tab.'}
         </Alert>
+      )}
+
+      {/* ------------------------------------------- waiting for a decision */}
+      {admin && pending && pending.length > 0 && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+            <Typography variant="h3">Waiting for your decision</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>{pending.length}</Typography>
+          </Box>
+          <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.75 }}>
+            A task reported late that moves its project. Approve to move the project&rsquo;s due date — here and in Jira —
+            or reject with a reason.
+          </Typography>
+          {pending.map((p) => (
+            <DecisionCard
+              key={`${p.id}:${p.updatedAt}`}
+              p={p}
+              people={plan?.people}
+              jira={jira}
+              busy={deciding}
+              onApprove={(x, due) => decide('approve', x, due)}
+              onReject={(x, why) => decide('reject', x, why)}
+              onShowTimeline={onShowTimeline}
+            />
+          ))}
+        </Box>
       )}
 
       {/* ---------------------------------------------------- my week */}
@@ -627,6 +860,8 @@ export default function Weekly({ plan, me, hello = 'there' }) {
                 jiraTasks={jiraTasks}
                 onNeedJira={needJira}
                 jiraHint={t.jiraKey && jiraDone[t.jiraKey] ? `${t.jiraKey} is resolved in Jira` : null}
+                proposal={propsBy[data.person]?.[t.id]}
+                onShowTimeline={onShowTimeline}
               />
             ))}
             {!readOnly && (
@@ -793,7 +1028,7 @@ export default function Weekly({ plan, me, hello = 'there' }) {
                 {admin && (
                   <Collapse in={isOpen} unmountOnExit>
                     <Box sx={{ mt: 1 }}>
-                      <WeekSummary entry={e} projectByKey={projectByKey} />
+                      <WeekSummary entry={e} projectByKey={projectByKey} proposals={propsBy[row.person]} onShowTimeline={onShowTimeline} />
                     </Box>
                   </Collapse>
                 )}

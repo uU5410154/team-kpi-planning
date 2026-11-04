@@ -1,8 +1,12 @@
 import { connect, UNAVAILABLE } from './db.js'
+import * as store from './db.js'
+import * as jira from './jira.js'
 import {
   cleanEntry, planProblems, reportProblems, carryOver, addWeeks, deadlines, stageStatus,
-  defaultSubmitters,
+  defaultSubmitters, proposalFor, proposalId, weekOf,
 } from '../src/lib/weekly.js'
+import { replanPatch, repairState } from '../src/lib/model.js'
+import { JIRA_KEY } from '../src/lib/jiraMerge.js'
 
 /**
  * The weekly check-in's own storage.
@@ -20,6 +24,7 @@ import {
 const cfg = () => ({
   entries: process.env.MONGODB_WEEKLY_COLLECTION || 'kpi_weekly',
   settings: process.env.MONGODB_WEEKLY_SETTINGS_COLLECTION || 'kpi_weekly_settings',
+  proposals: process.env.MONGODB_WEEKLY_PROPOSALS_COLLECTION || 'kpi_weekly_proposals',
   // The plan whose roster says who the team is. The same one the Jira sync
   // writes to, for the same reason: there is one shared plan.
   scenario: process.env.JIRA_SYNC_SCENARIO || 'Baseline',
@@ -27,6 +32,7 @@ const cfg = () => ({
 
 let entries = null
 let settings = null
+let proposals = null
 async function colls() {
   const c = await connect()
   if (!c) return null
@@ -34,9 +40,12 @@ async function colls() {
     const db = c.s.db
     entries = db.collection(cfg().entries)
     settings = db.collection(cfg().settings)
+    proposals = db.collection(cfg().proposals)
     await entries.createIndex({ week: 1, person: 1 }, { unique: true })
+    await proposals.createIndex({ status: 1, createdAt: -1 })
+    await proposals.createIndex({ projectKey: 1 })
   }
-  return { entries, settings, plans: c }
+  return { entries, settings, proposals, plans: c }
 }
 
 /** The team roster, from the shared plan. Empty when there is no plan yet. */
@@ -178,7 +187,11 @@ export async function save(week, person, body, by) {
     set.reportSubmittedBy = by
   }
   await c.entries.updateOne({ week, person }, { $set: set, $setOnInsert: { createdAt: now } }, { upsert: true })
-  return { entry: strip(await c.entries.findOne({ week, person })) }
+  const saved = strip(await c.entries.findOne({ week, person }))
+  // A report that is in raises, updates or withdraws its date proposals. A
+  // draft raises nothing: nobody is asked to approve a half-written report.
+  if (saved.reportSubmittedAt) await syncProposals(week, person, saved)
+  return { entry: saved }
 }
 
 /** Where one person stands on one week, for the team list and (later) the reminders. */
@@ -188,4 +201,255 @@ export function standing(week, e, now = Date.now()) {
     plan: stageStatus(e?.planSubmittedAt, d.planDue, now),
     report: stageStatus(e?.reportSubmittedAt, d.reportDue, now),
   }
+}
+
+/* ------------------------------------------------------------ proposals */
+
+/*
+ * A SLIPPED TASK ASKS TO MOVE ITS PROJECT.
+ *
+ * Kept in a collection of its own, one document per task per week, so the
+ * list of what is waiting for a decision is a query rather than a walk through
+ * every week anybody ever submitted.
+ *
+ *   pending    waiting for an administrator
+ *   approved   the project's due date was moved (and written to Jira)
+ *   rejected   left where it was, with the reason
+ *   withdrawn  the member changed the report so it no longer asks
+ *
+ * A decided proposal is the record and is not rewritten by later edits —
+ * unless the member then gives a DIFFERENT date, which is a new question and
+ * goes back to pending, keeping the earlier decision in `earlier`.
+ */
+const projectsOf = async () => {
+  const r = await roster()
+  return r === UNAVAILABLE ? [] : r.projects
+}
+
+export async function syncProposals(week, person, entry) {
+  const c = await colls()
+  if (!c) return UNAVAILABLE
+  const byKey = Object.fromEntries((await projectsOf()).map((p) => [p.key, p]))
+  const now = new Date().toISOString()
+  const live = new Set()
+  for (const t of entry.tasks || []) {
+    const q = proposalFor(t, byKey[t.projectKey])
+    const _id = proposalId(week, person, t.id)
+    const prior = await c.proposals.findOne({ _id })
+    if (!q) {
+      if (prior?.status === 'pending') {
+        await c.proposals.updateOne({ _id }, { $set: { status: 'withdrawn', updatedAt: now } })
+      }
+      continue
+    }
+    live.add(_id)
+    const p = byKey[t.projectKey]
+    const fields = {
+      week,
+      person,
+      taskId: t.id,
+      taskTitle: t.title,
+      projectKey: t.projectKey,
+      epicKey: p.jiraKey ? String(p.jiraKey).trim().toUpperCase() : null,
+      jiraTaskKey: t.jiraKey || null,
+      newDate: t.newDate,
+      ...q,
+      blocker: t.blocker,
+      blockerCategory: t.blockerCategory,
+      pct: t.pct,
+      updatedAt: now,
+    }
+    if (!prior || prior.status === 'withdrawn') {
+      await c.proposals.replaceOne({ _id }, { _id, ...fields, status: 'pending', createdAt: now }, { upsert: true })
+    } else if (prior.status === 'pending') {
+      await c.proposals.updateOne({ _id }, { $set: fields })
+    } else if (prior.newDate !== t.newDate && ['approved', 'rejected'].includes(prior.status)) {
+      const earlier = {
+        status: prior.status, newDate: prior.newDate, decidedAt: prior.decidedAt, decidedBy: prior.decidedBy,
+        decidedDue: prior.decidedDue || null, fromDue: prior.fromDue || null, reason: prior.reason || null,
+      }
+      await c.proposals.updateOne({ _id }, {
+        $set: { ...fields, status: 'pending', createdAt: now },
+        $unset: { decidedAt: '', decidedBy: '', decidedDue: '', reason: '', fromDue: '', jira: '' },
+        $push: { earlier },
+      })
+    }
+  }
+  // A task taken out of the report takes its pending proposal with it.
+  await c.proposals.updateMany(
+    { week, person, status: 'pending', _id: { $nin: [...live] } },
+    { $set: { status: 'withdrawn', updatedAt: now } },
+  )
+  return true
+}
+
+/** Proposals, newest first. `person` limits them to one member's own. */
+export async function listProposals({ status, person, week, projectKeys } = {}) {
+  const c = await colls()
+  if (!c) return UNAVAILABLE
+  const q = {}
+  if (status && status !== 'all') q.status = status
+  else q.status = { $ne: 'withdrawn' }
+  if (person) q.person = person
+  if (week) q.week = week
+  if (projectKeys) q.projectKey = { $in: projectKeys }
+  return c.proposals.find(q).sort({ createdAt: -1 }).limit(300).toArray()
+}
+
+const jiraWritable = () => String(process.env.JIRA_ALLOW_WRITES || '').toLowerCase() === 'true'
+const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`))
+
+/*
+ * APPROVE: MOVE THE PROJECT, AND JIRA WITH IT.
+ *
+ * In this order, and stopping at the first thing that fails:
+ *
+ *   1. claim the proposal, so two administrators clicking at once cannot
+ *      both move the project;
+ *   2. write the new due date to the project's Jira epic. FIRST, because the
+ *      07:00 sync copies the epic's due date into the plan every morning — a
+ *      date approved here and not in Jira would be quietly undone tomorrow.
+ *      So if Jira is connected but this server may not write to it, or Jira
+ *      refuses, nothing is changed and the administrator is told why;
+ *   3. move the project in the shared plan through replanPatch, the same door
+ *      every other date change uses: the first re-plan is free, later ones
+ *      count as drift. Every register line on the same epic moves together,
+ *      as they do on the Timeline.
+ *
+ * A project with no epic, or a server with no Jira at all, has nothing for a
+ * sync to undo, so step 2 is skipped.
+ */
+export async function approve(id, { due } = {}, by) {
+  const c = await colls()
+  if (!c) return UNAVAILABLE
+  const p = await c.proposals.findOne({ _id: id })
+  if (!p) return { status: 404, error: 'No such proposal.' }
+  if (p.status !== 'pending') return { status: 409, error: `That proposal is already ${p.status}.` }
+  const date = due || p.proposedDue
+  if (!isDay(date)) return { status: 400, error: 'Pick the new due date for the project.' }
+
+  const name = cfg().scenario
+  const doc = await store.getScenario(name)
+  if (doc === store.UNAVAILABLE) return UNAVAILABLE
+  const projects = doc?.payload?.projects || []
+  const target = projects.find((x) => x.key === p.projectKey && !x.deleted)
+  if (!target) return { status: 409, error: `${p.projectKey} is no longer in the register.` }
+  const epic = String(target.jiraKey || '').trim().toUpperCase()
+  const keys = new Set(projects
+    .filter((x) => !x.deleted && (x.key === target.key || (epic && String(x.jiraKey || '').trim().toUpperCase() === epic)))
+    .map((x) => x.key))
+
+  const claim = await c.proposals.updateOne({ _id: id, status: 'pending' }, { $set: { status: 'deciding' } })
+  if (!claim.modifiedCount) return { status: 409, error: 'Somebody else is deciding on that proposal right now.' }
+  const release = () => c.proposals.updateOne({ _id: id, status: 'deciding' }, { $set: { status: 'pending' } })
+
+  let jiraResult = null
+  try {
+    if (JIRA_KEY.test(epic) && jira.status().configured) {
+      if (!jiraWritable()) {
+        await release()
+        return {
+          status: 409,
+          error: `Not approved: ${epic} is in Jira, and this server is not allowed to write to Jira, so the 07:00 sync `
+            + 'would put the old date back tomorrow. Set JIRA_ALLOW_WRITES=true in the Render dashboard, then approve again.',
+        }
+      }
+      try {
+        const r = await jira.updateIssue(epic, { due: date })
+        if (r === jira.UNAVAILABLE) throw new Error('Jira is not configured.')
+        jiraResult = { key: epic, written: true }
+      } catch (e) {
+        await release()
+        return { status: 502, error: `Not approved: Jira refused the new date for ${epic} — ${e.message}. Nothing was changed.` }
+      }
+    } else if (JIRA_KEY.test(epic)) {
+      jiraResult = { key: epic, written: false, why: 'Jira is not connected to this server.' }
+    }
+
+    const next = repairState({
+      ...doc.payload,
+      projects: projects.map((x) => (keys.has(x.key) ? { ...x, ...replanPatch(x, date) } : x)),
+    })
+    const saved = await store.saveScenario(name, next, `Weekly approval (${by})`)
+    if (saved === store.UNAVAILABLE) { await release(); return UNAVAILABLE }
+
+    const changed = next.projects.filter((x) => keys.has(x.key))
+      .map((x) => ({ key: x.key, due: x.due ?? null, baselineDue: x.baselineDue ?? null, replanCount: x.replanCount ?? 0 }))
+    const now = new Date().toISOString()
+    await c.proposals.updateOne({ _id: id }, {
+      $set: {
+        status: 'approved', decidedAt: now, decidedBy: by, decidedDue: date, fromDue: target.due || null, jira: jiraResult,
+        replanCount: changed.find((x) => x.key === target.key)?.replanCount ?? null,
+      },
+    })
+    return { proposal: await c.proposals.findOne({ _id: id }), projects: changed, savedAt: saved.updatedAt }
+  } catch (e) {
+    await release()
+    throw e
+  }
+}
+
+/** Reject: the project stays where it is, and the member is told why. */
+export async function reject(id, { reason } = {}, by) {
+  const c = await colls()
+  if (!c) return UNAVAILABLE
+  const why = String(reason || '').trim().slice(0, 1000)
+  if (why.length < 3) return { status: 400, error: 'Say why, so the member knows what to do instead.' }
+  const r = await c.proposals.updateOne(
+    { _id: id, status: 'pending' },
+    { $set: { status: 'rejected', reason: why, decidedAt: new Date().toISOString(), decidedBy: by } },
+  )
+  if (!r.matchedCount) {
+    const p = await c.proposals.findOne({ _id: id })
+    return p ? { status: 409, error: `That proposal is already ${p.status}.` } : { status: 404, error: 'No such proposal.' }
+  }
+  return { proposal: await c.proposals.findOne({ _id: id }) }
+}
+
+/*
+ * THE WEEKLY STORY OF EACH PROJECT, for the Timeline.
+ *
+ * The last eight weeks of tasks linked to a project, the proposals on it, and
+ * its open blockers — a task not finished in the latest report that mentions
+ * it. `person` limits everything to one member's own weeks: a team member sees
+ * their own work on the Timeline, never a colleague's blockers.
+ */
+export async function byProject({ person } = {}) {
+  const c = await colls()
+  if (!c) return UNAVAILABLE
+  const since = addWeeks(weekOf(), -8)
+  const q = { week: { $gte: since } }
+  if (person) q.person = person
+  const rows = await c.entries.find(q).sort({ week: -1 }).toArray()
+  const props = await listProposals({ person, status: 'all' })
+  if (props === UNAVAILABLE) return UNAVAILABLE
+  const out = {}
+  const slot = (k) => { out[k] = out[k] || { history: [], blockers: [], proposals: [] }; return out[k] }
+  const latestReport = {}
+  for (const e of rows) {
+    for (const t of e.tasks || []) {
+      if (!t.projectKey) continue
+      slot(t.projectKey).history.push({
+        week: e.week, person: e.person, title: t.title, done: t.done, pct: t.pct, expected: t.expected,
+        newDate: t.newDate, blocker: t.blocker || '', blockerCategory: t.blockerCategory, priority: t.priority,
+      })
+      // Open blockers come from the latest REPORTED week per person and project.
+      if (e.reportSubmittedAt) {
+        const k = `${t.projectKey}|${e.person}`
+        if (!(k in latestReport) || latestReport[k] === e.week) {
+          latestReport[k] = e.week
+          if (t.done === false && t.blocker) {
+            slot(t.projectKey).blockers.push({
+              week: e.week, person: e.person, title: t.title, blocker: t.blocker, blockerCategory: t.blockerCategory, newDate: t.newDate,
+            })
+          }
+        }
+      }
+    }
+  }
+  for (const p of props) {
+    if (p.week < since && p.status !== 'pending') continue
+    slot(p.projectKey).proposals.push(p)
+  }
+  return out
 }
