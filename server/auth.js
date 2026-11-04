@@ -197,6 +197,10 @@ export const publicUser = (u, { withPassword = false } = {}) => (u ? {
   approvedAt: u.approvedAt || null,
   approvedBy: u.approvedBy || null,
   lastLoginAt: u.lastLoginAt || null,
+  // Which person on the team this account IS — set by an administrator on the
+  // Access tab. Null until then, and the weekly check-in cannot be filled in
+  // without it: an address alone does not say whose week it is.
+  person: u.person || null,
   ...(withPassword ? { password: reveal(u) } : {}),
 } : null)
 
@@ -277,6 +281,20 @@ export async function updateUser(email, patch, by) {
       set.approvedAt = new Date().toISOString()
       set.approvedBy = by || 'admin'
     }
+  }
+  if (patch.person !== undefined) {
+    const person = patch.person === null || patch.person === '' ? null : String(patch.person)
+    if (person !== null && !/^[a-z0-9_-]{1,40}$/i.test(person)) return { error: 'Unknown person.' }
+    /*
+     * One account per person. Two accounts both being James would mean two
+     * people filling in one week, each overwriting the other — refused, and
+     * the address already holding them named, so it is clear what to undo.
+     */
+    if (person) {
+      const other = await c.findOne({ person, email: { $ne: e } })
+      if (other) return { error: `${other.email} is already linked to that person. Unlink it first.` }
+    }
+    set.person = person
   }
   if (patch.password !== undefined) {
     if (locked()) return { error: LOCKED_MESSAGE }

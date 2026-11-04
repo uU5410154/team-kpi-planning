@@ -35,6 +35,7 @@ import Apps from './pages/Apps.jsx'
 import Settings from './pages/Settings.jsx'
 import SignIn from './pages/SignIn.jsx'
 import Users from './pages/Users.jsx'
+import Weekly from './pages/Weekly.jsx'
 import * as authApi from './lib/authApi.js'
 
 /*
@@ -62,6 +63,13 @@ const TABS = [
    */
   { id: 'projects', label: 'Projects', roles: ['admin'] },
   { id: 'people', label: 'Scorecards', roles: ['admin'] },
+  /*
+   * The weekly check-in. Everybody's: a member fills in their own week and
+   * reads the team's focus, an administrator reads every week in full. Ahead
+   * of the team tab so it is the first thing a member lands on — it is the one
+   * page they come to do something on.
+   */
+  { id: 'weekly', label: 'Weekly', roles: ['admin', 'user'] },
   // Beside the individual cards, not instead of them: one answers what a
   // person is measured on, the other whether the team adds up.
   { id: 'team', label: 'Overall team', roles: ['admin', 'user'] },
@@ -1125,7 +1133,7 @@ export default function App() {
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.
             */}
-          {allowed && tab === 'users' && <Users me={me} />}
+          {allowed && tab === 'users' && <Users me={me} people={state.people} />}
           {allowed && tab === 'dashboard' && <Dashboard plan={plan} onGoTo={setTab} />}
           {allowed && tab === 'projects' && (
             <Projects
@@ -1144,6 +1152,7 @@ export default function App() {
               onGoTo={setTab}
             />
           )}
+          {allowed && tab === 'weekly' && <Weekly plan={plan} me={me} />}
           {allowed && tab === 'team' && <Team plan={plan} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
           {allowed && tab === 'timeline' && (

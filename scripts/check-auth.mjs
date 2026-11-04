@@ -339,7 +339,8 @@ try {
     await signInAs('staff@lotuss.com', 'brand-new-1')
     const memberTabs = await tabs()
     check('A TEAM MEMBER GETS WHAT THE TEAM IS CARRYING, AND WHEN IT LANDS',
-      JSON.stringify(memberTabs) === JSON.stringify(['Overall team', 'Timeline', 'Apps']),
+      // Weekly first: it is the one page a member comes to do something on.
+      JSON.stringify(memberTabs) === JSON.stringify(['Weekly', 'Overall team', 'Timeline', 'Apps']),
       memberTabs.join(' | '))
     check('  and NOT the register, where the numbers are typed',
       !memberTabs.includes('Projects'))
@@ -374,10 +375,10 @@ try {
       })
     }
     check('  A BOOKMARKED REGISTER LANDS ON AN ALLOWED TAB INSTEAD',
-      (await landedOn('#projects')) === 'Overall team',
+      (await landedOn('#projects')) === 'Weekly',
       await landedOn('#projects'))
     check('  and so does a bookmarked scorecard',
-      (await landedOn('#people')) === 'Overall team')
+      (await landedOn('#people')) === 'Weekly')
     check('  and the register\'s own editable grid is nowhere on the page',
       !(await page.evaluate(() => !!document.querySelector('input[placeholder="FNP-000"], [aria-label="open cost breakdown"]'))),
       'the Projects table edits in place, so its inputs are the thing to look for')

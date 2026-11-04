@@ -9,6 +9,8 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { STATUS } from '../lib/palette.js'
 import * as auth from '../lib/authApi.js'
+import * as api from '../lib/api.js'
+import { defaultSubmitters } from '../lib/weekly.js'
 
 const ROLE_LABEL = { admin: 'Administrator', user: 'Team member' }
 const STATUS_TONE = { active: STATUS.good, pending: STATUS.warning, inactive: 'text.disabled' }
@@ -21,7 +23,7 @@ const STATUS_TONE = { active: STATUS.good, pending: STATUS.warning, inactive: 't
  * person, which is the point: a work address proves employment, not that
  * somebody should see what their colleagues are appraised on.
  */
-export default function Users({ me }) {
+export default function Users({ me, people = [] }) {
   const [rows, setRows] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(null)
@@ -29,14 +31,39 @@ export default function Users({ me }) {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [reset, setReset] = useState(null)
 
+  /*
+   * The team, as the weekly check-in knows it: the people who hold a
+   * scorecard. IT and the business users are assignable in the register but
+   * are not anybody's login.
+   */
+  const team = people.filter((p) => defaultSubmitters([p]).length)
+  const [weekly, setWeekly] = useState(null)
+
   const load = useCallback(async () => {
     try {
-      setRows(await auth.listUsers())
+      const [users, ws] = await Promise.all([auth.listUsers(), api.weeklySettings().catch(() => null)])
+      setRows(users)
+      setWeekly(ws)
       setError(null)
     } catch (e) {
       setError(e.message)
     }
   }, [])
+
+  const toggleSubmitter = async (id) => {
+    if (!weekly) return
+    const next = weekly.submitters.includes(id)
+      ? weekly.submitters.filter((x) => x !== id)
+      : [...weekly.submitters, id]
+    setBusy(`weekly:${id}`)
+    try {
+      setWeekly({ ...weekly, ...(await api.saveWeeklySettings(next)) })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -62,8 +89,9 @@ export default function Users({ me }) {
           <Typography variant="h2">People with access</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             Registering adds somebody here and does nothing else. You decide whether the account works and what it can
-            see: a <strong>team member</strong> gets the register, the scorecards, the team, the timeline and the apps;
-            an <strong>administrator</strong> gets those and the model behind them, including this page.
+            see: a <strong>team member</strong> gets their weekly check-in, the overall team, the timeline and the apps;
+            an <strong>administrator</strong> gets everything, including the register, the scorecards and this page.
+            Link each account to the person it is so the weekly check-in knows whose week to open.
           </Typography>
         </Box>
         <Button startIcon={<RefreshIcon />} onClick={load} variant="outlined">Refresh</Button>
@@ -80,10 +108,11 @@ export default function Users({ me }) {
 
       {/* Scrolls sideways on a phone rather than widening the whole page. */}
       <Paper variant="outlined" sx={{ overflowX: 'auto' }}>
-        <Table size="small" sx={{ minWidth: 900 }}>
+        <Table size="small" sx={{ minWidth: 1060 }}>
           <TableHead>
             <TableRow>
               <TableCell>Email</TableCell>
+              <TableCell sx={{ width: 160 }}>Is</TableCell>
               <TableCell sx={{ width: 170 }}>Role</TableCell>
               <TableCell sx={{ width: 150 }}>Status</TableCell>
               <TableCell sx={{ width: 190 }}>Password</TableCell>
@@ -100,6 +129,33 @@ export default function Users({ me }) {
                   <TableCell sx={{ fontWeight: isMe ? 700 : 500 }}>
                     {u.email}
                     {isMe && <Chip size="small" label="you" sx={{ ml: 1, height: 18, fontSize: '0.65rem' }} />}
+                  </TableCell>
+                  <TableCell>
+                    {/*
+                      * Which person on the team this login is. The weekly
+                      * check-in needs it to know whose week to open, and the
+                      * reminders will need it to know whom to chase.
+                      */}
+                    <Select
+                      size="small"
+                      fullWidth
+                      displayEmpty
+                      value={u.person || ''}
+                      disabled={busy === u.email}
+                      onChange={(e) => patch(u.email, { person: e.target.value || null })}
+                      sx={{ fontSize: '0.8125rem', color: u.person ? 'text.primary' : 'text.disabled' }}
+                      SelectDisplayProps={{ 'aria-label': `team member for ${u.email}` }}
+                    >
+                      <MenuItem value=""><em>not linked</em></MenuItem>
+                      {team.map((p) => {
+                        const taken = (rows || []).find((x) => x.person === p.id && x.email !== u.email)
+                        return (
+                          <MenuItem key={p.id} value={p.id} disabled={!!taken}>
+                            {p.nick}{taken ? ` (${taken.email.split('@')[0]})` : ''}
+                          </MenuItem>
+                        )
+                      })}
+                    </Select>
                   </TableCell>
                   <TableCell>
                     <Select
@@ -197,13 +253,42 @@ export default function Users({ me }) {
             })}
             {rows && rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} sx={{ textAlign: 'center', color: 'text.disabled', py: 4 }}>
+                <TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.disabled', py: 4 }}>
                   Nobody has registered yet.
                 </TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+        <Typography variant="h4" sx={{ mb: 0.5 }}>Weekly check-in: who has to submit</Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
+          Ticked people are expected to send a plan every Monday and a report every Friday, and will be the ones
+          reminded. {weekly?.isDefault ? 'Nobody has changed this yet, so it is everybody with a scorecard.' : ''}
+        </Typography>
+        {!weekly && <Typography variant="body2" sx={{ color: 'text.disabled' }}>Could not load the list.</Typography>}
+        {weekly && (
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {team.map((p) => {
+              const on = weekly.submitters.includes(p.id)
+              const linked = (rows || []).find((x) => x.person === p.id)
+              return (
+                <Tooltip key={p.id} title={linked ? `Signs in as ${linked.email}` : 'No account is linked to this person yet'}>
+                  <Chip
+                    label={p.nick}
+                    color={on ? 'primary' : 'default'}
+                    variant={on ? 'filled' : 'outlined'}
+                    onClick={() => toggleSubmitter(p.id)}
+                    disabled={busy === `weekly:${p.id}`}
+                    aria-pressed={on}
+                  />
+                </Tooltip>
+              )
+            })}
+          </Box>
+        )}
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>

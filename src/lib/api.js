@@ -93,6 +93,44 @@ export const saveApps = async (name, apps) =>
     body: JSON.stringify({ apps }),
   }))
 
+/* --------------------------- weekly --------------------------- */
+
+/*
+ * The weekly check-in. Kept out of the plan payload on purpose — see
+ * server/weekly.js — so it has calls of its own.
+ */
+export const weeklySettings = async () => j(await fetch('/api/weekly/settings'))
+
+export const saveWeeklySettings = async (submitters) =>
+  j(await fetch('/api/weekly/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ submitters }),
+  }))
+
+/** One week as this person may see it. `week` is a Monday, or 'current'. */
+export const loadWeek = async (week) => j(await fetch(`/api/weekly/${encodeURIComponent(week)}`))
+
+/*
+ * Save one's own week. A refusal comes back with `problems` — the list of
+ * what is missing — so the page can show every one rather than just the first.
+ */
+export async function saveMyWeek(week, body) {
+  const res = await fetch(`/api/weekly/${encodeURIComponent(week)}/mine`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const out = await res.json().catch(() => ({}))
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+  if (!res.ok) {
+    const err = new Error(out.error || `Request failed (${res.status})`)
+    err.problems = out.problems || []
+    throw err
+  }
+  return out
+}
+
 /** The tasks under an epic, or the epics under an initiative. */
 export const jiraChildren = async (keys) =>
   j(await fetch('/api/jira/children', {

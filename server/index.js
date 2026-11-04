@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs'
 import * as store from './db.js'
 import * as jira from './jira.js'
 import * as auth from './auth.js'
+import * as weekly from './weekly.js'
+import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -326,6 +328,95 @@ app.delete('/api/scenarios/:name', adminOnly, async (req, res) => {
   res.json(r)
 })
 
+/* ------------------------------ weekly ------------------------------ */
+
+/*
+ * THE WEEKLY CHECK-IN.
+ *
+ * Who sees what is decided HERE, not in the page: a team member is sent their
+ * own week in full and everybody else's focus line, and nothing more — not a
+ * colleague's blockers, not who is late. An administrator is sent all of it.
+ * Hiding the rest in the browser would put it one developer-tools tab away.
+ */
+
+/** Who has to submit, and the roster to pick from. */
+app.get('/api/weekly/settings', async (_req, res) => {
+  const [s, r] = await Promise.all([weekly.getSettings(), weekly.roster()])
+  if (s === store.UNAVAILABLE || r === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ ...s, people: r.people.map(({ id, nick, name }) => ({ id, nick, name })) })
+})
+
+app.put('/api/weekly/settings', adminOnly, async (req, res) => {
+  const r = await weekly.saveSettings(req.body || {}, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(400).json({ error: r.error })
+  return res.json(r)
+})
+
+app.get('/api/weekly/:week', async (req, res) => {
+  const week = req.params.week === 'current' ? weekOf() : req.params.week
+  if (!isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
+  const { me } = req
+  const admin = me.role === 'admin'
+  const [settings, r, all] = await Promise.all([weekly.getSettings(), weekly.roster(), weekly.entriesFor(week)])
+  if ([settings, r, all].includes(store.UNAVAILABLE)) return unavailable(res)
+
+  const mine = me.person ? await weekly.entryOrDraft(week, me.person) : null
+  if (mine === store.UNAVAILABLE) return unavailable(res)
+
+  const now = Date.now()
+  const nick = Object.fromEntries(r.people.map((p) => [p.id, p.nick]))
+  // Everybody who must submit, and anybody else who did anyway.
+  const ids = [...new Set([...settings.submitters, ...Object.keys(all)])]
+  const team = ids.map((person) => {
+    const e = all[person] || null
+    const row = { person, nick: nick[person] || person, focus: e?.focus || '', required: settings.submitters.includes(person) }
+    if (!admin) return row
+    return { ...row, standing: weekly.standing(week, e, now), entry: e }
+  })
+
+  return res.json({
+    week,
+    current: weekOf(now),
+    now,
+    deadlines: deadlines(week),
+    locked: isLocked(week, now),
+    // Whether THIS person may write THIS week: theirs to fill in, and still open.
+    writable: !!me.person && canWriteWeek(week, now),
+    person: me.person || null,
+    mine,
+    mineStanding: mine ? weekly.standing(week, mine.draft ? null : mine, now) : null,
+    team,
+    submitters: settings.submitters,
+  })
+})
+
+/*
+ * Save one's own week. Only one's own: the person comes from the account, never
+ * from the request, so nobody can write somebody else's week by changing a
+ * field — administrators included. A manager reads a member's week; the member
+ * writes it.
+ */
+app.put('/api/weekly/:week/mine', async (req, res) => {
+  const { week } = req.params
+  const { me } = req
+  if (!isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
+  if (!me.person) {
+    return res.status(409).json({ error: 'This account is not linked to anybody on the team yet. Ask an administrator to link it on the Access tab.' })
+  }
+  if (!canWriteWeek(week)) {
+    return res.status(409).json({
+      error: isLocked(week)
+        ? 'That week is locked: it closed at 08:00 on the following Monday and is now the record.'
+        : 'Only this week and next can be filled in.',
+    })
+  }
+  const r = await weekly.save(week, me.person, req.body || {}, me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(400).json(r)
+  return res.json(r)
+})
+
 /* ----------------------------- accounts ----------------------------- */
 
 app.get('/api/auth/config', (_req, res) => res.json({
@@ -414,6 +505,13 @@ app.put('/api/auth/users/:email', adminOnly, async (req, res) => {
     if (target && target.role === 'admin' && target.status === 'active' && admins <= 1) {
       return res.status(409).json({ error: 'This is the only administrator who can still sign in. Grant somebody else the role first.' })
     }
+  }
+
+  // A person has to be somebody on the team, not any string that looks like an id.
+  if (patch.person) {
+    const r = await weekly.roster()
+    if (r === store.UNAVAILABLE) return unavailable(res)
+    if (!r.people.some((p) => p.id === patch.person)) return res.status(400).json({ error: 'That person is not on the team.' })
   }
 
   const r = await auth.updateUser(email, patch, me.email)
