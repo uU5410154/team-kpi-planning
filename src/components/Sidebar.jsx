@@ -1,6 +1,7 @@
 import {
-  Box, Drawer, Typography, Tooltip, IconButton, Button, LinearProgress, ButtonBase, Avatar,
+  Box, Drawer, Typography, Tooltip, IconButton, Button, LinearProgress, ButtonBase, Avatar, Switch,
 } from '@mui/material'
+import PreviewIcon from '@mui/icons-material/VisibilityOutlined'
 import { alpha, useTheme } from '@mui/material/styles'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -77,10 +78,12 @@ function NavItem({
 }
 
 function NavBody({
-  tabs, tab, onTab, mini, onFold, phone, onClose, me, onSignOut, coverage,
+  tabs, tab, onTab, mini, onFold, phone, onClose, me, onSignOut, coverage, previewing, onToggleView,
 }) {
   const theme = useTheme()
-  const roleWord = me?.local ? 'Local copy' : me?.role === 'admin' ? 'Administrator' : 'Team member'
+  const roleWord = me?.local ? 'Local copy'
+    : previewing ? 'Admin · as a member'
+      : me?.role === 'admin' ? 'Administrator' : 'Team member'
 
   return (
     <Box sx={{
@@ -131,6 +134,47 @@ function NavBody({
           </Tooltip>
         )}
       </Box>
+
+      {/*
+        * An administrator who is also on the team can see the app as the
+        * team does — to try a page as a member would, or to fill in their own
+        * week without the administrator's view around it.
+        */}
+      {onToggleView && !me?.local && (mini ? (
+        <Tooltip title={previewing ? 'Back to the administrator view' : 'View as a team member'} placement="right">
+          <IconButton
+            onClick={() => onToggleView(!previewing)}
+            aria-label="view as a team member"
+            aria-pressed={previewing}
+            sx={{ alignSelf: 'center', color: previewing ? 'primary.light' : 'text.secondary', bgcolor: previewing ? alpha(theme.palette.primary.main, 0.14) : undefined }}
+          >
+            <PreviewIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <Box
+          component="label"
+          sx={{
+            display: 'flex', alignItems: 'center', gap: 1, px: 1.25, py: 0.5, mt: -0.5, borderRadius: '12px', cursor: 'pointer',
+            border: 1, borderColor: previewing ? alpha(theme.palette.primary.main, 0.4) : 'divider',
+            bgcolor: previewing ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+          }}
+        >
+          <PreviewIcon sx={{ fontSize: 18, color: previewing ? 'primary.light' : 'text.secondary' }} />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>View as a team member</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.3, display: 'block' }}>
+              {previewing ? 'On — what your team sees' : 'See the app as your team does'}
+            </Typography>
+          </Box>
+          <Switch
+            size="small"
+            checked={!!previewing}
+            onChange={(e) => onToggleView(e.target.checked)}
+            inputProps={{ 'aria-label': 'view as a team member' }}
+          />
+        </Box>
+      ))}
 
       <Box>
         {!mini && (

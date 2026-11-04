@@ -369,6 +369,39 @@ try {
     check('CLICKING THE PROJECT SHOWS ITS WEEKLY HISTORY', /week by week/i.test(story) && story.includes('Asset tagging')
       && /waiting for approval/i.test(story) && /approved/i.test(story), story.slice(0, 200))
 
+    console.log('\n--- an administrator viewing as a team member ---')
+    const asMember = (await call('GET', `/api/weekly/${WEEK}?view=member`, undefined, boss)).body
+    check('THE SERVER ANSWERS AN ADMINISTRATOR BY A MEMBER’S RULES WHEN ASKED',
+      asMember.team.every((r) => r.entry === undefined && r.standing === undefined) && asMember.mine !== undefined)
+    check('  and sends only their own proposals',
+      (await call('GET', '/api/weekly/proposals?status=all&view=member', undefined, boss)).body.proposals.every((p) => p.person === 'gun'))
+    check('  but what the account may DO is unchanged — it can still decide',
+      (await call('POST', '/api/weekly/proposals/nope/reject?view=member', { reason: 'xxx' }, boss)).status === 404)
+
+    await a.evaluate(() => localStorage.removeItem('fa-kpi-view-as'))
+    await a.goto(`${base}/?landing=1`, { waitUntil: 'networkidle0' })
+    await a.waitForSelector('[role="tab"]', { timeout: 15000 })
+    const selected = () => a.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+      .find((t) => t.getAttribute('aria-selected') === 'true')?.textContent.trim())
+    check('AN ADMINISTRATOR OPENS THE APP ON THE DASHBOARD', (await selected()) === 'Dashboard', await selected())
+    await a.evaluate(() => document.querySelector('input[aria-label="view as a team member"]').click())
+    await a.waitForFunction(() => document.body.innerText.includes('Viewing as a team member'), { timeout: 8000 }).catch(() => {})
+    const tabsNow = await a.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim()))
+    check('SWITCHED TO A MEMBER’S VIEW: A MEMBER’S PAGES, AND NO OTHERS',
+      JSON.stringify(tabsNow) === JSON.stringify(['Weekly', 'Overall team', 'Timeline', 'Apps']), tabsNow.join(' | '))
+    check('  landed on their week, since a member has no Dashboard', (await selected()) === 'Weekly')
+    await a.waitForFunction(() => document.body.innerText.includes('My week'), { timeout: 10000 }).catch(() => {})
+    const asText = await a.evaluate(() => document.body.innerText)
+    check('  with no decision panel and no colleague’s blockers', !asText.includes('Waiting for your decision')
+      && !asText.includes('Blocker:') && asText.includes('My week'))
+    check('  and it says so, with the way back', asText.includes('Viewing as a team member') && asText.includes('Back to administrator'))
+    await a.reload({ waitUntil: 'networkidle0' })
+    await a.waitForSelector('[role="tab"]', { timeout: 15000 })
+    check('  REMEMBERED ACROSS A RELOAD', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 4)
+    await a.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Back to administrator')?.click())
+    await a.waitForFunction(() => document.querySelectorAll('[role="tab"]').length > 4, { timeout: 8000 }).catch(() => {})
+    check('“BACK TO ADMINISTRATOR” BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 9)
+
     console.log('\n--- the member, on a phone ---')
     const m = await as(james, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
     await m.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })

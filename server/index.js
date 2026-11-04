@@ -112,6 +112,14 @@ app.use('/api', async (req, res, next) => {
   }
 })
 
+/*
+ * Answer as an administrator? Not when the administrator has asked to see the
+ * weekly pages as a team member does (?view=member) — then the same rules a
+ * member gets apply, so the preview shows what a member is really sent. Reads
+ * only: what an account may DO is never affected by this.
+ */
+const seesAll = (req) => req.me?.role === 'admin' && req.query.view !== 'member'
+
 /** Writes to the plan, Jira and the account list: administrators only. */
 const adminOnly = (req, res, next) => (req.me?.role === 'admin'
   ? next()
@@ -348,7 +356,7 @@ app.get('/api/weekly/settings', async (req, res) => {
   // The escalation list is addresses, and an administrator's business.
   const { escalation, ...rest } = s
   return res.json({
-    ...(req.me.role === 'admin' ? s : rest),
+    ...(seesAll(req) ? s : rest),
     people: r.people.map(({ id, nick, name }) => ({ id, nick, name })),
   })
 })
@@ -427,7 +435,7 @@ const withNames = async (rows) => {
 
 app.get('/api/weekly/proposals', async (req, res) => {
   const { me } = req
-  const admin = me.role === 'admin'
+  const admin = seesAll(req)
   if (!admin && !me.person) return res.json({ proposals: [] })
   const rows = await weekly.listProposals({ status: req.query.status || 'pending', person: admin ? undefined : me.person })
   if (rows === store.UNAVAILABLE) return unavailable(res)
@@ -463,7 +471,7 @@ app.post('/api/weekly/proposals/:id/reject', adminOnly, async (req, res) => {
 /* The weekly story of every project, for the Timeline: one's own, or everybody's for an administrator. */
 app.get('/api/weekly/projects', async (req, res) => {
   const { me } = req
-  const admin = me.role === 'admin'
+  const admin = seesAll(req)
   if (!admin && !me.person) return res.json({ byProject: {} })
   const r = await weekly.byProject({ person: admin ? undefined : me.person })
   if (r === store.UNAVAILABLE) return unavailable(res)
@@ -480,7 +488,7 @@ app.get('/api/weekly/:week', async (req, res) => {
   const week = req.params.week === 'current' ? weekOf() : req.params.week
   if (!isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
   const { me } = req
-  const admin = me.role === 'admin'
+  const admin = seesAll(req)
   const [settings, r, all] = await Promise.all([weekly.getSettings(), weekly.roster(), weekly.entriesFor(week)])
   if ([settings, r, all].includes(store.UNAVAILABLE)) return unavailable(res)
 

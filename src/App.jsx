@@ -97,13 +97,13 @@ const TABS = [
 ]
 
 /*
- * Where the app opens: the register.
- *
- * The dashboard summarises what the register says, and nobody arrives wanting
- * a summary of work they have not entered yet. A link that names a tab still
- * wins — the hash is what a bookmark carries.
+ * Where the app opens: the Dashboard, for an administrator — the welcome, the
+ * year against its target, and the way into the weekly check-in. A team
+ * member cannot open the Dashboard and lands on the first page they can,
+ * which is their week. A link that names a page still wins: the hash is what
+ * a bookmark carries.
  */
-const DEFAULT_TAB = 'projects'
+const DEFAULT_TAB = 'dashboard'
 
 const tabFromHash = () => {
   const h = window.location.hash.replace('#', '')
@@ -149,6 +149,31 @@ export default function App() {
    */
   const [me, setMe] = useState(undefined)
   const [authConfig, setAuthConfig] = useState(null)
+  /*
+   * VIEW AS A TEAM MEMBER.
+   *
+   * An administrator who is also on the team — Gun submits a week like
+   * everybody else — can switch the whole app to what a team member sees: the
+   * same four pages, the Timeline read-only, the Weekly page without anybody
+   * else's blockers. Not a costume in the browser: the server is asked to
+   * answer the weekly pages by a member's rules too, so what shows is what a
+   * member is actually sent. The account stays an administrator throughout;
+   * nothing is written to the plan while previewing.
+   *
+   * Remembered per browser, and announced on every page while it is on, so
+   * nobody forgets they are in it.
+   */
+  const [viewAsMember, setViewAsMember] = useState(() => {
+    try { return localStorage.getItem('fa-kpi-view-as') === 'member' } catch { return false }
+  })
+  const previewing = me?.role === 'admin' && viewAsMember
+  const viewer = previewing ? { ...me, role: 'user', previewing: true } : me
+  // Set before any page below asks the server for anything.
+  api.setViewAs(previewing ? 'member' : null)
+  const toggleView = (on) => {
+    setViewAsMember(on)
+    try { localStorage.setItem('fa-kpi-view-as', on ? 'member' : 'admin') } catch { /* private window */ }
+  }
   // The home screen writes itself to the shared plan on a short delay of its
   // own, apart from the register's save.
   const appsSaveTimer = useRef(null)
@@ -176,10 +201,10 @@ export default function App() {
    * looking at it — becomes the first one they can.
    */
   useEffect(() => {
-    if (!me) return
-    const mine = TABS.filter((t) => (t.roles || []).includes(me.role))
+    if (!viewer) return
+    const mine = TABS.filter((t) => (t.roles || []).includes(viewer.role))
     if (mine.length && !mine.some((t) => t.id === tab)) setTab(mine[0].id)
-  }, [me, tab])
+  }, [viewer?.role, me, tab])
 
   useEffect(() => {
     let stop = false
@@ -202,7 +227,7 @@ export default function App() {
    * must not try: an automatic save that can only fail would leave "unsaved
    * changes" hanging over a page they cannot save from.
    */
-  const canWrite = me?.role === 'admin'
+  const canWrite = viewer?.role === 'admin'
   /*
    * The shared plan is only asked for once somebody is signed in. The server
    * refuses a stranger now, and a browser that signed in AFTER these effects
@@ -936,7 +961,7 @@ export default function App() {
    * link to #settings from somebody who is not an administrator lands on the
    * first tab they DO have rather than on a page they should not see.
    */
-  const visibleTabs = TABS.filter((t) => (t.roles || []).includes(me?.role))
+  const visibleTabs = TABS.filter((t) => (t.roles || []).includes(viewer?.role))
   const allowed = visibleTabs.some((t) => t.id === tab)
 
   const current = TABS.find((t) => t.id === tab)
@@ -1051,6 +1076,8 @@ export default function App() {
           onClose={() => setNavOpen(false)}
           me={me}
           onSignOut={signOut}
+          previewing={previewing}
+          onToggleView={me?.role === 'admin' ? toggleView : null}
           coverage={{
             total: Math.round(plan.totals.totalHours),
             target: plan.totals.target,
@@ -1201,7 +1228,20 @@ export default function App() {
             </Box>
           </Box>
 
-        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
+        {/* Keyed on the view, so switching it rebuilds the page and every page
+            asks the server again under the new rules. */}
+        <Box key={previewing ? 'member' : 'admin'} sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
+          {previewing && (
+            <Alert
+              severity="info"
+              variant="outlined"
+              sx={{ mb: 2.5, alignItems: 'center' }}
+              action={<Button color="inherit" size="small" onClick={() => toggleView(false)}>Back to administrator</Button>}
+            >
+              <strong>Viewing as a team member.</strong> This is what your team sees, with your own week as {hello}.
+              Nothing you see here changes the plan.
+            </Alert>
+          )}
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.
@@ -1229,7 +1269,7 @@ export default function App() {
           {allowed && tab === 'weekly' && (
             <Weekly
               plan={plan}
-              me={me}
+              me={viewer}
               hello={hello}
               onProjectsChanged={applyServerProjects}
               onShowTimeline={showOnTimeline}

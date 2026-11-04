@@ -99,7 +99,17 @@ export const saveApps = async (name, apps) =>
  * The weekly check-in. Kept out of the plan payload on purpose — see
  * server/weekly.js — so it has calls of its own.
  */
-export const weeklySettings = async () => j(await fetch('/api/weekly/settings'))
+
+/*
+ * An administrator previewing the app as a team member: every weekly READ
+ * asks the server for what a member would be sent. Writes are untouched — the
+ * account is still what it is, and the server still decides what it may do.
+ */
+let viewAs = null
+export const setViewAs = (v) => { viewAs = v === 'member' ? 'member' : null }
+const vq = (url) => (viewAs ? `${url}${url.includes('?') ? '&' : '?'}view=member` : url)
+
+export const weeklySettings = async () => j(await fetch(vq('/api/weekly/settings')))
 
 export const saveWeeklySettings = async (submitters) =>
   j(await fetch('/api/weekly/settings', {
@@ -123,7 +133,7 @@ export const mailStatus = async () => j(await fetch('/api/weekly/mail'))
 export const sendTestMail = async () => j(await fetch('/api/weekly/mail/test', { method: 'POST' }))
 
 /** One week as this person may see it. `week` is a Monday, or 'current'. */
-export const loadWeek = async (week) => j(await fetch(`/api/weekly/${encodeURIComponent(week)}`))
+export const loadWeek = async (week) => j(await fetch(vq(`/api/weekly/${encodeURIComponent(week)}`)))
 
 /*
  * Save one's own week. A refusal comes back with `problems` — the list of
@@ -147,7 +157,7 @@ export async function saveMyWeek(week, body) {
 
 /* Date proposals: a slipped task asking to move its project's due date. */
 export const proposals = async (status = 'pending') =>
-  j(await fetch(`/api/weekly/proposals?status=${encodeURIComponent(status)}`))
+  j(await fetch(vq(`/api/weekly/proposals?status=${encodeURIComponent(status)}`)))
 
 export const approveProposal = async (id, due) =>
   j(await fetch(`/api/weekly/proposals/${encodeURIComponent(id)}/approve`, {
@@ -164,7 +174,7 @@ export const rejectProposal = async (id, reason) =>
   }))
 
 /** Each project's last eight weeks, its blockers and its proposals — for the Timeline. */
-export const weeklyByProject = async () => j(await fetch('/api/weekly/projects'))
+export const weeklyByProject = async () => j(await fetch(vq('/api/weekly/projects')))
 
 /** The tasks under an epic, or the epics under an initiative. */
 export const jiraChildren = async (keys) =>
