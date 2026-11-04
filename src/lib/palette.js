@@ -29,18 +29,23 @@ export const CHART = {
     seq: ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#2a78d6', '#256abf', '#184f95'],
     deemphasis: '#c3c2b7',
   },
+  /*
+   * The neutrals follow the chrome — navy rather than charcoal — so a chart
+   * sits on its panel instead of as a grey slab in it. The series and the
+   * sequential ramp are untouched: those are the validated part.
+   */
   dark: {
-    surface: '#1a1a19',
-    plane: '#0d0d0d',
-    textPrimary: '#ffffff',
-    textSecondary: '#c3c2b7',
-    muted: '#898781',
-    gridline: '#2c2c2a',
-    baseline: '#383835',
-    border: 'rgba(255,255,255,0.10)',
+    surface: '#0f1338',
+    plane: '#080b26',
+    textPrimary: '#eef0ff',
+    textSecondary: '#a5aad6',
+    muted: '#7d82ad',
+    gridline: '#232a5c',
+    baseline: '#343c78',
+    border: 'rgba(129,140,248,0.16)',
     series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'],
     seq: ['#0d366b', '#104281', '#184f95', '#256abf', '#2a78d6', '#3987e5', '#6da7ec'],
-    deemphasis: '#52514e',
+    deemphasis: '#4a5080',
   },
 }
 

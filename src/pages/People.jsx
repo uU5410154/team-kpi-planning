@@ -402,10 +402,13 @@ export default function People({
 
       <Grid container spacing={2.5}>
         {/* ---------- weight table ---------- */}
-        {/* Five twelfths below lg, not four: at 1100px a third of the row was
-            337px against a table that cannot shrink below 391, and the delete
-            button went back outside the frame. */}
-        <Grid item xs={12} md={5} lg={4}>
+        {/* Measured against the space BESIDE the side menu, not the window:
+            the menu takes ~280px, so a 1440px screen leaves about 1,140 for
+            the page. The table cannot shrink below 392px, so the card stacks
+            full width below 1200px, takes half from there, and five twelfths
+            only on screens wide enough for that to still clear 392. A third
+            of the row put the delete button outside the frame. */}
+        <Grid item xs={12} lg={6} xl={5}>
           <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
             <Box sx={{ px: 2.5, py: 2, bgcolor: 'action.hover', borderBottom: 1, borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
@@ -1048,7 +1051,7 @@ export default function People({
         </Grid>
 
         {/* ---------- portfolio ---------- */}
-        <Grid item xs={12} md={7} lg={8}>
+        <Grid item xs={12} lg={6} xl={7}>
           {/* overflow hidden on the card + scroll on the table, so a wide
               editable table scrolls inside its own panel instead of pushing
               the page sideways */}

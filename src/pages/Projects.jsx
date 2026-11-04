@@ -538,7 +538,9 @@ export default function Projects({
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} alignItems={{ lg: 'center' }}>
+        {/* Wraps: beside the side menu a 1500px screen leaves about 1,200px,
+            which is less than the search box and six filters need in one row. */}
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" alignItems={{ lg: 'center' }}>
           <TextField
             size="small"
             placeholder="Search key, project, team, assignee…"

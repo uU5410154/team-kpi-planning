@@ -1,0 +1,242 @@
+import {
+  Box, Drawer, Typography, Tooltip, IconButton, Button, LinearProgress, ButtonBase, Avatar,
+} from '@mui/material'
+import { alpha, useTheme } from '@mui/material/styles'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import CloseIcon from '@mui/icons-material/Close'
+import LogoutIcon from '@mui/icons-material/Logout'
+import { SURFACE } from '../theme.js'
+
+/*
+ * THE SIDE MENU.
+ *
+ * Replaces the tab strip that ran across the top. Nine pages in one row did
+ * not fit a laptop without scrolling and did not fit a phone at all; a column
+ * holds them with room to spare and says where you are at a glance.
+ *
+ * Three shapes:
+ *   - wide on a computer: icon and name for every page;
+ *   - folded on a computer: icons only, the name on hover — for the Timeline
+ *     and the register, which want every pixel of width they can get;
+ *   - on a phone: hidden, and slid in over the page from the ☰ button.
+ *
+ * The pages are a real tab list (role="tab", aria-selected), as the top strip
+ * was: a screen reader announces them the same way, and the browser checks
+ * that find a page by its tab keep working.
+ */
+
+export const NAV_W = 252
+export const NAV_W_MINI = 76
+
+/** "wisarut.gunjarueg@lotuss.com" → "Wisarut Gunjarueg". */
+const displayName = (email) => String(email || '')
+  .split('@')[0]
+  .split(/[._-]+/)
+  .filter(Boolean)
+  .map((w) => w[0].toUpperCase() + w.slice(1))
+  .join(' ') || 'Signed in'
+
+const initials = (email) => displayName(email).split(' ').map((w) => w[0]).slice(0, 2).join('')
+
+function NavItem({
+  item, selected, mini, onClick,
+}) {
+  const theme = useTheme()
+  const Icon = item.icon
+  const blue = theme.palette.primary.main
+  const button = (
+    <ButtonBase
+      role="tab"
+      aria-selected={selected}
+      onClick={onClick}
+      sx={{
+        width: '100%',
+        justifyContent: mini ? 'center' : 'flex-start',
+        gap: 1.5,
+        px: mini ? 0 : 1.75,
+        py: 1.15,
+        borderRadius: 2.5,
+        color: selected ? '#fff' : 'text.secondary',
+        fontWeight: selected ? 700 : 550,
+        fontSize: '0.875rem',
+        transition: 'background-color .15s, color .15s',
+        ...(selected
+          ? {
+            background: `linear-gradient(90deg, ${theme.palette.primary.dark}, ${blue})`,
+            boxShadow: `0 6px 16px ${alpha(blue, 0.35)}`,
+          }
+          : { '&:hover': { bgcolor: 'action.hover', color: 'text.primary' } }),
+      }}
+    >
+      <Icon sx={{ fontSize: 20, flexShrink: 0 }} />
+      {/* Kept in the page when folded, only hidden: the tab still has its name
+          for a screen reader and for anything that finds it by its text. */}
+      <Box component="span" sx={{ display: mini ? 'none' : 'block', whiteSpace: 'nowrap' }}>{item.label}</Box>
+    </ButtonBase>
+  )
+  return mini ? <Tooltip title={item.label} placement="right">{button}</Tooltip> : button
+}
+
+function NavBody({
+  tabs, tab, onTab, mini, onFold, phone, onClose, me, onSignOut, coverage,
+}) {
+  const theme = useTheme()
+  const roleWord = me?.local ? 'Local copy' : me?.role === 'admin' ? 'Administrator' : 'Team member'
+
+  return (
+    <Box sx={{
+      height: '100%', display: 'flex', flexDirection: 'column', p: mini ? 1.25 : 2, gap: 2, overflowY: 'auto', overflowX: 'hidden',
+    }}
+    >
+      {/* Who is signed in. On a shared machine the first thing worth knowing
+          is whose session it is, so it heads the menu. */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', gap: 1.25, pb: 2, borderBottom: 1, borderColor: 'divider',
+        flexDirection: mini ? 'column' : 'row',
+      }}
+      >
+        <Avatar sx={{
+          width: 40, height: 40, fontSize: '0.85rem', fontWeight: 700, color: '#fff',
+          background: 'linear-gradient(135deg, #a855f7, #4f6bff)',
+        }}
+        >
+          {me?.local ? 'L' : initials(me?.email)}
+        </Avatar>
+        {!mini && (
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
+              {me?.local ? 'No accounts' : displayName(me?.email)}
+            </Typography>
+            <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block', letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.65rem' }}>
+              {roleWord}
+            </Typography>
+          </Box>
+        )}
+        {phone ? (
+          <IconButton size="small" onClick={onClose} aria-label="close menu"><CloseIcon fontSize="small" /></IconButton>
+        ) : (
+          <Tooltip title={mini ? 'Open the menu' : 'Fold the menu'} placement="right">
+            <IconButton
+              size="small"
+              onClick={onFold}
+              aria-label={mini ? 'expand menu' : 'collapse menu'}
+              sx={{
+                bgcolor: 'primary.main', color: '#fff', width: 28, height: 28, borderRadius: '50%',
+                '&:hover': { bgcolor: 'primary.dark' },
+              }}
+            >
+              {mini ? <ChevronRightIcon sx={{ fontSize: 18 }} /> : <ChevronLeftIcon sx={{ fontSize: 18 }} />}
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+
+      <Box>
+        {!mini && (
+          <Typography variant="subtitle2" sx={{ color: 'text.disabled', fontSize: '0.65rem', px: 1, mb: 1, display: 'block' }}>
+            F&amp;A Tech · 2026 plan
+          </Typography>
+        )}
+        <Box role="tablist" aria-orientation="vertical" aria-label="Pages" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          {tabs.map((t) => (
+            <NavItem key={t.id} item={t} selected={t.id === tab} mini={mini} onClick={() => onTab(t.id)} />
+          ))}
+        </Box>
+      </Box>
+
+      <Box sx={{ flex: 1 }} />
+
+      {/* Where the team stands against the year, always in view — what the
+          old top bar's hours chip said, given room to say it properly. */}
+      {coverage && !mini && (
+        <Box sx={{
+          p: 2, borderRadius: '16px', border: 1, borderColor: 'divider',
+          background: `linear-gradient(160deg, ${alpha(theme.palette.primary.main, 0.14)}, ${alpha('#a855f7', 0.08)} 70%)`,
+        }}
+        >
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>Saving hours, committed</Typography>
+          <Typography variant="h3" sx={{ fontVariantNumeric: 'tabular-nums', mt: 0.25 }}>
+            {coverage.total.toLocaleString()}
+            <Typography component="span" variant="caption" sx={{ color: 'text.secondary', ml: 0.75 }}>
+              / {coverage.target.toLocaleString()} hrs
+            </Typography>
+          </Typography>
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(100, coverage.share * 100)}
+            color={coverage.tone}
+            sx={{ mt: 1, height: 6, bgcolor: alpha(theme.palette.text.primary, 0.08) }}
+          />
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.75 }}>
+            {Math.round(coverage.share * 100)}% of the year&rsquo;s target
+          </Typography>
+        </Box>
+      )}
+
+      {/* Nothing to sign out of when there are no accounts. */}
+      {!me?.local && (
+        mini ? (
+          <Tooltip title="Sign out" placement="right">
+            <IconButton onClick={onSignOut} aria-label="Sign out" sx={{ alignSelf: 'center' }}>
+              <LogoutIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        ) : (
+          <Button
+            onClick={onSignOut}
+            startIcon={<LogoutIcon fontSize="small" />}
+            sx={{ color: 'text.secondary', justifyContent: 'flex-start', px: 1.75 }}
+          >
+            Sign out
+          </Button>
+        )
+      )}
+    </Box>
+  )
+}
+
+export default function Sidebar(props) {
+  const { phone, open, onClose, mini } = props
+  const theme = useTheme()
+  const s = SURFACE[theme.palette.mode === 'dark' ? 'dark' : 'light']
+
+  if (phone) {
+    return (
+      <Drawer
+        variant="temporary"
+        open={open}
+        onClose={onClose}
+        // Mounted while closed, so the pages are in the document for anything
+        // that looks for them, and the menu opens without a rebuild.
+        ModalProps={{ keepMounted: true }}
+        PaperProps={{ sx: { width: Math.min(NAV_W, 300), bgcolor: s.rail, borderRight: 1, borderColor: 'divider' } }}
+      >
+        <NavBody {...props} mini={false} />
+      </Drawer>
+    )
+  }
+
+  const width = mini ? NAV_W_MINI : NAV_W
+  return (
+    <Box
+      component="nav"
+      sx={{
+        position: 'fixed',
+        top: 12,
+        bottom: 12,
+        left: 12,
+        width,
+        zIndex: (t) => t.zIndex.appBar + 1,
+        transition: 'width .2s ease',
+        bgcolor: alpha(s.rail, theme.palette.mode === 'dark' ? 0.86 : 0.95),
+        backdropFilter: 'blur(14px)',
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: '22px',
+      }}
+    >
+      <NavBody {...props} />
+    </Box>
+  )
+}

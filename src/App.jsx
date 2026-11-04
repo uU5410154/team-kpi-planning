@@ -1,9 +1,21 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
-  ThemeProvider, CssBaseline, Box, AppBar, Toolbar, Typography, Tabs, Tab,
+  ThemeProvider, CssBaseline, Box, Typography,
   Button, IconButton, Tooltip, Snackbar, Alert, Chip, Divider, Menu, MenuItem,
   CircularProgress, useMediaQuery,
 } from '@mui/material'
+import { alpha } from '@mui/material/styles'
+import MenuIcon from '@mui/icons-material/Menu'
+import SpaceDashboardIcon from '@mui/icons-material/SpaceDashboardOutlined'
+import FolderIcon from '@mui/icons-material/FolderOutlined'
+import BadgeIcon from '@mui/icons-material/BadgeOutlined'
+import EventNoteIcon from '@mui/icons-material/EventNoteOutlined'
+import GroupsIcon from '@mui/icons-material/GroupsOutlined'
+import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
+import AppsIcon from '@mui/icons-material/AppsOutlined'
+import TuneIcon from '@mui/icons-material/TuneOutlined'
+import AdminIcon from '@mui/icons-material/AdminPanelSettingsOutlined'
+import Sidebar, { NAV_W, NAV_W_MINI } from './components/Sidebar.jsx'
 import DownloadIcon from '@mui/icons-material/Download'
 import DarkModeIcon from '@mui/icons-material/DarkModeOutlined'
 import LightModeIcon from '@mui/icons-material/LightModeOutlined'
@@ -51,7 +63,7 @@ import * as authApi from './lib/authApi.js'
  * tab nobody could reach, which is the safe way round for a mistake.
  */
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', roles: ['admin'] },
+  { id: 'dashboard', label: 'Dashboard', icon: SpaceDashboardIcon, roles: ['admin'] },
   /*
    * The register and the individual scorecards are ADMIN ONLY.
    *
@@ -61,24 +73,24 @@ const TABS = [
    * lands — the Overall team page and the timeline — without the row-by-row
    * numbers behind somebody else's appraisal.
    */
-  { id: 'projects', label: 'Projects', roles: ['admin'] },
-  { id: 'people', label: 'Scorecards', roles: ['admin'] },
+  { id: 'projects', label: 'Projects', icon: FolderIcon, roles: ['admin'] },
+  { id: 'people', label: 'Scorecards', icon: BadgeIcon, roles: ['admin'] },
   /*
    * The weekly check-in. Everybody's: a member fills in their own week and
    * reads the team's focus, an administrator reads every week in full. Ahead
    * of the team tab so it is the first thing a member lands on — it is the one
    * page they come to do something on.
    */
-  { id: 'weekly', label: 'Weekly', roles: ['admin', 'user'] },
+  { id: 'weekly', label: 'Weekly', icon: EventNoteIcon, roles: ['admin', 'user'] },
   // Beside the individual cards, not instead of them: one answers what a
   // person is measured on, the other whether the team adds up.
-  { id: 'team', label: 'Overall team', roles: ['admin', 'user'] },
+  { id: 'team', label: 'Overall team', icon: GroupsIcon, roles: ['admin', 'user'] },
   // Beside the register rather than inside it: the register answers what a
   // project is worth, this answers when it was supposed to land.
-  { id: 'timeline', label: 'Timeline', roles: ['admin', 'user'] },
-  { id: 'apps', label: 'Apps', roles: ['admin', 'user'] },
-  { id: 'settings', label: 'Model', roles: ['admin'] },
-  { id: 'users', label: 'Access', roles: ['admin'] },
+  { id: 'timeline', label: 'Timeline', icon: TimelineIcon, roles: ['admin', 'user'] },
+  { id: 'apps', label: 'Apps', icon: AppsIcon, roles: ['admin', 'user'] },
+  { id: 'settings', label: 'Model', icon: TuneIcon, roles: ['admin'] },
+  { id: 'users', label: 'Access', icon: AdminIcon, roles: ['admin'] },
 ]
 
 /*
@@ -105,6 +117,18 @@ export default function App() {
   const [state, setState] = useState(loadState)
   const [toast, setToast] = useState(null)
   const [menuEl, setMenuEl] = useState(null)
+  /*
+   * The side menu: folded to icons or open, remembered per browser — somebody
+   * who folds it to give the Timeline room wants it folded tomorrow too. On a
+   * phone it is closed until the ☰ opens it, every time.
+   */
+  const [navMini, setNavMini] = useState(() => {
+    try { return localStorage.getItem('fa-kpi-nav-mini') === '1' } catch { return false }
+  })
+  const [navOpen, setNavOpen] = useState(false)
+  useEffect(() => {
+    try { localStorage.setItem('fa-kpi-nav-mini', navMini ? '1' : '0') } catch { /* private window */ }
+  }, [navMini])
   const [scenario, setScenario] = useState(null) // 'save' | 'open' | null
   const [dirty, setDirty] = useState(false)
   /*
@@ -905,6 +929,12 @@ export default function App() {
   const visibleTabs = TABS.filter((t) => (t.roles || []).includes(me?.role))
   const allowed = visibleTabs.some((t) => t.id === tab)
 
+  const current = TABS.find((t) => t.id === tab)
+  const CurrentIcon = current?.icon || null
+  const signOut = async () => {
+    try { await authApi.signOut() } finally { setMe(null) }
+  }
+
   const cov = plan.totals.totalCoverage
   const covTone = cov >= 1 ? 'success' : cov >= 0.9 ? 'warning' : 'error'
 
@@ -966,169 +996,167 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-        <AppBar position="sticky" color="default" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+      <Box sx={{ minHeight: '100vh' }}>
+        <Sidebar
+          tabs={visibleTabs}
+          tab={tab}
+          onTab={(id) => { setTab(id); setNavOpen(false) }}
+          mini={navMini}
+          onFold={() => setNavMini((m) => !m)}
+          phone={phone}
+          open={navOpen}
+          onClose={() => setNavOpen(false)}
+          me={me}
+          onSignOut={signOut}
+          coverage={{
+            total: Math.round(plan.totals.totalHours),
+            target: plan.totals.target,
+            share: cov || 0,
+            tone: covTone,
+          }}
+        />
+
+        {/* Everything beside the menu: the header, then the page. */}
+        <Box sx={{
+          ml: phone ? 0 : `${(navMini ? NAV_W_MINI : NAV_W) + 24}px`,
+          transition: 'margin-left .2s ease',
+          pr: { xs: 0, sm: 1.5 },
+        }}
+        >
           {/*
-            * On a phone the bar held seven things in one unbreakable row and
-            * pushed the export and the menu off the right edge, which made
-            * Safari zoom the whole app out to fit them. There the subtitle
-            * goes, export becomes an icon, and who is signed in moves into
-            * the ⋮ menu.
+            * THE HEADER: which page this is, and the few things that apply to
+            * every page — the export, the light/dark switch, the file menu.
+            *
+            * On a phone the ☰ opens the menu over the page; on a computer it
+            * folds the menu to icons and back. The export becomes an icon on a
+            * phone, where a 390px row has no room for its words.
             */}
-          <Toolbar sx={{ gap: { xs: 1, sm: 2 }, px: { xs: 1.5, sm: 3 }, minHeight: { xs: 56, sm: 60 } }}>
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.25, minWidth: 0, flexShrink: 0 }}>
-              <Typography variant="h4" noWrap sx={{ fontWeight: 700, letterSpacing: '-0.01em' }}>
-                F&amp;A Tech
-              </Typography>
-              <Typography variant="body2" noWrap sx={{ color: 'text.secondary', display: { xs: 'none', md: 'block' } }}>
-                2026 Objective &amp; KPI Planning
-              </Typography>
-            </Box>
-
-            <Chip
-              size="small"
-              color={covTone}
-              variant="outlined"
-              label={phone
-                ? `${Math.round(plan.totals.totalHours).toLocaleString()} / ${plan.totals.target.toLocaleString()}`
-                : `${Math.round(plan.totals.totalHours).toLocaleString()} / ${plan.totals.target.toLocaleString()} hrs`}
-              sx={{ fontVariantNumeric: 'tabular-nums', minWidth: 0 }}
-            />
-            {plan.invalid.length > 0 && (
-              <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')} — saving is blocked until every scorecard totals 100%`}>
-                <Chip
-                  size="small"
-                  color="error"
-                  label={phone ? `${plan.invalid.length} ≠ 100%` : `${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} ≠ 100%`}
-                  onClick={() => setTab('people')}
-                  sx={{ cursor: 'pointer' }}
-                />
-              </Tooltip>
-            )}
-
-            <Box sx={{ flex: 1 }} />
-
-            {/*
-              * Who is signed in, and the way out. Beside the export rather
-              * than hidden in a menu: on a shared machine the most important
-              * thing this bar can say is whose session it is. A phone is not
-              * a shared machine, and has no room — there both go in the menu.
-              */}
-            {!phone && (
-              <Tooltip title={me.local
-                ? 'No database is configured, so there are no accounts and nothing shared to protect. This is your browser’s own copy of the plan.'
-                : me.role === 'admin'
-                  ? 'Signed in as an administrator — you can see everything, including who has access'
-                  : 'Signed in as a team member'}
-              >
-                <Chip
-                  size="small"
-                  label={me.local ? 'local — no accounts' : `${me.email.split('@')[0]}${me.role === 'admin' ? ' · admin' : ''}`}
-                  variant="outlined"
-                  sx={{ mr: 1 }}
-                />
-              </Tooltip>
-            )}
-            {/* Nothing to sign out of when there are no accounts. */}
-            {!me.local && !phone && (
-              <Button
-                size="small"
-                onClick={async () => {
-                  try { await authApi.signOut() } finally { setMe(null) }
-                }}
-                sx={{ mr: 1 }}
-              >
-                Sign out
-              </Button>
-            )}
-
-            {phone ? (
-              <Tooltip title="Export Excel">
-                <span>
-                  <IconButton color="primary" onClick={handleExport} disabled={exporting} aria-label="Export Excel">
-                    {exporting ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
-                  </IconButton>
-                </span>
-              </Tooltip>
-            ) : (
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<DownloadIcon />}
-                onClick={handleExport}
-                disabled={exporting}
-                sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-              >
-                {exporting ? 'Building…' : 'Export Excel'}
-              </Button>
-            )}
-
-            <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
-              <IconButton size="small" onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}>
-                {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
-              </IconButton>
-            </Tooltip>
-
-            <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More">
-              <MoreVertIcon fontSize="small" />
-            </IconButton>
-            <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
-              {phone && (
-                <MenuItem disabled sx={{ opacity: '1 !important', fontSize: '0.8125rem' }}>
-                  {me.local ? 'local — no accounts' : `${me.email}${me.role === 'admin' ? ' · admin' : ''}`}
-                </MenuItem>
-              )}
-              {phone && !me.local && (
-                <MenuItem onClick={async () => {
-                  setMenuEl(null)
-                  try { await authApi.signOut() } finally { setMe(null) }
-                }}
-                >
-                  Sign out
-                </MenuItem>
-              )}
-              {phone && <Divider />}
-              {/* Writing the shared plan is an administrator's; the server refuses anybody else. */}
-              {canWrite && (
-                <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
-                  <CloudUploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Publish to shared store
-                </MenuItem>
-              )}
-              <MenuItem onClick={() => { setScenario('open'); setMenuEl(null) }}>
-                <CloudDownloadIcon fontSize="small" sx={{ mr: 1.5 }} /> Open shared scenario
-              </MenuItem>
-              <Divider />
-              <MenuItem onClick={() => { downloadScenario(state); setMenuEl(null) }}>
-                <DataObjectIcon fontSize="small" sx={{ mr: 1.5 }} /> Save scenario file (.json)
-              </MenuItem>
-              <MenuItem onClick={() => { fileRef.current?.click(); setMenuEl(null) }}>
-                <UploadFileIcon fontSize="small" sx={{ mr: 1.5 }} /> Load scenario file (.json)
-              </MenuItem>
-              <Divider />
-              <MenuItem onClick={() => { handleReset(); setMenuEl(null) }}>
-                <RestartAltIcon fontSize="small" sx={{ mr: 1.5 }} /> Reset to source workbook
-              </MenuItem>
-            </Menu>
-            <input ref={fileRef} type="file" accept="application/json" hidden onChange={handleImport} />
-          </Toolbar>
-
-          <Tabs
-            value={tab}
-            onChange={(_e, v) => setTab(v)}
-            // Scrolls on a narrow screen rather than clipping the last tabs.
-            variant="scrollable"
-            scrollButtons={false}
+          <Box
+            component="header"
             sx={{
-              px: { xs: 0, sm: 2 },
-              minHeight: 40,
-              '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontWeight: 600, px: { xs: 1.5, sm: 2 }, minWidth: { xs: 0, sm: 90 } },
+              position: 'sticky',
+              top: 0,
+              zIndex: (t) => t.zIndex.appBar,
+              pt: { xs: 1, sm: 1.5 },
+              px: { xs: 1, sm: 1.5 },
             }}
           >
-            {visibleTabs.map((t) => <Tab key={t.id} value={t.id} label={t.label} />)}
-          </Tabs>
-        </AppBar>
+            <Box sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: { xs: 0.75, sm: 1.5 },
+              px: { xs: 0.75, sm: 1.5 },
+              py: { xs: 0.75, sm: 1 },
+              borderRadius: 4,
+              border: 1,
+              borderColor: 'divider',
+              bgcolor: (t) => alpha(t.palette.background.paper, 0.78),
+              backdropFilter: 'blur(14px)',
+            }}
+            >
+              <Tooltip title={phone ? 'Menu' : navMini ? 'Open the menu' : 'Fold the menu'}>
+                <IconButton
+                  onClick={() => (phone ? setNavOpen(true) : setNavMini((m) => !m))}
+                  aria-label="menu"
+                >
+                  <MenuIcon />
+                </IconButton>
+              </Tooltip>
+              {CurrentIcon && (
+                <Box sx={{
+                  width: 36,
+                  height: 36,
+                  flexShrink: 0,
+                  borderRadius: 2.5,
+                  display: 'grid',
+                  placeItems: 'center',
+                  color: '#fff',
+                  background: (t) => `linear-gradient(135deg, ${t.palette.primary.dark}, ${t.palette.primary.main})`,
+                  boxShadow: (t) => `0 4px 14px ${alpha(t.palette.primary.main, 0.4)}`,
+                }}
+                >
+                  <CurrentIcon sx={{ fontSize: 20 }} />
+                </Box>
+              )}
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h4" noWrap sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.1rem' } }}>
+                  {current?.label || 'F&A Tech'}
+                </Typography>
+                <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: { xs: 'none', md: 'block' } }}>
+                  F&amp;A Tech · 2026 Objective &amp; KPI Planning
+                </Typography>
+              </Box>
 
-        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2, md: 3 }, py: { xs: 2, sm: 3 } }}>
+              {plan.invalid.length > 0 && (
+                <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')} — saving is blocked until every scorecard totals 100%`}>
+                  <Chip
+                    size="small"
+                    color="error"
+                    label={phone ? `${plan.invalid.length} ≠ 100%` : `${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} ≠ 100%`}
+                    onClick={() => setTab('people')}
+                    sx={{ cursor: 'pointer', minWidth: 0 }}
+                  />
+                </Tooltip>
+              )}
+
+              <Box sx={{ flex: 1 }} />
+
+              {phone ? (
+                <Tooltip title="Export Excel">
+                  <span>
+                    <IconButton color="primary" onClick={handleExport} disabled={exporting} aria-label="Export Excel">
+                      {exporting ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="contained"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleExport}
+                  disabled={exporting}
+                  sx={{ flexShrink: 0, whiteSpace: 'nowrap', px: 2.25, py: 0.9 }}
+                >
+                  {exporting ? 'Building…' : 'Export Excel'}
+                </Button>
+              )}
+
+              <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
+                <IconButton size="small" onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}>
+                  {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+
+              <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More">
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+              <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
+                {/* Writing the shared plan is an administrator's; the server refuses anybody else. */}
+                {canWrite && (
+                  <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
+                    <CloudUploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Publish to shared store
+                  </MenuItem>
+                )}
+                <MenuItem onClick={() => { setScenario('open'); setMenuEl(null) }}>
+                  <CloudDownloadIcon fontSize="small" sx={{ mr: 1.5 }} /> Open shared scenario
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={() => { downloadScenario(state); setMenuEl(null) }}>
+                  <DataObjectIcon fontSize="small" sx={{ mr: 1.5 }} /> Save scenario file (.json)
+                </MenuItem>
+                <MenuItem onClick={() => { fileRef.current?.click(); setMenuEl(null) }}>
+                  <UploadFileIcon fontSize="small" sx={{ mr: 1.5 }} /> Load scenario file (.json)
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={() => { handleReset(); setMenuEl(null) }}>
+                  <RestartAltIcon fontSize="small" sx={{ mr: 1.5 }} /> Reset to source workbook
+                </MenuItem>
+              </Menu>
+              <input ref={fileRef} type="file" accept="application/json" hidden onChange={handleImport} />
+            </Box>
+          </Box>
+
+        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 1.5, md: 1.5 }, py: { xs: 2, sm: 2.5 } }}>
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.
@@ -1195,6 +1223,7 @@ export default function App() {
               onScenarioName={(v) => setState((s) => ({ ...s, scenarioName: v }))}
             />
           )}
+        </Box>
         </Box>
 
         <ScenarioDialog
