@@ -13,22 +13,27 @@ import ArrowOutwardIcon from '@mui/icons-material/ArrowOutward'
  * to tell orange from red to read it.
  */
 
-/** The pill colours, as on the reference: bright fill, and text that reads on it. */
+/*
+ * The pill colours. Tinted, not solid: a faint wash of the colour with the
+ * word in it, so a page of statuses reads as information rather than as a row
+ * of warning lights. The hue still carries the meaning; the word always does.
+ */
 export const PILL = {
-  high: { bg: '#ff6a2b', fg: '#ffffff' },
-  medium: { bg: '#f5c518', fg: '#1a1500' },
-  low: { bg: '#22d3ee', fg: '#04222a' },
-  good: { bg: '#22c55e', fg: '#03210f' },
-  bad: { bg: '#ef4444', fg: '#ffffff' },
-  warn: { bg: '#f59e0b', fg: '#1f1300' },
-  info: { bg: '#4f6bff', fg: '#ffffff' },
-  violet: { bg: '#a855f7', fg: '#ffffff' },
-  neutral: { bg: '#5b6191', fg: '#ffffff' },
+  high: '#f0845a',
+  medium: '#e3b341',
+  low: '#5cc6d6',
+  good: '#4fbf7f',
+  bad: '#e5676b',
+  warn: '#e0a33e',
+  info: '#7d93f2',
+  violet: '#a98be8',
+  neutral: '#8d92b8',
 }
 
-/** A solid, rounded, upper-case label. `tone` is a key of PILL. */
+/** A tinted, rounded, upper-case label. `tone` is a key of PILL. */
 export function Pill({ label, tone = 'neutral', title, sx }) {
-  const c = PILL[tone] || PILL.neutral
+  const hue = PILL[tone] || PILL.neutral
+  const c = { bg: alpha(hue, 0.14), fg: hue }
   return (
     <Box
       component="span"
@@ -41,8 +46,9 @@ export function Pill({ label, tone = 'neutral', title, sx }) {
         borderRadius: '6px',
         bgcolor: c.bg,
         color: c.fg,
+        border: `1px solid ${alpha(hue, 0.28)}`,
         fontSize: '0.62rem',
-        fontWeight: 800,
+        fontWeight: 700,
         letterSpacing: '0.06em',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
@@ -56,32 +62,39 @@ export function Pill({ label, tone = 'neutral', title, sx }) {
   )
 }
 
-/** The colour each page is known by — its tile in the menu, the header and search. */
+/*
+ * The colour each page is known by — its tile in the menu, the header and
+ * search. Muted on purpose: enough to tell the pages apart at a glance, not
+ * enough to compete with the work on them.
+ */
 export const PAGE_COLOR = {
-  dashboard: '#4f6bff',
-  projects: '#f5b81a',
-  people: '#ec4899',
-  weekly: '#a855f7',
-  team: '#22c55e',
-  timeline: '#22d3ee',
-  apps: '#ff6a2b',
-  settings: '#8b93c9',
-  users: '#ef4444',
+  dashboard: '#7d8ff0',
+  projects: '#d6ad55',
+  people: '#cf7fa6',
+  weekly: '#a18ad9',
+  team: '#62b98a',
+  timeline: '#5fb6c7',
+  apps: '#d98a62',
+  settings: '#9095b8',
+  users: '#d27373',
 }
 
 /*
  * One colour per person, fixed by their place in the roster rather than by
  * a hash of their name, so the same person is the same colour on every page.
  */
-const PERSON_COLORS = ['#4f6bff', '#ec4899', '#22c55e', '#f5b81a', '#a855f7', '#22d3ee', '#ff6a2b', '#8b93c9']
+const PERSON_COLORS = ['#7d8ff0', '#cf7fa6', '#62b98a', '#d6ad55', '#a18ad9', '#5fb6c7', '#d98a62', '#9095b8']
 export const personColor = (people, id) => {
   const i = (people || []).findIndex((p) => p.id === id)
   return PERSON_COLORS[(i < 0 ? 0 : i) % PERSON_COLORS.length]
 }
 
-/** A coloured rounded square holding an icon or a letter or two. */
+/*
+ * A rounded square holding an icon or a letter or two: a faint wash of the
+ * colour, a hairline of it round the edge, and the icon in the colour itself.
+ */
 export function IconTile({
-  icon: Icon, text, color = '#4f6bff', size = 30, sx,
+  icon: Icon, text, color = '#7d8ff0', size = 30, sx,
 }) {
   return (
     <Box
@@ -90,15 +103,14 @@ export function IconTile({
         width: size,
         height: size,
         flexShrink: 0,
-        borderRadius: `${Math.round(size * 0.3)}px`,
+        borderRadius: `${Math.round(size * 0.28)}px`,
         display: 'grid',
         placeItems: 'center',
-        color: '#fff',
-        bgcolor: color,
-        backgroundImage: `linear-gradient(145deg, ${alpha('#ffffff', 0.22)}, transparent 60%)`,
-        boxShadow: `0 4px 12px ${alpha(color, 0.35)}`,
-        fontSize: size * 0.4,
-        fontWeight: 800,
+        color,
+        bgcolor: alpha(color, 0.13),
+        border: `1px solid ${alpha(color, 0.22)}`,
+        fontSize: size * 0.38,
+        fontWeight: 700,
         ...sx,
       }}
     >
@@ -123,9 +135,10 @@ export function WelcomeBanner({
       overflow: 'hidden',
       borderRadius: '20px',
       color: '#fff',
-      background: 'linear-gradient(135deg, #1d1a6b 0%, #3b22a8 45%, #6d2fd8 100%)',
-      border: '1px solid rgba(168, 140, 255, 0.28)',
-      boxShadow: '0 18px 40px rgba(76, 29, 149, 0.35)',
+      // Deep indigo rather than bright violet: it marks the top of the page
+      // without being the brightest thing on it.
+      background: 'linear-gradient(135deg, #12153a 0%, #1b1a4a 55%, #2a2163 100%)',
+      border: '1px solid rgba(150, 140, 230, 0.18)',
       display: 'flex',
       flexDirection: 'column',
       // Fills its row, so beside two lists it is as tall as they are and the
@@ -140,7 +153,7 @@ export function WelcomeBanner({
         viewBox="0 0 400 260"
         preserveAspectRatio="xMaxYMax slice"
         sx={{
-          position: 'absolute', right: 0, bottom: 0, width: { xs: '90%', md: '60%' }, height: '100%', opacity: 0.35, pointerEvents: 'none',
+          position: 'absolute', right: 0, bottom: 0, width: { xs: '90%', md: '60%' }, height: '100%', opacity: 0.18, pointerEvents: 'none',
         }}
       >
         {[60, 95, 130, 165, 200, 235].map((r) => (
@@ -149,7 +162,7 @@ export function WelcomeBanner({
       </Box>
       <Box sx={{
         position: 'absolute', top: -80, left: -60, width: 260, height: 260, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(99,102,241,0.55), transparent 70%)', pointerEvents: 'none',
+        background: 'radial-gradient(circle, rgba(99,102,241,0.22), transparent 70%)', pointerEvents: 'none',
       }}
       />
 
@@ -185,11 +198,10 @@ export function WelcomeBanner({
             justifyContent: 'space-between',
             textAlign: 'left',
             gap: 2,
-            bgcolor: 'rgba(255,255,255,0.10)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,255,255,0.14)',
+            bgcolor: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.10)',
             transition: 'background-color .15s',
-            '&:hover': { bgcolor: 'rgba(255,255,255,0.16)' },
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.09)' },
           }}
         >
           <Box sx={{ minWidth: 0 }}>
@@ -198,7 +210,7 @@ export function WelcomeBanner({
           </Box>
           <Box sx={{
             width: 44, height: 44, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center',
-            border: '1.5px dashed rgba(255,255,255,0.55)',
+            border: '1px solid rgba(255,255,255,0.25)',
           }}
           >
             <ArrowOutwardIcon sx={{ fontSize: 20 }} />

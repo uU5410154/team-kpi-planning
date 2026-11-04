@@ -51,14 +51,16 @@ function NavItem({
         px: mini ? 0 : 1,
         py: mini ? 0.75 : 0.75,
         borderRadius: '12px',
-        color: selected ? '#fff' : 'text.secondary',
-        fontWeight: selected ? 700 : 550,
+        color: selected ? 'text.primary' : 'text.secondary',
+        fontWeight: selected ? 650 : 500,
         fontSize: '0.875rem',
         transition: 'background-color .15s, color .15s',
         ...(selected
           ? {
-            background: `linear-gradient(90deg, ${theme.palette.primary.dark}, ${blue})`,
-            boxShadow: `0 6px 16px ${alpha(blue, 0.35)}`,
+            // A quiet wash and a thin bar at the edge: where you are is
+            // plain, without the menu shouting it.
+            bgcolor: alpha(blue, 0.14),
+            boxShadow: `inset 3px 0 0 ${blue}`,
           }
           : { '&:hover': { bgcolor: 'action.hover', color: 'text.primary' } }),
       }}
@@ -93,8 +95,10 @@ function NavBody({
       }}
       >
         <Avatar sx={{
-          width: 40, height: 40, fontSize: '0.85rem', fontWeight: 700, color: '#fff',
-          background: 'linear-gradient(135deg, #a855f7, #4f6bff)',
+          width: 40, height: 40, fontSize: '0.85rem', fontWeight: 700,
+          color: theme.palette.primary.light,
+          bgcolor: alpha(theme.palette.primary.main, 0.16),
+          border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
         }}
         >
           {me?.local ? 'L' : initials(me?.email)}
@@ -118,8 +122,8 @@ function NavBody({
               onClick={onFold}
               aria-label={mini ? 'expand menu' : 'collapse menu'}
               sx={{
-                bgcolor: 'primary.main', color: '#fff', width: 28, height: 28, borderRadius: '50%',
-                '&:hover': { bgcolor: 'primary.dark' },
+                color: 'text.secondary', width: 28, height: 28, borderRadius: '50%', border: 1, borderColor: 'divider',
+                '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
               }}
             >
               {mini ? <ChevronRightIcon sx={{ fontSize: 18 }} /> : <ChevronLeftIcon sx={{ fontSize: 18 }} />}
@@ -148,7 +152,7 @@ function NavBody({
       {coverage && !mini && (
         <Box sx={{
           p: 2, borderRadius: '16px', border: 1, borderColor: 'divider',
-          background: `linear-gradient(160deg, ${alpha(theme.palette.primary.main, 0.14)}, ${alpha('#a855f7', 0.08)} 70%)`,
+          bgcolor: alpha(theme.palette.text.primary, 0.025),
         }}
         >
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>Saving hours, committed</Typography>

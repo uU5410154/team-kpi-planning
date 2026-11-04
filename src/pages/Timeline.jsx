@@ -27,7 +27,7 @@ import { Pill } from '../components/Brand.jsx'
 import { weekLabel, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
 
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
-const FORECAST = '#a855f7'
+const FORECAST = '#a18ad9'
 const fmtD = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '—')
 const PROPOSAL_TONE = { pending: 'violet', approved: 'good', rejected: 'bad', deciding: 'violet' }
 
