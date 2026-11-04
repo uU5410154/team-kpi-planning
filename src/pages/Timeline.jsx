@@ -157,7 +157,7 @@ function PlanEditor({ row, onSave, onHold, saving, jira }) {
  * happened. It is never coloured as though it were on time.
  */
 export default function Timeline({
-  plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false,
+  plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false, jump = null,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -579,6 +579,11 @@ export default function Timeline({
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
   const [ours, setOurs] = useState(true)
+  // Sent here by the header search: that project, whatever was filtered before.
+  useEffect(() => {
+    if (!jump?.q) return
+    setQ(jump.q); setFPic('all'); setFState('all'); setOurs(false)
+  }, [jump?.n])
 
   const rows = useMemo(() => {
     const hay = q.trim().toLowerCase()

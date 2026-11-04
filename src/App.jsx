@@ -16,6 +16,9 @@ import AppsIcon from '@mui/icons-material/AppsOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
 import AdminIcon from '@mui/icons-material/AdminPanelSettingsOutlined'
 import Sidebar, { NAV_W, NAV_W_MINI } from './components/Sidebar.jsx'
+import GlobalSearch from './components/GlobalSearch.jsx'
+import { IconTile, PAGE_COLOR, displayName } from './components/Brand.jsx'
+import { SURFACE } from './theme.js'
 import DownloadIcon from '@mui/icons-material/Download'
 import DarkModeIcon from '@mui/icons-material/DarkModeOutlined'
 import LightModeIcon from '@mui/icons-material/LightModeOutlined'
@@ -126,6 +129,13 @@ export default function App() {
     try { return localStorage.getItem('fa-kpi-nav-mini') === '1' } catch { return false }
   })
   const [navOpen, setNavOpen] = useState(false)
+  /*
+   * Where the header search sent somebody: a page, and on it a project to
+   * filter to or a person to open. Numbered, so picking the same project twice
+   * still moves the page — the second time is usually because the first was
+   * filtered away.
+   */
+  const [jump, setJump] = useState(null)
   useEffect(() => {
     try { localStorage.setItem('fa-kpi-nav-mini', navMini ? '1' : '0') } catch { /* private window */ }
   }, [navMini])
@@ -931,6 +941,15 @@ export default function App() {
 
   const current = TABS.find((t) => t.id === tab)
   const CurrentIcon = current?.icon || null
+  // What the welcome banner calls somebody: their nickname on the team when
+  // the account is linked to one, otherwise the name in their address.
+  const hello = (me?.person && state.people.find((p) => p.id === me.person)?.nick)
+    || (me?.local ? 'there' : displayName(me?.email))
+  const goTo = (o) => {
+    setJump({ ...o, n: Date.now() })
+    setTab(o.tab)
+    setNavOpen(false)
+  }
   const signOut = async () => {
     try { await authApi.signOut() } finally { setMe(null) }
   }
@@ -1017,10 +1036,25 @@ export default function App() {
         />
 
         {/* Everything beside the menu: the header, then the page. */}
+        {/*
+          * THE STAGE: one large rounded panel holding the header and the page,
+          * beside the menu, with the glow showing round its edges — the frame
+          * of the reference. On a phone there is no room for a frame, and the
+          * page runs edge to edge.
+          */}
         <Box sx={{
           ml: phone ? 0 : `${(navMini ? NAV_W_MINI : NAV_W) + 24}px`,
+          mr: phone ? 0 : '12px',
+          my: phone ? 0 : '12px',
+          minHeight: phone ? '100vh' : 'calc(100vh - 24px)',
           transition: 'margin-left .2s ease',
-          pr: { xs: 0, sm: 1.5 },
+          ...(phone ? {} : {
+            borderRadius: '24px',
+            border: 1,
+            borderColor: 'divider',
+            bgcolor: SURFACE[mode].stage,
+            backdropFilter: 'blur(18px)',
+          }),
         }}
         >
           {/*
@@ -1037,20 +1071,20 @@ export default function App() {
               position: 'sticky',
               top: 0,
               zIndex: (t) => t.zIndex.appBar,
-              pt: { xs: 1, sm: 1.5 },
-              px: { xs: 1, sm: 1.5 },
+              pt: { xs: 1, sm: 0 },
+              px: { xs: 1, sm: 0 },
             }}
           >
             <Box sx={{
               display: 'flex',
               alignItems: 'center',
               gap: { xs: 0.75, sm: 1.5 },
-              px: { xs: 0.75, sm: 1.5 },
-              py: { xs: 0.75, sm: 1 },
-              borderRadius: 4,
-              border: 1,
-              borderColor: 'divider',
-              bgcolor: (t) => alpha(t.palette.background.paper, 0.78),
+              px: { xs: 0.75, sm: 2.5 },
+              py: { xs: 0.75, sm: 1.75 },
+              ...(phone
+                ? { borderRadius: 4, border: 1, borderColor: 'divider' }
+                : { borderTopLeftRadius: '24px', borderTopRightRadius: '24px', borderBottom: 1, borderColor: 'divider' }),
+              bgcolor: (t) => alpha(t.palette.mode === 'dark' ? '#0a0c2e' : '#ffffff', 0.82),
               backdropFilter: 'blur(14px)',
             }}
             >
@@ -1062,22 +1096,7 @@ export default function App() {
                   <MenuIcon />
                 </IconButton>
               </Tooltip>
-              {CurrentIcon && (
-                <Box sx={{
-                  width: 36,
-                  height: 36,
-                  flexShrink: 0,
-                  borderRadius: 2.5,
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: '#fff',
-                  background: (t) => `linear-gradient(135deg, ${t.palette.primary.dark}, ${t.palette.primary.main})`,
-                  boxShadow: (t) => `0 4px 14px ${alpha(t.palette.primary.main, 0.4)}`,
-                }}
-                >
-                  <CurrentIcon sx={{ fontSize: 20 }} />
-                </Box>
-              )}
+              {CurrentIcon && <IconTile icon={CurrentIcon} color={PAGE_COLOR[tab]} size={phone ? 32 : 38} />}
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="h4" noWrap sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.1rem' } }}>
                   {current?.label || 'F&A Tech'}
@@ -1100,6 +1119,8 @@ export default function App() {
               )}
 
               <Box sx={{ flex: 1 }} />
+
+              <GlobalSearch tabs={visibleTabs} plan={plan} admin={canWrite} onGo={goTo} phone={phone} />
 
               {phone ? (
                 <Tooltip title="Export Excel">
@@ -1156,13 +1177,13 @@ export default function App() {
             </Box>
           </Box>
 
-        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 1.5, md: 1.5 }, py: { xs: 2, sm: 2.5 } }}>
+        <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.
             */}
           {allowed && tab === 'users' && <Users me={me} people={state.people} />}
-          {allowed && tab === 'dashboard' && <Dashboard plan={plan} onGoTo={setTab} />}
+          {allowed && tab === 'dashboard' && <Dashboard plan={plan} onGoTo={setTab} hello={hello} />}
           {allowed && tab === 'projects' && (
             <Projects
               plan={plan}
@@ -1178,9 +1199,10 @@ export default function App() {
               scenarioName={state.scenarioName}
               blocked={plan.invalid}
               onGoTo={setTab}
+              jump={jump?.tab === 'projects' ? jump : null}
             />
           )}
-          {allowed && tab === 'weekly' && <Weekly plan={plan} me={me} />}
+          {allowed && tab === 'weekly' && <Weekly plan={plan} me={me} hello={hello} />}
           {allowed && tab === 'team' && <Team plan={plan} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
           {allowed && tab === 'timeline' && (
@@ -1194,6 +1216,7 @@ export default function App() {
               // A team member reads the timeline. Moving a date is a re-plan
               // against somebody's scorecard, and goes through an administrator.
               readOnly={!canWrite}
+              jump={jump?.tab === 'timeline' ? jump : null}
             />
           )}
 
@@ -1211,6 +1234,7 @@ export default function App() {
               onRebalance={rebalancePersonKpi}
               onSyncTargets={syncPersonTargets}
               onUpdate={updateProject}
+              jump={jump?.tab === 'people' ? jump : null}
             />
           )}
           {allowed && tab === 'settings' && (

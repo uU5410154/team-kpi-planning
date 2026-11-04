@@ -4,6 +4,10 @@ import {
   Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Divider, Tooltip,
 } from '@mui/material'
 import StatTile from '../components/StatTile.jsx'
+import FolderIcon from '@mui/icons-material/FolderOutlined'
+import {
+  WelcomeBanner, IconTile, PAGE_COLOR, personColor,
+} from '../components/Brand.jsx'
 import { HBar, StackedHBar, GateScatter, Meter } from '../components/Charts.jsx'
 import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
 import {
@@ -33,7 +37,7 @@ function Section({ title, subtitle, children, action }) {
   )
 }
 
-export default function Dashboard({ plan, onGoTo }) {
+export default function Dashboard({ plan, onGoTo, hello = 'there' }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   // mixByObjective, not byObjective: this chart asks where the work SITS,
@@ -102,8 +106,79 @@ export default function Dashboard({ plan, onGoTo }) {
     color: CHART[mode].series[i],
   }))
 
+  // The tile colours for the project list, in a fixed order so the biggest
+  // project is always the same colour as long as it stays the biggest.
+  const TILE = [PAGE_COLOR.projects, PAGE_COLOR.dashboard, PAGE_COLOR.people, PAGE_COLOR.apps, PAGE_COLOR.timeline]
+  const listCard = (title, count, rows) => (
+    <Paper variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{
+        px: 2, py: 1.5, display: 'flex', alignItems: 'baseline', gap: 1, borderBottom: '1px dashed', borderColor: 'divider',
+      }}
+      >
+        <Typography variant="h4">{title}</Typography>
+        <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>{count}</Typography>
+      </Box>
+      <Box sx={{ p: 1.25, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {rows.map((r) => (
+          <Box
+            key={r.key}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: 1.25, p: 1, borderRadius: '12px',
+              border: 1, borderColor: 'divider', bgcolor: 'action.hover',
+            }}
+          >
+            {r.tile}
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" noWrap sx={{ fontWeight: 650 }}>{r.title}</Typography>
+              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block' }}>{r.sub}</Typography>
+            </Box>
+          </Box>
+        ))}
+      </Box>
+    </Paper>
+  )
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      {/*
+        * ---------- welcome ----------
+        * Who this is for and the one sentence that matters, with the next
+        * thing to do; beside it, the projects carrying the most hours and the
+        * people carrying them — the two lists anybody opening this page asks
+        * for first.
+        */}
+      <Grid container spacing={2}>
+        <Grid item xs={12} lg={6}>
+          <WelcomeBanner
+            eyebrow="Welcome to F&A Tech KPI Planning"
+            title={`Hello ${hello}`}
+            subtitle={`${fmtHours(totals.totalHours)} saving hours a month in the plan — ${fmtPct(totals.totalCoverage)} of the `
+              + `${totals.target.toLocaleString()} target. ${quality.pastDue} project${quality.pastDue === 1 ? ' is' : 's are'} past due and not done.`}
+            next={{
+              label: 'Weekly check-in',
+              sub: 'See who has sent their plan and report this week',
+              onClick: () => onGoTo?.('weekly'),
+            }}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} lg={3}>
+          {listCard('Biggest projects', totals.topProjects.length, totals.topProjects.map((p, i) => ({
+            key: p.key,
+            tile: <IconTile icon={FolderIcon} color={TILE[i % TILE.length]} size={34} />,
+            title: p.summary || p.key,
+            sub: `${p.jiraKey || p.key} · ${fmtHours(p.savingHours)} hrs/mth`,
+          })))}
+        </Grid>
+        <Grid item xs={12} sm={6} lg={3}>
+          {listCard('The team', ranked.length, ranked.slice(0, 5).map((p) => ({
+            key: p.id,
+            tile: <IconTile text={(p.nick || p.name || '?').slice(0, 2)} color={personColor(plan.people, p.id)} size={34} />,
+            title: p.name || p.nick,
+            sub: `${fmtHours(p.ownHours)} hrs/mth · ${p.ownCount ?? 0} project${p.ownCount === 1 ? '' : 's'}`,
+          })))}
+        </Grid>
+      </Grid>
+
       {/* ---------- headline row ---------- */}
       {/* Five tiles, so a flex strip rather than a 12-column grid: thirds at
           tablet width, fifths once there is room for all of them. */}

@@ -7,6 +7,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CloseIcon from '@mui/icons-material/Close'
 import LogoutIcon from '@mui/icons-material/Logout'
 import { SURFACE } from '../theme.js'
+import { IconTile, PAGE_COLOR, displayName as nameOf } from './Brand.jsx'
 
 /*
  * THE SIDE MENU.
@@ -29,13 +30,7 @@ import { SURFACE } from '../theme.js'
 export const NAV_W = 252
 export const NAV_W_MINI = 76
 
-/** "wisarut.gunjarueg@lotuss.com" → "Wisarut Gunjarueg". */
-const displayName = (email) => String(email || '')
-  .split('@')[0]
-  .split(/[._-]+/)
-  .filter(Boolean)
-  .map((w) => w[0].toUpperCase() + w.slice(1))
-  .join(' ') || 'Signed in'
+const displayName = (email) => nameOf(email)
 
 const initials = (email) => displayName(email).split(' ').map((w) => w[0]).slice(0, 2).join('')
 
@@ -43,7 +38,6 @@ function NavItem({
   item, selected, mini, onClick,
 }) {
   const theme = useTheme()
-  const Icon = item.icon
   const blue = theme.palette.primary.main
   const button = (
     <ButtonBase
@@ -54,9 +48,9 @@ function NavItem({
         width: '100%',
         justifyContent: mini ? 'center' : 'flex-start',
         gap: 1.5,
-        px: mini ? 0 : 1.75,
-        py: 1.15,
-        borderRadius: 2.5,
+        px: mini ? 0 : 1,
+        py: mini ? 0.75 : 0.75,
+        borderRadius: '12px',
         color: selected ? '#fff' : 'text.secondary',
         fontWeight: selected ? 700 : 550,
         fontSize: '0.875rem',
@@ -69,7 +63,9 @@ function NavItem({
           : { '&:hover': { bgcolor: 'action.hover', color: 'text.primary' } }),
       }}
     >
-      <Icon sx={{ fontSize: 20, flexShrink: 0 }} />
+      {/* Each page has its colour, as the reference gives each project
+          one: the eye finds Timeline by its cyan before it reads the word. */}
+      <IconTile icon={item.icon} color={PAGE_COLOR[item.id]} size={30} />
       {/* Kept in the page when folded, only hidden: the tab still has its name
           for a screen reader and for anything that finds it by its text. */}
       <Box component="span" sx={{ display: mini ? 'none' : 'block', whiteSpace: 'nowrap' }}>{item.label}</Box>

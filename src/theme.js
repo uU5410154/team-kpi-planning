@@ -29,22 +29,32 @@ const NAVY = {
 /** The surfaces, named once so the sidebar, the header and the pages agree. */
 export const SURFACE = {
   dark: {
-    page: '#080b26',
-    panel: '#0f1338',
-    raised: '#151a47',
-    rail: '#0b0f2e',
-    edge: 'rgba(129, 140, 248, 0.16)',
-    glow: 'rgba(124, 58, 237, 0.42)',
-    glow2: 'rgba(59, 91, 255, 0.28)',
+    page: '#0b0930',
+    panel: '#0f1240',
+    raised: '#161a4d',
+    rail: '#0a0c2c',
+    // The big panel the pages sit in: dark enough to read on, see-through
+    // enough that the glow shows at its edges, as on the reference.
+    stage: 'rgba(8, 10, 36, 0.78)',
+    edge: 'rgba(139, 148, 255, 0.17)',
+    glow: 'rgba(139, 61, 255, 0.75)',
+    glow2: 'rgba(59, 91, 255, 0.45)',
+    glow3: 'rgba(168, 85, 247, 0.45)',
+    // The light falling across a card: blue from the top left, a little
+    // violet at the far corner.
+    sheen: 'linear-gradient(155deg, rgba(99,102,241,0.16) 0%, rgba(79,107,255,0.04) 42%, rgba(168,85,247,0.07) 100%)',
   },
   light: {
-    page: '#f2f3fb',
+    page: '#efeffb',
     panel: '#ffffff',
-    raised: '#f7f7fe',
+    raised: '#f8f8ff',
     rail: '#ffffff',
+    stage: 'rgba(255, 255, 255, 0.62)',
     edge: 'rgba(30, 35, 90, 0.10)',
-    glow: 'rgba(124, 58, 237, 0.10)',
-    glow2: 'rgba(59, 91, 255, 0.08)',
+    glow: 'rgba(139, 61, 255, 0.20)',
+    glow2: 'rgba(59, 91, 255, 0.14)',
+    glow3: 'rgba(168, 85, 247, 0.12)',
+    sheen: 'linear-gradient(155deg, rgba(99,102,241,0.06) 0%, rgba(255,255,255,0) 45%, rgba(168,85,247,0.04) 100%)',
   },
 }
 
@@ -83,8 +93,9 @@ const shared = (mode) => {
              * fading into the navy. Fixed, so it stays behind the work as the
              * page scrolls instead of scrolling away with the first screen.
              */
-            backgroundImage: `radial-gradient(1100px 560px at 12% -8%, ${s.glow}, transparent 62%),`
-              + ` radial-gradient(900px 480px at 100% -4%, ${s.glow2}, transparent 60%)`,
+            backgroundImage: `radial-gradient(1000px 420px at 45% -12%, ${s.glow}, transparent 65%),`
+              + ` radial-gradient(800px 520px at 100% 10%, ${s.glow2}, transparent 62%),`
+              + ` radial-gradient(700px 600px at -5% 105%, ${s.glow3}, transparent 60%)`,
             backgroundAttachment: 'fixed',
             backgroundRepeat: 'no-repeat',
           },
@@ -97,9 +108,9 @@ const shared = (mode) => {
           rounded: { borderRadius: 14 },
           outlined: {
             borderColor: s.edge,
-            // A faint lift at the top edge, as on the reference: panels read
-            // as lit from above rather than as flat cut-outs.
-            ...(dark && { backgroundImage: `linear-gradient(180deg, ${alpha(BLUE, 0.05)} 0%, transparent 140px)` }),
+            // Lit glass rather than a flat cut-out: a soft blue sheen from
+            // the top left, as on the reference's cards.
+            backgroundImage: s.sheen,
           },
         },
       },

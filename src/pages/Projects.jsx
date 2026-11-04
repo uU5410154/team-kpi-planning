@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { Pill } from '../components/Brand.jsx'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
@@ -192,6 +193,15 @@ function SoftBenefitCell({ value, onChange }) {
  * The primary tag above stays what the register reports in one column; these
  * are the rest.
  */
+/** Done is green, under way is blue, not begun is grey, anything else violet. */
+const statusTone = (st) => {
+  const x = String(st || '').toLowerCase()
+  if (/done|complete|closed|resolved/.test(x)) return 'good'
+  if (/progress|uat|test|review|develop/.test(x)) return 'info'
+  if (/not ?start|to ?do|backlog|open/.test(x)) return 'neutral'
+  return 'violet'
+}
+
 function AlsoServes({ project, onChange }) {
   const [anchor, setAnchor] = useState(null)
   const extra = (Array.isArray(project.objectives) ? project.objectives : [])
@@ -269,7 +279,7 @@ const SESSION_START = Date.now()
 
 export default function Projects({
   plan, onUpdate, onBulk, onAdd, onDelete, onImport,
-  onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo,
+  onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo, jump = null,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -296,6 +306,15 @@ export default function Projects({
    */
   const [fSub, setFSub] = useState([])
   const [fHc, setFHc] = useState('all')
+  /*
+   * Sent here by the header search: show that project, and only that. Every
+   * other filter is cleared too — a project hidden by a filter somebody set an
+   * hour ago would read as the search having found nothing.
+   */
+  useEffect(() => {
+    if (!jump?.q) return
+    setQ(jump.q); setFObj('all'); setFPic([]); setFCommit('all'); setFGap('all'); setFTeam('all'); setFSub([]); setFHc('all')
+  }, [jump?.n])
   const [sort, setSort] = useState({ by: 'savingHours', dir: 'desc' })
   const [sel, setSel] = useState(() => new Set())
   const [bulkEl, setBulkEl] = useState(null)
@@ -1254,9 +1273,11 @@ export default function Projects({
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                      {p.srcStatus || p.status || '—'}
-                    </Typography>
+                    {/* A pill, coloured by where the work is; the word is on it
+                        too. Whatever Jira calls it is shown as it is. */}
+                    {(p.srcStatus || p.status)
+                      ? <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />
+                      : <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>}
                     {p.pastDue && (
                       // The date lives in the tooltip: spelled out here it was
                       // the widest thing in the column and pushed ROI off-screen.

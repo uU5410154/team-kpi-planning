@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
   Grid, Chip, Tabs, Tab, Alert, Tooltip, TextField, InputAdornment, Button, IconButton,
@@ -225,7 +225,7 @@ function PortfolioNum({ value, onChange }) {
 
 export default function People({
   plan, onPersonKpi, onResetKpi, onRemoveLine, onRestoreLine, onRebalance, onSyncTargets, onUpdate,
-  onAddObjective, onRemoveObjective, onSaveLine, onOverride,
+  onAddObjective, onRemoveObjective, onSaveLine, onOverride, jump = null,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -233,6 +233,8 @@ export default function People({
   const { people, settings, totals, finance: fin } = plan
   const sym = fin.symbol
   const [who, setWho] = useState(people[0]?.id)
+  // Sent here by the header search: open that person's card.
+  useEffect(() => { if (jump?.person) setWho(jump.person) }, [jump?.n])
   // Which KPI line is currently filtering the portfolio, by objective id.
   const [focus, setFocus] = useState(null)
   // The project KEY whose cost dialog is open, re-looked-up every render so an

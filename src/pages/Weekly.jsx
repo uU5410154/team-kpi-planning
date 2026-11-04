@@ -12,6 +12,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import LockIcon from '@mui/icons-material/LockOutlined'
 import { STATUS } from '../lib/palette.js'
+import {
+  Pill, IconTile, WelcomeBanner, personColor,
+} from '../components/Brand.jsx'
 import * as api from '../lib/api.js'
 import {
   addWeeks, weekLabel, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
@@ -31,23 +34,24 @@ import {
  * page only lays out what it is sent.
  */
 
-const TONE = {
-  open: 'text.secondary', missing: STATUS.critical, ontime: STATUS.good, late: STATUS.warning,
+// Where somebody stands, as a pill colour. The word is always on the pill too.
+const PILL_TONE = {
+  open: 'neutral', missing: 'bad', ontime: 'good', late: 'warn',
 }
+// Must / should / nice, as the reference's HIGH / MEDIUM / LOW.
+const PRIORITY_TONE = { must: 'high', should: 'medium', nice: 'low' }
 const PRIORITY_LABEL = Object.fromEntries(PRIORITIES.map((p) => [p.id, p.label]))
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
 const fmtDay = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '—')
 
 function StandingChip({ label, value }) {
   if (!value) return null
-  return (
-    <Chip
-      size="small"
-      variant="outlined"
-      label={`${label}: ${STATUS_LABEL[value]}`}
-      sx={{ color: TONE[value], borderColor: TONE[value] }}
-    />
-  )
+  return <Pill label={`${label}: ${STATUS_LABEL[value]}`} tone={PILL_TONE[value]} />
+}
+
+function PriorityPill({ priority }) {
+  if (!priority) return null
+  return <Pill label={PRIORITY_LABEL[priority]} tone={PRIORITY_TONE[priority]} />
 }
 
 const blankTask = () => ({
@@ -73,6 +77,7 @@ function TaskEditor({
     <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Task {index + 1}</Typography>
+        <PriorityPill priority={task.priority} />
         {task.carriedFrom && (
           <Tooltip title="Not finished last time, so it was carried into this week">
             <Chip size="small" label={`carried from ${fmtDay(task.carriedFrom)}`} sx={{ height: 20 }} />
@@ -305,17 +310,17 @@ function WeekSummary({ entry, projectByKey }) {
         const impact = slipImpact(t, p?.due)
         return (
           <Box key={t.id} sx={{ borderLeft: 3, borderColor: t.done === true ? STATUS.good : t.done === false ? STATUS.warning : 'divider', pl: 1.25 }}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {t.title}
-              {t.carriedFrom && <Chip size="small" label="carried" sx={{ ml: 1, height: 18 }} />}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.title}</Typography>
+              <PriorityPill priority={t.priority} />
+              {t.carriedFrom && <Pill label="carried" tone="violet" />}
+            </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
               {[
                 t.projectKey && `${t.projectKey}${p ? ` · ${p.summary}` : ''}`,
                 t.jiraKey,
                 `expected ${fmtDay(t.expected)}`,
                 t.effort !== null && `${t.effort} d`,
-                t.priority && PRIORITY_LABEL[t.priority],
               ].filter(Boolean).join(' · ')}
             </Typography>
             {t.done === true && <Typography variant="caption" sx={{ color: STATUS.good }}>Finished</Typography>}
@@ -362,7 +367,7 @@ function WeekSummary({ entry, projectByKey }) {
 
 /* ------------------------------------------------------------ the page */
 
-export default function Weekly({ plan, me }) {
+export default function Weekly({ plan, me, hello = 'there' }) {
   const theme = useTheme()
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
   const admin = me?.role === 'admin'
@@ -378,6 +383,7 @@ export default function Weekly({ plan, me }) {
   const [jiraTasks, setJiraTasks] = useState({})
   const [jiraDone, setJiraDone] = useState({})
   const asked = useRef(new Set())
+  const myWeekRef = useRef(null)
 
   const projects = useMemo(
     () => (plan?.projects || []).filter((p) => !p.deleted).map((p) => ({
@@ -496,11 +502,41 @@ export default function Weekly({ plan, me }) {
   // reported against when the week is nearly over.
   const showReport = planIn || (d && data.now >= d.reportDue - 2 * 86400_000)
 
+  /*
+   * THE ONE THING TO DO NEXT, said in the banner. Worked out from where this
+   * person's own week stands; an administrator who does not submit is told
+   * how the team is doing instead.
+   */
+  const toMyWeek = () => myWeekRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const required = (data?.team || []).filter((r) => r.required)
+  const plansIn = required.filter((r) => r.entry?.planSubmittedAt).length
+  const next = (() => {
+    if (!data) return null
+    if (data.locked) return { label: 'This week is closed', sub: 'It locked at 08:00 the following Monday and is kept as the record.' }
+    if (!data.person) {
+      return admin
+        ? { label: `${plansIn} of ${required.length} plans in`, sub: 'Open anybody below to read their week.' }
+        : { label: 'Your account is not linked yet', sub: 'Ask an administrator to link it to your name on the Access tab.' }
+    }
+    if (!planIn) return { label: 'Send your plan for the week', sub: `Due ${bangkokTime(d.planDue)}, Bangkok time`, onClick: toMyWeek }
+    if (!reportIn) return { label: 'Report how the week went', sub: `Due ${bangkokTime(d.reportDue)} — Sunday 15:00 is the second chance`, onClick: toMyWeek }
+    return { label: 'All in for this week — thank you', sub: 'You can still edit until it locks.', onClick: toMyWeek }
+  })()
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      {data && (
+        <WelcomeBanner
+          eyebrow={`Weekly check-in · week of ${weekLabel(data.week)}`}
+          title={`Hello ${hello}`}
+          subtitle={admin && required.length
+            ? `${plansIn} of ${required.length} plans are in for this week.`
+            : 'Your plan on Monday, how it went on Friday. Everything is in Bangkok time.'}
+          next={next}
+        />
+      )}
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
         <Box sx={{ flex: 1, minWidth: 260 }}>
-          <Typography variant="h2">Weekly check-in</Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             The plan for the week is due <strong>Monday 08:00</strong>; how it went is due <strong>Friday 15:00</strong>,
             with Sunday 15:00 as the second chance. A week stays editable until the next Monday 08:00. Bangkok time.
@@ -543,7 +579,7 @@ export default function Weekly({ plan, me }) {
 
       {/* ---------------------------------------------------- my week */}
       {data && draft && (
-        <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Paper ref={myWeekRef} variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 96 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <Typography variant="h3" sx={{ mr: 1 }}>My week</Typography>
             <StandingChip label="Plan" value={data.mineStanding?.plan} />
@@ -717,6 +753,7 @@ export default function Weekly({ plan, me }) {
             return (
               <Box key={row.person} sx={{ borderTop: 1, borderColor: 'divider', pt: 1.25 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                  <IconTile text={row.nick.slice(0, 2)} color={personColor(plan?.people, row.person)} size={30} />
                   <Typography variant="body2" sx={{ fontWeight: 700, minWidth: 80 }}>
                     {row.nick}
                     {row.person === data.person && <Chip size="small" label="you" sx={{ ml: 0.75, height: 18, fontSize: '0.65rem' }} />}
