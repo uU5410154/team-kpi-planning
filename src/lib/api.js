@@ -108,6 +108,20 @@ export const saveWeeklySettings = async (submitters) =>
     body: JSON.stringify({ submitters }),
   }))
 
+/** Any of: escalation (a list of addresses, or null for the administrators), remindersOn. */
+export const saveWeeklyOptions = async (patch) =>
+  j(await fetch('/api/weekly/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }))
+
+/** Whether email can go out, and what went out lately. Administrators only. */
+export const mailStatus = async () => j(await fetch('/api/weekly/mail'))
+
+/** A test email to the person asking. */
+export const sendTestMail = async () => j(await fetch('/api/weekly/mail/test', { method: 'POST' }))
+
 /** One week as this person may see it. `week` is a Monday, or 'current'. */
 export const loadWeek = async (week) => j(await fetch(`/api/weekly/${encodeURIComponent(week)}`))
 

@@ -81,20 +81,45 @@ export async function getSettings() {
   return {
     submitters: chosen ? doc.submitters.filter((id) => known.has(id)) : defaultSubmitters(people),
     isDefault: !chosen,
+    /*
+     * Who gets the 23:00 list of who is still missing. Null until somebody
+     * sets it, which means the administrators. May hold any address, not only
+     * accounts here — a manager who never opens the app can still be told.
+     */
+    escalation: Array.isArray(doc?.escalation) ? doc.escalation : null,
+    // The reminders can be paused without touching anything else.
+    remindersOn: doc?.remindersOn !== false,
     updatedAt: doc?.updatedAt || null,
     updatedBy: doc?.updatedBy || null,
   }
 }
 
-export async function saveSettings({ submitters }, by) {
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** Change any of: who submits, who gets the 23:00 list, whether reminders go out. */
+export async function saveSettings({ submitters, escalation, remindersOn }, by) {
   const c = await colls()
   if (!c) return UNAVAILABLE
-  if (!Array.isArray(submitters)) return { error: 'submitters must be a list of people.' }
-  const r = await roster()
-  const known = new Set((r === UNAVAILABLE ? [] : r.people).map((p) => p.id))
-  const bad = submitters.filter((id) => !known.has(id))
-  if (bad.length) return { error: `Not on the team: ${bad.join(', ')}.` }
-  const set = { submitters: [...new Set(submitters)], updatedAt: new Date().toISOString(), updatedBy: by || 'admin' }
+  const set = { updatedAt: new Date().toISOString(), updatedBy: by || 'admin' }
+  if (submitters !== undefined) {
+    if (!Array.isArray(submitters)) return { error: 'submitters must be a list of people.' }
+    const r = await roster()
+    const known = new Set((r === UNAVAILABLE ? [] : r.people).map((p) => p.id))
+    const bad = submitters.filter((id) => !known.has(id))
+    if (bad.length) return { error: `Not on the team: ${bad.join(', ')}.` }
+    set.submitters = [...new Set(submitters)]
+  }
+  if (escalation !== undefined) {
+    if (escalation !== null && !Array.isArray(escalation)) return { error: 'escalation must be a list of addresses.' }
+    if (escalation) {
+      const list = [...new Set(escalation.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))]
+      const bad = list.filter((e) => !EMAIL.test(e))
+      if (bad.length) return { error: `Not an email address: ${bad.join(', ')}.` }
+      if (list.length > 20) return { error: 'Twenty addresses at most.' }
+      set.escalation = list
+    } else set.escalation = null
+  }
+  if (remindersOn !== undefined) set.remindersOn = remindersOn !== false
   await c.settings.updateOne({ _id: 'settings' }, { $set: set }, { upsert: true })
   return getSettings()
 }
@@ -190,8 +215,10 @@ export async function save(week, person, body, by) {
   const saved = strip(await c.entries.findOne({ week, person }))
   // A report that is in raises, updates or withdraws its date proposals. A
   // draft raises nothing: nobody is asked to approve a half-written report.
-  if (saved.reportSubmittedAt) await syncProposals(week, person, saved)
-  return { entry: saved }
+  const raised = saved.reportSubmittedAt ? await syncProposals(week, person, saved) : []
+  // `raised`: proposals that are newly waiting, so the caller can tell the
+  // administrators. Not sent from here — this module only keeps the record.
+  return { entry: saved, raised: Array.isArray(raised) ? raised : [] }
 }
 
 /** Where one person stands on one week, for the team list and (later) the reminders. */
@@ -232,6 +259,7 @@ export async function syncProposals(week, person, entry) {
   const byKey = Object.fromEntries((await projectsOf()).map((p) => [p.key, p]))
   const now = new Date().toISOString()
   const live = new Set()
+  const raised = []
   for (const t of entry.tasks || []) {
     const q = proposalFor(t, byKey[t.projectKey])
     const _id = proposalId(week, person, t.id)
@@ -261,6 +289,7 @@ export async function syncProposals(week, person, entry) {
     }
     if (!prior || prior.status === 'withdrawn') {
       await c.proposals.replaceOne({ _id }, { _id, ...fields, status: 'pending', createdAt: now }, { upsert: true })
+      raised.push(_id)
     } else if (prior.status === 'pending') {
       await c.proposals.updateOne({ _id }, { $set: fields })
     } else if (prior.newDate !== t.newDate && ['approved', 'rejected'].includes(prior.status)) {
@@ -273,6 +302,7 @@ export async function syncProposals(week, person, entry) {
         $unset: { decidedAt: '', decidedBy: '', decidedDue: '', reason: '', fromDue: '', jira: '' },
         $push: { earlier },
       })
+      raised.push(_id)
     }
   }
   // A task taken out of the report takes its pending proposal with it.
@@ -280,7 +310,7 @@ export async function syncProposals(week, person, entry) {
     { week, person, status: 'pending', _id: { $nin: [...live] } },
     { $set: { status: 'withdrawn', updatedAt: now } },
   )
-  return true
+  return raised.length ? c.proposals.find({ _id: { $in: raised } }).toArray() : []
 }
 
 /** Proposals, newest first. `person` limits them to one member's own. */

@@ -7,6 +7,8 @@ import * as store from './db.js'
 import * as jira from './jira.js'
 import * as auth from './auth.js'
 import * as weekly from './weekly.js'
+import * as mail from './mail.js'
+import * as reminders from './reminders.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -340,11 +342,58 @@ app.delete('/api/scenarios/:name', adminOnly, async (req, res) => {
  */
 
 /** Who has to submit, and the roster to pick from. */
-app.get('/api/weekly/settings', async (_req, res) => {
+app.get('/api/weekly/settings', async (req, res) => {
   const [s, r] = await Promise.all([weekly.getSettings(), weekly.roster()])
   if (s === store.UNAVAILABLE || r === store.UNAVAILABLE) return unavailable(res)
-  return res.json({ ...s, people: r.people.map(({ id, nick, name }) => ({ id, nick, name })) })
+  // The escalation list is addresses, and an administrator's business.
+  const { escalation, ...rest } = s
+  return res.json({
+    ...(req.me.role === 'admin' ? s : rest),
+    people: r.people.map(({ id, nick, name }) => ({ id, nick, name })),
+  })
 })
+
+/*
+ * EMAIL: whether it can go out and what went out lately; a test to oneself;
+ * and, for the test suites, a reminder pass at a chosen moment. The moment is
+ * honoured only outside production — on the live server the clock is the
+ * clock.
+ */
+app.get('/api/weekly/mail', adminOnly, async (_req, res) => {
+  const recent = await mail.recent(40)
+  if (recent === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ status: mail.status(), recent })
+})
+
+app.post('/api/weekly/mail/test', adminOnly, async (req, res) => {
+  const r = await reminders.test(req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r === 'unconfigured') return res.status(409).json({ error: 'Email is not set up: add SMTP_USER and SMTP_PASSWORD in the Render dashboard.' })
+  if (r !== 'sent') return res.status(502).json({ error: 'The email did not go — the latest one in the list below says why.' })
+  return res.json({ ok: true, to: req.me.email })
+})
+
+app.post('/api/weekly/reminders/run', adminOnly, async (req, res) => {
+  const at = req.body?.at && process.env.NODE_ENV !== 'production' ? Date.parse(req.body.at) : Date.now()
+  if (Number.isNaN(at)) return res.status(400).json({ error: 'at must be a date and time.' })
+  try {
+    return res.json(await reminders.tick(at))
+  } catch (e) {
+    return res.status(500).json({ error: e.message })
+  }
+})
+
+/** Tell the administrators about new proposals, without holding up the save. */
+const announce = (raised) => {
+  if (!raised?.length) return
+  weekly.roster().then((r) => {
+    const nick = Object.fromEntries((r === store.UNAVAILABLE ? [] : r.people).map((p) => [p.id, p.nick]))
+    return reminders.proposalsRaised(raised, nick)
+  }).catch((e) => console.warn(`[mail] proposal email failed: ${e.message}`))
+}
+const announceDecision = (p) => {
+  reminders.decided(p).catch((e) => console.warn(`[mail] decision email failed: ${e.message}`))
+}
 
 app.put('/api/weekly/settings', adminOnly, async (req, res) => {
   const r = await weekly.saveSettings(req.body || {}, req.me.email)
@@ -395,6 +444,7 @@ app.post('/api/weekly/proposals/:id/approve', adminOnly, async (req, res) => {
   try {
     const r = await weekly.approve(req.params.id, { due: req.body?.due || null }, req.me.email)
     if (decided(res, r)) return undefined
+    announceDecision(r.proposal)
     const [proposal] = await withNames([r.proposal])
     return res.json({ proposal, projects: r.projects, savedAt: r.savedAt })
   } catch (e) {
@@ -405,6 +455,7 @@ app.post('/api/weekly/proposals/:id/approve', adminOnly, async (req, res) => {
 app.post('/api/weekly/proposals/:id/reject', adminOnly, async (req, res) => {
   const r = await weekly.reject(req.params.id, { reason: req.body?.reason }, req.me.email)
   if (decided(res, r)) return undefined
+  announceDecision(r.proposal)
   const [proposal] = await withNames([r.proposal])
   return res.json({ proposal })
 })
@@ -493,7 +544,8 @@ app.put('/api/weekly/:week/mine', async (req, res) => {
   const r = await weekly.save(week, me.person, req.body || {}, me.email)
   if (r === store.UNAVAILABLE) return unavailable(res)
   if (r.error) return res.status(400).json(r)
-  return res.json(r)
+  announce(r.raised)
+  return res.json({ entry: r.entry })
 })
 
 /* ----------------------------- accounts ----------------------------- */
@@ -632,4 +684,7 @@ app.listen(port, async () => {
   // Armed after the port is open, so a slow Jira cannot delay the app coming
   // up. Silent when Jira is not configured — there would be nothing to sync.
   if (jira.status().configured) startSchedule()
+  // The weekly emails. Only with a database: without one there are no
+  // accounts, no weeks and nobody to remind.
+  if (store.isConfigured()) reminders.startSchedule()
 })
