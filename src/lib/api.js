@@ -155,6 +155,27 @@ export async function saveMyWeek(week, body) {
   return out
 }
 
+/*
+ * The last few weeks, for the Excel "Weekly" sheet: newest first, each as this
+ * person is sent it. `full` says whether that includes everybody's tasks (an
+ * administrator) or only everybody's focus and one's own (a member). Null when
+ * the weekly store is not there — the workbook then simply has no such sheet.
+ */
+export async function weeklyForExport(count = 4, load = loadWeek) {
+  try {
+    const now = await load('current')
+    const weeks = [now]
+    let w = now.week
+    for (let i = 1; i < count; i++) {
+      w = new Date(Date.parse(`${w}T00:00:00Z`) - 7 * 86400_000).toISOString().slice(0, 10)
+      weeks.push(await load(w))
+    }
+    return { weeks, full: weeks[0].team.some((t) => 'standing' in t) }
+  } catch {
+    return null
+  }
+}
+
 /* Date proposals: a slipped task asking to move its project's due date. */
 export const proposals = async (status = 'pending') =>
   j(await fetch(vq(`/api/weekly/proposals?status=${encodeURIComponent(status)}`)))

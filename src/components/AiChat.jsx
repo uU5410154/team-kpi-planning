@@ -27,7 +27,13 @@ const STARTERS = [
   'สัปดาห์นี้ใครยังไม่ส่งแผนงานบ้าง',
 ]
 
-export default function AiChat({ open, onClose, phone }) {
+/*
+ * `seed` — { q, n } — is a question asked from elsewhere (the Dashboard's
+ * starters). It opens a new conversation with that question, once per `n`.
+ */
+export default function AiChat({
+  open, onClose, phone, seed,
+}) {
   const theme = useTheme()
   const [chats, setChats] = useState([])
   const [chat, setChat] = useState(null)
@@ -48,16 +54,18 @@ export default function AiChat({ open, onClose, phone }) {
     try { setChat((await api.aiChat(id)).chat) } catch (e) { setError(e.message) }
   }
 
-  const send = async (q) => {
+  const send = async (q, fresh = false) => {
     const question = String(q ?? text).trim()
     if (!question || busy) return
     setBusy(true)
     setError(null)
-    setText('')
+    if (!fresh) setText('')
     // Shown at once, so the question does not seem to vanish while the AI thinks.
-    setChat((c) => ({ ...(c || {}), messages: [...(c?.messages || []), { role: 'user', content: question, pending: true }] }))
+    setChat((c) => (fresh
+      ? { messages: [{ role: 'user', content: question, pending: true }] }
+      : { ...(c || {}), messages: [...(c?.messages || []), { role: 'user', content: question, pending: true }] }))
     try {
-      const r = await api.aiAsk(chat?.id, question)
+      const r = await api.aiAsk(fresh ? null : chat?.id, question)
       setChat(r.chat)
       loadList()
     } catch (e) {
@@ -68,6 +76,14 @@ export default function AiChat({ open, onClose, phone }) {
       setBusy(false)
     }
   }
+
+  const seeded = useRef(null)
+  useEffect(() => {
+    if (!open || !seed?.q || seeded.current === seed.n) return
+    seeded.current = seed.n
+    send(seed.q, true)
+    // send is recreated every render; the seed's number is what must not repeat.
+  }, [open, seed])
 
   const remove = async () => {
     if (!chat?.id || !window.confirm('Delete this conversation?')) return

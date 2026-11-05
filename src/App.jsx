@@ -141,6 +141,12 @@ export default function App() {
   // The administrators' chatbot, and whether the AI is there at all.
   const [chatOpen, setChatOpen] = useState(false)
   const [aiOn, setAiOn] = useState(false)
+  // A question asked from the Dashboard: opens the chat with it already sent.
+  const [chatSeed, setChatSeed] = useState(null)
+  const askAi = (q) => {
+    if (q) setChatSeed({ q, n: Date.now() })
+    setChatOpen(true)
+  }
   useEffect(() => {
     try { localStorage.setItem('fa-kpi-nav-mini', navMini ? '1' : '0') } catch { /* private window */ }
   }, [navMini])
@@ -936,7 +942,8 @@ export default function App() {
   const handleExport = async () => {
     setExporting(true)
     try {
-      await exportWorkbook(plan, state)
+      // The check-ins as this person may see them; no sheet if the store is down.
+      await exportWorkbook(plan, state, await api.weeklyForExport())
       setToast({ severity: 'success', msg: 'Excel workbook exported.' })
     } catch (e) {
       setToast({ severity: 'error', msg: `Export failed: ${e.message}` })
@@ -1274,7 +1281,9 @@ export default function App() {
             * what somebody clicks; this is what a bookmarked hash reaches.
             */}
           {allowed && tab === 'users' && <Users me={me} people={state.people} />}
-          {allowed && tab === 'dashboard' && <Dashboard plan={plan} onGoTo={setTab} hello={hello} />}
+          {allowed && tab === 'dashboard' && (
+            <Dashboard plan={plan} onGoTo={setTab} hello={hello} aiOn={canWrite && aiOn} onAsk={askAi} />
+          )}
           {allowed && tab === 'projects' && (
             <Projects
               plan={plan}
@@ -1350,7 +1359,7 @@ export default function App() {
         </Box>
         </Box>
 
-        {canWrite && aiOn && <AiChat open={chatOpen} onClose={() => setChatOpen(false)} phone={phone} />}
+        {canWrite && aiOn && <AiChat open={chatOpen} onClose={() => setChatOpen(false)} phone={phone} seed={chatSeed} />}
 
         <ScenarioDialog
           open={!!scenario}

@@ -16,6 +16,10 @@ import { existsSync, readFileSync } from 'node:fs'
 import puppeteer from 'puppeteer-core'
 import { weekOf, deadlines } from '../src/lib/weekly.js'
 import { summarySlot } from '../server/ai.js'
+import ExcelJS from 'exceljs'
+import { computePlan, DEFAULT_SETTINGS } from '../src/lib/model.js'
+import { buildWorkbook } from '../src/lib/exportXlsx.js'
+import { weeklyForExport } from '../src/lib/api.js'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -216,6 +220,58 @@ try {
 
   check('THE ACCESS TAB’S TEST ASKS FOR ONE WORD', (await call('POST', '/api/ai/test', {}, boss)).body.reply === 'ok')
 
+  console.log('\n--- the Excel "Weekly" sheet ---')
+  {
+    const loader = (cookie) => async (w) => {
+      const r = await call('GET', `/api/weekly/${w}`, undefined, cookie)
+      if (r.status !== 200) throw new Error(r.body.error)
+      return r.body
+    }
+    const state = {
+      meta: seed.meta, people: seed.people, projects: seed.projects, settings: DEFAULT_SETTINGS, scenarioName: 'Weekly test',
+    }
+    const plan = computePlan(state)
+    const read = async (weekly) => {
+      const wb = await buildWorkbook(plan, state, weekly)
+      const back = new ExcelJS.Workbook()
+      await back.xlsx.load(await wb.xlsx.writeBuffer())
+      return back
+    }
+    const forBoss = await weeklyForExport(4, loader(boss))
+    check('FOUR WEEKS ARE GATHERED, NEWEST FIRST', forBoss?.weeks?.length === 4 && forBoss.weeks[0].week === WEEK
+      && forBoss.weeks[1].week < WEEK && forBoss.full === true)
+    const wb = await read(forBoss)
+    const ws = wb.getWorksheet('Weekly')
+    check('THE WORKBOOK HAS A "WEEKLY" SHEET', !!ws && ws.state !== 'hidden')
+    const rows = []
+    ws?.eachRow((row) => rows.push(row.values.slice(1).map((v) => (v && typeof v === 'object' && 'richText' in v ? v.richText.map((t) => t.text).join('') : v))))
+    const head = rows.find((r) => r[0] === 'Person') || []
+    const col = (name) => head.indexOf(name)
+    const task = rows.find((r) => r[col('Task')] === 'Vendor mapping')
+    check('  ONE ROW PER TASK, with the report on it',
+      !!task && task[col('Done')] === 'No' && task[col('% done')] === 0.4 && task[col('Blocker')] === 'Waiting on AP for the vendor list'
+      && task[col('Waiting on')] === 'Waiting on business user' && task[col('New date')] === '2026-12-15' && task[col('Pushes deadline')] === 'Yes',
+      JSON.stringify(task))
+    check('  the project is named, not only keyed', /^FNP-88 — ./.test(task?.[col('Project')] || ''))
+    check('  THE DATE REQUEST IS ON THE TASK', /^Waiting for approval/.test(task?.[col('Date request')] || ''), task?.[col('Date request')])
+    check('  STANDING PER PERSON — the report is in, on time', task?.[col('Report')] === 'On time', task?.[col('Report')])
+    check('  everybody on the submit list has a row, even with nothing in',
+      rows.some((r) => r[col('Task')] === 'Nothing submitted'))
+    check('  each week is headed with how many are in', rows.some((r) => /^WEEK OF .* reports in 1 of \d+/.test(String(r[0] || ''))))
+    check('  the workbook still opens on the register', wb.worksheets[wb.views?.[0]?.activeTab ?? 0]?.name === 'Projects')
+
+    const forMember = await weeklyForExport(4, loader(james))
+    const mws = (await read(forMember)).getWorksheet('Weekly')
+    const mrows = []
+    mws?.eachRow((row) => mrows.push(row.values.slice(1)))
+    const mhead = mrows.find((r) => r[0] === 'Person') || []
+    check('A MEMBER’S EXPORT HOLDS THEIR OWN TASKS', mrows.some((r) => r[mhead.indexOf('Task')] === 'Vendor mapping'))
+    check('  and no standing for anybody — that is an administrator’s', mrows.every((r) => !['On time', 'Late', 'Missing'].includes(r[mhead.indexOf('Plan')]) && !['On time', 'Late', 'Missing'].includes(r[mhead.indexOf('Report')])))
+    check('  and says so at the top', /as a team member sees it/.test(String(mrows[1]?.[0] || '')))
+    check('NO STORE, NO SHEET — and the export still works',
+      !(await read(await weeklyForExport(4, async () => { throw new Error('down') }))).getWorksheet('Weekly'))
+  }
+
   /* ------------------------------------------------------------- browser */
   const chrome = [
     process.env.CHROME_PATH,
@@ -278,6 +334,44 @@ try {
     await a.waitForFunction(() => /Connected — model|The AI is off/.test(document.body.innerText), { timeout: 8000 }).catch(() => {})
     const at = await a.evaluate(() => document.body.innerText)
     check('THE ACCESS TAB SAYS THE AI IS CONNECTED', /Connected — model/.test(at), at.slice(at.indexOf('AI (Lotus'), at.indexOf('AI (Lotus') + 300).replace(/\n/g, ' | '))
+
+    console.log('\n--- the Dashboard ---')
+    const d = await as(boss, { width: 1440, height: 900 })
+    await d.goto(`${base}/`, { waitUntil: 'networkidle0' })
+    await d.waitForFunction(() => document.body.innerText.includes('This week ·'), { timeout: 15000 }).catch(() => {})
+    await d.waitForFunction(() => document.body.innerText.includes('AP blocker seen'), { timeout: 8000 }).catch(() => {})
+    const sect = (label) => d.evaluate((l) => document.querySelector(`section[aria-label="${l}"]`)?.innerText || '', label)
+    const wk = await sect('this week')
+    check('THE DASHBOARD SHOWS THIS WEEK — each person, their focus and where they stand',
+      /Plans in \d+ of \d+ · reports in 1 of \d+/.test(wk) && wk.includes('AP automation') && /REPORT: ON TIME/i.test(wk) && /PLAN: /i.test(wk),
+      wk.slice(0, 300).replace(/\n/g, ' | '))
+    const wait = await sect('waiting for your decision')
+    check('  THE DATE CHANGES WAITING FOR A DECISION', /1 request to move/.test(wait) && wait.includes('FNP-88') && wait.includes('15 Dec'),
+      wait.replace(/\n/g, ' | '))
+    check('  THE AI’S SUMMARY OF THE WEEK', (await sect('the week, summarised')).includes('AP blocker seen'))
+    const chatsBefore = (await call('GET', '/api/ai/chats', undefined, boss)).body.chats.length
+    await d.evaluate(() => [...document.querySelectorAll('section[aria-label="ask about the plan"] button')]
+      .find((b) => b.textContent.includes('Which costed projects'))?.click())
+    await d.waitForFunction(() => document.querySelector('.MuiDrawer-paper')?.innerText.includes('I can see:'), { timeout: 15000 }).catch(() => {})
+    const drawer = await d.evaluate(() => document.querySelector('.MuiDrawer-paper')?.innerText || '')
+    check('  A STARTER QUESTION OPENS THE CHAT, ALREADY ASKED',
+      drawer.includes('Which costed projects are below the ROI gate?') && drawer.includes('I can see:'), drawer.slice(0, 200).replace(/\n/g, ' | '))
+    check('  as a new conversation', (await call('GET', '/api/ai/chats', undefined, boss)).body.chats.length === chatsBefore + 1)
+    if (process.env.SHOT_DIR) {
+      await d.keyboard.press('Escape')
+      await new Promise((r) => setTimeout(r, 500))
+      await d.screenshot({ path: `${process.env.SHOT_DIR}/dashboard-week.png` })
+    }
+    const dp = await as(boss, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
+    await dp.goto(`${base}/`, { waitUntil: 'networkidle0' })
+    await dp.waitForFunction(() => document.body.innerText.includes('This week ·'), { timeout: 15000 }).catch(() => {})
+    check('  and on a phone nothing spills sideways', (await dp.evaluate(() => document.documentElement.scrollWidth)) <= 390)
+    // Previewing as a member: no Dashboard, so nothing of this to leak.
+    await dp.evaluate(() => localStorage.setItem('fa-kpi-view-as', 'member'))
+    await dp.goto(`${base}/?again=1`, { waitUntil: 'networkidle0' })
+    await new Promise((r) => setTimeout(r, 800))
+    check('VIEWING AS A MEMBER, the Dashboard and its weekly panel are not there',
+      !(await dp.evaluate(() => !!document.querySelector('section[aria-label="waiting for your decision"]'))))
   }
 } catch (e) {
   failures++

@@ -3,6 +3,9 @@ import { OBJECTIVES, OBJ_BY_ID, OUT_OF_PLAN, COMMIT_LEVELS } from './palette.js'
 import {
   SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths, MONTH_LABELS, MONTHS_IN_YEAR, countsToPool, creditSummary, ROLE_LABEL,
 } from './model.js'
+import {
+  STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, PROPOSAL_LABEL, weekLabel,
+} from './weekly.js'
 
 /* ------------------------------------------------------------------ */
 /* house style                                                         */
@@ -202,8 +205,140 @@ function writeTarget(cell, line, basis, currency) {
 /* workbook                                                            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* the Weekly sheet                                                    */
+/* ------------------------------------------------------------------ */
+
+const STANDING_TONE = { ontime: GOOD, late: WARN, missing: BAD }
+
+/*
+ * THE WEEKLY CHECK-INS, one row per task.
+ *
+ * `weekly` is what the server sent this person — `weeks`, newest first, each
+ * as GET /api/weekly/:week answers it. An administrator is sent everybody's
+ * plan and report; a member only everybody's focus line and their own week,
+ * and so that is all this sheet can hold for them. Nothing here is worked out
+ * a second time: status, dates and requests are as the app holds them.
+ */
+function addWeeklySheet(wb, weekly, projects) {
+  const cols = [
+    ['Person', 12], ['Plan', 11], ['Report', 11], ['Focus', 40],
+    ['Task', 40], ['Project', 30], ['Jira', 12], ['Priority', 11],
+    ['Expected', 11], ['Effort (days)', 10], ['Done', 7], ['% done', 8],
+    ['Blocker', 40], ['Waiting on', 18], ['New date', 11], ['Pushes deadline', 11], ['Date request', 30],
+  ]
+  const wc = (label) => cols.findIndex((c) => c[0] === label) + 1
+  const projectName = Object.fromEntries((projects || []).map((p) => [p.key, p.summary || '']))
+  const priority = Object.fromEntries(PRIORITIES.map((p) => [p.id, p.label]))
+  const category = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
+  const yesNo = (v) => (v === true ? 'Yes' : v === false ? 'No' : '')
+
+  const ws = wb.addWorksheet('Weekly', {
+    properties: { tabColor: { argb: 'FF5468E0' } },
+    views: [{ state: 'frozen', xSplit: 1, ySplit: 4 }],
+    pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  })
+  const n = weekly.weeks.length
+  banner(ws, 'WEEKLY CHECK-IN',
+    `the last ${n} week${n === 1 ? '' : 's'}, newest first · plan due Monday 08:00, report Friday 15:00, Bangkok time`
+    + `${weekly.full ? '' : ' · as a team member sees it: everybody\'s focus, and only your own tasks'}`,
+    cols.length)
+  headerRow(ws, 4, cols.map((c) => c[0]), cols.map((c) => c[1]))
+
+  let r = 5
+  for (const w of weekly.weeks) {
+    const required = w.team.filter((t) => t.required)
+    const inCount = (stage) => required.filter((t) => ['ontime', 'late'].includes(t.standing?.[stage])).length
+    sectionRow(ws, r++, `WEEK OF ${weekLabel(w.week).toUpperCase()}`
+      + (weekly.full ? `  ·  plans in ${inCount('plan')} of ${required.length}  ·  reports in ${inCount('report')} of ${required.length}` : ''),
+      cols.length)
+    const props = Object.fromEntries((w.proposals || []).map((p) => [`${p.person}.${p.taskId}`, p]))
+    const first = r
+    for (const row of w.team) {
+      // A member is sent their own week as `mine`, not on the team row.
+      const e = row.entry || (row.person === w.person && w.mine && !w.mine.draft ? w.mine : null)
+      const tasks = e?.tasks || []
+      const lines = [
+        ...tasks.map((t) => ({ t })),
+        ...(e?.unplanned || []).map((u) => ({ u })),
+      ]
+      if (!lines.length) lines.push({})
+      lines.forEach((line, i) => {
+        const x = ws.getRow(r++)
+        x.getCell(wc('Person')).value = row.nick
+        if (i === 0) {
+          for (const stage of ['plan', 'report']) {
+            const s = row.standing?.[stage]
+            const c = x.getCell(wc(stage === 'plan' ? 'Plan' : 'Report'))
+            c.value = s ? STATUS_LABEL[s] : ''
+            c.alignment = { horizontal: 'center' }
+            if (STANDING_TONE[s]) tone(c, STANDING_TONE[s])
+          }
+          x.getCell(wc('Focus')).value = row.focus || e?.focus || ''
+        }
+        const t = line.t
+        const u = line.u
+        if (t) {
+          const p = props[`${row.person}.${t.id}`]
+          x.getCell(wc('Task')).value = t.carriedFrom ? `${t.title} (carried from ${t.carriedFrom})` : t.title
+          x.getCell(wc('Project')).value = t.projectKey ? `${t.projectKey}${projectName[t.projectKey] ? ` — ${projectName[t.projectKey]}` : ''}` : ''
+          x.getCell(wc('Jira')).value = t.jiraKey || ''
+          x.getCell(wc('Priority')).value = priority[t.priority] || ''
+          x.getCell(wc('Expected')).value = t.expected || ''
+          if (t.effort != null) { x.getCell(wc('Effort (days)')).value = t.effort; x.getCell(wc('Effort (days)')).numFmt = N1 }
+          x.getCell(wc('Done')).value = yesNo(t.done)
+          if (t.done === true) tone(x.getCell(wc('Done')), GOOD)
+          if (t.done === false) tone(x.getCell(wc('Done')), WARN)
+          if (t.pct != null) { x.getCell(wc('% done')).value = t.pct / 100; x.getCell(wc('% done')).numFmt = PCT }
+          x.getCell(wc('Blocker')).value = t.blocker || ''
+          x.getCell(wc('Waiting on')).value = category[t.blockerCategory] || ''
+          x.getCell(wc('New date')).value = t.newDate || ''
+          x.getCell(wc('Pushes deadline')).value = yesNo(t.affects)
+          if (p && p.status !== 'withdrawn') {
+            const to = p.status === 'approved' ? p.decidedDue : p.proposedDue
+            x.getCell(wc('Date request')).value = `${PROPOSAL_LABEL[p.status] || p.status}`
+              + `${to ? `: ${p.currentDue || p.fromDue || '—'} → ${to}` : ''}`
+              + `${p.status === 'rejected' && p.reason ? ` (${p.reason})` : ''}`
+            tone(x.getCell(wc('Date request')), p.status === 'approved' ? GOOD : p.status === 'rejected' ? BAD : WARN, false)
+          }
+        } else if (u) {
+          x.getCell(wc('Task')).value = `Unplanned: ${u.title}`
+          tone(x.getCell(wc('Task')), MUTED, false)
+          x.getCell(wc('Project')).value = u.projectKey ? `${u.projectKey}${projectName[u.projectKey] ? ` — ${projectName[u.projectKey]}` : ''}` : ''
+          if (u.effort != null) { x.getCell(wc('Effort (days)')).value = u.effort; x.getCell(wc('Effort (days)')).numFmt = N1 }
+        } else if (weekly.full || row.person === w.person) {
+          x.getCell(wc('Task')).value = 'Nothing submitted'
+          tone(x.getCell(wc('Task')), MUTED, false)
+        }
+        for (const label of ['Focus', 'Task', 'Blocker', 'Date request']) {
+          x.getCell(wc(label)).alignment = { vertical: 'top', wrapText: true }
+        }
+        for (const label of ['Expected', 'Done', '% done', 'New date', 'Pushes deadline', 'Priority']) {
+          x.getCell(wc(label)).alignment = { horizontal: 'center', vertical: 'top' }
+        }
+      })
+    }
+    // Font and border only: each row carries its own colours above, and the
+    // body style is applied first so those survive.
+    if (r > first) {
+      const keep = []
+      for (let rr = first; rr < r; rr++) {
+        for (let c = 1; c <= cols.length; c++) {
+          const cell = ws.getCell(rr, c)
+          if (cell.font?.color) keep.push([cell, cell.font])
+        }
+      }
+      styleBody(ws, first, r - 1, cols.length, { zebra: false })
+      for (const [cell, font] of keep) cell.font = font
+      for (let rr = first; rr < r; rr++) ws.getRow(rr).height = undefined
+    }
+    r++
+  }
+  return ws
+}
+
 /** Builds the workbook. Pure — no DOM — so it can be exercised from Node. */
-export async function buildWorkbook(plan, state) {
+export async function buildWorkbook(plan, state, weekly = null) {
   const {
     totals, people, projects, quality, settings, byObjective, finance: fin,
   } = plan
@@ -1495,6 +1630,9 @@ export async function buildWorkbook(plan, state) {
     // striping would file it back into the table it was pulled out of.
   }
 
+  /* ============ Weekly — the check-ins, when the server sent them ============ */
+  if (weekly?.weeks?.length) addWeeklySheet(wb, weekly, projects)
+
   // Last, once every cell is written: a column can only be sized against what
   // it actually holds.
   for (const ws of wb.worksheets) fitColumns(ws)
@@ -1521,8 +1659,8 @@ export const exportFilename = () =>
   `F&A Tech Team Objective 2026 — ${new Date().toISOString().slice(0, 10)}.xlsx`
 
 /** Builds and downloads. Browser only. */
-export async function exportWorkbook(plan, state) {
-  const wb = await buildWorkbook(plan, state)
+export async function exportWorkbook(plan, state, weekly = null) {
+  const wb = await buildWorkbook(plan, state, weekly)
   const buf = await wb.xlsx.writeBuffer()
   const blob = new Blob([buf], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

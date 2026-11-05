@@ -4,6 +4,7 @@ import {
   Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Divider, Tooltip,
 } from '@mui/material'
 import StatTile from '../components/StatTile.jsx'
+import ThisWeek from '../components/ThisWeek.jsx'
 import FolderIcon from '@mui/icons-material/FolderOutlined'
 import {
   WelcomeBanner, IconTile, PAGE_COLOR, personColor,
@@ -37,7 +38,9 @@ function Section({ title, subtitle, children, action }) {
   )
 }
 
-export default function Dashboard({ plan, onGoTo, hello = 'there' }) {
+export default function Dashboard({
+  plan, onGoTo, hello = 'there', aiOn = false, onAsk,
+}) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   // mixByObjective, not byObjective: this chart asks where the work SITS,
@@ -178,6 +181,9 @@ export default function Dashboard({ plan, onGoTo, hello = 'there' }) {
           })))}
         </Grid>
       </Grid>
+
+      {/* ---------- the weekly check-in, at a glance ---------- */}
+      <ThisWeek plan={plan} onGoTo={onGoTo} aiOn={aiOn} onAsk={onAsk} />
 
       {/* ---------- headline row ---------- */}
       {/* Five tiles, so a flex strip rather than a 12-column grid: thirds at
