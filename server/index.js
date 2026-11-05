@@ -9,6 +9,8 @@ import * as auth from './auth.js'
 import * as weekly from './weekly.js'
 import * as mail from './mail.js'
 import * as reminders from './reminders.js'
+import * as llm from './llm.js'
+import * as ai from './ai.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -385,7 +387,9 @@ app.post('/api/weekly/reminders/run', adminOnly, async (req, res) => {
   const at = req.body?.at && process.env.NODE_ENV !== 'production' ? Date.parse(req.body.at) : Date.now()
   if (Number.isNaN(at)) return res.status(400).json({ error: 'at must be a date and time.' })
   try {
-    return res.json(await reminders.tick(at))
+    // The weekly summary rides on the same pass: it is due at the same deadlines.
+    const [mailPass, summary] = await Promise.all([reminders.tick(at), ai.summaryTick(at)])
+    return res.json({ ...mailPass, summary })
   } catch (e) {
     return res.status(500).json({ error: e.message })
   }
@@ -554,6 +558,79 @@ app.put('/api/weekly/:week/mine', async (req, res) => {
   if (r.error) return res.status(400).json(r)
   announce(r.raised)
   return res.json({ entry: r.entry })
+})
+
+/* -------------------------------- AI -------------------------------- */
+
+/*
+ * The Lotus LLM, through the server only. Whether it is there is anybody's
+ * to know (the page hides the buttons when it is not); why it is not is an
+ * administrator's.
+ */
+const aiFailed = (res, e) => res.status(e instanceof llm.LlmError ? 502 : 500).json({ error: e.message || 'The AI request failed.' })
+
+app.get('/api/ai/status', (req, res) => {
+  const st = llm.status()
+  return res.json(req.me.role === 'admin' ? st : { configured: st.configured })
+})
+
+app.post('/api/ai/write', async (req, res) => {
+  if (!llm.allow(req.me.email)) return res.status(429).json({ error: 'That is a lot of requests in a minute. Wait a moment and try again.' })
+  try {
+    const r = await ai.write(req.body || {})
+    if (r.error) return res.status(r.status || 400).json({ error: r.error })
+    return res.json(r)
+  } catch (e) {
+    return aiFailed(res, e)
+  }
+})
+
+app.get('/api/ai/summary', adminOnly, async (req, res) => {
+  const week = req.query.week === 'current' || !req.query.week ? weekOf() : String(req.query.week)
+  if (!isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
+  const rows = await ai.summaries(week)
+  if (rows === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ week, summaries: rows.map(({ _id, ...r }) => ({ id: _id, ...r })), ai: llm.status().configured })
+})
+
+app.post('/api/ai/test', adminOnly, async (_req, res) => {
+  try {
+    return res.json(await ai.test())
+  } catch (e) {
+    return aiFailed(res, e)
+  }
+})
+
+/* The chatbot: an administrator's own conversations, nobody else's. */
+app.get('/api/ai/chats', adminOnly, async (req, res) => {
+  const rows = await ai.listChats(req.me.email)
+  if (rows === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ chats: rows })
+})
+
+app.get('/api/ai/chats/:id', adminOnly, async (req, res) => {
+  const chat = await ai.getChat(req.me.email, req.params.id)
+  if (chat === store.UNAVAILABLE) return unavailable(res)
+  if (!chat) return res.status(404).json({ error: 'No such conversation.' })
+  return res.json({ chat })
+})
+
+app.post('/api/ai/chats', adminOnly, async (req, res) => {
+  if (!llm.allow(req.me.email)) return res.status(429).json({ error: 'That is a lot of questions in a minute. Wait a moment.' })
+  try {
+    const r = await ai.ask(req.me.email, req.body || {})
+    if (r === store.UNAVAILABLE) return unavailable(res)
+    if (r.error) return res.status(r.status || 400).json({ error: r.error })
+    return res.json(r)
+  } catch (e) {
+    return aiFailed(res, e)
+  }
+})
+
+app.delete('/api/ai/chats/:id', adminOnly, async (req, res) => {
+  const r = await ai.deleteChat(req.me.email, req.params.id)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
 })
 
 /* ----------------------------- accounts ----------------------------- */

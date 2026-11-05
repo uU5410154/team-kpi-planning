@@ -17,6 +17,8 @@ import TuneIcon from '@mui/icons-material/TuneOutlined'
 import AdminIcon from '@mui/icons-material/AdminPanelSettingsOutlined'
 import Sidebar, { NAV_W, NAV_W_MINI } from './components/Sidebar.jsx'
 import GlobalSearch from './components/GlobalSearch.jsx'
+import AiChat from './components/AiChat.jsx'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import { IconTile, PAGE_COLOR, displayName } from './components/Brand.jsx'
 import { SURFACE } from './theme.js'
 import DownloadIcon from '@mui/icons-material/Download'
@@ -136,6 +138,9 @@ export default function App() {
    * filtered away.
    */
   const [jump, setJump] = useState(null)
+  // The administrators' chatbot, and whether the AI is there at all.
+  const [chatOpen, setChatOpen] = useState(false)
+  const [aiOn, setAiOn] = useState(false)
   useEffect(() => {
     try { localStorage.setItem('fa-kpi-nav-mini', navMini ? '1' : '0') } catch { /* private window */ }
   }, [navMini])
@@ -228,6 +233,10 @@ export default function App() {
    * changes" hanging over a page they cannot save from.
    */
   const canWrite = viewer?.role === 'admin'
+  useEffect(() => {
+    if (!canWrite) { setAiOn(false); return }
+    api.aiStatus().then((r) => setAiOn(!!r.configured)).catch(() => setAiOn(false))
+  }, [canWrite])
   /*
    * The shared plan is only asked for once somebody is signed in. The server
    * refuses a stranger now, and a browser that signed in AFTER these effects
@@ -1173,6 +1182,24 @@ export default function App() {
 
               <GlobalSearch tabs={visibleTabs} plan={plan} admin={canWrite} onGo={goTo} phone={phone} />
 
+              {/* The chatbot: an administrator's, and only when the AI is there. */}
+              {canWrite && aiOn && (phone ? (
+                <Tooltip title="Ask about the plan">
+                  <IconButton onClick={() => setChatOpen(true)} aria-label="Ask about the plan">
+                    <AutoAwesomeIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="outlined"
+                  startIcon={<AutoAwesomeIcon />}
+                  onClick={() => setChatOpen(true)}
+                  sx={{ flexShrink: 0, whiteSpace: 'nowrap', color: 'text.primary', borderColor: 'divider' }}
+                >
+                  Ask
+                </Button>
+              ))}
+
               {phone ? (
                 <Tooltip title="Export Excel">
                   <span>
@@ -1322,6 +1349,8 @@ export default function App() {
           )}
         </Box>
         </Box>
+
+        {canWrite && aiOn && <AiChat open={chatOpen} onClose={() => setChatOpen(false)} phone={phone} />}
 
         <ScenarioDialog
           open={!!scenario}

@@ -12,6 +12,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import LockIcon from '@mui/icons-material/LockOutlined'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
+import AiAssist from '../components/AiAssist.jsx'
+import Markdown from '../components/Markdown.jsx'
 import { STATUS } from '../lib/palette.js'
 import {
   Pill, IconTile, WelcomeBanner, personColor,
@@ -53,6 +56,10 @@ function StandingChip({ label, value }) {
 function PriorityPill({ priority }) {
   if (!priority) return null
   return <Pill label={PRIORITY_LABEL[priority]} tone={PRIORITY_TONE[priority]} />
+}
+
+const SUMMARY_WHEN = {
+  plan: 'after the Monday plans', report: 'after the Friday reports', second: 'after the Sunday second chance',
 }
 
 const PROPOSAL_TONE = {
@@ -210,7 +217,7 @@ const blankTask = () => ({
 
 function TaskEditor({
   task, index, projects, projectByKey, onChange, onRemove, readOnly, showReport, jiraTasks, onNeedJira, jiraHint,
-  proposal, onShowTimeline,
+  proposal, onShowTimeline, aiOn,
 }) {
   const set = (patch) => onChange({ ...task, ...patch })
   const project = task.projectKey ? projectByKey[task.projectKey] : null
@@ -411,6 +418,15 @@ function TaskEditor({
                 maxRows={8}
                 fullWidth
               />
+              <AiAssist
+                available={aiOn}
+                disabled={readOnly}
+                field="blocker"
+                text={task.blocker}
+                onText={(t) => set({ blocker: t })}
+                task={{ title: task.title, newDate: task.newDate, projectDue: project?.due || null }}
+                onSuggest={(sg) => set({ blockerCategory: sg.category, ...(sg.affects !== null ? { affects: sg.affects } : {}) })}
+              />
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                 <Typography variant="body2">Does this push the project&rsquo;s deadline?</Typography>
                 <ToggleButtonGroup
@@ -550,6 +566,19 @@ export default function Weekly({
   const [pending, setPending] = useState(null)
   const [jira, setJira] = useState(null)
   const [deciding, setDeciding] = useState(null)
+  // Whether the AI is there to help. Asked once; the buttons stay hidden if not.
+  const [aiOn, setAiOn] = useState(false)
+  useEffect(() => {
+    api.aiStatus().then((r) => setAiOn(!!r.configured)).catch(() => setAiOn(false))
+  }, [])
+  // The AI's summary of the week on screen, for an administrator.
+  const [summary, setSummary] = useState(null)
+  useEffect(() => {
+    if (!admin || !data?.week) return
+    let stop = false
+    api.aiSummary(data.week).then((r) => { if (!stop) setSummary(r) }).catch(() => { if (!stop) setSummary(null) })
+    return () => { stop = true }
+  }, [admin, data?.week])
   const loadPending = useCallback(async () => {
     if (!admin) return
     try { setPending((await api.proposals('pending')).proposals) } catch { setPending(null) }
@@ -810,6 +839,37 @@ export default function Weekly({
         </Box>
       )}
 
+      {/* ------------------------------------------------ the AI summary */}
+      {admin && summary?.ai && (
+        <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 } }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+            <AutoAwesomeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+            <Typography variant="h3">The week, summarised</Typography>
+            {summary.summaries[0] && (
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                written {new Date(summary.summaries[0].writtenAt).toLocaleString('en-GB', {
+                  timeZone: 'Asia/Bangkok', weekday: 'short', hour: '2-digit', minute: '2-digit',
+                })}
+                {' '}{SUMMARY_WHEN[summary.summaries[0].trigger]}
+              </Typography>
+            )}
+          </Box>
+          {summary.summaries[0]
+            ? <Markdown text={summary.summaries[0].text} />
+            : (
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                The AI writes this by itself once each deadline has passed — Monday 08:00, Friday 15:00 and Sunday 15:00 —
+                and emails it to the administrators.
+              </Typography>
+            )}
+          {summary.summaries[0] && (
+            <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 1 }}>
+              Written by AI from what the team submitted. Check anything you act on against the week below.
+            </Typography>
+          )}
+        </Paper>
+      )}
+
       {/* ---------------------------------------------------- my week */}
       {data && draft && (
         <Paper ref={myWeekRef} variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 96 }}>
@@ -844,6 +904,7 @@ export default function Weekly({
             fullWidth
             helperText={readOnly ? undefined : 'A few sentences. This is what the team and your manager see first.'}
           />
+          <AiAssist available={aiOn} disabled={readOnly} field="focus" text={draft.focus} onText={(t) => edit({ focus: t })} />
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             {draft.tasks.map((t, i) => (
@@ -862,6 +923,7 @@ export default function Weekly({
                 jiraHint={t.jiraKey && jiraDone[t.jiraKey] ? `${t.jiraKey} is resolved in Jira` : null}
                 proposal={propsBy[data.person]?.[t.id]}
                 onShowTimeline={onShowTimeline}
+                aiOn={aiOn}
               />
             ))}
             {!readOnly && (

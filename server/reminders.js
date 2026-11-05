@@ -202,7 +202,12 @@ let timer = null
 /** Once a minute, from the moment the server is up. */
 export function startSchedule() {
   if (timer) return
-  const run = () => tick().catch((e) => console.warn(`[mail] reminder pass failed: ${e.message}`))
+  const run = () => {
+    tick().catch((e) => console.warn(`[mail] reminder pass failed: ${e.message}`))
+    // The AI's weekly summary, due at the same deadlines and independent of
+    // email: it is written and kept even when nothing can be sent.
+    import('./ai.js').then((ai) => ai.summaryTick()).catch((e) => console.warn(`[ai] summary pass failed: ${e.message}`))
+  }
   timer = setInterval(run, 60_000)
   if (timer.unref) timer.unref()
   setTimeout(run, 5_000).unref?.()

@@ -176,6 +176,31 @@ export const rejectProposal = async (id, reason) =>
 /** Each project's last eight weeks, its blockers and its proposals — for the Timeline. */
 export const weeklyByProject = async () => j(await fetch(vq('/api/weekly/projects')))
 
+/* ---------------------------- AI ---------------------------- */
+
+const post = async (url, body) => j(await fetch(url, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body || {}),
+}))
+
+/** Whether the AI is available here (and, for an administrator, why not). */
+export const aiStatus = async () => j(await fetch('/api/ai/status'))
+
+/** Help with one field: kind 'notes' | 'polish' | 'blocker'. */
+export const aiWrite = async (body) => post('/api/ai/write', body)
+
+/** The week's AI summaries, newest first. Administrators only. */
+export const aiSummary = async (week) => j(await fetch(`/api/ai/summary?week=${encodeURIComponent(week)}`))
+
+export const aiTest = async () => post('/api/ai/test')
+
+/* The chatbot: this administrator's own conversations. */
+export const aiChats = async () => j(await fetch('/api/ai/chats'))
+export const aiChat = async (id) => j(await fetch(`/api/ai/chats/${encodeURIComponent(id)}`))
+export const aiAsk = async (chatId, message) => post('/api/ai/chats', { chatId: chatId || null, message })
+export const aiDeleteChat = async (id) => j(await fetch(`/api/ai/chats/${encodeURIComponent(id)}`, { method: 'DELETE' }))
+
 /** The tasks under an epic, or the epics under an initiative. */
 export const jiraChildren = async (keys) =>
   j(await fetch('/api/jira/children', {

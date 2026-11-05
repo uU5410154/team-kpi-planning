@@ -12,6 +12,7 @@ import * as auth from '../lib/authApi.js'
 import * as api from '../lib/api.js'
 import { defaultSubmitters } from '../lib/weekly.js'
 import MailSettings from '../components/MailSettings.jsx'
+import AiSettings from '../components/AiSettings.jsx'
 
 const ROLE_LABEL = { admin: 'Administrator', user: 'Team member' }
 const STATUS_TONE = { active: STATUS.good, pending: STATUS.warning, inactive: 'text.disabled' }
@@ -293,6 +294,8 @@ export default function Users({ me, people = [] }) {
       </Paper>
 
       <MailSettings weekly={weekly} onWeekly={(w) => setWeekly((cur) => ({ ...cur, ...w }))} />
+
+      <AiSettings />
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>
         <Typography variant="h4" sx={{ mb: 1 }}>About the passwords on this page</Typography>
