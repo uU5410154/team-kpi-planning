@@ -147,6 +147,20 @@ export function cleanTask(t = {}) {
     newDate: isDay(t.newDate) ? t.newDate : null,
     // The member's own answer to "does this push the project's deadline?".
     affects: boolOrNull(t.affects),
+    /*
+     * A task that came from Jira and was reported on card by card: what was
+     * done this week, why it is not finished, and whether a decision is
+     * needed. Kept through an ordinary save, so saving the week's adhoc work
+     * does not wipe them.
+     */
+    source: t.source === 'jira' ? 'jira' : null,
+    progress: text(t.progress, 4000),
+    reason: text(t.reason, 2000),
+    decision: t.decision === true,
+    decisionText: text(t.decisionText, 2000),
+    start: isDay(t.start) ? t.start : null,
+    reportedAt: typeof t.reportedAt === 'string' && !Number.isNaN(Date.parse(t.reportedAt)) ? t.reportedAt : null,
+    attachments: (Array.isArray(t.attachments) ? t.attachments : []).slice(0, 10).map((x) => text(x, 200)).filter(Boolean),
   }
 }
 

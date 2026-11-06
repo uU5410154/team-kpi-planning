@@ -43,8 +43,12 @@ export default function Dashboard({
   const [now, setNow] = useState(undefined)
   const [prev, setPrev] = useState(undefined)
   const [pending, setPending] = useState([])
+  // "A decision is needed" raised on a Jira task in somebody's weekly update.
+  const [decisions, setDecisions] = useState([])
   const [followups, setFollowups] = useState([])
-  const [summary, setSummary] = useState(null)
+  // undefined: still loading; null: could not be read.
+  const [summary, setSummary] = useState(undefined)
+  const [prevSummary, setPrevSummary] = useState(null)
   const [trend, setTrend] = useState(null)
 
   useEffect(() => {
@@ -57,13 +61,24 @@ export default function Dashboard({
       })
       .catch(() => { if (!stop) { setNow(null); setPrev(null) } })
     api.proposals('pending').then((r) => { if (!stop) setPending(r.proposals || []) }).catch(() => {})
+    api.decisions('open').then((r) => { if (!stop) setDecisions(r.decisions || []) }).catch(() => {})
     api.followups('current').then((r) => { if (!stop) setFollowups(r.followups || []) }).catch(() => {})
     return () => { stop = true }
   }, [])
   useEffect(() => {
     if (!aiOn || !now?.week) return undefined
     let stop = false
-    api.aiSummary(now.week).then((r) => { if (!stop) setSummary(r) }).catch(() => {})
+    api.aiSummary(now.week)
+      .then(async (r) => {
+        if (stop) return
+        setSummary(r)
+        // Nothing written for this week yet: last week's, said as such, rather than a blank card.
+        if (!r?.summaries?.length) {
+          const p = await api.aiSummary(addWeeks(now.week, -1)).catch(() => null)
+          if (!stop) setPrevSummary(p)
+        }
+      })
+      .catch(() => { if (!stop) setSummary(null) })
     return () => { stop = true }
   }, [aiOn, now?.week])
 
@@ -132,8 +147,14 @@ export default function Dashboard({
     now,
     prev,
     pending,
+    decisions,
+    onDecide: async (id, note) => {
+      await api.decide(id, note)
+      setDecisions((list) => list.filter((d) => d.id !== id))
+    },
     followups,
     summary,
+    prevSummary,
     trend,
     aiOn,
     onAsk,

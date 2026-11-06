@@ -14,6 +14,8 @@ import LockIcon from '@mui/icons-material/LockOutlined'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import AiAssist from '../components/AiAssist.jsx'
+import JiraWeek from '../components/JiraWeek.jsx'
+import { activeInWeek } from '../lib/manager.js'
 import Markdown from '../components/Markdown.jsx'
 import { STATUS } from '../lib/palette.js'
 import {
@@ -613,7 +615,7 @@ function WeekSummary({
 /* ------------------------------------------------------------ the page */
 
 export default function Weekly({
-  plan, me, hello = 'there', onProjectsChanged, onShowTimeline, focusProject = null,
+  plan, me, hello = 'there', onProjectsChanged, onProjectsAdded, onShowTimeline, focusProject = null,
 }) {
   const theme = useTheme()
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
@@ -695,12 +697,27 @@ export default function Weekly({
         jiraKey: p.jiraKey || null,
         summary: p.summary || '',
         due: p.due || p.timeline?.plannedEnd || null,
-        active: p.active === true,
+        active: activeInWeek(p, data?.week || undefined),
         overdue: !!p.timeline?.overdue,
       }))
       .sort((a, b) => (b.active - a.active) || (b.overdue - a.overdue)
         || String(a.due || '9999').localeCompare(String(b.due || '9999')))
-  }, [plan, myId])
+  }, [plan, myId, data?.week])
+
+  /*
+   * THE WEEK FROM JIRA. When this person's Jira account is found, their week
+   * is their Jira tasks, card by card (components/JiraWeek.jsx). When it is
+   * not — Jira off, account not linked, name not matched — the Monday form
+   * below is still there.
+   */
+  const [jw, setJw] = useState(null)
+  const [preset, setPreset] = useState(null)
+  const loadJira = useCallback(async (w) => {
+    if (!w || w === 'current') return
+    try { setJw(await api.jiraWeek(w)) } catch (e) { setJw({ jira: 'error', error: e.message }) }
+  }, [])
+  useEffect(() => { if (data?.week && data.person) loadJira(data.week); else setJw(null) }, [data?.week, data?.person, loadJira])
+  const jiraMode = jw?.jira === 'on'
 
   const load = useCallback(async (w) => {
     setError(null)
@@ -784,7 +801,7 @@ export default function Weekly({
     const proj = projectByKey[key]
     if (!proj) { setError(`There is no project ${key} in the register.`); return }
     setAskedAbout(proj)
-    if (data.writable && !draft.tasks.some((t) => t.projectKey === key)) {
+    if (data.writable && !jiraMode && !draft.tasks.some((t) => t.projectKey === key)) {
       setDraft((dr) => ({ ...dr, tasks: [...dr.tasks, { ...blankTask(), projectKey: key }] }))
       setDirty(true)
     }
@@ -794,7 +811,7 @@ export default function Weekly({
     }, 300)
     const t2 = setTimeout(() => setFocused(null), 6000)
     return () => { clearTimeout(t1); clearTimeout(t2) }
-  }, [focusProject?.n, data, draft, projectByKey])
+  }, [focusProject?.n, data, draft, projectByKey, jiraMode])
 
   const edit = (patch) => { setDraft((d) => ({ ...d, ...patch })); setDirty(true) }
   const editTask = (i, t) => edit({ tasks: draft.tasks.map((x, j) => (j === i ? t : x)) })
@@ -823,7 +840,12 @@ export default function Weekly({
   }
 
   const save = async (submit) => {
-    const body = { ...draft, ...(submit ? { submit } : {}) }
+    const body = jiraMode
+      // A week run from Jira: the tasks are Jira's, kept by the server; this
+      // saves the adhoc work beside them. Last week's carried-over form tasks
+      // do not belong in it.
+      ? { ...draft, mode: 'jira', tasks: draft.tasks.filter((t) => t.source === 'jira') }
+      : { ...draft, ...(submit ? { submit } : {}) }
     // Checked here first so every missing answer is listed at once; the server
     // checks again and is the one that counts.
     const clean = cleanEntry(body)
@@ -1017,7 +1039,7 @@ export default function Weekly({
             Plan due {bangkokTime(d.planDue)} · report due {bangkokTime(d.reportDue)} · locks {bangkokTime(d.locksAt)}
           </Typography>
 
-          {mine?.draft && draft.tasks.length > 0 && (
+          {!jiraMode && mine?.draft && draft.tasks.length > 0 && (
             <Alert severity="info" sx={{ py: 0 }}>
               {draft.tasks.length} unfinished task{draft.tasks.length === 1 ? '' : 's'} carried over from last week.
               Edit, remove or add to them — nothing is saved until you save.
@@ -1027,6 +1049,55 @@ export default function Weekly({
             <Alert severity="info" sx={{ py: 0 }}>This week is locked and kept as the record.</Alert>
           )}
 
+          {jw?.jira === 'unmatched' && (
+            <Alert severity="info" variant="outlined" sx={{ py: 0 }}>
+              Your Jira account could not be found from your name on the team
+              {jw.names?.length ? ` (tried ${jw.names.join(', ')})` : ''}, so this week is the form below rather than your
+              Jira tasks. Ask an administrator to add your Jira display name on the Model tab.
+            </Alert>
+          )}
+          {askedAbout && jiraMode && (
+            <Alert severity="info" onClose={() => setAskedAbout(null)}>
+              Your manager asked for an update on <strong>{askedAbout.jiraKey || askedAbout.key}</strong>
+              {askedAbout.summary ? ` — ${askedAbout.summary}` : ''}. Submit an update on its tasks below, or add one.
+              They are told when you do.
+            </Alert>
+          )}
+          {jiraMode && jw.week !== data.week && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+              <CircularProgress size={16} />
+              <Typography variant="body2">Reading your Jira tasks for {weekTitle(data.week)}…</Typography>
+            </Box>
+          )}
+          {jiraMode && jw.week === data.week && (
+            <JiraWeek
+              week={data.week}
+              current={data.current}
+              canWrite={!readOnly}
+              jw={jw}
+              onReload={() => { loadJira(data.week); load(data.week) }}
+              projects={projects}
+              preset={preset}
+              onPresetUsed={() => setPreset(null)}
+              focusKey={focused}
+              aiOn={aiOn}
+              planIn={planIn}
+              planInAt={mine?.planSubmittedAt || null}
+              onGoWeek={go}
+              onPlanned={() => load(data.week)}
+              onProjectAdded={(r) => { if (r.project) onProjectsAdded?.([r.project]) }}
+            />
+          )}
+          {jiraMode && (
+            <MyProjects
+              projects={myOpen}
+              readOnly={readOnly}
+              onPlan={new Set([...(jw.tasks || []), ...(jw.overdue || [])].map((t) => t.project?.key).filter(Boolean))}
+              onAdd={(key) => setPreset(key)}
+            />
+          )}
+
+          {!jiraMode && (<>
           <TextField
             label="This week I'm focused on…"
             value={draft.focus}
@@ -1093,12 +1164,15 @@ export default function Weekly({
               </Button>
             )}
           </Box>
+          </>)}
 
-          {showReport && (
+          {(showReport || (jiraMode && data.week <= data.current)) && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Typography variant="h4">Unplanned work</Typography>
+              <Typography variant="h4">{jiraMode ? 'Adhoc work' : 'Unplanned work'}</Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>
-                Anything that took your time this week and was not in Monday&rsquo;s plan.
+                {jiraMode
+                  ? 'Anything that took your time this week and is not a Jira task. Press Save adhoc work when done.'
+                  : <>Anything that took your time this week and was not in Monday&rsquo;s plan.</>}
               </Typography>
               {draft.unplanned.map((u, i) => (
                 <Box
@@ -1152,7 +1226,7 @@ export default function Weekly({
                   onClick={() => edit({ unplanned: [...draft.unplanned, { id: newTaskId(), title: '', projectKey: null, effort: null }] })}
                   sx={{ alignSelf: 'flex-start' }}
                 >
-                  Add unplanned work
+                  {jiraMode ? 'Add adhoc work' : 'Add unplanned work'}
                 </Button>
               )}
             </Box>
@@ -1167,7 +1241,12 @@ export default function Weekly({
           )}
           {notice && <Alert severity="success" onClose={() => setNotice(null)} sx={{ py: 0 }}>{notice}</Alert>}
 
-          {!readOnly && (
+          {!readOnly && jiraMode && dirty && (
+            <Button variant="outlined" onClick={() => save(null)} disabled={!!busy} sx={{ alignSelf: 'flex-start' }}>
+              {busy === 'save' ? 'Saving…' : 'Save adhoc work'}
+            </Button>
+          )}
+          {!readOnly && !jiraMode && (
             <Stack direction={phone ? 'column' : 'row'} spacing={1} sx={{ alignItems: phone ? 'stretch' : 'center' }}>
               <Button variant="outlined" onClick={() => save(null)} disabled={!!busy || !dirty}>
                 {busy === 'save' ? 'Saving…' : dirty ? 'Save draft' : 'Saved'}

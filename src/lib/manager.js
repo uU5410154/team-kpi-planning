@@ -5,17 +5,79 @@
  * inputs — the plan, and the weeks as GET /api/weekly/:week answers an
  * administrator — so a figure on a card can be checked by hand.
  *
- * "Active" is the administrator's word, set with the switch on the Timeline.
- * Nothing becomes active by itself.
+ * "Active" is worked out from the dates: a project is active in a week when
+ * its timeline covers that week. An administrator can override it either way
+ * on the Timeline or the project page (`active: true` / `active: false`);
+ * with no override (`active` unset) the dates decide.
  */
+import { weekOf, addWeeks } from './weekly.js'
 
 export const isLive = (p) => !!p && !p.deleted
-export const isActive = (p) => isLive(p) && p.active === true
 
-/** Active, and everything on the register including the inactive. */
-export function projectCounts(projects = []) {
+const DAY = /^\d{4}-\d{2}-\d{2}$/
+const d = (v) => (typeof v === 'string' && DAY.test(v.slice(0, 10)) ? v.slice(0, 10) : null)
+const OUT = new Set(['nextyear', 'excluded'])
+
+/**
+ * The stretch of calendar a project's timeline covers, or null without dates.
+ *
+ * From the planned start (or the actual start, if earlier or the only one)
+ * to the planned end — or later, where the work now lands after it — and no
+ * further than the day it actually finished. A project with a single date
+ * covers that day only. A project marked Done with no finish date recorded
+ * covers nothing: it is over, and when is unknown.
+ */
+export function activeSpan(p) {
+  if (!p) return null
+  const start0 = [d(p.start), d(p.actualStart)].filter(Boolean).sort()[0] || null
+  const planned = [d(p.due), d(p.adjustedDue)].filter(Boolean).sort().pop() || null
+  const finished = d(p.actualEnd)
+  if (!finished && p.status === 'Done') return null
+  let end = finished || planned
+  const start = start0 || end
+  if (!start) return null
+  if (!end) end = start
+  if (finished && finished < end) end = finished
+  return end < start ? { from: start, to: start } : { from: start, to: end }
+}
+
+/**
+ * WHY a project is or is not active in a week (Monday, YYYY-MM-DD):
+ *   'forced-on'  an administrator switched it on
+ *   'forced-off' an administrator switched it off
+ *   'dates'      its timeline covers the week
+ *   'none'       neither — not active
+ * A project deferred to next year or excluded is never active.
+ */
+export function activeSource(p, weekMonday = weekOf()) {
+  if (!isLive(p) || OUT.has(p.commitLevel)) return 'none'
+  if (p.active === true) return 'forced-on'
+  if (p.active === false) return 'forced-off'
+  const span = activeSpan(p)
+  if (!span) return 'none'
+  const sunday = addWeeks(weekMonday, 1) // the next Monday: the week is [Monday, next Monday)
+  return span.from < sunday && span.to >= weekMonday ? 'dates' : 'none'
+}
+
+/** Whether a project is active in a week (Monday, YYYY-MM-DD): override first, then dates. */
+export const activeInWeek = (p, weekMonday = weekOf()) => {
+  const s = activeSource(p, weekMonday)
+  return s === 'forced-on' || s === 'dates'
+}
+
+/** Active in the given week; this week when none is given. */
+export const isActive = (p, weekMonday) => activeInWeek(p, weekMonday || weekOf())
+
+/** Active this week, and everything on the register including the inactive. */
+export function projectCounts(projects = [], weekMonday = weekOf()) {
   const live = projects.filter(isLive)
-  return { total: live.length, active: live.filter(isActive).length }
+  const on = live.filter((p) => isActive(p, weekMonday))
+  return {
+    total: live.length,
+    active: on.length,
+    forced: on.filter((p) => p.active === true).length,
+    byDates: on.filter((p) => p.active !== true).length,
+  }
 }
 
 /** Each person's saved week in a week's answer. A member's own comes as `mine`. */
@@ -44,7 +106,7 @@ export function tasksByProject(week) {
 /** How many ACTIVE projects have a task on them in this week's check-ins. */
 export function updatedCount(projects, week) {
   const by = tasksByProject(week)
-  const active = projects.filter(isActive)
+  const active = projects.filter((p) => isActive(p, week?.week))
   return { updated: active.filter((p) => by[p.key]?.length).length, active: active.length }
 }
 
@@ -64,7 +126,7 @@ export function ownerRows({
   const asked = {}
   for (const f of followups) if (!asked[f.projectKey] || f.sentAt > asked[f.projectKey].sentAt) asked[f.projectKey] = f
   const groups = {}
-  for (const p of projects.filter(isActive)) {
+  for (const p of projects.filter((x) => isActive(x, now?.week))) {
     const owner = p.pic || null
     const g = groups[owner || ''] = groups[owner || ''] || {
       person: owner, nick: owner ? (nick[owner] || owner) : 'No owner', projects: [],
@@ -123,7 +185,8 @@ export function slipping({
   }
   const waiting = {}
   for (const p of pending) (waiting[p.projectKey] = waiting[p.projectKey] || []).push(p)
-  for (const p of projects.filter(isActive)) {
+  const thisWeek = asOf ? weekOf(Date.parse(`${asOf}T12:00:00Z`)) : weekOf()
+  for (const p of projects.filter((x) => isActive(x, thisWeek))) {
     const why = []
     const done = /^done$/i.test(String(p.status || ''))
     if (!done && p.due && asOf && p.due < asOf) why.push({ kind: 'pastDue', text: `past due ${p.due}` })
@@ -148,7 +211,7 @@ export function workload({ projects = [], people = [], week = null, submitters =
       nick: person?.nick || id,
       days: tasks.reduce((a, t) => a + (Number(t.effort) || 0), 0),
       tasks: tasks.length,
-      active: projects.filter((p) => isActive(p) && p.pic === id).length,
+      active: projects.filter((p) => isActive(p, week?.week) && p.pic === id).length,
     }
   })
 }

@@ -600,3 +600,311 @@ function shape(raw, c) {
     startSource: startField ? 'start-date' : (day(f.created) ? 'created' : null),
   }
 }
+
+/* ======================================================================
+ * THE WEEKLY CHECK-IN, IN JIRA.
+ *
+ * A member's week is their Jira tasks: the ones assigned to them whose dates
+ * cover the week. Their update on a task goes back onto that task — a
+ * comment, the screenshot as an attachment, and Done when it is finished —
+ * and a task or a project they add is created in Jira.
+ *
+ * Everything is written under the one account this app runs as (JIRA_EMAIL),
+ * so a comment names the member in its text. Writing is refused unless
+ * JIRA_ALLOW_WRITES is true, like the date edits above.
+ * ====================================================================== */
+
+export const writable = () => String(process.env.JIRA_ALLOW_WRITES || '').toLowerCase() === 'true'
+
+const KEY = /^[A-Z][A-Z0-9_]+-\d+$/
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+/** One call to Jira, as this app's account. Throws with Jira's own words. */
+async function call(path, { method = 'GET', body, headers = {}, raw = false } = {}) {
+  const c = conf()
+  const res = await fetch(`${c.base}${path}`, {
+    method,
+    headers: {
+      Authorization: auth(),
+      Accept: 'application/json',
+      ...(body !== undefined && !raw ? { 'Content-Type': 'application/json' } : {}),
+      ...headers,
+    },
+    body: body === undefined ? undefined : (raw ? body : JSON.stringify(body)),
+    signal: AbortSignal.timeout(30000),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let msg = text.slice(0, 300)
+    try {
+      const j = JSON.parse(text)
+      msg = [...(j.errorMessages || []), ...Object.values(j.errors || {})].join(' ') || msg
+    } catch { /* not JSON */ }
+    const err = new Error(`Jira ${res.status}: ${msg}`)
+    err.statusCode = res.status
+    throw err
+  }
+  if (res.status === 204) return null
+  return res.json().catch(() => null)
+}
+
+const refuseWrites = () => {
+  const e = new Error('Writing to Jira is switched off. Set JIRA_ALLOW_WRITES=true in the Render dashboard.')
+  e.statusCode = 409
+  e.writesOff = true
+  return e
+}
+
+/*
+ * WHO A PERSON IS IN JIRA.
+ *
+ * Found by the names the roster already matches Jira assignees on, then by
+ * their email; the first active Atlassian account whose display name or email
+ * matches exactly. Kept for a day: people do not change Jira accounts.
+ */
+const users = new Map()
+const DAY_MS = 24 * 3600 * 1000
+export async function accountFor({ names = [], email = null } = {}) {
+  if (!status().configured) return UNAVAILABLE
+  const tries = [...new Set([...names, email].filter(Boolean).map((x) => String(x).trim()))]
+  const cacheKey = tries.join('|').toLowerCase()
+  const hit = users.get(cacheKey)
+  if (hit && Date.now() - hit.at < DAY_MS) return hit.value
+  const fold = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  let found = null
+  for (const q of tries) {
+    const list = await call(`/rest/api/3/user/search?query=${encodeURIComponent(q)}&maxResults=20`)
+    const people = (Array.isArray(list) ? list : []).filter((u) => u.accountType === 'atlassian' && u.active !== false)
+    found = people.find((u) => fold(u.displayName) === fold(q) || fold(u.emailAddress) === fold(q))
+      || (people.length === 1 && q.includes('@') ? people[0] : null)
+    if (found) break
+  }
+  const value = found ? { accountId: found.accountId, displayName: found.displayName } : null
+  users.set(cacheKey, { at: Date.now(), value })
+  return value
+}
+
+/** Monday..Sunday of a week named by its Monday. */
+const weekEnd = (week) => {
+  const d = new Date(`${week}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 6)
+  return d.toISOString().slice(0, 10)
+}
+
+/*
+ * The span a task occupies for the weekly check-in: its OWN start and due
+ * dates first — those are what a member sets when they plan a week — and the
+ * sprint only where the task carries no date of its own.
+ */
+export function taskSpan(t) {
+  const start = t.start || t.sprintStart || null
+  const end = t.due || t.sprintEnd || null
+  return { start: start || end, end: end || start }
+}
+
+/** Whether a task belongs in a week: its span overlaps Monday..Sunday. */
+export function coversWeek(t, week) {
+  const { start, end } = taskSpan(t)
+  if (!start) return false
+  return start <= weekEnd(week) && end >= week
+}
+
+/*
+ * A MEMBER'S TASKS FOR A WEEK.
+ *
+ *   week     tasks whose dates cover it (finished ones too, so the week reads whole)
+ *   overdue  not done, due before the week began: still theirs to report on
+ *   undated  not done and no date at all: shown so they can be planned
+ *
+ * Epics are left out: an epic is a project, not a task.
+ */
+export async function tasksForWeek(accountId, week) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+  if (!/^[A-Za-z0-9:_-]{6,128}$/.test(String(accountId || ''))) return { week: [], overdue: [], undated: [] }
+  const since = new Date(`${week}T00:00:00Z`)
+  since.setUTCDate(since.getUTCDate() - 7)
+  const jql = `assignee = "${accountId}" AND issuetype != "${c.epicType.replace(/"/g, '')}" `
+    + `AND (statusCategory != Done OR resolutiondate >= "${since.toISOString().slice(0, 10)}") ORDER BY duedate ASC`
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', 'parent', c.startField, c.sprintField]
+  const all = []
+  let token = null
+  for (let page = 0; page < 5; page++) {
+    const data = await call('/rest/api/3/search/jql', {
+      method: 'POST',
+      body: { jql, fields, maxResults: 100, ...(token ? { nextPageToken: token } : {}) },
+    })
+    for (const raw of data?.issues || []) {
+      const f = raw.fields || {}
+      all.push({
+        ...shape(raw, c),
+        type: f.issuetype?.name || '',
+        parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '' } : null,
+        url: `${c.base}/browse/${raw.key}`,
+      })
+    }
+    token = data?.nextPageToken || null
+    if (!token) break
+  }
+  const out = { week: [], overdue: [], undated: [] }
+  for (const t of all) {
+    const { start, end } = taskSpan(t)
+    if (coversWeek(t, week)) out.week.push(t)
+    else if (!t.done && end && end < week) out.overdue.push(t)
+    else if (!t.done && !start) out.undated.push(t)
+  }
+  return out
+}
+
+/** One issue, with who it is assigned to by account id — for checking ownership. */
+export async function issueOwner(key) {
+  const k = String(key || '').trim().toUpperCase()
+  if (!KEY.test(k)) return null
+  const c = conf()
+  const raw = await call(`/rest/api/3/issue/${encodeURIComponent(k)}?fields=summary,assignee,status,parent,issuetype,duedate,${c.startField}`)
+  const f = raw?.fields || {}
+  return {
+    key: raw.key,
+    summary: f.summary || '',
+    accountId: f.assignee?.accountId || null,
+    done: f.status?.statusCategory?.key === 'done',
+    type: f.issuetype?.name || '',
+    parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '' } : null,
+  }
+}
+
+/** The issue type to create a task as in a project: "Task" if it has one. */
+const typeCache = new Map()
+async function issueTypeFor(projectKey, want) {
+  const k = `${projectKey}:${want}`
+  if (typeCache.has(k)) return typeCache.get(k)
+  const data = await call(`/rest/api/3/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes?maxResults=100`)
+  const types = data?.issueTypes || data?.values || []
+  const fold = (s) => String(s || '').toLowerCase()
+  const pick = types.find((t) => fold(t.name) === fold(want))
+    || (want === 'Task' ? types.find((t) => !t.subtask && fold(t.name) !== 'epic' && t.hierarchyLevel === 0) : null)
+  if (!pick) {
+    const e = new Error(`Jira project ${projectKey} has no "${want}" issue type.`)
+    e.statusCode = 400
+    throw e
+  }
+  typeCache.set(k, pick.id)
+  return pick.id
+}
+
+const checkDates = (start, due) => {
+  if (!ISO_DAY.test(String(start || '')) || !ISO_DAY.test(String(due || ''))) {
+    const e = new Error('Give a start date and a due date.'); e.statusCode = 400; throw e
+  }
+  if (start > due) { const e = new Error('The start date is after the due date.'); e.statusCode = 400; throw e }
+}
+
+/** A new task under an epic, assigned to the member, with both dates. */
+export async function createTask({ epicKey, summary, start, due, accountId }) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  const epic = String(epicKey || '').trim().toUpperCase()
+  if (!KEY.test(epic)) { const e = new Error('Pick a project that has a Jira epic.'); e.statusCode = 400; throw e }
+  const title = String(summary || '').trim().slice(0, 250)
+  if (title.length < 3) { const e = new Error('Say what the task is.'); e.statusCode = 400; throw e }
+  checkDates(start, due)
+  const projectKey = epic.split('-')[0]
+  const fields = {
+    project: { key: projectKey },
+    issuetype: { id: await issueTypeFor(projectKey, 'Task') },
+    summary: title,
+    parent: { key: epic },
+    duedate: due,
+    [c.startField]: start,
+    ...(accountId ? { assignee: { accountId } } : {}),
+  }
+  const r = await call('/rest/api/3/issue', { method: 'POST', body: { fields } })
+  return { key: r.key, url: `${c.base}/browse/${r.key}` }
+}
+
+/** The labels a new project carries in Jira, by its kind. */
+export const PROJECT_KINDS = { adhoc: { label: 'adhoc-work', name: 'Adhoc work' }, cr: { label: 'change-request', name: 'Change Request' } }
+
+/** A new project: an epic in the register's Jira project, labelled by kind. */
+export async function createEpic({ summary, kind, start, due, accountId, description = '' }) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  const title = String(summary || '').trim().slice(0, 250)
+  if (title.length < 3) { const e = new Error('Name the project.'); e.statusCode = 400; throw e }
+  if (!PROJECT_KINDS[kind]) { const e = new Error('Pick Adhoc work or Change Request.'); e.statusCode = 400; throw e }
+  checkDates(start, due)
+  const fields = {
+    project: { key: c.project },
+    issuetype: { id: await issueTypeFor(c.project, c.epicType) },
+    summary: title,
+    labels: [PROJECT_KINDS[kind].label],
+    duedate: due,
+    [c.startField]: start,
+    ...(accountId ? { assignee: { accountId } } : {}),
+    ...(description.trim() ? { description: adf(description.trim()) } : {}),
+  }
+  const r = await call('/rest/api/3/issue', { method: 'POST', body: { fields } })
+  return { key: r.key, url: `${c.base}/browse/${r.key}` }
+}
+
+/*
+ * Plain text to Atlassian Document Format: one paragraph per line, a bold
+ * lead where a line starts "**Label:**", and bare links made clickable.
+ */
+export function adf(text) {
+  const para = (line) => {
+    const content = []
+    let rest = line
+    const bold = rest.match(/^\*\*(.+?)\*\*\s?/)
+    if (bold) {
+      content.push({ type: 'text', text: bold[1], marks: [{ type: 'strong' }] })
+      rest = rest.slice(bold[0].length)
+      if (rest) content.push({ type: 'text', text: ' ' })
+    }
+    for (const part of rest.split(/(https?:\/\/[^\s]+)/)) {
+      if (!part) continue
+      if (/^https?:\/\//.test(part)) content.push({ type: 'text', text: part, marks: [{ type: 'link', attrs: { href: part } }] })
+      else content.push({ type: 'text', text: part })
+    }
+    return content.length ? { type: 'paragraph', content } : { type: 'paragraph' }
+  }
+  return { type: 'doc', version: 1, content: String(text).split('\n').map(para) }
+}
+
+/** A comment on an issue, from plain text. */
+export async function addComment(key, text) {
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  const k = String(key || '').trim().toUpperCase()
+  const r = await call(`/rest/api/3/issue/${encodeURIComponent(k)}/comment`, { method: 'POST', body: { body: adf(text) } })
+  return { id: r?.id || null }
+}
+
+/** Files onto an issue: [{ name, type, buffer }]. Returns the stored file names. */
+export async function attach(key, files) {
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  if (!files?.length) return []
+  const k = String(key || '').trim().toUpperCase()
+  const form = new FormData()
+  for (const f of files) form.append('file', new Blob([f.buffer], { type: f.type }), f.name)
+  const r = await call(`/rest/api/3/issue/${encodeURIComponent(k)}/attachments`, {
+    method: 'POST', body: form, raw: true, headers: { 'X-Atlassian-Token': 'no-check' },
+  })
+  return (Array.isArray(r) ? r : []).map((a) => a.filename)
+}
+
+/** Move an issue to whichever status its workflow calls done. */
+export async function markDone(key) {
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  const k = String(key || '').trim().toUpperCase()
+  const data = await call(`/rest/api/3/issue/${encodeURIComponent(k)}/transitions`)
+  const to = (data?.transitions || []).find((t) => t.to?.statusCategory?.key === 'done')
+  if (!to) return { moved: false, reason: 'No transition to a done status from where it is now.' }
+  await call(`/rest/api/3/issue/${encodeURIComponent(k)}/transitions`, { method: 'POST', body: { transition: { id: to.id } } })
+  cache.delete(k)
+  return { moved: true, status: to.to?.name || 'Done' }
+}

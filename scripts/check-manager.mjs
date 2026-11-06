@@ -16,6 +16,7 @@ import { weekOf, addWeeks } from '../src/lib/weekly.js'
 import { computePlan, DEFAULT_SETTINGS } from '../src/lib/model.js'
 import {
   projectCounts, updatedCount, ownerRows, slipping, workload, blockersByType, submissionTrend,
+  activeInWeek, activeSource,
 } from '../src/lib/manager.js'
 import { cleanLayout } from '../server/manager.js'
 import { DEFAULT_LAYOUT, EXTRA_CARDS } from '../src/dashboard/layout.js'
@@ -26,6 +27,30 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+console.log('\n--- active, by the dates ---')
+{
+  const W = '2026-11-02' // Monday of week 45
+  const src = (p) => activeSource(p, W)
+  check('DATES COVERING THE WEEK MAKE A PROJECT ACTIVE', src({ start: '2026-10-01', due: '2026-12-01' }) === 'dates')
+  check('  a start on the Sunday counts; one the next Monday does not',
+    src({ start: '2026-11-08', due: '2026-12-01' }) === 'dates' && src({ start: '2026-11-09', due: '2026-12-01' }) === 'none')
+  check('  a due date on the Monday counts; the Sunday before does not',
+    src({ start: '2026-10-01', due: '2026-11-02' }) === 'dates' && src({ start: '2026-10-01', due: '2026-11-01' }) === 'none')
+  check('  a single date counts in its own week', src({ due: '2026-11-05' }) === 'dates' && src({ start: '2026-11-04' }) === 'dates')
+  check('  a project that finished before the week is not active',
+    src({ start: '2026-10-01', due: '2026-12-01', actualEnd: '2026-10-20' }) === 'none'
+    && src({ start: '2026-10-01', due: '2026-12-01', status: 'Done' }) === 'none')
+  check('  work now landing later (adjusted due) keeps it active', src({ start: '2026-10-01', due: '2026-10-20', adjustedDue: '2026-11-03' }) === 'dates')
+  check('  no dates, not active', src({}) === 'none' && activeInWeek({}, W) === false)
+  check('AN ADMINISTRATOR’S OVERRIDE WINS EITHER WAY',
+    src({ active: true }) === 'forced-on' && activeInWeek({ active: true }, W)
+    && src({ active: false, start: '2026-10-01', due: '2026-12-01' }) === 'forced-off'
+    && !activeInWeek({ active: false, start: '2026-10-01', due: '2026-12-01' }, W))
+  check('  next year and excluded are never active',
+    !activeInWeek({ commitLevel: 'nextyear', start: '2026-10-01', due: '2026-12-01' }, W)
+    && !activeInWeek({ commitLevel: 'excluded', active: true }, W))
+}
 
 console.log('\n--- the layout, cleaned ---')
 {
@@ -153,29 +178,34 @@ try {
     const now = (await call('GET', `/api/weekly/${WEEK}`, undefined, boss)).body
     const prev = (await call('GET', `/api/weekly/${LAST}`, undefined, boss)).body
     const plan = computePlan({ meta: seed.meta, people: seed.people, projects: seed.projects, settings: DEFAULT_SETTINGS })
-    const counts = projectCounts(plan.projects)
-    check('ACTIVE: THE FOUR SWITCHED ON, out of every project in the register',
-      counts.active === 4 && counts.total === plan.projects.filter((p) => !p.deleted).length, JSON.stringify(counts))
+    const counts = projectCounts(plan.projects, WEEK)
+    const activeNow = plan.projects.filter((p) => !p.deleted && activeInWeek(p, WEEK))
+    check('ACTIVE: THE FOUR SWITCHED ON, plus those whose dates cover this week, of every project in the register',
+      counts.forced === 4 && counts.active === activeNow.length && counts.active === counts.forced + counts.byDates
+      && counts.total === plan.projects.filter((p) => !p.deleted).length, JSON.stringify(counts))
     const up = updatedCount(plan.projects, now)
-    check('UPDATED THIS WEEK: one of the four has a task on it', up.updated === 1 && up.active === 4, JSON.stringify(up))
+    check('UPDATED THIS WEEK: one of the active has a task on it', up.updated === 1 && up.active === activeNow.length, JSON.stringify(up))
     const groups = ownerRows({ projects: plan.projects, people: plan.assignees, now, prev })
     const jg = groups.find((g) => g.person === 'james')
     const f379 = jg?.projects.find((p) => p.key === 'FNP-379')
-    check('WHO HOLDS WHAT: James holds FNP-379 and FNP-877', jg?.projects.map((p) => p.key).sort().join() === 'FNP-379,FNP-877')
+    const jamesActive = activeNow.filter((p) => p.pic === 'james').map((p) => p.key).sort()
+    check('WHO HOLDS WHAT: James holds FNP-379 and FNP-877, and whatever else of his is active',
+      jg?.projects.map((p) => p.key).sort().join() === jamesActive.join() && jamesActive.includes('FNP-379') && jamesActive.includes('FNP-877'),
+      jg?.projects.map((p) => p.key).join())
     check('  last week’s task, and that it did not finish',
       f379?.lastWeek[0]?.title === 'Build the forecast model' && f379.lastWeek[0].done === false && f379.lastWeek[0].pct === 60)
     check('  this week’s task', f379?.thisWeek[0]?.title === 'Validate the forecast with FP&A')
     check('  and when it was last updated', !!f379?.latest)
     check('  a project with no owner is listed under "No owner", last',
-      groups[groups.length - 1].person === null && groups[groups.length - 1].projects[0].key === 'ROW-9')
+      groups[groups.length - 1].person === null && groups[groups.length - 1].projects.some((p) => p.key === 'ROW-9'))
     const blockers = blockersByType(prev)
     check('BLOCKERS BY TYPE: last week’s IT blocker', blockers.it?.[0]?.blocker === 'Waiting on IT for the data feed')
     const slip = slipping({ projects: plan.projects, asOf: '2026-11-05', weeks: [now, prev], pending: [] })
     check('SLIPPING: FNP-379 lands after its due (31 Aug), and is past due',
       slip.find((s) => s.key === 'FNP-379')?.why.map((w) => w.kind).sort().join() === 'lands,pastDue', JSON.stringify(slip.find((s) => s.key === 'FNP-379')))
     const wl = workload({ projects: plan.projects, people: plan.people, week: now })
-    check('WORKLOAD: James planned 2 days, holds 2 active projects',
-      wl.find((r) => r.person === 'james')?.days === 2 && wl.find((r) => r.person === 'james')?.active === 2)
+    check('WORKLOAD: James planned 2 days, and holds his active projects',
+      wl.find((r) => r.person === 'james')?.days === 2 && wl.find((r) => r.person === 'james')?.active === jamesActive.length)
     const tr = submissionTrend([now, prev])
     check('SUBMISSION TREND: oldest week first, James on time last week',
       tr.weeks[0] === LAST && tr.people.find((p) => p.person === 'james')?.weeks[LAST]?.report === 'ontime')
@@ -263,10 +293,18 @@ try {
     await a.waitForFunction(() => document.querySelector('section[aria-label="who holds what"]')?.innerText.includes('Load the budget data'), { timeout: 15000 }).catch(() => {})
     const sect = (pg, l) => pg.evaluate((x) => document.querySelector(`section[aria-label="${x}"]`)?.innerText || '', l)
     const total = seed.projects.filter((p) => !p.deleted).length
+    const nActive = seed.projects.filter((p) => !p.deleted && activeInWeek(p, WEEK)).length
     const act = await sect(a, 'Active projects')
-    check('ACTIVE PROJECTS: 4, of every project in the register', /\b4\b/.test(act) && act.includes(`of ${total}`), act.replace(/\n/g, ' | '))
+    check(`ACTIVE PROJECTS: ${nActive} (4 switched on, the rest by their dates), of every project in the register`,
+      new RegExp(`\\b${nActive}\\b`).test(act) && act.includes(`of ${total}`) && act.includes('4 switched on'), act.replace(/\n/g, ' | '))
     const upd = await sect(a, 'Updated this week')
-    check('UPDATED THIS WEEK: 2 of 4', /\b2\b/.test(upd) && upd.includes('of 4 active'), upd.replace(/\n/g, ' | '))
+    check(`UPDATED THIS WEEK: 2 of ${nActive}`, /\b2\b/.test(upd) && upd.includes(`of ${nActive} active`), upd.replace(/\n/g, ' | '))
+    // No card is left blank: each says something under its title.
+    const blank = await a.evaluate(() => [...document.querySelectorAll('[data-card]')]
+      .filter((c) => c.innerText.trim().split('\n').filter((l) => l.trim()).length < 2).map((c) => c.getAttribute('data-card')))
+    check('NO CARD IS LEFT BLANK', blank.length === 0, blank.join(','))
+    const sum = await sect(a, 'the week, summarised')
+    check('  the summary card says why there is no summary', /not switched on/i.test(sum), sum.replace(/\n/g, ' | '))
     const own = await sect(a, 'who holds what')
     check('WHO HOLDS WHAT: by owner, last week and this week',
       own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /NOT DONE · 60%/i.test(own)
@@ -365,25 +403,43 @@ try {
     // a click waits for it to.
     await a.bringToFront()
     await a.goto(`${base}/#timeline`, { waitUntil: 'networkidle0' })
-    await a.waitForFunction(() => !!document.querySelector('input[aria-label="active FNP-935"]'), { timeout: 15000 }).catch(() => {})
-    check('EACH PROJECT ROW HAS AN ACTIVE SWITCH', !!(await a.$('input[aria-label="active FNP-935"]')))
-    check('  set as the register says', await a.evaluate(() => document.querySelector('input[aria-label="active FNP-379"]')?.checked === true))
-    await a.evaluate(() => document.querySelector('input[aria-label="active FNP-935"]').click())
-    // The plan saves itself four seconds after an edit.
-    let p935 = null
-    for (let i = 0; i < 30 && !p935?.active; i++) {
-      await sleep(500)
-      p935 = (await call('GET', '/api/scenarios/Baseline', undefined, 'service')).body.payload?.projects?.find((p) => p.key === 'FNP-935')
+    const ctl = (k) => `[aria-label="active ${k}"]`
+    await a.waitForFunction((sel) => !!document.querySelector(sel), { timeout: 15000 }, ctl('FNP-935')).catch(() => {})
+    check('EACH PROJECT ROW HAS AN ACTIVE CONTROL', !!(await a.$(ctl('FNP-935'))))
+    check('  FNP-379 reads as switched on by an administrator',
+      await a.evaluate((sel) => { const b = document.querySelector(sel); return b?.dataset.active === 'on' && b.dataset.activeMode === 'on' }, ctl('FNP-379')))
+    check('  FNP-935, past its dates and not switched on, reads Auto and not active',
+      await a.evaluate((sel) => { const b = document.querySelector(sel); return b?.dataset.active === 'off' && b.dataset.activeMode === 'auto' }, ctl('FNP-935')))
+    // Pick from the control's menu, then wait for the plan to save itself (four seconds after an edit).
+    const choose = async (key, item) => {
+      await a.evaluate((sel) => document.querySelector(sel)?.click(), ctl(key))
+      await a.waitForSelector('[role="menuitem"]', { timeout: 5000 }).catch(() => {})
+      await a.evaluate((t) => [...document.querySelectorAll('[role="menuitem"]')].find((x) => x.textContent.startsWith(t))?.click(), item)
     }
-    const why = p935?.active ? '' : JSON.stringify({
-      checked: await a.evaluate(() => document.querySelector('input[aria-label="active FNP-935"]')?.checked),
-      said: (await text(a)).split('\n').filter((l) => /sav|newer|someone|conflict|offline|changed/i.test(l)).slice(0, 8),
-    })
-    check('SWITCHING ONE ON SAVES IT TO THE SHARED PLAN', p935?.active === true, why)
+    const saved = async (key, want) => {
+      let p = null
+      for (let i = 0; i < 30; i++) {
+        await sleep(500)
+        p = (await call('GET', '/api/scenarios/Baseline', undefined, 'service')).body.payload?.projects?.find((x) => x.key === key)
+        if (want(p)) return { ok: true, p }
+      }
+      return { ok: false, p, said: (await text(a)).split('\n').filter((l) => /sav|newer|someone|conflict|offline|changed/i.test(l)).slice(0, 8) }
+    }
+    await choose('FNP-935', 'Always active')
+    let r935 = await saved('FNP-935', (p) => p?.active === true)
+    check('"ALWAYS ACTIVE" SAVES TO THE SHARED PLAN', r935.ok, r935.ok ? '' : JSON.stringify(r935))
+    check('  and the control now reads active', await a.evaluate((sel) => document.querySelector(sel)?.dataset.active === 'on', ctl('FNP-935')))
+    await choose('FNP-935', 'Never active')
+    r935 = await saved('FNP-935', (p) => p?.active === false)
+    check('"NEVER ACTIVE" SAVES TOO', r935.ok, r935.ok ? '' : JSON.stringify(r935))
+    await choose('FNP-935', 'Automatic')
+    r935 = await saved('FNP-935', (p) => p && p.active === undefined)
+    check('"AUTOMATIC" TAKES THE OVERRIDE OFF AGAIN', r935.ok, r935.ok ? '' : JSON.stringify(r935.p?.active))
     await a.evaluate(() => document.querySelector('input[aria-label="active projects only"]')?.click())
     await sleep(400)
-    const rowsShown = await a.evaluate(() => document.querySelectorAll('input[aria-label^="active FNP-"], input[aria-label^="active ROW-"]').length)
-    check('"ACTIVE ONLY" SHOWS JUST THE ACTIVE ONES', rowsShown > 0 && rowsShown <= 5, String(rowsShown))
+    const shownRows = await a.evaluate(() => [...document.querySelectorAll('[aria-label^="active FNP-"], [aria-label^="active ROW-"]')]
+      .filter((x) => x.tagName !== 'INPUT').map((x) => x.dataset.active))
+    check('"ACTIVE ONLY" SHOWS JUST THE ACTIVE ONES', shownRows.length > 0 && shownRows.every((v) => v === 'on'), shownRows.join(','))
 
     console.log('\n--- members, and phones ---')
     await m.bringToFront()

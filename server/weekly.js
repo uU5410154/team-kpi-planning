@@ -5,7 +5,7 @@ import {
   cleanEntry, planProblems, reportProblems, carryOver, addWeeks, deadlines, stageStatus,
   defaultSubmitters, proposalFor, proposalId, weekOf,
 } from '../src/lib/weekly.js'
-import { replanPatch, repairState } from '../src/lib/model.js'
+import { replanPatch, repairState, DEFAULT_JIRA_NAMES } from '../src/lib/model.js'
 import { JIRA_KEY } from '../src/lib/jiraMerge.js'
 
 /**
@@ -56,6 +56,8 @@ export async function roster() {
   return {
     people: (doc?.payload?.people || []).map((p) => ({
       id: p.id, nick: p.nick || p.name || p.id, name: p.name || p.nick || p.id, scorecard: p.scorecard, role: p.role,
+      // The names this person goes by in Jira, for finding their account there.
+      jiraNames: Array.isArray(p.jiraNames) && p.jiraNames.length ? p.jiraNames : (DEFAULT_JIRA_NAMES[p.id] || []),
     })),
     projects: (doc?.payload?.projects || []).filter((p) => !p.deleted).map((p) => ({
       key: p.key, jiraKey: p.jiraKey || null, summary: p.summary || '', due: p.due || null, pic: p.pic || null,
@@ -182,14 +184,17 @@ export async function save(week, person, body, by) {
   if (submit && !['plan', 'report'].includes(submit)) return { error: 'Unknown submission.' }
 
   const prior = await c.entries.findOne({ week, person })
+  // A week run from Jira is planned and reported task by task, in Jira; the
+  // Monday form's rules do not apply to it.
+  const fromJira = prior?.mode === 'jira'
   // A plan being submitted, or one already in — once it is in it stays a
   // complete plan, so later edits cannot hollow it out. A report sent before
   // any plan was submitted needs a complete plan too: it reports on one.
-  if (submit || prior?.planSubmittedAt) {
+  if (!fromJira && (submit || prior?.planSubmittedAt)) {
     const problems = planProblems(clean)
     if (problems.length) return { error: 'The plan is not complete yet.', problems }
   }
-  if (submit === 'report' || prior?.reportSubmittedAt) {
+  if (!fromJira && (submit === 'report' || prior?.reportSubmittedAt)) {
     const problems = reportProblems(clean)
     if (problems.length) return { error: 'The report is not complete yet.', problems }
   }
@@ -221,6 +226,44 @@ export async function save(week, person, body, by) {
   // administrators. Not sent from here — this module only keeps the record.
   return { entry: saved, raised: Array.isArray(raised) ? raised : [] }
 }
+
+/*
+ * ONE JIRA TASK INTO SOMEBODY'S WEEK.
+ *
+ * A week run from Jira is still a week here: the dashboard, the reminders, the
+ * summary and the Excel sheet all read this collection. So each Jira task the
+ * member plans or reports on is kept as a task of their week, by a stable id
+ * from its key, and replaced whole each time.
+ *
+ * `plan`: the week's plan counts as in (first time only). `report`: the
+ * report counts as in (first time only) — the caller decides when every task
+ * of the week has been reported on.
+ */
+export async function mirrorTasks(week, person, tasks, { by, plan = false, report = false } = {}) {
+  const c = await colls()
+  if (!c) return UNAVAILABLE
+  const prior = await c.entries.findOne({ week, person })
+  const byId = new Map((prior?.tasks || []).map((t) => [t.id, t]))
+  for (const t of tasks) {
+    const clean = cleanEntry({ tasks: [{ ...byId.get(t.id), ...t, source: 'jira' }] }).tasks[0]
+    if (clean) byId.set(clean.id, clean)
+  }
+  const now = new Date().toISOString()
+  const set = {
+    week, person, mode: 'jira', tasks: [...byId.values()], updatedAt: now, updatedBy: by,
+  }
+  if (plan && !prior?.planSubmittedAt) { set.planSubmittedAt = now; set.planSubmittedBy = by }
+  if (report && !prior?.reportSubmittedAt) { set.reportSubmittedAt = now; set.reportSubmittedBy = by }
+  await c.entries.updateOne(
+    { week, person },
+    { $set: set, $setOnInsert: { createdAt: now, focus: '', unplanned: [] } },
+    { upsert: true },
+  )
+  return strip(await c.entries.findOne({ week, person }))
+}
+
+/** The id a Jira task is kept under in a week: its key, letters and digits only. */
+export const jiraTaskId = (key) => `j${String(key || '').replace(/[^A-Za-z0-9]/g, '')}`.slice(0, 40)
 
 /** Where one person stands on one week, for the team list and (later) the reminders. */
 export function standing(week, e, now = Date.now()) {

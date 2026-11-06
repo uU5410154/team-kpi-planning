@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Box, Paper, Typography, Button, Grid, Switch, FormControlLabel, Link, Skeleton, Alert, Divider,
+  Box, Paper, Typography, Button, Grid, Link, Skeleton, Alert, Divider,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
@@ -16,6 +16,8 @@ import {
   Pill, IconTile, PAGE_COLOR, personColor, statusTone,
 } from '../components/Brand.jsx'
 import FollowUp, { ago } from '../components/FollowUp.jsx'
+import ActiveControl from '../dashboard/ActiveControl.jsx'
+import { activeInWeek } from '../lib/manager.js'
 
 /**
  * ONE PROJECT, IN FULL.
@@ -122,7 +124,9 @@ export default function Project({
   const lastFollow = follow.filter((f) => keys.includes(f.projectKey)).sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0] || null
 
   const owner = plan.assignees?.find((x) => x.id === p.pic) || plan.people.find((x) => x.id === p.pic)
-  const active = lines.every((x) => x.active === true)
+  // Active this week: by its dates, unless an administrator overrode it.
+  const active = lines.length > 0 && lines.every((x) => activeInWeek(x))
+  const forced = lines.every((x) => x.active === true) ? 'switched on' : lines.every((x) => x.active === false) ? 'switched off' : 'by its dates'
   const hours = lines.reduce((a, x) => a + (x.savingHours || 0), 0)
   const jiraKey = String(p.jiraKey || '').trim()
 
@@ -150,7 +154,7 @@ export default function Project({
                   )
                   : <Typography variant="body2" sx={{ fontWeight: 600 }}>{jiraKey}</Typography>)}
                 {(p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
-                <Pill label={active ? 'Active' : 'Not active'} tone={active ? 'info' : 'neutral'} />
+                <Pill label={active ? 'Active' : 'Not active'} tone={active ? 'info' : 'neutral'} title={`This week, ${forced}`} />
                 {lines.length > 1 && <Typography variant="caption" sx={{ color: 'text.secondary' }}>{lines.length} register lines on this epic</Typography>}
               </Box>
             </Box>
@@ -159,16 +163,11 @@ export default function Project({
             }}
             >
               {canWrite && (
-                <FormControlLabel
-                  control={(
-                    <Switch
-                      size="small"
-                      checked={active}
-                      onChange={(e) => keys.forEach((k) => onUpdate(k, { active: e.target.checked }))}
-                      inputProps={{ 'aria-label': 'active project' }}
-                    />
-                  )}
-                  label={<Typography variant="body2">Active</Typography>}
+                <ActiveControl
+                  projects={lines}
+                  size="medium"
+                  label="active project"
+                  onSet={(v) => keys.forEach((k) => onUpdate(k, { active: v }))}
                 />
               )}
               <Button size="small" startIcon={<TimelineIcon />} onClick={() => onShowTimeline?.(p.key)}>Timeline</Button>

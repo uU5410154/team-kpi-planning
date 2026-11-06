@@ -24,7 +24,9 @@ import { alpha } from '@mui/material/styles'
 import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
 import HourglassIcon from '@mui/icons-material/HourglassTopOutlined'
 import { Pill } from '../components/Brand.jsx'
-import { weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
+import ActiveControl from '../dashboard/ActiveControl.jsx'
+import { activeInWeek } from '../lib/manager.js'
+import { weekOf, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
 
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
 const FORECAST = '#a18ad9'
@@ -638,7 +640,13 @@ export default function Timeline({
   // The administrator's own word on what is being worked on now. Read by the
   // manager dashboard; nothing becomes active by itself.
   const [onlyActive, setOnlyActive] = useState(false)
-  const activeKeys = useMemo(() => new Set(plan.projects.filter((p) => p.active === true).map((p) => p.key)), [plan.projects])
+  // Active THIS week: by its dates, unless an administrator overrode it.
+  const thisWeek = weekOf()
+  const activeKeys = useMemo(
+    () => new Set(plan.projects.filter((p) => activeInWeek(p, thisWeek)).map((p) => p.key)),
+    [plan.projects, thisWeek],
+  )
+  const projectOf = useMemo(() => Object.fromEntries(plan.projects.map((p) => [p.key, p])), [plan.projects])
   // Sent here by the header search: that project, whatever was filtered before.
   useEffect(() => {
     if (!jump?.q) return
@@ -650,7 +658,7 @@ export default function Timeline({
     return plan.projects
       .filter((p) => p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded')
       .filter((p) => (ours ? !p.outsideTeam : true))
-      .filter((p) => (onlyActive ? p.active === true : true))
+      .filter((p) => (onlyActive ? activeKeys.has(p.key) : true))
       .filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd || p.timeline.actualStart)
       .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
       .filter((p) => {
@@ -664,7 +672,7 @@ export default function Timeline({
       .filter((p) => !hay || `${p.jiraKey || ''} ${p.summary} ${p.program || ''}`.toLowerCase().includes(hay))
       .sort((a, b) => String(a.timeline.plannedStart || a.timeline.actualStart || '9999')
         .localeCompare(String(b.timeline.plannedStart || b.timeline.actualStart || '9999')))
-  }, [plan.projects, q, fPic, fState, ours, onlyActive])
+  }, [plan.projects, q, fPic, fState, ours, onlyActive, activeKeys])
 
   /*
    * ONE BAR PER TICKET.
@@ -1060,22 +1068,17 @@ export default function Timeline({
                 <HourglassIcon aria-label="date change waiting" sx={{ fontSize: 16, color: FORECAST, flexShrink: 0 }} />
               </Tooltip>
             )}
-            {/* ACTIVE: an administrator's switch, on every register line behind
-                the bar at once — the same work, so the same answer. */}
-            {depth === 0 && row.projectKeys?.length > 0 && !readOnly && (() => {
-              const on = row.projectKeys.every((k) => activeKeys.has(k))
-              return (
-                <Tooltip title={on ? 'Active — on the manager dashboard. Click to set inactive.' : 'Set active: show it on the manager dashboard'}>
-                  <Switch
-                    size="small"
-                    checked={on}
-                    onChange={(e) => row.projectKeys.forEach((k) => onUpdate(k, { active: e.target.checked }))}
-                    inputProps={{ 'aria-label': `active ${row.jiraKey || row.projectKey}` }}
-                    sx={{ flexShrink: 0, mr: -0.75 }}
-                  />
-                </Tooltip>
-              )
-            })()}
+            {/* ACTIVE: by its dates, or an administrator's override, on every
+                register line behind the bar at once — the same work, so the
+                same answer. */}
+            {depth === 0 && row.projectKeys?.length > 0 && !readOnly && (
+              <ActiveControl
+                projects={row.projectKeys.map((k) => projectOf[k])}
+                week={thisWeek}
+                label={`active ${row.jiraKey || row.projectKey}`}
+                onSet={(v) => row.projectKeys.forEach((k) => onUpdate(k, { active: v }))}
+              />
+            )}
           </Box>
 
           <Box sx={{
@@ -1476,7 +1479,11 @@ export default function Timeline({
         />
         <FormControlLabel
           control={<Switch size="small" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} inputProps={{ 'aria-label': 'active projects only' }} />}
-          label={<Typography variant="body2">Active only ({activeKeys.size})</Typography>}
+          label={(
+            <Tooltip title="Active this week: its dates cover this week, or an administrator set it to always active">
+              <Typography variant="body2">Active only ({activeKeys.size})</Typography>
+            </Tooltip>
+          )}
         />
         <Box sx={{ flex: 1 }} />
         <ToggleButtonGroup

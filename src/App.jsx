@@ -1047,6 +1047,16 @@ export default function App() {
       }),
     }))
   }
+  // A project a member created from their week (a new Jira epic), added to the
+  // register on the server: added here too, so this browser's next automatic
+  // save carries it instead of dropping it.
+  const addServerProjects = (rows) => {
+    setState((s) => {
+      const have = new Set(s.projects.map((p) => p.key))
+      const fresh = (rows || []).filter((p) => p?.key && !have.has(p.key))
+      return fresh.length ? { ...s, projects: [...s.projects, ...fresh] } : s
+    })
+  }
   // A project's own page.
   const openProject = (key) => { window.location.hash = `project/${encodeURIComponent(key)}` }
   // From a weekly task to its project's bar on the Timeline, highlighted.
@@ -1369,6 +1379,7 @@ export default function App() {
               me={viewer}
               hello={hello}
               onProjectsChanged={applyServerProjects}
+              onProjectsAdded={addServerProjects}
               onShowTimeline={showOnTimeline}
               focusProject={hashArg.page === 'weekly' && hashArg.key ? hashArg : null}
             />

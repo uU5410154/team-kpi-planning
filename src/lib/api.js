@@ -275,3 +275,39 @@ export const jiraRollup = async (keys) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keys }),
   }))
+
+/* ------------------------------ the week, from Jira ------------------------------ */
+
+// Like `j`, but an error keeps the server's list of what is missing.
+const jp = async (res) => {
+  const body = await res.json().catch(() => ({}))
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+  if (!res.ok) {
+    const e = new Error(body.error || `Request failed (${res.status})`)
+    e.problems = Array.isArray(body.problems) ? body.problems : []
+    throw e
+  }
+  return body
+}
+const send = async (method, url, body) => jp(await fetch(url, {
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body || {}),
+}))
+
+/** One's own Jira tasks for a week: { jira: 'on'|'off'|'unlinked'|'unmatched', tasks, overdue, undated }. */
+export const jiraWeek = async (week) => jp(await fetch(`/api/weekly/${encodeURIComponent(week)}/jira`))
+/** Submit one task's update; it is posted to the task in Jira. */
+export const submitTaskUpdate = async (week, key, body) =>
+  send('POST', `/api/weekly/${encodeURIComponent(week)}/jira/${encodeURIComponent(key)}/update`, body)
+/** "My plan for this week is set." */
+export const confirmJiraPlan = async (week) => send('POST', `/api/weekly/${encodeURIComponent(week)}/jira/plan`)
+/** A new Jira task under a project's epic, assigned to oneself. */
+export const newJiraTask = async (body) => send('POST', '/api/jira/tasks', body)
+/** A task's start and due dates, written to Jira. */
+export const planJiraTask = async (key, body) => send('PUT', `/api/jira/tasks/${encodeURIComponent(key)}/dates`, body)
+/** A new project: a Jira epic plus a row in the register. */
+export const newJiraProject = async (body) => send('POST', '/api/jira/projects', body)
+/** Decisions asked for on tasks: open ones by default. */
+export const decisions = async (status = 'open') => jp(await fetch(vq(`/api/decisions?status=${encodeURIComponent(status)}`)))
+export const decide = async (id, note) => send('POST', `/api/decisions/${encodeURIComponent(id)}/decide`, { note })

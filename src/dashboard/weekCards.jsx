@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import {
   Box, Typography, Button, ButtonBase, Skeleton, Table, TableBody, TableCell, TableHead, TableRow,
-  Link, ToggleButton, ToggleButtonGroup, Tooltip, LinearProgress,
+  Link, ToggleButton, ToggleButtonGroup, Tooltip, LinearProgress, TextField,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import EventRepeatIcon from '@mui/icons-material/EventRepeatOutlined'
+import HelpIcon from '@mui/icons-material/HelpOutlineOutlined'
 import StatTile from '../components/StatTile.jsx'
 import Markdown from '../components/Markdown.jsx'
 import FollowUp, { ago } from '../components/FollowUp.jsx'
@@ -57,7 +58,10 @@ const ProjectLink = ({ p, onOpen }) => (
 /* --------------------------------------------------------------- counts */
 
 export function ActiveCard({ ctx, f }) {
-  const { total, active } = projectCounts(ctx.plan.projects)
+  const week = ctx.now?.week
+  const {
+    total, active, forced, byDates,
+  } = projectCounts(ctx.plan.projects, week || undefined)
   return (
     <CardFrame {...f} bare title="Active projects">
       <StatTile
@@ -65,9 +69,9 @@ export function ActiveCard({ ctx, f }) {
         value={active}
         unit={`of ${total} in the register`}
         context={active
-          ? `${total - active} not active · set on the Timeline`
-          : 'None marked yet — switch projects on in the Timeline'}
-        help="A project is active when an administrator switches it on beside its name on the Timeline. The total counts every project in the register, active or not."
+          ? `${byDates} by their dates${forced ? ` · ${forced} switched on` : ''} · ${week ? `week ${weekNo(week)}` : 'this week'}`
+          : 'No project’s dates cover this week — switch one on in the Timeline'}
+        help="A project is active in a week when its start-to-due dates cover that week. An administrator can override that either way on the Timeline or the project page. The total counts every project in the register, active or not."
       />
     </CardFrame>
   )
@@ -153,7 +157,8 @@ export function OwnersCard({ ctx, f }) {
           {count === 0 && (
             <Box sx={{ py: 1 }}>
               <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-                No project is marked active yet. Switch projects on in the Timeline — the switch beside each project&rsquo;s name.
+                No project is active this week: none has start and due dates covering week {weekNo(ctx.now.week)}, and none is
+                switched on. Give projects their dates, or set one to &ldquo;Always active&rdquo; on the Timeline.
               </Typography>
               <Button size="small" variant="outlined" onClick={() => ctx.onGoTo?.('timeline')}>Open the Timeline</Button>
             </Box>
@@ -283,19 +288,63 @@ export function TeamWeekCard({ ctx, f }) {
   )
 }
 
+/*
+ * A decision a member asked for on a Jira task. "Decided" takes a line on
+ * what was decided, which is also written on the task in Jira.
+ */
+function TaskDecision({ d, onDecide }) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try { await onDecide(d.id, note) } catch (e) { setError(e.message); setBusy(false) }
+  }
+  return (
+    <Box data-decision={d.jiraKey} sx={{ p: 1, borderRadius: '10px', border: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+        <IconTile icon={HelpIcon} color="#c98b8b" size={30} />
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+            {d.jiraKey}{d.summary ? ` — ${d.summary}` : ''}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+            {d.nick} asks: “{d.text}”
+          </Typography>
+        </Box>
+        {!open && <Button size="small" onClick={() => setOpen(true)}>Decided</Button>}
+      </Box>
+      {open && (
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <TextField size="small" fullWidth placeholder="What was decided (also written on the task in Jira)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <Button size="small" variant="contained" onClick={save} disabled={busy || !note.trim()}>Save</Button>
+          <Button size="small" onClick={() => setOpen(false)}>Cancel</Button>
+        </Box>
+      )}
+      {error && <Typography variant="caption" sx={{ color: 'error.main' }}>{error}</Typography>}
+    </Box>
+  )
+}
+
 export function DecisionsCard({ ctx, f }) {
   const pending = ctx.pending || []
+  const asked = ctx.decisions || []
+  const parts = [
+    pending.length ? `${pending.length} request${pending.length === 1 ? '' : 's'} to move a project's date` : null,
+    asked.length ? `${asked.length} decision${asked.length === 1 ? '' : 's'} asked for on tasks` : null,
+  ].filter(Boolean)
   return (
     <CardFrame
       {...f}
       label="waiting for your decision"
       title="Waiting for your decision"
-      sub={pending.length
-        ? `${pending.length} request${pending.length === 1 ? '' : 's'} to move a project's date`
-        : 'No date changes are waiting.'}
+      sub={parts.length ? parts.join(' · ') : 'No date changes or decisions are waiting.'}
       action={pending.length > 0 && <Button size="small" onClick={() => ctx.onGoTo?.('weekly')}>Decide</Button>}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        {asked.map((d) => <TaskDecision key={d.id} d={d} onDecide={ctx.onDecide} />)}
         {pending.map((p) => (
           <Box
             key={p.id}
@@ -320,27 +369,45 @@ export function DecisionsCard({ ctx, f }) {
   )
 }
 
+/** When the next summary is due to be written, after `now`, for a week's answer. */
+function nextSummary(week) {
+  if (!week?.deadlines) return null
+  const slots = [week.deadlines.planDue, week.deadlines.reportDue, week.deadlines.secondChance]
+  const next = slots.find((t) => t > week.now)
+  return next ? bangkokTime(next) : 'Monday 08:00'
+}
+
 export function SummaryCard({ ctx, f }) {
-  const latest = ctx.summary?.summaries?.[0]
+  // This week's newest; failing that, last week's, said as such.
+  const own = ctx.summary?.summaries?.[0] || null
+  const older = !own ? ctx.prevSummary?.summaries?.[0] || null : null
+  const latest = own || older
+  const when = (x) => new Date(x.writtenAt).toLocaleString('en-GB', {
+    timeZone: 'Asia/Bangkok', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  })
+  const next = nextSummary(ctx.now)
+  let sub
+  if (ctx.aiOn && own) sub = `Written by AI ${when(own)} ${WHEN[own.trigger] || ''}`
+  else if (ctx.aiOn && older) sub = `Last week’s, written ${when(older)} · this week’s is written after ${next}`
+  else if (ctx.aiOn) sub = 'Written by itself after Monday 08:00, Friday 15:00 and Sunday 15:00.'
   return (
-    <CardFrame
-      {...f}
-      label="the week, summarised"
-      title="The week, summarised"
-      sub={!ctx.aiOn
-        ? undefined
-        : latest
-          ? `Written by AI ${new Date(latest.writtenAt).toLocaleString('en-GB', {
-            timeZone: 'Asia/Bangkok', weekday: 'short', hour: '2-digit', minute: '2-digit',
-          })} ${WHEN[latest.trigger] || ''}`
-          : 'Written by itself after Monday 08:00, Friday 15:00 and Sunday 15:00.'}
-    >
+    <CardFrame {...f} label="the week, summarised" title="The week, summarised" sub={sub}>
       {!ctx.aiOn && (
-        <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-          The AI is not switched on. Add LOTUS_API_KEY on Render, then use Test the AI on the Access tab.
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          The AI is not switched on, so there is no summary. Add LOTUS_API_KEY on Render, then press Test the AI on
+          the Access tab.
         </Typography>
       )}
       {ctx.aiOn && latest && <Markdown text={latest.text} dense />}
+      {ctx.aiOn && !latest && (
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          {ctx.summary === undefined
+            ? 'Loading the summary…'
+            : ctx.summary === null
+              ? 'The summary could not be read just now.'
+              : `No summary yet${ctx.now ? ` for ${weekTitle(ctx.now.week)}` : ''}. The AI writes one by itself after each deadline — the next after ${next || 'Monday 08:00'} — and emails it to the administrators.`}
+        </Typography>
+      )}
     </CardFrame>
   )
 }

@@ -12,6 +12,7 @@ import * as reminders from './reminders.js'
 import * as llm from './llm.js'
 import * as ai from './ai.js'
 import * as manager from './manager.js'
+import * as jiraWeek from './jiraWeek.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -472,6 +473,47 @@ app.post('/api/weekly/proposals/:id/reject', adminOnly, async (req, res) => {
   const [proposal] = await withNames([r.proposal])
   return res.json({ proposal })
 })
+
+/*
+ * A MEMBER'S WEEK FROM JIRA: their tasks for it, an update per task (posted
+ * to the task in Jira), new tasks and dates written to Jira, and a new project
+ * created as an epic. Every route works on the signed-in person's own tasks:
+ * the person comes from the account, and the task must be assigned to them in
+ * Jira — nobody can post on somebody else's ticket by changing a field.
+ */
+const answer = (res, r, ok = 200) => {
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r?.error) return res.status(r.status || 400).json(r)
+  return res.status(ok).json(r)
+}
+const jiraWrap = (fn) => async (req, res) => {
+  try {
+    return answer(res, await fn(req))
+  } catch (e) {
+    return res.status(e.statusCode && e.statusCode < 500 ? e.statusCode : 502).json({ error: e.message || 'Jira request failed.' })
+  }
+}
+
+app.get('/api/weekly/:week/jira', jiraWrap(async (req) => {
+  const week = req.params.week === 'current' ? weekOf() : req.params.week
+  if (!isWeek(week)) return { status: 400, error: 'A week is named by its Monday, as YYYY-MM-DD.' }
+  if (!req.me.person) return { jira: 'unlinked', week }
+  return jiraWeek.weekFor(req.me.person, req.me.email, week)
+}))
+app.post('/api/weekly/:week/jira/plan', jiraWrap((req) => jiraWeek.confirmPlan(req.params.week, req.me)))
+app.post('/api/weekly/:week/jira/:key/update', jiraWrap((req) => jiraWeek.submit(req.params.week, req.me, { ...req.body, jiraKey: req.params.key })))
+app.post('/api/jira/tasks', jiraWrap((req) => jiraWeek.newTask(req.me, req.body || {})))
+app.put('/api/jira/tasks/:key/dates', jiraWrap((req) => jiraWeek.planTask(req.me, req.params.key, req.body || {})))
+app.post('/api/jira/projects', jiraWrap((req) => jiraWeek.newProject(req.me, req.body || {})))
+
+/* "A decision is needed" raised on a task: an administrator's list, a member's own. */
+app.get('/api/decisions', jiraWrap(async (req) => {
+  const admin = seesAll(req)
+  if (!admin && !req.me.person) return { decisions: [] }
+  const rows = await jiraWeek.listDecisions({ status: req.query.status || 'open', person: admin ? undefined : req.me.person })
+  return rows === store.UNAVAILABLE ? rows : { decisions: rows }
+}))
+app.post('/api/decisions/:id/decide', adminOnly, jiraWrap((req) => jiraWeek.resolveDecision(req.params.id, req.body?.note, req.me.email)))
 
 /* The weekly story of every project, for the Timeline: one's own, or everybody's for an administrator. */
 app.get('/api/weekly/projects', async (req, res) => {
