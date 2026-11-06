@@ -16,6 +16,7 @@ import AiAssist from './AiAssist.jsx'
 import { Pill } from './Brand.jsx'
 import { ago } from './FollowUp.jsx'
 import { pulseSx } from './pulse.js'
+import { mentionsHold } from '../lib/hold.js'
 
 /**
  * A MEMBER'S WEEK, FROM JIRA.
@@ -49,6 +50,23 @@ function TaskCard({
   const u = task.update
   const [progress, setProgress] = useState(u?.progress || '')
   const [done, setDone] = useState(u ? u.done : null)
+  // On hold: picked by hand, or for them when the update says so ("this
+  // project is hold"). A hand-picked choice is never overruled.
+  const [hold, setHold] = useState(!!u?.hold)
+  const [holdAuto, setHoldAuto] = useState(false)
+  const [picked, setPicked] = useState(!!u)
+  useEffect(() => {
+    if (picked) return
+    const says = mentionsHold(progress)
+    if (says && !hold) { setHold(true); setDone(false); setHoldAuto(true) }
+    if (!says && hold && holdAuto) { setHold(false); setDone(null); setHoldAuto(false) }
+  }, [progress, picked, hold, holdAuto])
+  const choose = (v) => {
+    setPicked(true)
+    setHoldAuto(false)
+    setHold(v === 'hold')
+    setDone(v === 'yes')
+  }
   const [reason, setReason] = useState(u?.reason || '')
   const [blocker, setBlocker] = useState(u?.blocker || '')
   const [decision, setDecision] = useState(!!u?.decision)
@@ -79,12 +97,16 @@ function TaskCard({
     setProblems([])
     try {
       const r = await api.submitTaskUpdate(week, task.key, {
-        progress, done, reason, blocker, decision, decisionText, images,
+        progress, done, hold, reason, blocker, decision, decisionText, images,
       })
       const j = r.update?.jira || {}
       setImages([])
       setMsg(j.state === 'posted'
-        ? { tone: 'success', text: `Submitted and posted to ${task.key} in Jira${j.done ? ` — moved to ${j.done}` : ''}.` }
+        ? {
+          tone: String(j.hold || '').startsWith('not moved') ? 'warning' : 'success',
+          text: `Submitted and posted to ${task.key} in Jira${j.done ? ` — moved to ${j.done}` : ''}${
+            j.hold ? (String(j.hold).startsWith('not moved') ? `, but not put on hold: ${j.hold.replace(/^not moved: /, '')}` : ` — status ${j.hold}`) : ''}.`,
+        }
         : { tone: 'warning', text: `Submitted here, but not posted to Jira: ${j.error || 'writing to Jira is switched off.'}` })
       onSaved?.()
     } catch (e) {
@@ -147,6 +169,7 @@ function TaskCard({
           {task.epic && <Pill label="Epic" tone="info" title="A project in Jira with you as PIC" />}
           {overdue && <Pill label="Past due" tone="bad" />}
           {task.done && <Pill label="Done in Jira" tone="good" />}
+          {!task.done && /hold|paused|suspended|parked/i.test(task.status || '') && <Pill label="On hold in Jira" tone="warn" />}
           {u && <Pill label={`Updated ${ago(u.submittedAt)}`} tone={posted ? 'info' : 'warn'} title={posted ? 'Posted to Jira' : (u.jira?.error || 'Not posted to Jira')} />}
         </Box>
       </Box>
@@ -196,21 +219,37 @@ function TaskCard({
             <ToggleButtonGroup
               size="small"
               exclusive
-              value={done === null ? null : done ? 'yes' : 'no'}
-              onChange={(_e, v) => v && setDone(v === 'yes')}
+              value={hold ? 'hold' : done === null ? null : done ? 'yes' : 'no'}
+              onChange={(_e, v) => v && choose(v)}
               disabled={!canWrite}
               aria-label={`finished ${task.key}`}
             >
               <ToggleButton value="yes">Finished</ToggleButton>
               <ToggleButton value="no">Not finished</ToggleButton>
+              <ToggleButton value="hold">On hold</ToggleButton>
             </ToggleButtonGroup>
             <FormControlLabel
               control={<Checkbox size="small" checked={decision} onChange={(e) => setDecision(e.target.checked)} disabled={!canWrite} />}
               label={<Typography variant="body2" sx={{ color: decision ? 'error.light' : 'text.primary' }}>Decision needed?</Typography>}
             />
           </Box>
+          {hold && canWrite && (
+            <Typography variant="caption" sx={{ color: 'warning.light', mt: -0.5 }} data-hold-note>
+              {holdAuto ? 'Your update says it is on hold, so On hold is picked. ' : ''}
+              Submit moves {task.key} to its Hold status in Jira.
+            </Typography>
+          )}
           {done === false && (
-            <TextField size="small" label="Why isn't it finished?" value={reason} onChange={(e) => setReason(e.target.value)} disabled={!canWrite} multiline maxRows={4} fullWidth />
+            <TextField
+              size="small"
+              label={hold ? 'Why is it on hold? (optional)' : "Why isn't it finished?"}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              disabled={!canWrite}
+              multiline
+              maxRows={4}
+              fullWidth
+            />
           )}
           <TextField size="small" label="Blocker (optional)" value={blocker} onChange={(e) => setBlocker(e.target.value)} disabled={!canWrite} multiline maxRows={4} fullWidth />
           {decision && (
@@ -222,7 +261,7 @@ function TaskCard({
                 {u ? 'Submit again' : 'Submit'}
               </Button>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {writable ? `Posts a comment on ${task.key} in Jira${done ? ' and moves it to Done' : ''}.` : 'Kept here; writing to Jira is switched off on the server.'}
+                {writable ? `Posts a comment on ${task.key} in Jira${done ? ' and moves it to Done' : hold ? ' and puts it on hold' : ''}.` : 'Kept here; writing to Jira is switched off on the server.'}
               </Typography>
             </Box>
           )}

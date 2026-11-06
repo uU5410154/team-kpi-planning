@@ -18,6 +18,7 @@ import puppeteer from 'puppeteer-core'
 import { weekOf, addWeeks } from '../src/lib/weekly.js'
 import { coversWeek, taskSpan } from '../server/jira.js'
 import { commentText } from '../server/jiraWeek.js'
+import { mentionsHold } from '../src/lib/hold.js'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -133,9 +134,12 @@ const fake = createServer(async (req, res) => {
   }
   k = m(/^\/rest\/api\/3\/issue\/([A-Z]+-\d+)\/transitions$/)
   if (k) {
-    if (req.method === 'GET') return send(200, { transitions: [{ id: '21', to: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } }, { id: '31', to: { name: 'Done', statusCategory: { key: 'done' } } }] })
+    if (req.method === 'GET') return send(200, { transitions: [{ id: '21', to: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } }, { id: '31', to: { name: 'Done', statusCategory: { key: 'done' } } }, { id: '41', name: 'Put on hold', to: { name: 'On Hold', statusCategory: { key: 'indeterminate' } } }] })
     writes.push({ kind: 'transition', key: k[1], id: json().transition?.id })
-    const i = issues.get(k[1]); if (i) { i.status = 'Done'; i.cat = 'done' }
+
+    const tid = json().transition?.id
+    const i = issues.get(k[1])
+    if (i && tid === '41') { i.status = 'On Hold'; i.cat = 'indeterminate' } else if (i) { i.status = 'Done'; i.cat = 'done' }
     return send(204)
   }
   k = m(/^\/rest\/api\/3\/issue\/([A-Z]+-\d+)$/)
@@ -282,6 +286,18 @@ try {
   const again = (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, james)).body
   check('the week now shows each task’s update', again.tasks.find((t) => t.key === 'FNP-2001')?.update?.done === true
     && again.tasks.find((t) => t.key === 'FNP-2002')?.update?.reason === 'Budget file late from FP&A')
+
+  // ON HOLD: read from what they wrote, and the item moved to Hold in Jira.
+  check('"HOLD" IN AN UPDATE IS READ AS ON HOLD', ['This project is hold', 'Put on hold until Q1', 'โปรเจกต์นี้โฮลด์ไว้ก่อน', 'ระงับไว้ก่อน'].every(mentionsHold)
+    && !['Reconciled the forecast', 'No longer on hold, resumed work', 'Set the threshold', 'Household data loaded'].some(mentionsHold))
+  put('FNP-2012', { summary: 'Vendor portal phase 2', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
+  const held = await call('POST', `/api/weekly/${WEEK}/jira/FNP-2012/update`, { progress: 'This project is hold', hold: true }, james)
+  check('ON HOLD IS SUBMITTED WITHOUT A REASON, AND MOVES THE ITEM TO HOLD IN JIRA', held.status === 200 && held.body.update?.hold === true
+    && held.body.update.done === false && held.body.update.jira?.hold === 'On Hold'
+    && writes.some((x) => x.kind === 'transition' && x.key === 'FNP-2012' && x.id === '41'), JSON.stringify(held.body).slice(0, 200))
+  check('  and the comment says On hold', writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2012' && /On hold/.test(JSON.stringify(x.body))))
+  issues.delete('FNP-2012')
+  await D.collection('kpi_task_updates').deleteOne({ _id: `${WEEK}.james.FNP-2012` })
   const adhoc = await call('PUT', `/api/weekly/${WEEK}/mine`, { mode: 'jira', focus: '', tasks: entry2.tasks, unplanned: [{ title: 'Audit request', effort: 0.5 }] }, james)
   const entry3 = await D.collection('kpi_weekly').findOne({ week: WEEK, person: 'james' })
   check('ADHOC WORK SAVES BESIDE THE JIRA TASKS, KEEPING THEM', adhoc.status === 200 && entry3.unplanned?.[0]?.title === 'Audit request'
@@ -363,6 +379,21 @@ try {
     await sleep(700)
     check('  and pressing it puts them in that task\'s progress box',
       await pg.evaluate(() => document.activeElement?.closest('[data-jira-task]')?.getAttribute('data-jira-task') === 'FNP-2010'))
+    // Writing "hold" picks On hold for them; taking it out un-picks it.
+    await pg.keyboard.type('This project is hold')
+    await sleep(250)
+    const holdOn = await pg.evaluate(() => {
+      const card = document.querySelector('[data-jira-task="FNP-2010"]')
+      const b = [...card.querySelectorAll('button')].find((x) => x.textContent.trim() === 'On hold')
+      return { pressed: b?.getAttribute('aria-pressed'), note: card.querySelector('[data-hold-note]')?.textContent || '' }
+    })
+    check('  WRITING "HOLD" PICKS ON HOLD, AND SAYS IT WILL MOVE IN JIRA', holdOn.pressed === 'true' && /Hold status in Jira/.test(holdOn.note), JSON.stringify(holdOn))
+    for (let i = 0; i < 'This project is hold'.length; i++) await pg.keyboard.press('Backspace')
+    await sleep(250)
+    check('  and taking it out un-picks it', await pg.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-jira-task="FNP-2010"] button')].find((x) => x.textContent.trim() === 'On hold')
+      return b?.getAttribute('aria-pressed') === 'false'
+    }))
     // Fill in the card and submit.
     await pg.evaluate(() => {
       const card = document.querySelector('[data-jira-task="FNP-2010"]')

@@ -1,3 +1,5 @@
+import { isHoldStatus } from '../src/lib/hold.js'
+
 /**
  * Jira, read-only, from the server.
  *
@@ -777,6 +779,7 @@ export async function issueOwner(key) {
     summary: f.summary || '',
     accountId: f.assignee?.accountId || null,
     done: f.status?.statusCategory?.key === 'done',
+    status: f.status?.name || '',
     type: f.issuetype?.name || '',
     parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '' } : null,
   }
@@ -906,6 +909,22 @@ export async function attach(key, files) {
 }
 
 /** Move an issue to whichever status its workflow calls done. */
+/*
+ * ON HOLD: through the transition whose status reads as on hold ("On Hold",
+ * "Hold", "Paused"…). A workflow without one says so, and nothing moves.
+ */
+export async function markHold(key) {
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  const k = String(key || '').trim().toUpperCase()
+  const data = await call(`/rest/api/3/issue/${encodeURIComponent(k)}/transitions`)
+  const to = (data?.transitions || []).find((t) => isHoldStatus(t.to?.name) || isHoldStatus(t.name))
+  if (!to) return { moved: false, reason: 'its Jira workflow has no Hold status to move it to.' }
+  await call(`/rest/api/3/issue/${encodeURIComponent(k)}/transitions`, { method: 'POST', body: { transition: { id: to.id } } })
+  cache.delete(k)
+  return { moved: true, status: to.to?.name || 'On hold' }
+}
+
 export async function markDone(key) {
   if (!status().configured) return UNAVAILABLE
   if (!writable()) throw refuseWrites()

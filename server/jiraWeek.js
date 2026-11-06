@@ -7,6 +7,7 @@ import * as mail from './mail.js'
 import * as manager from './manager.js'
 import { weekTitle, canWriteWeek, isWeek } from '../src/lib/weekly.js'
 import { projectFromEpic } from '../src/lib/jiraMerge.js'
+import { isHoldStatus } from '../src/lib/hold.js'
 
 /**
  * A MEMBER'S WEEK, RUN FROM JIRA.
@@ -123,6 +124,7 @@ export async function weekFor(person, email, week) {
       update: u ? {
         progress: u.progress,
         done: u.done,
+        hold: !!u.hold,
         reason: u.reason,
         blocker: u.blocker,
         decision: u.decision,
@@ -170,9 +172,9 @@ const clip = (v, n) => String(v ?? '').slice(0, n).trim()
 export function commentText({ nick, week, u, attachments }) {
   return [
     `**Weekly update — ${weekTitle(week)}, from ${nick}** (posted by the F&A KPI app)`,
-    `**Status:** ${u.done ? 'Finished' : 'Not finished'}`,
+    `**Status:** ${u.done ? 'Finished' : u.hold ? 'On hold' : 'Not finished'}`,
     u.progress ? `**This week:** ${u.progress}` : null,
-    !u.done && u.reason ? `**Why not finished:** ${u.reason}` : null,
+    !u.done && u.reason ? `**${u.hold ? 'Why on hold' : 'Why not finished'}:** ${u.reason}` : null,
     u.blocker ? `**Blocker:** ${u.blocker}` : null,
     u.decision ? `**Decision needed:** ${u.decisionText}` : null,
     attachments.length ? `**Attached:** ${attachments.join(', ')}` : null,
@@ -197,7 +199,9 @@ export async function submit(week, me, body, now = Date.now()) {
   const key = clip(body?.jiraKey, 40).toUpperCase()
   const u = {
     progress: clip(body?.progress, 4000),
-    done: body?.done === true ? true : body?.done === false ? false : null,
+    done: body?.done === true ? true : body?.done === false || body?.hold === true ? false : null,
+    // On hold is a kind of not finished: the work has stopped on purpose.
+    hold: body?.hold === true && body?.done !== true,
     reason: clip(body?.reason, 2000),
     blocker: clip(body?.blocker, 2000),
     decision: body?.decision === true,
@@ -206,7 +210,7 @@ export async function submit(week, me, body, now = Date.now()) {
   const problems = []
   if (!u.progress) problems.push('Write what happened on it this week.')
   if (u.done === null) problems.push('Say whether it is finished.')
-  if (u.done === false && !u.reason) problems.push('Say why it is not finished.')
+  if (u.done === false && !u.hold && !u.reason) problems.push('Say why it is not finished.')
   if (u.decision && !u.decisionText) problems.push('Say what decision is needed.')
   const imgs = imagesOf(body?.images)
   if (imgs.error) problems.push(imgs.error)
@@ -251,6 +255,12 @@ export async function submit(week, me, body, now = Date.now()) {
       const d = await jira.markDone(key)
       result.done = d.moved ? d.status : `not moved: ${d.reason}`
     }
+    if (u.hold && !issue.done && !isHoldStatus(issue.status)) {
+      const h = await jira.markHold(key)
+      result.hold = h.moved ? h.status : `not moved: ${h.reason}`
+    } else if (u.hold) {
+      result.hold = issue.status || 'On hold'
+    }
   } catch (e) {
     result.state = e.writesOff ? 'off' : 'failed'
     result.error = e.message
@@ -270,7 +280,7 @@ export async function submit(week, me, body, now = Date.now()) {
     expected: issue.due || null,
     done: u.done,
     pct: u.done ? 100 : null,
-    blocker: u.blocker || (u.done ? '' : u.reason),
+    blocker: u.blocker || (u.done ? '' : u.reason || (u.hold ? 'On hold' : '')),
     progress: u.progress,
     reason: u.reason,
     decision: u.decision,
