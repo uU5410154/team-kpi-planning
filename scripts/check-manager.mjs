@@ -417,6 +417,17 @@ try {
     check('  the side menu shows their own progress, not the team’s', wk.includes('Your projects, finished') && !wk.includes('Saving hours, committed'))
     const tabsM = await m.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim()))
     check('  the scorecard tab is theirs', tabsM.includes('My scorecard') && !tabsM.includes('Overall team'), tabsM.join(' | '))
+    // Clicking a task's project field opens the list on their own projects.
+    await m.evaluate(() => [...document.querySelectorAll('label')].find((l) => /^Project/.test(l.textContent))?.parentElement.querySelector('input')?.focus())
+    await m.evaluate(() => [...document.querySelectorAll('label')].find((l) => /^Project/.test(l.textContent))?.parentElement.querySelector('input')?.click())
+    await m.waitForSelector('[role="listbox"]', { timeout: 5000 }).catch(() => {})
+    const list = await m.evaluate(() => {
+      const box = document.querySelector('[role="listbox"]')
+      return box ? [...box.querySelectorAll('.MuiAutocomplete-groupLabel, [role="option"]')].slice(0, 6).map((x) => x.textContent.trim()) : []
+    })
+    check('THE PROJECT LIST POPS UP ON THEIR OWN PROJECTS FIRST',
+      /^Your projects \(you are PIC\)/.test(list[0] || '') && list.slice(1).some((x) => x.startsWith('FNP-379')), list.join(' | '))
+    await m.keyboard.press('Escape')
 
     await m.goto(`${base}/#team`, { waitUntil: 'networkidle0' })
     await m.waitForFunction(() => document.body.innerText.includes('My scorecard'), { timeout: 10000 }).catch(() => {})

@@ -215,6 +215,10 @@ const blankTask = () => ({
 
 /* ------------------------------------------------------------ one task */
 
+/** The heading a project is listed under in the project picker. */
+const PROJECT_GROUP = { pic: 'Your projects (you are PIC)', helping: 'Projects you help on', other: 'Other projects' }
+const projectGroup = (p) => PROJECT_GROUP[p.mine] || PROJECT_GROUP.other
+
 function TaskEditor({
   task, index, projects, projectByKey, onChange, onRemove, readOnly, showReport, jiraTasks, onNeedJira, jiraHint,
   proposal, onShowTimeline, aiOn,
@@ -264,6 +268,9 @@ function TaskEditor({
         <Autocomplete
           size="small"
           options={projects}
+          groupBy={projectGroup}
+          openOnFocus
+          autoHighlight
           value={project || null}
           disabled={readOnly}
           onChange={(_e, v) => set({ projectKey: v?.key || null, jiraKey: null })}
@@ -593,12 +600,23 @@ export default function Weekly({
     api.jiraStatus().then(setJira).catch(() => setJira({ configured: false }))
   }, [admin, loadPending])
 
-  const projects = useMemo(
-    () => (plan?.projects || []).filter((p) => !p.deleted).map((p) => ({
-      key: p.key, summary: p.summary || '', due: p.due || null, jiraKey: p.jiraKey || null,
-    })),
-    [plan],
-  )
+  /*
+   * The projects a task can be on. The person's own come first and are what
+   * the list opens on: the ones they are PIC of, then the ones they help on.
+   * Everything else follows, since work on somebody else's project still
+   * counts.
+   */
+  const myId = me?.person || null
+  const projects = useMemo(() => {
+    const rank = { pic: 0, helping: 1, other: 2 }
+    return (plan?.projects || []).filter((p) => !p.deleted).map((p) => {
+      const mine = !myId ? 'other' : p.pic === myId ? 'pic'
+        : (p.contributors || []).some((c) => c.person === myId) ? 'helping' : 'other'
+      return {
+        key: p.key, summary: p.summary || '', due: p.due || null, jiraKey: p.jiraKey || null, mine,
+      }
+    }).sort((a, b) => rank[a.mine] - rank[b.mine])
+  }, [plan, myId])
   const projectByKey = useMemo(() => Object.fromEntries(projects.map((p) => [p.key, p])), [projects])
 
   const load = useCallback(async (w) => {
@@ -1011,6 +1029,9 @@ export default function Weekly({
                   <Autocomplete
                     size="small"
                     options={projects}
+                    groupBy={projectGroup}
+                    openOnFocus
+                    autoHighlight
                     value={u.projectKey ? projectByKey[u.projectKey] || null : null}
                     disabled={readOnly}
                     onChange={(_e, v) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, projectKey: v?.key || null } : x)) })}
