@@ -885,6 +885,37 @@ export function adf(text) {
   return { type: 'doc', version: 1, content: String(text).split('\n').map(para) }
 }
 
+/*
+ * EACH WEEKLY UPDATE, ADDED TO THE ISSUE'S DESCRIPTION.
+ *
+ * The owner's rule (2026-11-06): appended to the end, its first line starting
+ * with the date as dd-mm-yyyy. What is already in the description is never
+ * changed; an empty description becomes the entry.
+ */
+export function appendWeeklyEntry(doc, text) {
+  const old = doc && doc.type === 'doc' && Array.isArray(doc.content) ? doc.content : []
+  const entry = adf(text).content
+  return { type: 'doc', version: 1, content: old.length ? [...old, { type: 'paragraph' }, ...entry] : entry }
+}
+
+/** dd-mm-yyyy, in Bangkok. */
+export function ddmmyyyy(at = Date.now()) {
+  const d = new Date(new Date(at).getTime() + 7 * 3600_000)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()}`
+}
+
+export async function addToDescription(key, text) {
+  if (!status().configured) return UNAVAILABLE
+  if (!writable()) throw refuseWrites()
+  const k = String(key || '').trim().toUpperCase()
+  const raw = await call(`/rest/api/3/issue/${encodeURIComponent(k)}?fields=description`)
+  const doc = appendWeeklyEntry(raw?.fields?.description || null, text)
+  await call(`/rest/api/3/issue/${encodeURIComponent(k)}`, { method: 'PUT', body: { fields: { description: doc } } })
+  cache.delete(k)
+  return { updated: true }
+}
+
 /** A comment on an issue, from plain text. */
 export async function addComment(key, text) {
   if (!status().configured) return UNAVAILABLE

@@ -169,6 +169,15 @@ function imagesOf(list) {
 const clip = (v, n) => String(v ?? '').slice(0, n).trim()
 
 /** The comment that goes onto the Jira task. */
+/**
+ * The update as it is added to the issue's description: the date first, as
+ * dd-mm-yyyy, then the same lines as the comment.
+ */
+export function descriptionText({ nick, week, u, attachments, at }) {
+  const lines = commentText({ nick, week, u, attachments }).split('\n').slice(1)
+  return [`**${jira.ddmmyyyy(at)}** — ${weekTitle(week)} update from ${nick}`, ...lines].join('\n')
+}
+
 export function commentText({ nick, week, u, attachments }) {
   return [
     `**Weekly update — ${weekTitle(week)}, from ${nick}** (posted by the F&A KPI app)`,
@@ -251,6 +260,17 @@ export async function submit(week, me, body, now = Date.now()) {
     result.attachments = names
     const cm = await jira.addComment(key, commentText({ nick, week, u, attachments: names }))
     result.commentId = cm?.id || null
+    // And added to the description, so the issue itself says where it stands. A field
+    // Jira will not let the app edit is reported, and does not stop the rest.
+    try {
+      await jira.addToDescription(key, descriptionText({
+        nick, week, u, attachments: names, at: now,
+      }))
+      result.description = 'updated'
+    } catch (e) {
+      if (e.writesOff) throw e
+      result.description = `not updated: ${e.message}`
+    }
     if (u.done && !issue.done) {
       const d = await jira.markDone(key)
       result.done = d.moved ? d.status : `not moved: ${d.reason}`

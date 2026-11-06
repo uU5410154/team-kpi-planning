@@ -103,9 +103,10 @@ function TaskCard({
       setImages([])
       setMsg(j.state === 'posted'
         ? {
-          tone: String(j.hold || '').startsWith('not moved') ? 'warning' : 'success',
-          text: `Submitted and posted to ${task.key} in Jira${j.done ? ` — moved to ${j.done}` : ''}${
-            j.hold ? (String(j.hold).startsWith('not moved') ? `, but not put on hold: ${j.hold.replace(/^not moved: /, '')}` : ` — status ${j.hold}`) : ''}.`,
+          tone: String(j.hold || '').startsWith('not moved') || String(j.description || '').startsWith('not updated') ? 'warning' : 'success',
+          text: `Submitted and posted to ${task.key} in Jira (comment${j.description === 'updated' ? ' and description' : ''})${j.done ? ` — moved to ${j.done}` : ''}${
+            j.hold ? (String(j.hold).startsWith('not moved') ? `, but not put on hold: ${j.hold.replace(/^not moved: /, '')}` : ` — status ${j.hold}`) : ''}${
+            String(j.description || '').startsWith('not updated') ? `. The description was not changed — ${j.description.replace(/^not updated: /, '')}` : ''}.`,
         }
         : { tone: 'warning', text: `Submitted here, but not posted to Jira: ${j.error || 'writing to Jira is switched off.'}` })
       onSaved?.()
@@ -273,7 +274,7 @@ function TaskCard({
                 {u ? 'Submit again' : 'Submit'}
               </Button>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {writable ? `Posts a comment on ${task.key} in Jira${done ? ' and moves it to Done' : hold ? ' and puts it on hold' : ''}.` : 'Kept here; writing to Jira is switched off on the server.'}
+                {writable ? `Posts to ${task.key} in Jira — a comment, and a dated entry added to its description${done ? '; moves it to Done' : hold ? '; puts it on hold' : ''}.` : 'Kept here; writing to Jira is switched off on the server.'}
               </Typography>
             </Box>
           )}

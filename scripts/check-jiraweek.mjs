@@ -16,7 +16,7 @@ import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import puppeteer from 'puppeteer-core'
 import { weekOf, addWeeks } from '../src/lib/weekly.js'
-import { coversWeek, taskSpan } from '../server/jira.js'
+import { coversWeek, taskSpan, appendWeeklyEntry, ddmmyyyy } from '../server/jira.js'
 import { commentText } from '../server/jiraWeek.js'
 import { mentionsHold } from '../src/lib/hold.js'
 
@@ -55,7 +55,7 @@ const ACC = { james: 'acc-james-0001', kade: 'acc-kade-0002' }
 const issues = new Map()
 const put = (key, f) => issues.set(key, { key, ...f })
 put('FNP-2001', { summary: 'Reconcile the forecast', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
-put('FNP-2002', { summary: 'Load last year budget', assignee: ACC.james, parent: 'FNP-877', start: day(LAST, 3), due: day(WEEK, 2), status: 'To Do', cat: 'new' })
+put('FNP-2002', { description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Original scope: load FY25 budget by cost centre.' }] }] }, summary: 'Load last year budget', assignee: ACC.james, parent: 'FNP-877', start: day(LAST, 3), due: day(WEEK, 2), status: 'To Do', cat: 'new' })
 put('FNP-2003', { summary: 'Write the runbook', assignee: ACC.james, parent: 'FNP-379', status: 'To Do', cat: 'new' })
 put('FNP-2004', { summary: 'Demo to FP&A', assignee: ACC.james, parent: 'FNP-379', start: day(NEXT, 1), due: day(NEXT, 2), status: 'To Do', cat: 'new' })
 put('FNP-2005', { summary: 'Kade’s own task', assignee: ACC.kade, parent: 'FNP-267', start: day(WEEK, 0), due: day(WEEK, 4), status: 'To Do', cat: 'new' })
@@ -85,6 +85,7 @@ const asRaw = (i) => ({
     created: '2026-01-01T00:00:00.000+0700',
     updated: '2026-01-01T00:00:00.000+0700',
     resolutiondate: null,
+    description: i.description || null,
   },
 })
 let nextKey = 9001
@@ -148,7 +149,8 @@ const fake = createServer(async (req, res) => {
     if (!i) return send(404, { errorMessages: ['Issue does not exist'] })
     if (req.method === 'PUT') {
       const f = json().fields || {}
-      writes.push({ kind: 'dates', key: k[1], fields: f })
+      writes.push({ kind: 'description' in f ? 'description' : 'dates', key: k[1], fields: f })
+      if ('description' in f) i.description = f.description
       if ('duedate' in f) i.due = f.duedate
       if ('customfield_10015' in f) i.start = f.customfield_10015
       return send(204)
@@ -280,6 +282,20 @@ try {
   check('  no longer open', ((await call('GET', '/api/decisions', undefined, boss)).body.decisions || []).length === 0)
 
   const notDone = await call('POST', `/api/weekly/${WEEK}/jira/FNP-2002/update`, { progress: 'Started the load', done: false, reason: 'Budget file late from FP&A' }, james)
+  const flat = (n) => (n?.text || '') + (n?.content || []).map(flat).join('|')
+  const desc1 = flat(issues.get('FNP-2002').description)
+  const today = ddmmyyyy()
+  check('THE UPDATE IS ADDED TO THE ISSUE\'S DESCRIPTION, AFTER WHAT IS THERE', desc1.startsWith('Original scope: load FY25 budget by cost centre.')
+    && desc1.indexOf(today) > desc1.indexOf('Original scope') && /Started the load/.test(desc1) && notDone.body.update?.jira?.description === 'updated', desc1.slice(0, 240))
+  check(`  its first line starts with the date, dd-mm-yyyy (${today})`, /^\d{2}-\d{2}-\d{4}$/.test(today)
+    && issues.get('FNP-2002').description.content.at(-4)?.content?.[0]?.text === today, JSON.stringify(issues.get('FNP-2002').description.content.at(-4)).slice(0, 160))
+  await call('POST', `/api/weekly/${WEEK}/jira/FNP-2002/update`, { progress: 'Loaded half of it', done: false, reason: 'Budget file late from FP&A' }, james)
+  const desc2 = flat(issues.get('FNP-2002').description)
+  check('  A SECOND SUBMIT ADDS ANOTHER DATED ENTRY; NOTHING EARLIER IS CHANGED', desc2.startsWith(desc1)
+    && (desc2.match(new RegExp(today, 'g')) || []).length === 2 && desc2.indexOf('Loaded half of it') > desc2.indexOf('Started the load'), desc2.slice(0, 300))
+  const fresh = appendWeeklyEntry(null, '**06-11-2026** — first entry')
+  check('  an issue with no description gets the entry as its description', fresh.content.length === 1 && flat(fresh).startsWith('06-11-2026'))
+  check('  dd-mm-yyyy is Bangkok\'s date', ddmmyyyy(Date.parse('2026-11-06T18:30:00Z')) === '07-11-2026' && ddmmyyyy(Date.parse('2026-11-06T16:59:00Z')) === '06-11-2026')
   check('NOT FINISHED, WITH THE REASON', notDone.status === 200 && !writes.some((x) => x.kind === 'transition' && x.key === 'FNP-2002'))
   const entry2 = await D.collection('kpi_weekly').findOne({ week: WEEK, person: 'james' })
   check('  EVERY TASK OF THE WEEK UPDATED: THE REPORT COUNTS AS IN', !!entry2?.reportSubmittedAt && notDone.body.reportIn === true)
