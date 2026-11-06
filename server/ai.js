@@ -73,15 +73,27 @@ export async function write({ kind, field, text, task } = {}) {
   if (kind === 'notes' || kind === 'polish') {
     const what = field === 'blocker'
       ? 'what is blocking a task, and what is needed to unblock it'
-      : 'what this person is focused on this week'
+      : field === 'progress'
+        ? 'this week\'s progress on one Jira item (a task or a project epic), for the manager reading the weekly report'
+        : 'what this person is focused on this week'
+    // The item the text is about, so the AI can write a whole update and not
+    // just echo a five-word note back.
+    const about = [
+      task?.title && `Item: ${clip(task.title, 200)}`,
+      task?.project && `Project: ${clip(task.project, 200)}`,
+      task?.dates && `Dates: ${clip(task.dates, 60)}`,
+      task?.status && `Status they picked: ${clip(task.status, 40)}`,
+    ].filter(Boolean).join('\n')
     const instruction = kind === 'notes'
-      ? `Turn these rough notes into a clear, short update about ${what}, for a manager to read. Keep every fact and name; add nothing that is not in the notes. Plain sentences or a few short bullets, at most 80 words. No heading, no greeting, no preamble.`
-      : `Fix the grammar and make this tighter and clearer, keeping exactly the same meaning and every fact. It is about ${what}. Return only the improved text, no preamble.`
+      ? `Rewrite these rough notes as a clear, complete update about ${what}. Say plainly where it stands this week and what happened, naming the item when that helps. Keep every fact and name; you may use the item details given, but invent no work, numbers, dates or reasons. One to three plain sentences, or a few short bullets — at most 80 words. No heading, no greeting, no preamble.`
+      : `Rewrite this so it reads well to a manager: correct the grammar, make it clear and complete in a professional tone, keeping exactly the same meaning and every fact. It is about ${what}. Return only the improved text, no preamble.`
     const out = await llm.chat([
       { role: 'system', content: `You help members of a finance technology team write their weekly check-in. ${SAME_LANGUAGE}` },
-      { role: 'user', content: `${instruction}\n\n---\n${body}` },
-    ], { temperature: 0.2, maxTokens: 400 })
-    return { text: out.replace(/^["“]|["”]$/g, '').trim().slice(0, 2000) }
+      { role: 'user', content: `${instruction}${about ? `\n\nAbout:\n${about}` : ''}\n\n---\n${body}` },
+    ], { temperature: 0.3, maxTokens: 400 })
+    const text = out.replace(/^["“]|["”]$/g, '').trim().slice(0, 2000)
+    const same = (a) => a.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+    return { text, unchanged: same(text) === same(body) }
   }
   if (kind === 'blocker') {
     const out = await llm.chat([

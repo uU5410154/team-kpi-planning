@@ -28,20 +28,28 @@ export default function AiAssist({
   const [undo, setUndo] = useState(null)
   const [error, setError] = useState(null)
   const [suggestion, setSuggestion] = useState(null)
+  const [note, setNote] = useState(null)
   if (!available || disabled) return null
   const empty = !String(text || '').trim()
 
   const run = async (kind) => {
     setBusy(kind)
     setError(null)
+    setNote(null)
     setSuggestion(null)
     try {
       const r = await api.aiWrite({ kind, field, text, task })
       if (kind === 'blocker') {
         setSuggestion(r)
+      } else if (r.unchanged) {
+        // Said, not silent: a click that changes nothing looks broken.
+        setNote(kind === 'polish'
+          ? 'The AI had nothing to change — it already reads well. Add a little more detail and try again.'
+          : 'The AI had nothing to add from these notes. Write a little more about what happened, then try again.')
       } else {
         setUndo(text)
         onText(r.text)
+        setNote(kind === 'polish' ? 'Polished — read it over before you submit.' : 'Written up — read it over before you submit.')
       }
     } catch (e) {
       setError(e.message)
@@ -71,7 +79,7 @@ export default function AiAssist({
         {undo !== null && !busy && (
           <Button
             size="small"
-            onClick={() => { onText(undo); setUndo(null) }}
+            onClick={() => { onText(undo); setUndo(null); setNote(null) }}
             sx={{ py: 0.1, minHeight: 0, fontSize: '0.74rem' }}
           >
             Undo — put my words back
@@ -82,6 +90,7 @@ export default function AiAssist({
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>Writing… this can take a few seconds.</Typography>
       )}
       {error && <Typography variant="caption" sx={{ color: 'error.main' }}>{error}</Typography>}
+      {note && !busy && <Typography variant="caption" sx={{ color: 'text.secondary' }} data-ai-note>{note}</Typography>}
       {suggestion && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', p: 1, borderRadius: '10px', border: 1, borderColor: 'divider',

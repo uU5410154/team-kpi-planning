@@ -198,7 +198,19 @@ function TaskCard({
             fullWidth
             helperText={canWrite ? 'What you did on it. Links are fine; paste a screenshot straight in.' : undefined}
           />
-          <AiAssist available={aiOn} disabled={!canWrite} field="progress" text={progress} onText={setProgress} />
+          <AiAssist
+            available={aiOn}
+            disabled={!canWrite}
+            field="progress"
+            text={progress}
+            onText={setProgress}
+            task={{
+              title: `${task.key} ${task.summary}${task.epic ? ' (project epic)' : ''}`,
+              project: task.epic ? '' : project,
+              dates: `${task.start || task.sprintStart || '?'} to ${task.due || task.sprintEnd || '?'}`,
+              status: hold ? 'On hold' : done === true ? 'Finished' : done === false ? 'Not finished' : '',
+            }}
+          />
           {images.length > 0 && (
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               {images.map((im, i) => (

@@ -81,6 +81,7 @@ const fake = createServer((req, res) => {
       return reply(`<think>private reasoning</think>I can see: ${sees.join(', ')}. Turns: ${j.messages.length}.`)
     }
     if (/single word/.test(last)) return reply('ok')
+    if (/ECHO-ME/.test(last)) return reply(last.split('---\n').pop())
     return reply(`Polished: ${last.split('---\n').pop()}`)
   })
 })
@@ -155,9 +156,19 @@ try {
   check('  to the model named, without its reasoning preamble',
     sent.body.model === 'default' && sent.body.chat_template_kwargs?.enable_thinking === false)
   check('  ASKED TO KEEP THE MEMBER’S LANGUAGE', /same language/i.test(sent.body.messages[0].content) && /Never translate/.test(sent.body.messages[0].content))
-  check('  and told not to invent', /add nothing that is not in the notes/.test(sent.body.messages[1].content))
+  check('  and told not to invent', /invent no work, numbers, dates or reasons/.test(sent.body.messages[1].content))
   check('polish is its own instruction', (await call('POST', '/api/ai/write', { kind: 'polish', field: 'blocker', text: 'waitng IT' }, james)).status === 200
-    && /Fix the grammar/.test(calls[calls.length - 1].body.messages[1].content))
+    && /correct the grammar/.test(calls[calls.length - 1].body.messages[1].content))
+  // A task's progress: the AI is told which item it is, so a short note
+  // becomes a whole update rather than coming back as it went in.
+  const prog = await call('POST', '/api/ai/write', {
+    kind: 'polish', field: 'progress', text: 'The project is on hold.', task: { title: 'FNP-575 AR MALL QR code payment (project epic)', dates: '2026-05-17 to 2026-11-09', status: 'On hold' },
+  }, james)
+  const asked = calls[calls.length - 1].body.messages[1].content
+  check('A TASK\'S PROGRESS IS WRITTEN UP KNOWING WHICH ITEM IT IS', prog.status === 200 && /progress on one Jira item/.test(asked)
+    && /Item: FNP-575 AR MALL QR code payment/.test(asked) && /Status they picked: On hold/.test(asked) && prog.body.unchanged === false, asked.slice(0, 160))
+  const echo = await call('POST', '/api/ai/write', { kind: 'polish', field: 'progress', text: 'ECHO-ME as it is.' }, james)
+  check('  AND WHEN THE AI CHANGES NOTHING, IT SAYS SO', echo.status === 200 && echo.body.unchanged === true, JSON.stringify(echo.body))
   check('nothing written, nothing asked', (await call('POST', '/api/ai/write', { kind: 'notes', text: '  ' }, james)).status === 400)
   const sug = await call('POST', '/api/ai/write', {
     kind: 'blocker', field: 'blocker', text: 'need a firewall rule for the SFTP', task: { title: 'Bank feed', newDate: '2026-12-01', projectDue: '2026-11-30' },
