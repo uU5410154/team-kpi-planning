@@ -1,668 +1,243 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Box, Grid, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Alert, AlertTitle, ToggleButton, ToggleButtonGroup, Link, Divider, Tooltip,
+  Box, Button, Typography, Menu, MenuItem, ListSubheader, Alert, useMediaQuery, CircularProgress,
 } from '@mui/material'
-import StatTile from '../components/StatTile.jsx'
-import ThisWeek from '../components/ThisWeek.jsx'
-import FolderIcon from '@mui/icons-material/FolderOutlined'
-import {
-  WelcomeBanner, IconTile, PAGE_COLOR, personColor,
-} from '../components/Brand.jsx'
-import { HBar, StackedHBar, GateScatter, Meter } from '../components/Charts.jsx'
-import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
-import {
-  fmtHours, fmtPct, fmtRatio, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths,
-  gateAsHoursPerManday, gateAsPaybackMonths, servesObjective as serves,
-} from '../lib/model.js'
-import { useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles'
+import EditIcon from '@mui/icons-material/DashboardCustomizeOutlined'
+import AddIcon from '@mui/icons-material/Add'
+import GridLayout, { WidthProvider } from 'react-grid-layout'
+import 'react-grid-layout/css/styles.css'
+import 'react-resizable/css/styles.css'
+import * as api from '../lib/api.js'
+import { addWeeks } from '../lib/weekly.js'
+import { CARDS, DEFAULT_LAYOUT, GROUPS } from '../dashboard/cards.js'
+import { DRAG } from '../dashboard/CardFrame.jsx'
+import { ago } from '../components/FollowUp.jsx'
 
-function Section({ title, subtitle, children, action }) {
-  return (
-    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, height: '100%', minWidth: 0 }}>
-      {/* Wraps, so on a phone a view toggle drops under the title instead of
-          squeezing the subtitle into a column three words wide. */}
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 220px', minWidth: 0 }}>
-          <Typography variant="h4">{title}</Typography>
-          {subtitle && (
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
-              {subtitle}
-            </Typography>
-          )}
-        </Box>
-        {action}
-      </Box>
-      {children}
-    </Paper>
-  )
-}
+const Grid = WidthProvider(GridLayout)
+
+/**
+ * THE MANAGER DASHBOARD.
+ *
+ * A board of cards: what is active and what has been updated this week, who
+ * holds which project and where it stands, the weekly check-in, and the year
+ * against its target. An administrator arranges it — adds and removes cards,
+ * drags and resizes them — and saves; every administrator then sees that
+ * arrangement. Until somebody saves one, everybody sees the default.
+ *
+ * On a narrow screen the cards stack in the board's order at their natural
+ * height, and the board cannot be edited there.
+ */
+
+const known = (items) => (items || []).filter((it) => CARDS[it.type])
 
 export default function Dashboard({
-  plan, onGoTo, hello = 'there', aiOn = false, onAsk,
+  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
-  // mixByObjective, not byObjective: this chart asks where the work SITS,
-  // which is the project's own objective. byObjective is the KPI map, and
-  // every saving hour sits on the hours objective there.
-  const { totals, people, projects, quality, mixByObjective: byObjective, settings, finance: fin } = plan
+  const stacked = useMediaQuery(theme.breakpoints.down('md'))
 
-  /*
-   * What each objective is aiming at, and where it stands — each in its own
-   * unit. The hours column beside these says where the WORK sits; these two
-   * say whether the objective is being met, which is a different question for
-   * every one of them.
-   */
-  const objTarget = (o) => {
-    if (o.measure === 'ratio') return fmtRoi(fin.roiGate)
-    if (o.measure === 'hours') return fmtHours(settings.teamTarget ?? totals.guidelineTarget ?? 3000)
-    // The goal for the year, not a readout of where we are.
-    if (o.measure === 'count') return String(fin.objectiveTargets?.[o.id] ?? plan.countByObjective?.[o.id] ?? 0)
-    return o.target
-  }
-  const objActual = (o) => {
-    if (o.measure === 'ratio') return fin.roi == null ? '—' : fmtRoi(fin.roi)
-    if (o.measure === 'hours') return fmtHours(totals.headlineHours)
-    if (o.measure === 'count') return String(plan.countByObjective?.[o.id] ?? 0)
-    return o.target
-  }
-  const objTone = (o) => {
-    if (o.measure === 'ratio') return fin.roi == null ? 'text.disabled' : fin.roi >= fin.roiGate ? STATUS.good : STATUS.critical
-    if (o.measure === 'hours') {
-      const target = settings.teamTarget ?? totals.guidelineTarget ?? 3000
-      return totals.headlineHours >= target ? STATUS.good : STATUS.warning
+  /* ---------------------------------------------------------- the data */
+  // undefined: still loading; null: not available.
+  const [now, setNow] = useState(undefined)
+  const [prev, setPrev] = useState(undefined)
+  const [pending, setPending] = useState([])
+  const [followups, setFollowups] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [trend, setTrend] = useState(null)
+
+  useEffect(() => {
+    let stop = false
+    api.loadWeek('current')
+      .then(async (w) => {
+        if (stop) return
+        setNow(w)
+        try { const p = await api.loadWeek(addWeeks(w.week, -1)); if (!stop) setPrev(p) } catch { if (!stop) setPrev(null) }
+      })
+      .catch(() => { if (!stop) { setNow(null); setPrev(null) } })
+    api.proposals('pending').then((r) => { if (!stop) setPending(r.proposals || []) }).catch(() => {})
+    api.followups('current').then((r) => { if (!stop) setFollowups(r.followups || []) }).catch(() => {})
+    return () => { stop = true }
+  }, [])
+  useEffect(() => {
+    if (!aiOn || !now?.week) return undefined
+    let stop = false
+    api.aiSummary(now.week).then((r) => { if (!stop) setSummary(r) }).catch(() => {})
+    return () => { stop = true }
+  }, [aiOn, now?.week])
+
+  /* -------------------------------------------------------- the layout */
+  const [saved, setSaved] = useState(undefined) // { items, updatedBy, updatedAt } | null (no store)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [addAt, setAddAt] = useState(null)
+  useEffect(() => {
+    api.dashboardLayout().then(setSaved).catch(() => setSaved(null))
+  }, [])
+  const items = useMemo(
+    () => known(editing ? draft : (saved?.items || DEFAULT_LAYOUT)),
+    [editing, draft, saved],
+  )
+  const onBoard = new Set(items.map((it) => it.type))
+
+  // The eight weeks for the trend card, only when that card is on the board.
+  const wantsTrend = onBoard.has('trend')
+  useEffect(() => {
+    if (!wantsTrend || !now || prev === undefined || trend) return
+    let stop = false
+    Promise.all([2, 3, 4, 5, 6, 7].map((n) => api.loadWeek(addWeeks(now.week, -n)).catch(() => null)))
+      .then((rest) => { if (!stop) setTrend([now, prev, ...rest].filter(Boolean)) })
+    return () => { stop = true }
+  }, [wantsTrend, now, prev, trend])
+
+  const startEdit = () => { setDraft(known(saved?.items || DEFAULT_LAYOUT)); setEditing(true); setError(null) }
+  const cancel = () => { setEditing(false); setDraft(null); setError(null) }
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await api.saveDashboardLayout(draft)
+      setSaved(r)
+      setEditing(false)
+      setDraft(null)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
     }
-    if (o.measure === 'count') {
-      const target = fin.objectiveTargets?.[o.id]
-      if (!target) return 'text.primary'
-      return (plan.countByObjective?.[o.id] ?? 0) >= target ? STATUS.good : STATUS.warning
-    }
-    return 'text.primary'
   }
-  const sym = fin.symbol
-  const [byPersonView, setByPersonView] = useState('chart')
+  const remove = useCallback((type) => setDraft((d) => d.filter((it) => it.type !== type)), [])
+  const add = (type) => {
+    setAddAt(null)
+    setDraft((d) => {
+      const bottom = d.reduce((a, it) => Math.max(a, it.y + it.h), 0)
+      return [...d, { type, x: 0, y: bottom, w: CARDS[type].w, h: CARDS[type].h }]
+    })
+  }
+  const onLayoutChange = (l) => {
+    if (!editing) return
+    const at = Object.fromEntries(l.map((x) => [x.i, x]))
+    setDraft((d) => d.map((it) => (at[it.type] ? {
+      ...it, x: at[it.type].x, y: at[it.type].y, w: at[it.type].w, h: at[it.type].h,
+    } : it)))
+  }
 
-  // Personal contribution, so the bars add up to the team figure. The lead's
-  // scorecard shows the team aggregate, which would swamp this chart and
-  // double-count everyone else.
-  const ranked = [...people].sort((a, b) => b.ownHours - a.ownHours)
+  const ctx = {
+    plan,
+    mode,
+    hello,
+    now,
+    prev,
+    pending,
+    followups,
+    summary,
+    trend,
+    aiOn,
+    onAsk,
+    onGoTo,
+    onOpenProject,
+    onFollowSent: (f) => setFollowups((list) => [f, ...list]),
+  }
+  const card = (type) => {
+    const { C } = CARDS[type]
+    return <C ctx={ctx} f={{ editing, onRemove: () => remove(type), fill: !stacked }} />
+  }
 
-  // x = the whole investment (build + CAPEX), y = what it returns over the
-  // horizon NET of the monthly OPEX. The gate line is y = (1 + roiGate) * x, so
-  // anything under it fails Objective 1 — and because both axes are exactly the
-  // two sides of p.roi, a dot can never sit above the line while its own gate
-  // chip reads "below".
-  const gatePoints = projects
-    .filter((p) => (p.commitLevel === 'commit' || p.commitLevel === 'stretch') && p.investment != null && p.netHorizonBenefit != null)
-    .map((p) => ({
-      key: p.key,
-      summary: p.summary,
-      x: p.investment,
-      y: p.netHorizonBenefit,
-      note: `${fmtMoney(p.investment, sym)} invested · ${fmtMoney(p.netHorizonBenefit, sym)} back over ${fin.horizonMonths} months after OPEX · ROI ${fmtRoi(p.roi)}`,
-    }))
-
-  const series = OBJECTIVES.map((o, i) => ({
-    id: o.id,
-    label: `${o.no}. ${o.short}`,
-    color: CHART[mode].series[i],
-  }))
-
-  // The tile colours for the project list, in a fixed order so the biggest
-  // project is always the same colour as long as it stays the biggest.
-  const TILE = [PAGE_COLOR.projects, PAGE_COLOR.dashboard, PAGE_COLOR.people, PAGE_COLOR.apps, PAGE_COLOR.timeline]
-  const listCard = (title, count, rows) => (
-    <Paper variant="outlined" sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{
-        px: 2, py: 1.5, display: 'flex', alignItems: 'baseline', gap: 1, borderBottom: '1px dashed', borderColor: 'divider',
-      }}
-      >
-        <Typography variant="h4">{title}</Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>{count}</Typography>
-      </Box>
-      <Box sx={{ p: 1.25, display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {rows.map((r) => (
-          <Box
-            key={r.key}
-            sx={{
-              display: 'flex', alignItems: 'center', gap: 1.25, p: 1, borderRadius: '12px',
-              border: 1, borderColor: 'divider', bgcolor: 'action.hover',
-            }}
-          >
-            {r.tile}
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" noWrap sx={{ fontWeight: 650 }}>{r.title}</Typography>
-              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block' }}>{r.sub}</Typography>
-            </Box>
-          </Box>
-        ))}
-      </Box>
-    </Paper>
+  /* ------------------------------------------------------- the toolbar */
+  const missing = Object.keys(CARDS).filter((t) => !onBoard.has(t))
+  const toolbar = !stacked && saved !== undefined && (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end',
+    }}
+    >
+      {!editing && (
+        <>
+          <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
+            {saved === null
+              ? 'The layout cannot be saved while the database is unavailable.'
+              : saved.updatedBy ? `Layout arranged by ${saved.updatedBy}, ${ago(saved.updatedAt)} — the same for every administrator.`
+                : 'The default layout — the same for every administrator.'}
+          </Typography>
+          {saved !== null && (
+            <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={startEdit} sx={{ color: 'text.primary', borderColor: 'divider' }}>
+              Edit layout
+            </Button>
+          )}
+        </>
+      )}
+      {editing && (
+        <>
+          <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
+            Drag a card by its title bar, resize it from its bottom-right corner, remove it with ×. Saved for every administrator.
+          </Typography>
+          <Button size="small" startIcon={<AddIcon />} onClick={(e) => setAddAt(e.currentTarget)} disabled={!missing.length}>Add card</Button>
+          <Menu anchorEl={addAt} open={!!addAt} onClose={() => setAddAt(null)}>
+            {GROUPS.flatMap((g) => {
+              const list = missing.filter((t) => CARDS[t].group === g)
+              return list.length ? [
+                <ListSubheader key={`g:${g}`} sx={{ lineHeight: '32px' }}>{g}</ListSubheader>,
+                ...list.map((t) => <MenuItem key={t} onClick={() => add(t)}>{CARDS[t].title}</MenuItem>),
+              ] : []
+            })}
+          </Menu>
+          <Button size="small" onClick={() => setDraft(known(DEFAULT_LAYOUT))}>Reset to default</Button>
+          <Button size="small" onClick={cancel}>Cancel</Button>
+          <Button size="small" variant="contained" onClick={save} disabled={busy} startIcon={busy ? <CircularProgress size={14} /> : null}>
+            Save layout
+          </Button>
+        </>
+      )}
+    </Box>
   )
 
+  /* ---------------------------------------------------------- the board */
+  if (stacked) {
+    const order = [...items].sort((a, b) => a.y - b.y || a.x - b.x)
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {order.map((it) => <Box key={it.type} sx={{ minWidth: 0 }}>{card(it.type)}</Box>)}
+      </Box>
+    )
+  }
+
+  const rgl = items.map((it) => ({
+    i: it.type, x: it.x, y: it.y, w: it.w, h: it.h, minW: CARDS[it.type].minW, minH: CARDS[it.type].minH,
+  }))
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {/*
-        * ---------- welcome ----------
-        * Who this is for and the one sentence that matters, with the next
-        * thing to do; beside it, the projects carrying the most hours and the
-        * people carrying them — the two lists anybody opening this page asks
-        * for first.
-        */}
-      <Grid container spacing={2}>
-        <Grid item xs={12} lg={6}>
-          <WelcomeBanner
-            eyebrow="Welcome to F&A Tech KPI Planning"
-            title={`Hello ${hello}`}
-            subtitle={`${fmtHours(totals.totalHours)} saving hours a month in the plan — ${fmtPct(totals.totalCoverage)} of the `
-              + `${totals.target.toLocaleString()} target. ${quality.pastDue} project${quality.pastDue === 1 ? ' is' : 's are'} past due and not done.`}
-            next={{
-              label: 'Weekly check-in',
-              sub: 'See who has sent their plan and report this week',
-              onClick: () => onGoTo?.('weekly'),
-            }}
-          />
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      {toolbar}
+      {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+      <Box sx={{
+        mx: -1,
+        '& .react-grid-item.react-grid-placeholder': {
+          bgcolor: alpha(theme.palette.primary.main, 0.18), borderRadius: '16px', opacity: 1,
+        },
+        '& .react-grid-item > .react-resizable-handle': { zIndex: 4 },
+        '& .react-grid-item > .react-resizable-handle::after': {
+          borderRightColor: theme.palette.text.secondary, borderBottomColor: theme.palette.text.secondary,
+        },
+        '& .react-grid-item.resizing, & .react-grid-item.react-draggable-dragging': { zIndex: 5 },
+      }}
+      >
+        <Grid
+          layout={rgl}
+          cols={12}
+          rowHeight={30}
+          margin={[16, 16]}
+          containerPadding={[8, 0]}
+          isDraggable={editing}
+          isResizable={editing}
+          draggableHandle={`.${DRAG}`}
+          onLayoutChange={onLayoutChange}
+          compactType="vertical"
+          useCSSTransforms
+        >
+          {items.map((it) => <div key={it.type} data-card={it.type}>{card(it.type)}</div>)}
         </Grid>
-        <Grid item xs={12} sm={6} lg={3}>
-          {listCard('Biggest projects', totals.topProjects.length, totals.topProjects.map((p, i) => ({
-            key: p.key,
-            tile: <IconTile icon={FolderIcon} color={TILE[i % TILE.length]} size={34} />,
-            title: p.summary || p.key,
-            sub: `${p.jiraKey || p.key} · ${fmtHours(p.savingHours)} hrs/mth`,
-          })))}
-        </Grid>
-        <Grid item xs={12} sm={6} lg={3}>
-          {listCard('The team', ranked.length, ranked.slice(0, 5).map((p) => ({
-            key: p.id,
-            tile: <IconTile text={(p.nick || p.name || '?').slice(0, 2)} color={personColor(plan.people, p.id)} size={34} />,
-            title: p.name || p.nick,
-            sub: `${fmtHours(p.ownHours)} hrs/mth · ${p.ownCount ?? 0} project${p.ownCount === 1 ? '' : 's'}`,
-          })))}
-        </Grid>
-      </Grid>
-
-      {/* ---------- the weekly check-in, at a glance ---------- */}
-      <ThisWeek plan={plan} onGoTo={onGoTo} aiOn={aiOn} onAsk={onAsk} />
-
-      {/* ---------- headline row ---------- */}
-      {/* Five tiles, so a flex strip rather than a 12-column grid: thirds at
-          tablet width, fifths once there is room for all of them. */}
-      <Grid container spacing={2} sx={{ '& > .MuiGrid-item': { flexBasis: { lg: '20%' }, maxWidth: { lg: '20%' } } }}>
-        <Grid item xs={12} sm={6} md={4}>
-          <StatTile
-            hero
-            label="Total saving hours"
-            value={fmtHours(totals.totalHours)}
-            unit={settings.savingBasis === 'monthly' ? 'hrs / month' : 'hrs / year'}
-            tone={totals.totalCoverage >= 1 ? 'good' : totals.totalCoverage >= 0.9 ? 'warning' : 'critical'}
-            context={`${fmtPct(totals.totalCoverage)} of the ${totals.target.toLocaleString()} hr target · ${fmtHours(totals.doneHours)} already delivered`}
-            help="Every project in the register, summed straight from the Saving hrs/mth column. No filtering — this always reconciles to the source workbook."
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <StatTile
-            label="Value of hours released"
-            value={fmtMoneyShort(fin.annualBenefit, sym)}
-            unit="per year"
-            context={`${fin.fteReleased.toFixed(1)} FTE at ${fmtMoney(fin.acctHourRate, sym)} an hour · ${fmtMoneyShort(fin.monthlyBenefit, sym)}/month`}
-            help={`Objective 1. The saving hours valued at the accountant rate set on the Model tab: ${fmtHours(totals.totalHours)} hrs/month ÷ the FTE ratio of ${fin.hoursPerFteMonth} hrs = ${fin.fteReleased.toFixed(1)} FTE. This is capacity released, not cash taken off the payroll.`}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <StatTile
-            label="Return on investment"
-            value={fmtRoi(fin.roi)}
-            unit={`over ${fin.horizonMonths} months`}
-            tone={fin.roi == null ? undefined : fin.roi >= fin.roiGate ? 'good' : 'critical'}
-            context={
-              fin.roi == null
-                ? `No cost estimated yet on ${quality.uncosted} of ${quality.total} projects`
-                : `${fmtMoneyShort(fin.investment, sym)} invested${fin.opexRunRate > 0 ? ` + ${fmtMoneyShort(fin.opexRunRate, sym)}/mo` : ''} · gate ${fmtRoi(fin.roiGate)} · covers ${fmtPct(fin.roiCoverage)} of the benefit`
-            }
-            help={`Objective 1's gate. The benefit over ${fin.horizonMonths} months, NET of ${fmtMoney(fin.opexRunRate, sym)} a month of operating cost, against the whole investment: ${fmtMoney(fin.buildCost ?? 0, sym)} of build at ${fmtMoney(fin.devDayRate, sym)} a manday plus ${fmtMoney(fin.capex ?? 0, sym)} of CAPEX. No depreciation is applied — CAPEX is charged whole. Only projects carrying a cost are in EITHER side of this, so it is never a whole-book benefit divided by a partial cost. The gate of ${fmtRoi(fin.roiGate)} is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}, equivalent to ${gateAsHoursPerManday(fin)?.toFixed(2)} saving hours per manday on a project with no CAPEX or OPEX.`}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <StatTile
-            label="Concentration"
-            value={fmtPct(totals.top2Share)}
-            unit="in top 2"
-            tone={totals.top2Share > 0.4 ? 'critical' : totals.top2Share > 0.25 ? 'warning' : 'good'}
-            context={totals.topProjects[0] ? `Largest: ${totals.topProjects[0].key} at ${fmtHours(totals.topProjects[0].savingHours)} hrs` : '—'}
-            help="Share of the committed pool sitting in the two largest projects. Above 40% the whole target depends on two deliveries landing."
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <StatTile
-            label="Past due, not done"
-            value={quality.pastDue}
-            unit={`of ${quality.total}`}
-            tone={quality.pastDue > 20 ? 'critical' : quality.pastDue > 5 ? 'warning' : 'good'}
-            context={`Carrying ${fmtHours(quality.pastDueHours)} committed hrs · ${quality.missingSaving} epics still unquantified`}
-            help={`Epics whose Jira due date is before ${settings.asOfDate} and whose status is not Done. Seven of twelve months are gone — anything still open here needs re-dating or dropping.`}
-          />
-        </Grid>
-      </Grid>
-
-      {quality.uncosted > 0 && (
-        <Alert severity={fin.roiCoverage >= 0.9 ? 'info' : 'warning'} variant="outlined">
-          <AlertTitle sx={{ fontWeight: 600 }}>
-            {fin.roi == null
-              ? 'Objective 1 has a benefit but no cost yet'
-              : `Objective 1 covers ${fmtPct(fin.roiCoverage)} of the benefit`}
-          </AlertTitle>
-          The source workbook records saving hours and an FTE column but no build effort, so{' '}
-          {quality.uncosted} of {quality.total} projects still carry neither mandays nor a CAPEX. The benefit side is
-          live — <strong>{fmtMoneyShort(fin.annualBenefit, sym)} a year</strong> — but ROI, payback and net benefit
-          stay blank on those, because a project with unknown effort has an unknown cost, not a cost of nothing. They
-          are left out of both sides of the return rather than counted as free. Each one still shows the mandays it
-          could absorb and still clear the gate, and clicking its row opens its CAPEX and monthly-cost sheet.{' '}
-          <Link component="button" onClick={() => onGoTo('projects')} sx={{ fontWeight: 600 }}>
-            Estimate effort →
-          </Link>
-        </Alert>
-      )}
-
-      <Grid container spacing={2.5}>
-        {/* ---------- target bridge ---------- */}
-        <Grid item xs={12} md={5}>
-          <Section title="Target bridge" subtitle="How the book converts into a commitment">
-            <Box sx={{ mb: 2.5 }}>
-              <Meter
-                value={totals.totalHours}
-                target={totals.target}
-                label="Total book vs management target"
-                sublabel={
-                  totals.totalHours - totals.target >= 0
-                    ? `${fmtHours(totals.totalHours - totals.target)} hrs of headroom above target`
-                    : `${fmtHours(totals.target - totals.totalHours)} hrs short of target`
-                }
-              />
-            </Box>
-            <Table size="small">
-              <TableBody>
-                {[
-                  ['Done — delivered', totals.byStatus.Done || 0, 'good'],
-                  ['In Progress', totals.byStatus['In Progress'] || 0, null],
-                  ['Not Start', totals.byStatus['Not Start'] || 0, 'warning'],
-                ].map(([label, v, tone]) => (
-                  <TableRow key={label}>
-                    <TableCell sx={{ borderBottom: 'none', pl: 0, color: 'text.secondary' }}>{label}</TableCell>
-                    <TableCell align="right" sx={{ borderBottom: 'none', pr: 0, fontWeight: 600, color: tone === 'good' ? STATUS.good : tone === 'warning' ? STATUS.warning : 'text.primary' }}>
-                      {fmtHours(v)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                <TableRow>
-                  <TableCell sx={{ pl: 0, fontWeight: 700, borderTop: 1, borderColor: 'divider' }}>
-                    TOTAL — all {plan.projects.length} projects
-                  </TableCell>
-                  <TableCell align="right" sx={{ pr: 0, fontWeight: 700, borderTop: 1, borderColor: 'divider' }}>
-                    {fmtHours(totals.totalHours)}
-                  </TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>Management target</TableCell>
-                  <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                    {totals.target.toLocaleString()}
-                  </TableCell>
-                </TableRow>
-                {totals.nextYearHours > 0 && (
-                  <TableRow>
-                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                      Deferred to next year
-                      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
-                        {totals.nextYearCount} project{totals.nextYearCount === 1 ? '' : 's'} · not in the total above
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: 'text.disabled', fontWeight: 600 }}>
-                      ({fmtHours(totals.nextYearHours)})
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
-              Sums the <em>Saving hrs/mth</em> column across every project, with no objective or risk filtering — it
-              always reconciles to the source workbook.
-            </Typography>
-
-            {/* The gross-to-bankable bridge: what the team is targeted on vs
-                what the six scorecards can actually add up to. */}
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 1 }}>
-              Gross vs bankable
-            </Typography>
-            <Table size="small">
-              <TableBody>
-                <TableRow>
-                  <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                    Bankable across the six scorecards
-                  </TableCell>
-                  <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', fontWeight: 700 }}>
-                    {fmtHours(totals.bankableHours)}
-                  </TableCell>
-                </TableRow>
-                {totals.outsideHours > 0 && (
-                  <TableRow>
-                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                      Owned by IT or the business
-                      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
-                        {totals.outsideCount} project{totals.outsideCount === 1 ? '' : 's'} · on the register, off our book
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.warning, fontWeight: 600 }}>
-                      −{fmtHours(totals.outsideHours)}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {totals.partnerHours > 0 && (
-                  <TableRow>
-                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                      Built by partner / outsource devs
-                    </TableCell>
-                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.warning, fontWeight: 600 }}>
-                      −{fmtHours(totals.partnerHours)}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {totals.fallbackHours > 0 && (
-                  <TableRow>
-                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                      Of which absorbed by {people.find((x) => x.id === totals.fallbackPic)?.nick || 'the lead'}
-                      <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
-                        {totals.fallbackCount} unassigned project{totals.fallbackCount === 1 ? '' : 's'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', fontWeight: 600 }}>
-                      {fmtHours(totals.fallbackHours)}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {totals.orphanHours > 0 && (
-                  <TableRow>
-                    <TableCell sx={{ pl: 0, borderBottom: 'none', color: 'text.secondary' }}>
-                      Credited to nobody
-                    </TableCell>
-                    <TableCell align="right" sx={{ pr: 0, borderBottom: 'none', color: STATUS.critical, fontWeight: 600 }}>
-                      {fmtHours(totals.orphanHours)}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1.5 }}>
-              {settings.creditPartners
-                ? 'Net view — partner devs dilute each person\'s share, so the team cannot personally bank the whole pool. Never add the individual targets together and compare them to the team target.'
-                : 'Gross view — each owner is credited whole projects even where a partner dev builds them. Switch to the net view on the Model tab to see what they can personally bank.'}
-              {totals.fallbackHours > 0 &&
-                ` Projects left unassigned are credited to ${people.find((x) => x.id === totals.fallbackPic)?.nick || 'the team lead'}, who carries the team's overall KPI.`}
-              {totals.outsideHours > 0 &&
-                ` Projects whose PIC is IT or a business user are not the team's to claim — they stay on the register and in the book total above, but out of the commitment, out of every scorecard and out of the return.`}
-            </Typography>
-          </Section>
-        </Grid>
-
-        {/* ---------- by person ---------- */}
-        <Grid item xs={12} md={7}>
-          <Section
-            title="Credited saving hours by person"
-            subtitle="Personal contribution after shares — each project's hours are split once, never double-banked. The lead's scorecard shows the team aggregate; this chart shows their own projects so the bars still add up."
-            action={
-              <ToggleButtonGroup
-                size="small"
-                exclusive
-                value={byPersonView}
-                onChange={(_e, v) => v && setByPersonView(v)}
-              >
-                <ToggleButton value="chart" sx={{ textTransform: 'none', px: 1.5 }}>Chart</ToggleButton>
-                <ToggleButton value="mix" sx={{ textTransform: 'none', px: 1.5 }}>Mix</ToggleButton>
-                <ToggleButton value="table" sx={{ textTransform: 'none', px: 1.5 }}>Table</ToggleButton>
-              </ToggleButtonGroup>
-            }
-          >
-            {byPersonView === 'chart' && (
-              <HBar
-                data={ranked.map((p) => ({
-                  label: p.nick,
-                  value: p.ownHours,
-                  note: `${p.ownCount} projects · ${fmtRatio(p.ratio)} hrs/manday`,
-                }))}
-                unit=" hrs"
-              />
-            )}
-            {byPersonView === 'mix' && (
-              <StackedHBar
-                // ownByObjective, not byObjective: the lead's scorecard map is
-                // the whole team's, so stacking it beside the others counted
-                // every hour twice and the bars summed to 6,671 against 4,227.
-                rows={ranked.map((p) => ({ label: p.nick, values: p.ownByObjective }))}
-                series={series}
-              />
-            )}
-            {byPersonView === 'table' && (
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Person</TableCell>
-                    <TableCell align="right">Projects</TableCell>
-                    <TableCell align="right">Credited hrs</TableCell>
-                    <TableCell align="right">Benefit / yr</TableCell>
-                    <TableCell align="right">Mandays</TableCell>
-                    <TableCell align="right">Investment</TableCell>
-                    <TableCell align="right">ROI</TableCell>
-                    <TableCell align="right">Missing data</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {ranked.map((p) => (
-                    <TableRow key={p.id} hover>
-                      <TableCell sx={{ fontWeight: 600 }}>{p.nick}</TableCell>
-                      <TableCell align="right">{p.ownCount}</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(p.ownHours)}</TableCell>
-                      <TableCell align="right">{fmtMoneyShort(p.monthlyBenefit * 12, sym)}</TableCell>
-                      <TableCell align="right">{fmtHours(p.manday)}</TableCell>
-                      <TableCell align="right">
-                        <Tooltip title={`Build ${fmtMoneyShort(p.buildCost, sym)} + CAPEX ${fmtMoneyShort(p.capex, sym)}${p.opexRunRate > 0 ? `, and ${fmtMoneyShort(p.opexRunRate, sym)} a month of OPEX` : ''} — all at ${p.nick}'s share of each project.`}>
-                          <span>{fmtMoneyShort(p.investment, sym)}</span>
-                        </Tooltip>
-                      </TableCell>
-                      {/* Personal, like every other cell in this row — p.finance
-                          is the SCORECARD view, which for the lead is the whole
-                          team and would not belong beside their own hours. Net
-                          of OPEX and over the whole investment, exactly like the
-                          portfolio figure above. */}
-                      {(() => {
-                        const roi = p.investment > 0 ? (p.costedNetBenefit - p.investment) / p.investment : null
-                        return (
-                          <TableCell align="right" sx={{ color: roi != null && roi < fin.roiGate ? STATUS.critical : 'text.primary' }}>
-                            {fmtRoi(roi)}
-                          </TableCell>
-                        )
-                      })()}
-                      <TableCell align="right">{p.missingSaving || '—'}</TableCell>
-                    </TableRow>
-                  ))}
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
-                      Team total
-                    </TableCell>
-                    <TableCell align="right" sx={{ borderTop: 2, borderColor: 'divider' }} />
-                    <TableCell align="right" sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
-                      {fmtHours(totals.teamHours)}
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>
-                      {fmtMoneyShort(ranked.reduce((a, x) => a + x.monthlyBenefit * 12, 0), sym)}
-                    </TableCell>
-                    <TableCell colSpan={3} sx={{ borderTop: 2, borderColor: 'divider' }} />
-                  </TableRow>
-                </TableBody>
-              </Table>
-            )}
-          </Section>
-        </Grid>
-
-        {/* ---------- objective 1: is it worth it ---------- */}
-        <Grid item xs={12}>
-          <Section
-            title="Objective 1 — is the build worth it"
-            subtitle={`Each dot is a project: everything invested in it — mandays plus CAPEX — against what it gives back over ${fin.horizonMonths} months after its monthly operating cost, both in ${fin.currency}. The dashed line is the gate — a return of ${fmtRoi(fin.roiGate)}, or a payback of ${fmtMonths(gateAsPaybackMonths(fin))}. Anything below it costs more than it is worth.`}
-          >
-            <GateScatter
-              points={gatePoints}
-              gate={1 + fin.roiGate}
-              xLabel={`Investment — build + CAPEX (${fin.currency})`}
-              yLabel={`Net benefit over ${fin.horizonMonths} months, after OPEX (${fin.currency})`}
-              fmt={(v) => fmtMoneyShort(v, sym)}
-              emptyMessage={`No cost has been entered yet, so there is nothing to plot. The benefit side is already known — ${fmtMoneyShort(fin.annualBenefit, sym)} a year — but a return needs a cost. Use "Estimate effort" on the Projects tab, type mandays in, or click a project row to add its CAPEX, and every project appears here against the gate.`}
-            />
-          </Section>
-        </Grid>
-
-        {/* ---------- the management guideline, verbatim ---------- */}
-        <Grid item xs={12}>
-          <Section
-            title="2026 management KPI guideline"
-            subtitle="The objectives as issued, with what the team is currently carrying against each. Objectives 2, 4 and 5 all feed the one hour pool; objective 3 is date-gated and carries no hours."
-          >
-            <Box sx={{ overflowX: 'auto' }}>
-              <Table size="small" sx={{ minWidth: 880 }}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ minWidth: 190 }}>Objective</TableCell>
-                    <TableCell sx={{ minWidth: 280 }}>Objective detail</TableCell>
-                    <TableCell sx={{ minWidth: 260 }}>F&amp;A Tech</TableCell>
-                    <TableCell align="right">Projects</TableCell>
-                    <TableCell align="right">Hours</TableCell>
-                    <TableCell align="right" sx={{ minWidth: 120 }}>Target</TableCell>
-                    <TableCell align="right" sx={{ minWidth: 120 }}>Where we are</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {OBJECTIVES.map((o, i) => {
-                    // Every project that SERVES the objective, not only the
-                    // ones whose primary tag it is — a dashboard that removes
-                    // manual work belongs to both.
-                    const n = projects.filter((p) => serves(p, o.id)).length
-                    const h = byObjective[o.id] || 0
-                    return (
-                      <TableRow key={o.id} hover>
-                        <TableCell sx={{ verticalAlign: 'top' }}>
-                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                            <Box sx={{ width: 10, height: 10, borderRadius: '2px', mt: 0.6, bgcolor: CHART[mode].series[i], flexShrink: 0 }} />
-                            <Box>
-                              {o.guidelineName ? (
-                                <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.35 }}>
-                                  {o.guidelineName}
-                                </Typography>
-                              ) : (
-                                <Typography variant="body2" sx={{ color: 'text.disabled', fontStyle: 'italic', lineHeight: 1.35 }}>
-                                  (continues {OBJECTIVES[i - 1]?.guidelineName})
-                                </Typography>
-                              )}
-                              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                Objective {o.no} in this app
-                              </Typography>
-                            </Box>
-                          </Box>
-                        </TableCell>
-                        <TableCell sx={{ verticalAlign: 'top' }}>
-                          <Typography variant="body2" sx={{ lineHeight: 1.4 }}>
-                            {o.guidelineDetail}
-                          </Typography>
-                        </TableCell>
-                        <TableCell sx={{ verticalAlign: 'top' }}>
-                          <Typography variant="body2" sx={{ lineHeight: 1.5, fontWeight: 500 }}>
-                            {o.guidelineTarget}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>{n}</TableCell>
-                        <TableCell align="right" sx={{ verticalAlign: 'top', fontWeight: 600 }}>{fmtHours(h)}</TableCell>
-                        {/* The target in the unit the objective is actually
-                            measured in, and the live reading beside it. The
-                            Hours column above says where the work sits; these
-                            two say whether the objective is being met. */}
-                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {objTarget(o)}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {o.measure === 'ratio' ? 'or better'
-                              : o.measure === 'count' ? o.countUnit
-                                : o.measure === 'hours' ? 'hrs/month' : 'milestone'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right" sx={{ verticalAlign: 'top' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: objTone(o) }}>
-                            {objActual(o)}
-                          </Typography>
-                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                            {o.measure === 'ratio' ? `on ${fmtMoneyShort(fin.annualBenefit, fin.symbol)}/yr`
-                              : o.measure === 'count' ? 'delivered'
-                                : o.measure === 'hours' ? 'committed' : 'as planned'}
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </Box>
-          </Section>
-        </Grid>
-
-        {/* ---------- concentration ---------- */}
-        <Grid item xs={12}>
-          <Section
-            title="Concentration risk"
-            subtitle={`The five largest projects carry ${fmtPct(totals.topProjects.reduce((a, p) => a + (p.savingHours ?? 0), 0) / (totals.headlineHours || 1))} of the committed pool.`}
-          >
-            {/* scrolls on a phone rather than widening the whole page */}
-            <Box sx={{ overflowX: 'auto' }}>
-            <Table size="small" sx={{ minWidth: 560 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Jira</TableCell>
-                  <TableCell>Project</TableCell>
-                  <TableCell>PIC</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell align="right">Saving hrs</TableCell>
-                  <TableCell align="right">Share of pool</TableCell>
-                  <TableCell align="right">Coverage if it slips</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {totals.topProjects.map((p) => {
-                  const person = people.find((x) => x.id === p.pic)
-                  // The target is user-editable and can be cleared to 0.
-                  const without = totals.target > 0
-                    ? (totals.headlineHours - (p.savingHours ?? 0)) / totals.target
-                    : null
-                  return (
-                    <TableRow key={p.key} hover>
-                      <TableCell sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{p.key}</TableCell>
-                      <TableCell>{p.summary}</TableCell>
-                      <TableCell>{person?.nick || <Typography variant="body2" sx={{ color: STATUS.critical, fontWeight: 600 }}>TBC</Typography>}</TableCell>
-                      <TableCell>
-                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                          {p.srcStatus || p.status}
-                        </Typography>
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600 }}>{fmtHours(p.savingHours)}</TableCell>
-                      <TableCell align="right">{fmtPct((p.savingHours ?? 0) / (totals.headlineHours || 1))}</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 600, color: without < 1 ? STATUS.critical : STATUS.good }}>
-                        {fmtPct(without)}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-            </Box>
-          </Section>
-        </Grid>
-      </Grid>
+      </Box>
     </Box>
   )
 }

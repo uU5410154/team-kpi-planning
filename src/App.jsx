@@ -44,6 +44,7 @@ import {
 import { exportWorkbook } from './lib/exportXlsx.js'
 
 import Dashboard from './pages/Dashboard.jsx'
+import Project from './pages/Project.jsx'
 import Projects from './pages/Projects.jsx'
 import People from './pages/People.jsx'
 import Team from './pages/Team.jsx'
@@ -54,6 +55,7 @@ import SignIn from './pages/SignIn.jsx'
 import Users from './pages/Users.jsx'
 import Weekly from './pages/Weekly.jsx'
 import * as authApi from './lib/authApi.js'
+import { memberView, memberProgress } from './lib/memberView.js'
 
 /*
  * WHAT EACH ROLE SEES.
@@ -89,13 +91,20 @@ const TABS = [
   { id: 'weekly', label: 'Weekly', icon: EventNoteIcon, roles: ['admin', 'user'] },
   // Beside the individual cards, not instead of them: one answers what a
   // person is measured on, the other whether the team adds up.
-  { id: 'team', label: 'Overall team', icon: GroupsIcon, roles: ['admin', 'user'] },
+  // A member sees only their own card here, so the tab is named for that.
+  { id: 'team', label: 'Overall team', memberLabel: 'My scorecard', icon: GroupsIcon, roles: ['admin', 'user'] },
   // Beside the register rather than inside it: the register answers what a
   // project is worth, this answers when it was supposed to land.
   { id: 'timeline', label: 'Timeline', icon: TimelineIcon, roles: ['admin', 'user'] },
   { id: 'apps', label: 'Apps', icon: AppsIcon, roles: ['admin', 'user'] },
   { id: 'settings', label: 'Model', icon: TuneIcon, roles: ['admin'] },
   { id: 'users', label: 'Access', icon: AdminIcon, roles: ['admin'] },
+  /*
+   * One project in full. Not in the menu — reached from a project's name on
+   * the dashboard, or from the email saying a follow-up was answered — so it
+   * is `hidden`, but guarded like every other page.
+   */
+  { id: 'project', label: 'Project', icon: FolderIcon, roles: ['admin'], hidden: true },
 ]
 
 /*
@@ -107,8 +116,17 @@ const TABS = [
  */
 const DEFAULT_TAB = 'dashboard'
 
+/*
+ * The hash is the page, and after a slash what on it: #project/FNP-88 is that
+ * project's page, #weekly/FNP-88 is one's own week opened on that project's
+ * task (the link in a follow-up email).
+ */
+const hashParts = () => {
+  const [h, ...rest] = window.location.hash.replace('#', '').split('/')
+  return [h, rest.length ? decodeURIComponent(rest.join('/')) : null]
+}
 const tabFromHash = () => {
-  const h = window.location.hash.replace('#', '')
+  const [h] = hashParts()
   return TABS.some((t) => t.id === h) ? h : DEFAULT_TAB
 }
 
@@ -117,6 +135,12 @@ export default function App() {
   // here is still honoured — the toggle would be pointless if a reload undid it.
   const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode') || 'dark')
   const [tab, setTab] = useState(tabFromHash)
+  // What the hash names on the page: a project key, numbered so the same link
+  // followed twice still acts.
+  // The page is kept with it: a key is only ever used on the page its link
+  // named, so a #project link a member cannot open does not fall through to
+  // their week and add a task there.
+  const [hashArg, setHashArg] = useState(() => ({ page: hashParts()[0], key: hashParts()[1], n: 1 }))
   // Evaluate before the first save effect overwrites the cached copy.
   const [wasReset] = useState(loadWasReset)
   const [state, setState] = useState(loadState)
@@ -239,6 +263,14 @@ export default function App() {
    * changes" hanging over a page they cannot save from.
    */
   const canWrite = viewer?.role === 'admin'
+  /*
+   * A TEAM MEMBER SEES THEIR OWN: their projects, their scorecard, their
+   * progress. `shown` is the plan narrowed to that, and is what every page a
+   * member can open is drawn from; `plan` stays whole underneath, for saving.
+   */
+  const member = viewer?.role === 'user'
+  const myPerson = me?.person || null
+  const shown = useMemo(() => (member ? memberView(plan, myPerson) : plan), [member, plan, myPerson])
   useEffect(() => {
     if (!canWrite) { setAiOn(false); return }
     api.aiStatus().then((r) => setAiOn(!!r.configured)).catch(() => setAiOn(false))
@@ -588,7 +620,10 @@ export default function App() {
     if (tabFromHash() !== tab) window.location.hash = tab
   }, [tab])
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash())
+    const onHash = () => {
+      setTab(tabFromHash())
+      setHashArg((a) => ({ page: hashParts()[0], key: hashParts()[1], n: a.n + 1 }))
+    }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -978,9 +1013,11 @@ export default function App() {
    * first tab they DO have rather than on a page they should not see.
    */
   const visibleTabs = TABS.filter((t) => (t.roles || []).includes(viewer?.role))
+    .map((t) => (member && t.memberLabel ? { ...t, label: t.memberLabel } : t))
   const allowed = visibleTabs.some((t) => t.id === tab)
+  const menuTabs = visibleTabs.filter((t) => !t.hidden)
 
-  const current = TABS.find((t) => t.id === tab)
+  const current = visibleTabs.find((t) => t.id === tab) || TABS.find((t) => t.id === tab)
   const CurrentIcon = current?.icon || null
   // What the welcome banner calls somebody: their nickname on the team when
   // the account is linked to one, otherwise the name in their address.
@@ -1010,6 +1047,8 @@ export default function App() {
       }),
     }))
   }
+  // A project's own page.
+  const openProject = (key) => { window.location.hash = `project/${encodeURIComponent(key)}` }
   // From a weekly task to its project's bar on the Timeline, highlighted.
   const showOnTimeline = (projectKey) => {
     const p = state.projects.find((x) => x.key === projectKey)
@@ -1082,7 +1121,7 @@ export default function App() {
       <CssBaseline />
       <Box sx={{ minHeight: '100vh' }}>
         <Sidebar
-          tabs={visibleTabs}
+          tabs={menuTabs}
           tab={tab}
           onTab={(id) => { setTab(id); setNavOpen(false) }}
           mini={navMini}
@@ -1094,7 +1133,7 @@ export default function App() {
           onSignOut={signOut}
           previewing={previewing}
           onToggleView={me?.role === 'admin' ? toggleView : null}
-          coverage={{
+          coverage={member ? memberProgress(shown) : {
             total: Math.round(plan.totals.totalHours),
             target: plan.totals.target,
             share: cov || 0,
@@ -1173,7 +1212,7 @@ export default function App() {
                 </Typography>
               </Box>
 
-              {plan.invalid.length > 0 && (
+              {canWrite && plan.invalid.length > 0 && (
                 <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')} — saving is blocked until every scorecard totals 100%`}>
                   <Chip
                     size="small"
@@ -1187,7 +1226,7 @@ export default function App() {
 
               <Box sx={{ flex: 1 }} />
 
-              <GlobalSearch tabs={visibleTabs} plan={plan} admin={canWrite} onGo={goTo} phone={phone} />
+              <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone={phone} />
 
               {/* The chatbot: an administrator's, and only when the AI is there. */}
               {canWrite && aiOn && (phone ? (
@@ -1207,7 +1246,8 @@ export default function App() {
                 </Button>
               ))}
 
-              {phone ? (
+              {/* The workbook is the whole team's plan: an administrator's. */}
+              {canWrite && (phone ? (
                 <Tooltip title="Export Excel">
                   <span>
                     <IconButton color="primary" onClick={handleExport} disabled={exporting} aria-label="Export Excel">
@@ -1225,7 +1265,7 @@ export default function App() {
                 >
                   {exporting ? 'Building…' : 'Export Excel'}
                 </Button>
-              )}
+              ))}
 
               <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
                 <IconButton size="small" onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}>
@@ -1233,9 +1273,12 @@ export default function App() {
                 </IconButton>
               </Tooltip>
 
-              <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More">
-                <MoreVertIcon fontSize="small" />
-              </IconButton>
+              {/* Scenario files are copies of the whole plan: an administrator's too. */}
+              {canWrite && (
+                <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More">
+                  <MoreVertIcon fontSize="small" />
+                </IconButton>
+              )}
               <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
                 {/* Writing the shared plan is an administrator's; the server refuses anybody else. */}
                 {canWrite && (
@@ -1282,7 +1325,25 @@ export default function App() {
             */}
           {allowed && tab === 'users' && <Users me={me} people={state.people} />}
           {allowed && tab === 'dashboard' && (
-            <Dashboard plan={plan} onGoTo={setTab} hello={hello} aiOn={canWrite && aiOn} onAsk={askAi} />
+            <Dashboard
+              plan={plan}
+              onGoTo={setTab}
+              hello={hello}
+              aiOn={canWrite && aiOn}
+              onAsk={askAi}
+              onOpenProject={openProject}
+            />
+          )}
+          {allowed && tab === 'project' && (
+            <Project
+              key={hashArg.page === 'project' ? hashArg.key : ''}
+              plan={plan}
+              projectKey={hashArg.page === 'project' ? hashArg.key : null}
+              canWrite={canWrite}
+              onUpdate={updateProject}
+              onBack={() => (window.history.length > 1 ? window.history.back() : setTab('dashboard'))}
+              onShowTimeline={showOnTimeline}
+            />
           )}
           {allowed && tab === 'projects' && (
             <Projects
@@ -1309,13 +1370,14 @@ export default function App() {
               hello={hello}
               onProjectsChanged={applyServerProjects}
               onShowTimeline={showOnTimeline}
+              focusProject={hashArg.page === 'weekly' && hashArg.key ? hashArg : null}
             />
           )}
-          {allowed && tab === 'team' && <Team plan={plan} />}
+          {allowed && tab === 'team' && <Team plan={shown} own={member} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
           {allowed && tab === 'timeline' && (
             <Timeline
-              plan={plan}
+              plan={shown}
               settings={plan.settings}
               onUpdate={updateProject}
               onAddProjects={addProjects}
@@ -1324,6 +1386,9 @@ export default function App() {
               // A team member reads the timeline. Moving a date is a re-plan
               // against somebody's scorecard, and goes through an administrator.
               readOnly={!canWrite}
+              note={!member ? null : myPerson
+                ? 'Only the projects you hold, as PIC or contributor, are shown.'
+                : 'Your account is not linked to your name on the team yet, so no projects are shown. Ask an administrator to link it on the Access tab.'}
               jump={jump?.tab === 'timeline' ? jump : null}
               onOpenWeekly={() => setTab('weekly')}
             />

@@ -59,6 +59,7 @@ export async function roster() {
     })),
     projects: (doc?.payload?.projects || []).filter((p) => !p.deleted).map((p) => ({
       key: p.key, jiraKey: p.jiraKey || null, summary: p.summary || '', due: p.due || null, pic: p.pic || null,
+      active: p.active === true, status: p.status || null,
     })),
   }
 }
@@ -462,6 +463,8 @@ export async function byProject({ person } = {}) {
       slot(t.projectKey).history.push({
         week: e.week, person: e.person, title: t.title, done: t.done, pct: t.pct, expected: t.expected,
         newDate: t.newDate, blocker: t.blocker || '', blockerCategory: t.blockerCategory, priority: t.priority,
+        affects: t.affects, carriedFrom: t.carriedFrom || null, updatedAt: e.updatedAt || null,
+        planIn: !!e.planSubmittedAt, reportIn: !!e.reportSubmittedAt,
       })
       // Open blockers come from the latest REPORTED week per person and project.
       if (e.reportSubmittedAt) {

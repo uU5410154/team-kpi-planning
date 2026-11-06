@@ -388,7 +388,7 @@ try {
     await a.waitForFunction(() => document.body.innerText.includes('Viewing as a team member'), { timeout: 8000 }).catch(() => {})
     const tabsNow = await a.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim()))
     check('SWITCHED TO A MEMBER’S VIEW: A MEMBER’S PAGES, AND NO OTHERS',
-      JSON.stringify(tabsNow) === JSON.stringify(['Weekly', 'Overall team', 'Timeline', 'Apps']), tabsNow.join(' | '))
+      JSON.stringify(tabsNow) === JSON.stringify(['Weekly', 'My scorecard', 'Timeline', 'Apps']), tabsNow.join(' | '))
     check('  landed on their week, since a member has no Dashboard', (await selected()) === 'Weekly')
     await a.waitForFunction(() => document.body.innerText.includes('My week'), { timeout: 10000 }).catch(() => {})
     const asText = await a.evaluate(() => document.body.innerText)

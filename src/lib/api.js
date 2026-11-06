@@ -197,6 +197,26 @@ export const rejectProposal = async (id, reason) =>
 /** Each project's last eight weeks, its blockers and its proposals — for the Timeline. */
 export const weeklyByProject = async () => j(await fetch(vq('/api/weekly/projects')))
 
+/* ------------------------- manager dashboard ------------------------- */
+
+/** The one card layout every administrator sees; `items: null` means the default. */
+export const dashboardLayout = async () => j(await fetch('/api/dashboard/layout'))
+export const saveDashboardLayout = async (items) => j(await fetch('/api/dashboard/layout', {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ items }),
+}))
+export const resetDashboardLayout = async () => j(await fetch('/api/dashboard/layout', { method: 'DELETE' }))
+
+/** Ask a project's owner for an update, by email. */
+export const followUp = async (projectKey) => j(await fetch('/api/followups', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ projectKey }),
+}))
+/** This week's follow-ups by default; `null` for every week. */
+export const followups = async (week = 'current') => j(await fetch(week ? `/api/followups?week=${encodeURIComponent(week)}` : '/api/followups'))
+
 /* ---------------------------- AI ---------------------------- */
 
 const post = async (url, body) => j(await fetch(url, {

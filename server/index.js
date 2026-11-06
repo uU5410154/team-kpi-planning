@@ -11,6 +11,7 @@ import * as mail from './mail.js'
 import * as reminders from './reminders.js'
 import * as llm from './llm.js'
 import * as ai from './ai.js'
+import * as manager from './manager.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -346,8 +347,8 @@ app.delete('/api/scenarios/:name', adminOnly, async (req, res) => {
  * THE WEEKLY CHECK-IN.
  *
  * Who sees what is decided HERE, not in the page: a team member is sent their
- * own week in full and everybody else's focus line, and nothing more — not a
- * colleague's blockers, not who is late. An administrator is sent all of it.
+ * own week and nothing of anybody else's — not a colleague's focus line, not
+ * their blockers, not who is late. An administrator is sent all of it.
  * Hiding the rest in the browser would put it one developer-tools tab away.
  */
 
@@ -508,7 +509,10 @@ app.get('/api/weekly/:week', async (req, res) => {
   const now = Date.now()
   const nick = Object.fromEntries(r.people.map((p) => [p.id, p.nick]))
   // Everybody who must submit, and anybody else who did anyway.
-  const ids = [...new Set([...settings.submitters, ...Object.keys(all)])]
+  // A member's list is themselves alone.
+  const ids = admin
+    ? [...new Set([...settings.submitters, ...Object.keys(all)])]
+    : (me.person ? [me.person] : [])
   const team = ids.map((person) => {
     const e = all[person] || null
     const row = { person, nick: nick[person] || person, focus: e?.focus || '', required: settings.submitters.includes(person) }
@@ -528,7 +532,7 @@ app.get('/api/weekly/:week', async (req, res) => {
     mine,
     mineStanding: mine ? weekly.standing(week, mine.draft ? null : mine, now) : null,
     team,
-    submitters: settings.submitters,
+    submitters: admin ? settings.submitters : settings.submitters.filter((p) => p === me.person),
     proposals: await withNames(props),
   })
 })
@@ -557,7 +561,53 @@ app.put('/api/weekly/:week/mine', async (req, res) => {
   if (r === store.UNAVAILABLE) return unavailable(res)
   if (r.error) return res.status(400).json(r)
   announce(r.raised)
+  // A follow-up waiting on this person for a project now in their week is
+  // answered, and whoever asked is told. Never holds up the save.
+  manager.answered(week, me.person, r.entry).catch((e) => console.error('[followup]', e.message))
   return res.json({ entry: r.entry })
+})
+
+/* --------------------------- the manager dashboard --------------------------- */
+
+/*
+ * One arrangement of cards for every administrator, as agreed: moving a card
+ * moves it for all of them.
+ */
+app.get('/api/dashboard/layout', adminOnly, async (_req, res) => {
+  const r = await manager.getLayout()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
+})
+
+app.put('/api/dashboard/layout', adminOnly, async (req, res) => {
+  const r = await manager.saveLayout(req.body?.items, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(400).json(r)
+  return res.json(r)
+})
+
+app.delete('/api/dashboard/layout', adminOnly, async (_req, res) => {
+  const r = await manager.resetLayout()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
+})
+
+/* Ask a project's owner for an update, and see who has been asked. */
+app.post('/api/followups', adminOnly, async (req, res) => {
+  const key = String(req.body?.projectKey || '').trim().slice(0, 40)
+  if (!key) return res.status(400).json({ error: 'Which project?' })
+  const r = await manager.followUp(key, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(r.status || 400).json(r)
+  return res.json(r)
+})
+
+app.get('/api/followups', adminOnly, async (req, res) => {
+  const week = req.query.week === 'current' ? weekOf() : (req.query.week ? String(req.query.week) : undefined)
+  if (week && !isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
+  const r = await manager.listFollowups({ week })
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ followups: r })
 })
 
 /* -------------------------------- AI -------------------------------- */

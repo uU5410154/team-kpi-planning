@@ -199,11 +199,11 @@ function NavBody({
           bgcolor: alpha(theme.palette.text.primary, 0.025),
         }}
         >
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>Saving hours, committed</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>{coverage.label || 'Saving hours, committed'}</Typography>
           <Typography variant="h3" sx={{ fontVariantNumeric: 'tabular-nums', mt: 0.25 }}>
             {coverage.total.toLocaleString()}
             <Typography component="span" variant="caption" sx={{ color: 'text.secondary', ml: 0.75 }}>
-              / {coverage.target.toLocaleString()} hrs
+              / {coverage.target.toLocaleString()} {coverage.unit || 'hrs'}
             </Typography>
           </Typography>
           <LinearProgress
@@ -213,7 +213,7 @@ function NavBody({
             sx={{ mt: 1, height: 6, bgcolor: alpha(theme.palette.text.primary, 0.08) }}
           />
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.75 }}>
-            {Math.round(coverage.share * 100)}% of the year&rsquo;s target
+            {coverage.note || `${Math.round(coverage.share * 100)}% of the year’s target`}
           </Typography>
         </Box>
       )}

@@ -228,3 +228,12 @@ export const displayName = (email) => String(email || '')
   .filter(Boolean)
   .map((w) => w[0].toUpperCase() + w.slice(1))
   .join(' ') || 'there'
+
+/** Done is green, under way is blue, not begun is grey, anything else violet. */
+export const statusTone = (st) => {
+  const x = String(st || '').toLowerCase()
+  if (/done|complete|closed|resolved/.test(x)) return 'good'
+  if (/progress|uat|test|review|develop/.test(x)) return 'info'
+  if (/not ?start|to ?do|backlog|open/.test(x)) return 'neutral'
+  return 'violet'
+}

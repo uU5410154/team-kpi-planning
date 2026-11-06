@@ -239,13 +239,14 @@ try {
   console.log('\n--- who sees what ---')
   const asJames = (await call('GET', `/api/weekly/${WEEK}`, undefined, james)).body
   check('a member sees their own week in full', asJames.mine?.tasks?.[0]?.blocker === 'Waiting for 200 sample statements from AP')
-  const kadeRow = asJames.team.find((r) => r.person === 'kade')
-  check('A MEMBER SEES A COLLEAGUE’S FOCUS', kadeRow?.focus === 'Kade’s private focus')
-  check('  AND NOTHING ELSE OF THEIR WEEK', !kadeRow.entry && !kadeRow.standing
-    && !JSON.stringify(asJames.team).includes('KADE-BLOCKER') && !JSON.stringify(asJames.team).includes('Kade secret task'),
-  Object.keys(kadeRow).join(','))
-  check('  not even who is late', asJames.team.every((r) => r.standing === undefined))
-  check('the submit list decides the rows; Thapanee is off it', !asJames.team.some((r) => r.person === 'tha'))
+  check('A MEMBER SEES NOTHING OF A COLLEAGUE’S WEEK — NOT EVEN THEIR FOCUS',
+    !asJames.team.some((r) => r.person !== 'james')
+    && !JSON.stringify(asJames).includes('Kade’s private focus')
+    && !JSON.stringify(asJames).includes('KADE-BLOCKER') && !JSON.stringify(asJames).includes('Kade secret task'),
+  asJames.team.map((r) => r.person).join(','))
+  check('  their own row only, and not even whether they are late', asJames.team.length === 1
+    && asJames.team.every((r) => r.standing === undefined))
+  check('  nor who else is on the submit list', asJames.submitters.every((p) => p === 'james'), asJames.submitters.join(','))
 
   const asBoss = (await call('GET', `/api/weekly/${WEEK}`, undefined, boss)).body
   const jamesRow = asBoss.team.find((r) => r.person === 'james')
@@ -291,7 +292,7 @@ try {
     const text = await page.evaluate(() => document.body.innerText)
     check('A MEMBER LANDS ON THEIR WEEK', text.includes('Weekly check-in') && text.includes('My week'))
     check('  with their own draft in it', await page.evaluate(() => [...document.querySelectorAll('textarea')].some((t) => t.value === 'Kade’s private focus')))
-    check('  and a colleague’s focus below', text.includes('OCR pilot'))
+    check('  AND NOTHING OF A COLLEAGUE’S WEEK, NOT EVEN THEIR FOCUS', !text.includes('OCR pilot') && !text.includes('What the team is focused on'))
     check('  and none of the colleague’s blocker', !text.includes('Waiting for 200 sample'))
     const wide = await page.evaluate(() => document.documentElement.scrollWidth)
     check('NOTHING SPILLS SIDEWAYS AT 390px', wide <= 390, `scrollWidth ${wide}`)

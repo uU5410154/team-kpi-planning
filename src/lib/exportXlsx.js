@@ -4,7 +4,7 @@ import {
   SAVING_BASIS, targetUnit, gateAsHoursPerManday, gateAsPaybackMonths, fmtMonths, MONTH_LABELS, MONTHS_IN_YEAR, countsToPool, creditSummary, ROLE_LABEL,
 } from './model.js'
 import {
-  STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, PROPOSAL_LABEL, weekLabel,
+  STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, PROPOSAL_LABEL, weekTitle,
 } from './weekly.js'
 
 /* ------------------------------------------------------------------ */
@@ -249,7 +249,7 @@ function addWeeklySheet(wb, weekly, projects) {
   for (const w of weekly.weeks) {
     const required = w.team.filter((t) => t.required)
     const inCount = (stage) => required.filter((t) => ['ontime', 'late'].includes(t.standing?.[stage])).length
-    sectionRow(ws, r++, `WEEK OF ${weekLabel(w.week).toUpperCase()}`
+    sectionRow(ws, r++, `${weekTitle(w.week).toUpperCase()}`
       + (weekly.full ? `  ·  plans in ${inCount('plan')} of ${required.length}  ·  reports in ${inCount('report')} of ${required.length}` : ''),
       cols.length)
     const props = Object.fromEntries((w.proposals || []).map((p) => [`${p.person}.${p.taskId}`, p]))

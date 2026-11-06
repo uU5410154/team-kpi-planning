@@ -1,5 +1,5 @@
 import {
-  Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Chip,
+  Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Chip, Alert,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
@@ -17,8 +17,11 @@ import { fmtHours, fmtPct, fmtRoi, fmtMoneyShort, targetUnit } from '../lib/mode
  * It is built from the same computed people the workbook writes, so the two
  * cannot disagree — if a figure here is wrong it is wrong in the export too,
  * which is the point.
+ *
+ * `own`: a team member's view. The plan arrives already narrowed to them, so
+ * the grid is their card alone, and the team's totals are left off.
  */
-export default function Team({ plan }) {
+export default function Team({ plan, own = false }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { people, settings, finance: fin } = plan
@@ -64,13 +67,23 @@ export default function Team({ plan }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Box>
-        <Typography variant="h2">Overall team</Typography>
+        <Typography variant="h2">{own ? 'My scorecard' : 'Overall team'}</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-          Every scorecard side by side — the same grid as the <strong>Overall_Objectives</strong> sheet in the
-          export. Each person totals 100% across the objectives they hold.
+          {own
+            ? 'What you are measured on this year: the target for each objective you hold, its weight on your card, and where it stands now. The weights total 100%.'
+            : <>Every scorecard side by side — the same grid as the <strong>Overall_Objectives</strong> sheet in the
+              export. Each person totals 100% across the objectives they hold.</>}
         </Typography>
       </Box>
 
+      {own && people.length === 0 && (
+        <Alert severity="info" variant="outlined">
+          Your account is not linked to your name on the team yet, so there is no scorecard to show. Ask an
+          administrator to link it on the Access tab.
+        </Alert>
+      )}
+
+      {people.length > 0 && (
       <Paper variant="outlined" sx={{ overflowX: 'auto' }}>
         <Table size="small" sx={{ '& th, & td': { px: 1.25 } }}>
           <TableHead>
@@ -194,6 +207,7 @@ export default function Team({ plan }) {
           </TableBody>
         </Table>
       </Paper>
+      )}
 
       <Paper variant="outlined" sx={{ p: 2.5 }}>
         <Typography variant="h4" sx={{ mb: 1 }}>How to read it</Typography>
@@ -207,10 +221,12 @@ export default function Team({ plan }) {
           card states something different from the register the register&rsquo;s figure is printed beside the
           total.
         </Typography>
+        {!own && (
         <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 1.5 }}>
           Team total {fmtHours(plan.totals.committedHours)} hrs/month committed ·{' '}
           {fmtMoneyShort(fin.annualBenefit, sym)} a year · gate {fmtRoi(fin.roiGate)}
         </Typography>
+        )}
       </Paper>
     </Box>
   )

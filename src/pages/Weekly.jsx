@@ -21,7 +21,7 @@ import {
 } from '../components/Brand.jsx'
 import * as api from '../lib/api.js'
 import {
-  addWeeks, weekLabel, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
+  addWeeks, weekLabel, weekNo, weekTitle, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
   planProblems, reportProblems, cleanEntry, slipImpact, PROPOSAL_LABEL,
 } from '../lib/weekly.js'
 
@@ -31,8 +31,8 @@ import {
  * Two halves of one page. Monday: what this week is about and the tasks that
  * make it up. Friday: how each of those went — finished or not, and if not,
  * what is in the way, when it will land instead, and whether that moves the
- * project. Below, the team: everybody's focus line for a team member; every
- * plan, report and blocker for an administrator.
+ * project. Below, for an administrator only, the team: every plan, report
+ * and blocker. A team member sees their own week and nobody else's.
  *
  * The server decides who sees what (see /api/weekly in server/index.js). This
  * page only lays out what it is sent.
@@ -133,7 +133,7 @@ function DecisionCard({
             {p.nick} · {p.taskTitle}
           </Typography>
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-            {p.projectKey}{p.projectSummary ? ` · ${p.projectSummary}` : ''} · week of {weekLabel(p.week)}
+            {p.projectKey}{p.projectSummary ? ` · ${p.projectSummary}` : ''} · {weekTitle(p.week)}
           </Typography>
         </Box>
         {p.disagree && <Pill label="dates and member disagree" tone="warn" />}
@@ -540,7 +540,7 @@ function WeekSummary({
 /* ------------------------------------------------------------ the page */
 
 export default function Weekly({
-  plan, me, hello = 'there', onProjectsChanged, onShowTimeline,
+  plan, me, hello = 'there', onProjectsChanged, onShowTimeline, focusProject = null,
 }) {
   const theme = useTheme()
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
@@ -558,6 +558,10 @@ export default function Weekly({
   const [jiraDone, setJiraDone] = useState({})
   const asked = useRef(new Set())
   const myWeekRef = useRef(null)
+  // Arriving from a follow-up email: the project asked about, lit for a moment.
+  const [focused, setFocused] = useState(null)
+  const [askedAbout, setAskedAbout] = useState(null)
+  const handledFocus = useRef(0)
   /*
    * WAITING FOR A DECISION — an administrator's list, across every week, not
    * only the one on screen: a proposal raised last Friday is still waiting on
@@ -612,7 +616,10 @@ export default function Weekly({
     }
   }, [])
 
-  useEffect(() => { load(week) }, [week])
+  // 'current' resolves to a Monday and becomes the week; that week is already
+  // on screen then, and loading it a second time would throw away anything
+  // added to the draft in between — the task a follow-up link opens on.
+  useEffect(() => { if (data?.week !== week) load(week) }, [week])
 
   // A week left with edits unsaved is a week lost when the tab closes.
   useEffect(() => {
@@ -661,6 +668,32 @@ export default function Weekly({
     return () => { stop = true }
     // Once per week loaded: re-running on every keystroke would re-ask Jira.
   }, [data])
+
+  /*
+   * FROM A FOLLOW-UP EMAIL: #weekly/FNP-88 opens this week on that project's
+   * task, adding one if the week does not have it yet, so the member has only
+   * to fill it in and save — which answers the follow-up.
+   */
+  useEffect(() => {
+    if (!focusProject?.key || handledFocus.current === focusProject.n || !data || !draft) return
+    if (data.week !== data.current) return
+    handledFocus.current = focusProject.n
+    const key = focusProject.key
+    window.history.replaceState(null, '', '#weekly')
+    const proj = projectByKey[key]
+    if (!proj) { setError(`There is no project ${key} in the register.`); return }
+    setAskedAbout(proj)
+    if (data.writable && !draft.tasks.some((t) => t.projectKey === key)) {
+      setDraft((dr) => ({ ...dr, tasks: [...dr.tasks, { ...blankTask(), projectKey: key }] }))
+      setDirty(true)
+    }
+    setFocused(key)
+    const t1 = setTimeout(() => {
+      document.querySelector(`[data-task-project="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 300)
+    const t2 = setTimeout(() => setFocused(null), 6000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [focusProject?.n, data, draft, projectByKey])
 
   const edit = (patch) => { setDraft((d) => ({ ...d, ...patch })); setDirty(true) }
   const editTask = (i, t) => edit({ tasks: draft.tasks.map((x, j) => (j === i ? t : x)) })
@@ -760,7 +793,7 @@ export default function Weekly({
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       {data && (
         <WelcomeBanner
-          eyebrow={`Weekly check-in · week of ${weekLabel(data.week)}`}
+          eyebrow={`Weekly check-in · ${weekTitle(data.week)}`}
           title={`Hello ${hello}`}
           subtitle={admin && required.length
             ? `${plansIn} of ${required.length} plans are in for this week.`
@@ -779,9 +812,9 @@ export default function Weekly({
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <IconButton onClick={() => go(-1)} aria-label="previous week"><ChevronLeftIcon /></IconButton>
             <Box sx={{ textAlign: 'center', minWidth: 150 }}>
-              <Typography variant="h4">Week of {weekLabel(data.week)}</Typography>
+              <Typography variant="h4">Week {weekNo(data.week)}</Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {data.week === data.current ? 'this week' : data.week > data.current ? 'next week' : 'past week'}
+                {weekLabel(data.week)} · {data.week === data.current ? 'this week' : data.week > data.current ? 'next week' : 'past week'}
               </Typography>
             </Box>
             <IconButton
@@ -902,14 +935,29 @@ export default function Weekly({
             minRows={2}
             maxRows={8}
             fullWidth
-            helperText={readOnly ? undefined : 'A few sentences. This is what the team and your manager see first.'}
+            helperText={readOnly ? undefined : 'A few sentences. This is what your manager sees first.'}
           />
           <AiAssist available={aiOn} disabled={readOnly} field="focus" text={draft.focus} onText={(t) => edit({ focus: t })} />
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {askedAbout && (
+              <Alert severity="info" onClose={() => setAskedAbout(null)}>
+                Your manager asked for an update on <strong>{askedAbout.jiraKey || askedAbout.key}</strong>
+                {askedAbout.summary ? ` — ${askedAbout.summary}` : ''}. Fill in its task below, then press Save draft
+                or Submit. They are told when you do.
+              </Alert>
+            )}
             {draft.tasks.map((t, i) => (
-              <TaskEditor
+              <Box
                 key={t.id}
+                data-task-project={t.projectKey || undefined}
+                sx={{
+                  borderRadius: '14px',
+                  transition: 'box-shadow .4s',
+                  boxShadow: focused && t.projectKey === focused ? (th) => `0 0 0 2px ${th.palette.primary.main}` : 'none',
+                }}
+              >
+              <TaskEditor
                 task={t}
                 index={i}
                 projects={projects}
@@ -925,6 +973,7 @@ export default function Weekly({
                 onShowTimeline={onShowTimeline}
                 aiOn={aiOn}
               />
+              </Box>
             ))}
             {!readOnly && (
               <Button
@@ -1034,10 +1083,11 @@ export default function Weekly({
         </Paper>
       )}
 
-      {/* ---------------------------------------------------- the team */}
-      {data && (
+      {/* ------------------------------------------------ the team
+          An administrator's: a member sees their own week and nobody else's. */}
+      {data && admin && (
         <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Typography variant="h3">{admin ? 'The team this week' : 'What the team is focused on'}</Typography>
+          <Typography variant="h3">The team this week</Typography>
           {data.team.length === 0 && (
             <Typography variant="body2" sx={{ color: 'text.disabled' }}>Nobody is on the submit list.</Typography>
           )}

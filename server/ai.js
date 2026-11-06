@@ -5,7 +5,7 @@ import * as auth from './auth.js'
 import * as mail from './mail.js'
 import { connect, UNAVAILABLE } from './db.js'
 import {
-  weekOf, addWeeks, weekLabel, deadlines, stageStatus, STATUS_LABEL, BLOCKER_CATEGORIES, PRIORITIES,
+  weekOf, addWeeks, weekLabel, weekTitle, deadlines, stageStatus, STATUS_LABEL, BLOCKER_CATEGORIES, PRIORITIES,
 } from '../src/lib/weekly.js'
 import { repairState, computePlan } from '../src/lib/model.js'
 
@@ -243,13 +243,13 @@ async function emailSummary(s) {
     return line.trim() ? { html: t, text: line } : null
   }).filter(Boolean)
   const { html: body, text } = mail.layout({
-    heading: `The week of ${weekLabel(s.week)}`,
+    heading: weekTitle(s.week),
     lines: [`Written by the AI ${TRIGGER_LABEL[s.trigger]}.`, ...html],
     button: { label: 'Open the team’s week', href: `${mail.appUrl()}/#weekly` },
     foot: 'An AI summary of what the team submitted. Check anything you act on against the week itself.',
   })
   await mail.sendOnce(`summary:${s._id}`, {
-    to, kind: 'summary', subject: `Weekly summary: week of ${weekLabel(s.week)} (${s.trigger === 'plan' ? 'plans' : 'reports'})`, html: body, text,
+    to, kind: 'summary', subject: `Weekly summary: ${weekTitle(s.week)} (${s.trigger === 'plan' ? 'plans' : 'reports'})`, html: body, text,
   })
 }
 

@@ -2049,6 +2049,35 @@ export const isCounted = (p) => p.commitLevel === 'commit' || p.commitLevel === 
 export const isInPlan = (p) => !OUT_OF_PLAN.has(p.commitLevel)
 
 /**
+ * Delivery against the plan, over computed projects: how many have dates,
+ * finished, are running, and of those judged, how many landed on time.
+ * Exported so a member's own projects can be measured the same way.
+ */
+export function timelinessOf(projects) {
+  const timed = projects.filter((p) => isInPlan(p) && !p.outsideTeam)
+  const judged = timed.filter((p) => p.timeline.comparable)
+  const lateRows = judged.filter((p) => (p.timeline.lateBy ?? 0) > 0)
+  return {
+    planned: timed.filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd).length,
+    noDates: timed.filter((p) => !p.timeline.plannedStart && !p.timeline.plannedEnd).length,
+    started: timed.filter((p) => p.timeline.actualStart).length,
+    finished: timed.filter((p) => p.timeline.state === 'finished').length,
+    running: timed.filter((p) => p.timeline.running).length,
+    // Judged: has a due date and either finished or is already past it.
+    judged: judged.length,
+    onTime: judged.length - lateRows.length,
+    late: lateRows.length,
+    overdue: timed.filter((p) => p.timeline.overdue).length,
+    // The average slip, over the rows that actually slipped — an average that
+    // included the on-time ones would report a fortnight's delay as three days.
+    avgSlip: lateRows.length
+      ? Math.round(lateRows.reduce((a, p) => a + p.timeline.lateBy, 0) / lateRows.length)
+      : null,
+    worst: [...lateRows].sort((a, b) => b.timeline.lateBy - a.timeline.lateBy).slice(0, 5),
+  }
+}
+
+/**
  * Does this project's objective contribute hours to the 3,000 pool?
  *
  * `outsideTeam` is stamped in computePlan and answers a prior question: is this
@@ -2440,27 +2469,7 @@ export function computePlan(state) {
    * business is not this team's to answer for, and a deferred project has no
    * date this year to miss.
    */
-  const timed = perProject.filter((p) => isInPlan(p) && !p.outsideTeam)
-  const judged = timed.filter((p) => p.timeline.comparable)
-  const lateRows = judged.filter((p) => (p.timeline.lateBy ?? 0) > 0)
-  const timeliness = {
-    planned: timed.filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd).length,
-    noDates: timed.filter((p) => !p.timeline.plannedStart && !p.timeline.plannedEnd).length,
-    started: timed.filter((p) => p.timeline.actualStart).length,
-    finished: timed.filter((p) => p.timeline.state === 'finished').length,
-    running: timed.filter((p) => p.timeline.running).length,
-    // Judged: has a due date and either finished or is already past it.
-    judged: judged.length,
-    onTime: judged.length - lateRows.length,
-    late: lateRows.length,
-    overdue: timed.filter((p) => p.timeline.overdue).length,
-    // The average slip, over the rows that actually slipped — an average that
-    // included the on-time ones would report a fortnight's delay as three days.
-    avgSlip: lateRows.length
-      ? Math.round(lateRows.reduce((a, p) => a + p.timeline.lateBy, 0) / lateRows.length)
-      : null,
-    worst: [...lateRows].sort((a, b) => b.timeline.lateBy - a.timeline.lateBy).slice(0, 5),
-  }
+  const timeliness = timelinessOf(perProject)
 
   // Delivered by IT or by the business itself: on the register, off our book.
   // Reported so the difference between the two totals has a name.

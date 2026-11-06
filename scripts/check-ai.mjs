@@ -257,7 +257,7 @@ try {
     check('  STANDING PER PERSON — the report is in, on time', task?.[col('Report')] === 'On time', task?.[col('Report')])
     check('  everybody on the submit list has a row, even with nothing in',
       rows.some((r) => r[col('Task')] === 'Nothing submitted'))
-    check('  each week is headed with how many are in', rows.some((r) => /^WEEK OF .* reports in 1 of \d+/.test(String(r[0] || ''))))
+    check('  each week is headed with how many are in', rows.some((r) => /^WEEK \d+ · .* reports in 1 of \d+/.test(String(r[0] || ''))))
     check('  the workbook still opens on the register', wb.worksheets[wb.views?.[0]?.activeTab ?? 0]?.name === 'Projects')
 
     const forMember = await weeklyForExport(4, loader(james))

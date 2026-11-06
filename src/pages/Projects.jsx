@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { Pill } from '../components/Brand.jsx'
+import { Pill, statusTone } from '../components/Brand.jsx'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
@@ -193,14 +193,6 @@ function SoftBenefitCell({ value, onChange }) {
  * The primary tag above stays what the register reports in one column; these
  * are the rest.
  */
-/** Done is green, under way is blue, not begun is grey, anything else violet. */
-const statusTone = (st) => {
-  const x = String(st || '').toLowerCase()
-  if (/done|complete|closed|resolved/.test(x)) return 'good'
-  if (/progress|uat|test|review|develop/.test(x)) return 'info'
-  if (/not ?start|to ?do|backlog|open/.test(x)) return 'neutral'
-  return 'violet'
-}
 
 function AlsoServes({ project, onChange }) {
   const [anchor, setAnchor] = useState(null)

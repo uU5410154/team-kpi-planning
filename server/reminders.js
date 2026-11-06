@@ -2,7 +2,7 @@ import * as weekly from './weekly.js'
 import * as auth from './auth.js'
 import * as mail from './mail.js'
 import { UNAVAILABLE } from './db.js'
-import { weekOf, weekLabel, bangkokTime, deadlines } from '../src/lib/weekly.js'
+import { weekOf, weekLabel, weekNo, bangkokTime, deadlines } from '../src/lib/weekly.js'
 
 /**
  * THE WEEKLY EMAILS.
@@ -85,7 +85,8 @@ export function emailsAt(ms, ctx) {
     const d = deadlines(slot.week)
     const missing = (ctx.submitters || []).filter((p) => !isIn(ctx.entries?.[p], slot.stage))
     const what = slot.stage === 'plan' ? 'plan' : 'report'
-    const wk = weekLabel(slot.week)
+    // "week 45, 2 Nov 2026": the number people say, and the date that pins it down.
+    const wk = `${weekNo(slot.week)}, ${weekLabel(slot.week)}`
 
     if (slot.kind === 'digest') {
       if (!missing.length) continue
@@ -94,7 +95,7 @@ export function emailsAt(ms, ctx) {
       const { html, text } = mail.layout({
         heading: `Still missing at 23:00: ${missing.length} ${what}${missing.length === 1 ? '' : 's'}`,
         lines: [
-          `For the week of ${wk}, ${slot.second ? 'after the Sunday 15:00 second chance' : `due ${bangkokTime(slot.stage === 'plan' ? d.planDue : d.reportDue)}`}:`,
+          `For week ${wk}, ${slot.second ? 'after the Sunday 15:00 second chance' : `due ${bangkokTime(slot.stage === 'plan' ? d.planDue : d.reportDue)}`}:`,
           { html: `<b>${lines.map(mail.esc).join('<br>')}</b>`, text: lines.map((l) => `  • ${l}`).join('\n') },
           slot.stage === 'plan'
             ? 'They were reminded every hour from 08:00.'
@@ -107,7 +108,7 @@ export function emailsAt(ms, ctx) {
         id: `digest:${slot.stage}:${slot.week}:${day}`,
         kind: 'digest',
         to,
-        subject: `Weekly check-in: ${missing.length} ${what}${missing.length === 1 ? '' : 's'} still missing (week of ${wk})`,
+        subject: `Weekly check-in: ${missing.length} ${what}${missing.length === 1 ? '' : 's'} still missing (week ${wk})`,
         html,
         text,
         meta: { week: slot.week, stage: slot.stage, missing },
@@ -130,9 +131,9 @@ export function emailsAt(ms, ctx) {
           : `Your weekly report is due at 15:00 today`
         heading = slot.stage === 'plan' ? `Good morning, ${nick}` : `Hello ${nick}`
         lines = slot.stage === 'plan'
-          ? [`Your plan for the week of ${wk} is due today at 08:00 Bangkok time: what you are focused on, and the tasks with their dates, effort and priority.`,
+          ? [`Your plan for week ${wk} is due today at 08:00 Bangkok time: what you are focused on, and the tasks with their dates, effort and priority.`,
             'Last week’s unfinished tasks are already carried over for you.']
-          : [`Your report for the week of ${wk} is due today at 15:00 Bangkok time: for each task, finished or not — and if not, what is blocking it and the new date.`]
+          : [`Your report for week ${wk} is due today at 15:00 Bangkok time: for each task, finished or not — and if not, what is blocking it and the new date.`]
       } else {
         id = `remind:${slot.stage}:${slot.week}:${day}T${hh}:${p}`
         subject = slot.stage === 'plan'
@@ -141,10 +142,10 @@ export function emailsAt(ms, ctx) {
         heading = slot.stage === 'plan' ? 'Your plan for the week is not in yet' : 'Your weekly report is not in yet'
         lines = [
           slot.stage === 'plan'
-            ? `It was due at 08:00 today for the week of ${wk}.`
+            ? `It was due at 08:00 today for week ${wk}.`
             : slot.second
-              ? `The second chance for the week of ${wk} was 15:00 today. The week locks at 08:00 tomorrow.`
-              : `It was due at 15:00 today for the week of ${wk}. Sunday 15:00 is the second chance.`,
+              ? `The second chance for week ${wk} was 15:00 today. The week locks at 08:00 tomorrow.`
+              : `It was due at 15:00 today for week ${wk}. Sunday 15:00 is the second chance.`,
           `You will get this every hour until 23:00, until it is in.`,
         ]
       }

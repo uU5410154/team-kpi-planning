@@ -306,6 +306,21 @@ export const defaultSubmitters = (people) => (people || [])
 export const weekLabel = (week) => new Date(`${week}T00:00:00Z`)
   .toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
+/*
+ * The ISO week number of a week named by its Monday: week 1 is the week that
+ * holds the year's first Thursday, so 2 Nov 2026 is week 45. Worked out from
+ * the Thursday of the same week, which is always in the year the week counts for.
+ */
+export const weekNo = (week) => {
+  const thu = new Date(`${week}T00:00:00Z`)
+  thu.setUTCDate(thu.getUTCDate() + 3)
+  const jan1 = Date.UTC(thu.getUTCFullYear(), 0, 1)
+  return Math.floor((thu - jan1) / 86400_000 / 7) + 1
+}
+
+/** "Week 45 · 2 Nov 2026". */
+export const weekTitle = (week) => `Week ${weekNo(week)} · ${weekLabel(week)}`
+
 /** An epoch ms as Bangkok wall-clock, e.g. "Fri 7 Nov, 15:00". */
 export const bangkokTime = (ms) => new Date(ms).toLocaleString('en-GB', {
   weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok',
