@@ -144,6 +144,7 @@ function TaskCard({
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+          {task.epic && <Pill label="Epic" tone="info" title="A project in Jira with you as PIC" />}
           {overdue && <Pill label="Past due" tone="bad" />}
           {task.done && <Pill label="Done in Jira" tone="good" />}
           {u && <Pill label={`Updated ${ago(u.submittedAt)}`} tone={posted ? 'info' : 'warn'} title={posted ? 'Posted to Jira' : (u.jira?.error || 'Not posted to Jira')} />}
@@ -423,10 +424,12 @@ export default function JiraWeek({
   const groups = useMemo(() => {
     const by = new Map()
     for (const r of shown) {
-      const key = r.t.project?.key || r.t.parent?.key || ''
+      const key = r.t.project?.key || r.t.parent?.key || (r.t.epic ? r.t.key : '')
       if (!by.has(key)) by.set(key, { key, name: r.t.project?.summary || r.t.parent?.summary || 'No project', rows: [] })
       by.get(key).rows.push(r)
     }
+    // The project's own epic first, then its tasks.
+    for (const g of by.values()) g.rows.sort((a, b) => Number(!!b.t.epic) - Number(!!a.t.epic))
     return [...by.values()]
   }, [shown])
 
@@ -463,8 +466,7 @@ export default function JiraWeek({
             </ToggleButtonGroup>
           )}
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            Your Jira tasks ({jw.account}) whose dates fall in {weekTitle(week)}
-            {(jw.overdue || []).length ? ', and the ones past due and not done' : ''}.
+            The Jira epics and tasks with you ({jw.account}) as PIC whose timeline covers {weekTitle(week)}.
           </Typography>
         </Box>
         <Paper variant="outlined" sx={{ p: 1.5, minWidth: 240, maxWidth: { sm: 340 }, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
@@ -526,7 +528,7 @@ export default function JiraWeek({
       {shown.length === 0 && (
         <Typography variant="body2" sx={{ color: 'text.secondary', py: 1 }}>
           {rows.length === 0
-            ? `No Jira task of yours falls in ${weekTitle(week)}. Add one below, or give an undated one some dates.`
+            ? `Nothing in Jira with you as PIC covers ${weekTitle(week)}. Add a task below, or give an undated one some dates.`
             : filter === 'todo' ? 'Every task this week has an update. Thank you.' : 'Nothing updated yet this week.'}
         </Typography>
       )}

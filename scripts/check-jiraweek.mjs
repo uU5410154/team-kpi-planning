@@ -54,11 +54,23 @@ const ACC = { james: 'acc-james-0001', kade: 'acc-kade-0002' }
 const issues = new Map()
 const put = (key, f) => issues.set(key, { key, ...f })
 put('FNP-2001', { summary: 'Reconcile the forecast', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
-put('FNP-2002', { summary: 'Load last year budget', assignee: ACC.james, parent: 'FNP-877', start: day(LAST, 0), due: day(LAST, 3), status: 'To Do', cat: 'new' })
+put('FNP-2002', { summary: 'Load last year budget', assignee: ACC.james, parent: 'FNP-877', start: day(LAST, 3), due: day(WEEK, 2), status: 'To Do', cat: 'new' })
 put('FNP-2003', { summary: 'Write the runbook', assignee: ACC.james, parent: 'FNP-379', status: 'To Do', cat: 'new' })
 put('FNP-2004', { summary: 'Demo to FP&A', assignee: ACC.james, parent: 'FNP-379', start: day(NEXT, 1), due: day(NEXT, 2), status: 'To Do', cat: 'new' })
 put('FNP-2005', { summary: 'Kade’s own task', assignee: ACC.kade, parent: 'FNP-267', start: day(WEEK, 0), due: day(WEEK, 4), status: 'To Do', cat: 'new' })
+// The rule (owner, 2026-11-06): what James updates is what has him as PIC
+// (assignee) in Jira, epic or task, whose timeline covers the week.
+const EXTRA = ['FNP-2006', 'FNP-2007', 'FNP-2008', 'FNP-2009', 'FNP-2011', 'FNP-935', 'FNP-5000']
+put('FNP-2006', { summary: 'His task on Kade’s project', assignee: ACC.james, parent: 'FNP-267', start: day(WEEK, 0), due: day(WEEK, 4), status: 'To Do', cat: 'new' })
+put('FNP-2007', { summary: 'Under an epic not in the register', assignee: ACC.james, parent: 'FNP-4444', start: day(WEEK, 0), due: day(WEEK, 4), status: 'To Do', cat: 'new' })
+put('FNP-935', { summary: 'Dashboard Portal Configuration', type: 'Epic', assignee: ACC.james, start: day(LAST, 0), due: day(NEXT, 4), status: 'In Progress', cat: 'indeterminate' })
+// …and NOT these: past due, or marked [DELETED] (the item, its epic, its register row).
+put('FNP-2009', { summary: 'Long past due, never closed', assignee: ACC.james, parent: 'FNP-379', start: day(LAST, 0), due: day(LAST, 3), status: 'To Do', cat: 'new' })
+put('FNP-2008', { summary: 'Under a project deleted in the register', assignee: ACC.james, parent: 'FNP-868', start: day(WEEK, 0), due: day(WEEK, 2), status: 'To Do', cat: 'new' })
+put('FNP-5000', { summary: 'ERP Migration [DELETED]', type: 'Epic', assignee: ACC.james, start: day(WEEK, 0), due: day(NEXT, 4), status: 'To Do', cat: 'new' })
+put('FNP-2011', { summary: 'Under a deleted epic', assignee: ACC.james, parent: 'FNP-5000', start: day(WEEK, 0), due: day(WEEK, 2), status: 'To Do', cat: 'new' })
 const writes = []
+const taskJql = []
 const asRaw = (i) => ({
   key: i.key,
   fields: {
@@ -68,7 +80,7 @@ const asRaw = (i) => ({
     customfield_10015: i.start || null,
     assignee: i.assignee ? { accountId: i.assignee, displayName: i.assignee === ACC.james ? 'Pipat Singhasiri' : 'Jarinya Phosri' } : null,
     issuetype: { name: i.type || 'Task' },
-    parent: i.parent ? { key: i.parent, fields: { summary: `Epic ${i.parent}` } } : null,
+    parent: i.parent ? { key: i.parent, fields: { summary: issues.get(i.parent)?.summary || `Epic ${i.parent}` } } : null,
     created: '2026-01-01T00:00:00.000+0700',
     updated: '2026-01-01T00:00:00.000+0700',
     resolutiondate: null,
@@ -91,7 +103,11 @@ const fake = createServer(async (req, res) => {
   if (u.pathname === '/rest/api/3/search/jql') {
     const jql = json().jql || ''
     const acc = (jql.match(/assignee = "([^"]+)"/) || [])[1]
-    const list = [...issues.values()].filter((i) => (acc ? i.assignee === acc : true) && i.type !== 'Epic')
+    const noEpics = /issuetype != /.test(jql)
+    const dueFrom = (jql.match(/duedate >= "([^"]+)"/) || [])[1]
+    if (acc) taskJql.push(jql)
+    const list = [...issues.values()].filter((i) => (acc ? i.assignee === acc : true) && (!noEpics || i.type !== 'Epic')
+      && (!dueFrom || !i.due || i.due >= dueFrom))
     return send(200, { issues: list.map(asRaw) })
   }
   if (m(/^\/rest\/api\/3\/issue\/createmeta\/[A-Z]+\/issuetypes$/)) {
@@ -195,6 +211,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
 let browser
 try {
   const seed = JSON.parse(readFileSync(new URL('../src/data/seed.json', import.meta.url), 'utf8'))
+  const gone = seed.projects.find((p) => p.key === 'FNP-868')
+  gone.summary = `${gone.summary} [DELETED]`
   await call('PUT', '/api/scenarios/Baseline', { payload: seed, updatedBy: 'test' }, 'service')
   const boss = await signUp('boss@lotuss.com')
   const james = await signUp('james@lotuss.com')
@@ -204,10 +222,17 @@ try {
   console.log('\n--- the week, from Jira ---')
   const w = (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, james)).body
   check('A MEMBER’S WEEK IS THEIR JIRA TASKS', w.jira === 'on' && w.account === 'Pipat Singhasiri', JSON.stringify(w).slice(0, 160))
-  check('  the ones whose dates cover this week', w.tasks?.map((t) => t.key).join() === 'FNP-2001', w.tasks?.map((t) => t.key).join())
-  check('  the overdue unfinished one too', w.overdue?.map((t) => t.key).join() === 'FNP-2002')
-  check('  and the undated one, to plan', w.undated?.map((t) => t.key).join() === 'FNP-2003')
-  check('  NOT next week’s, and NOT a colleague’s', ![...w.tasks, ...w.overdue].some((t) => ['FNP-2004', 'FNP-2005'].includes(t.key)))
+  const got = (w.tasks || []).map((t) => t.key).sort().join()
+  check('  EVERYTHING WITH THEM AS PIC WHOSE TIMELINE COVERS THE WEEK, epic or task', got === ['FNP-2001', 'FNP-2002', 'FNP-2006', 'FNP-2007', 'FNP-935'].sort().join(), got)
+  check('  their epic is there as an epic, as its own project', w.tasks?.find((t) => t.key === 'FNP-935')?.epic === true
+    && w.tasks.find((t) => t.key === 'FNP-935').project?.key === 'FNP-935')
+  check('  NOT one past due, NOT next week’s, NOT a colleague’s', !(w.tasks || []).some((t) => ['FNP-2009', 'FNP-2004', 'FNP-2005'].includes(t.key)) && (w.overdue || []).length === 0)
+  check('  NOTHING MARKED [DELETED]: the epic, a task under it, a task under a deleted register row',
+    !(w.tasks || []).some((t) => ['FNP-5000', 'FNP-2011', 'FNP-2008'].includes(t.key)))
+  check('  and the undated one, to plan', w.undated?.map((t) => t.key).join() === 'FNP-2003', w.undated?.map((t) => t.key).join())
+  const asked = taskJql.at(-1) || ''
+  check('  Jira is asked only for what is due this week or later', asked.includes(`duedate >= "${WEEK}"`) && !/issuetype != /.test(asked), asked.slice(0, 200))
+  for (const k of EXTRA) issues.delete(k)
   check('  each under its project in the register', w.tasks?.[0]?.project?.key === 'FNP-379', JSON.stringify(w.tasks?.[0]?.project))
   check('an account not linked to anybody is told so', (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, nobody)).body.jira === 'unlinked')
 
@@ -235,7 +260,7 @@ try {
   const task = entry?.tasks?.find((t) => t.jiraKey === 'FNP-2001')
   check('IT COUNTS IN THE WEEK HERE — dashboard, reminders and summary read it',
     entry?.mode === 'jira' && task?.done === true && task.projectKey === 'FNP-379' && /Matched/.test(task.progress), JSON.stringify(task).slice(0, 160))
-  check('  the plan counts as in; the report not yet (the overdue one is unreported)', !!entry?.planSubmittedAt && !entry.reportSubmittedAt)
+  check('  the plan counts as in; the report not yet (FNP-2002 is unreported)', !!entry?.planSubmittedAt && !entry.reportSubmittedAt)
 
   console.log('\n--- a decision is needed ---')
   const dl = (await call('GET', '/api/decisions', undefined, boss)).body.decisions || []
@@ -256,7 +281,7 @@ try {
   check('  EVERY TASK OF THE WEEK UPDATED: THE REPORT COUNTS AS IN', !!entry2?.reportSubmittedAt && notDone.body.reportIn === true)
   const again = (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, james)).body
   check('the week now shows each task’s update', again.tasks.find((t) => t.key === 'FNP-2001')?.update?.done === true
-    && again.overdue.find((t) => t.key === 'FNP-2002')?.update?.reason === 'Budget file late from FP&A')
+    && again.tasks.find((t) => t.key === 'FNP-2002')?.update?.reason === 'Budget file late from FP&A')
   const adhoc = await call('PUT', `/api/weekly/${WEEK}/mine`, { mode: 'jira', focus: '', tasks: entry2.tasks, unplanned: [{ title: 'Audit request', effort: 0.5 }] }, james)
   const entry3 = await D.collection('kpi_weekly').findOne({ week: WEEK, person: 'james' })
   check('ADHOC WORK SAVES BESIDE THE JIRA TASKS, KEEPING THEM', adhoc.status === 200 && entry3.unplanned?.[0]?.title === 'Audit request'

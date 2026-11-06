@@ -723,7 +723,7 @@ export default function Weekly({
   const myId = me?.person || null
   const projects = useMemo(() => {
     const rank = { pic: 0, helping: 1, other: 2 }
-    return (plan?.projects || []).filter((p) => !p.deleted).map((p) => {
+    return (plan?.projects || []).filter((p) => !p.deleted && !/\[\s*deleted\s*\]/i.test(p.summary || '')).map((p) => {
       const mine = !myId ? 'other' : p.pic === myId ? 'pic'
         : (p.contributors || []).some((c) => c.person === myId) ? 'helping' : 'other'
       return {
@@ -736,7 +736,7 @@ export default function Weekly({
   const myOpen = useMemo(() => {
     if (!myId) return []
     return (plan?.projects || [])
-      .filter((p) => !p.deleted && p.pic === myId && p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded'
+      .filter((p) => !p.deleted && !/\[\s*deleted\s*\]/i.test(p.summary || '') && p.pic === myId && p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded'
         && p.timeline?.state !== 'finished')
       .map((p) => ({
         key: p.key,

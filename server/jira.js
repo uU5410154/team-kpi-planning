@@ -696,6 +696,8 @@ const weekEnd = (week) => {
  * dates first — those are what a member sets when they plan a week — and the
  * sprint only where the task carries no date of its own.
  */
+const isWeekDate = (w) => /^\d{4}-\d{2}-\d{2}$/.test(String(w || ''))
+
 export function taskSpan(t) {
   const start = t.start || t.sprintStart || null
   const end = t.due || t.sprintEnd || null
@@ -710,21 +712,27 @@ export function coversWeek(t, week) {
 }
 
 /*
- * A MEMBER'S TASKS FOR A WEEK.
+ * A MEMBER'S WORK FOR A WEEK: the Jira issues they are PIC of (assignee).
  *
- *   week     tasks whose dates cover it (finished ones too, so the week reads whole)
- *   overdue  not done, due before the week began: still theirs to report on
+ *   week     whose dates cover it (finished ones too, so the week reads whole)
+ *   overdue  not done, due before the week began
  *   undated  not done and no date at all: shown so they can be planned
  *
- * Epics are left out: an epic is a project, not a task.
+ * With withEpics, their epics come too, marked epic: true — an epic they are
+ * PIC of is theirs to update like a task. Only what is due on or after the
+ * week's Monday, or has no due date, is asked for, so a long tail of old
+ * open tasks never crowds the page out.
  */
-export async function tasksForWeek(accountId, week) {
+export async function tasksForWeek(accountId, week, { withEpics = false } = {}) {
   const c = conf()
   if (!status().configured) return UNAVAILABLE
   if (!/^[A-Za-z0-9:_-]{6,128}$/.test(String(accountId || ''))) return { week: [], overdue: [], undated: [] }
+  if (!isWeekDate(week)) return { week: [], overdue: [], undated: [] }
   const since = new Date(`${week}T00:00:00Z`)
   since.setUTCDate(since.getUTCDate() - 7)
-  const jql = `assignee = "${accountId}" AND issuetype != "${c.epicType.replace(/"/g, '')}" `
+  const epicType = c.epicType.replace(/"/g, '')
+  const jql = `assignee = "${accountId}" ${withEpics ? '' : `AND issuetype != "${epicType}" `}`
+    + `AND (duedate >= "${week}" OR duedate IS EMPTY) `
     + `AND (statusCategory != Done OR resolutiondate >= "${since.toISOString().slice(0, 10)}") ORDER BY duedate ASC`
   const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', 'parent', c.startField, c.sprintField]
   const all = []
@@ -739,6 +747,7 @@ export async function tasksForWeek(accountId, week) {
       all.push({
         ...shape(raw, c),
         type: f.issuetype?.name || '',
+        epic: (f.issuetype?.name || '').toLowerCase() === epicType.toLowerCase(),
         parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '' } : null,
         url: `${c.base}/browse/${raw.key}`,
       })

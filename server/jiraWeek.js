@@ -58,6 +58,30 @@ const projectFor = (roster, parentKey) => (parentKey
   ? roster.projects.find((p) => p.jiraKey && p.jiraKey.toUpperCase() === parentKey.toUpperCase()) || null
   : null)
 
+/** A project or epic someone has marked "[DELETED]" in its name: not shown. */
+export const markedDeleted = (name) => /\[\s*deleted\s*\]/i.test(name || '')
+
+/*
+ * WHAT A PERSON MUST UPDATE FOR A WEEK — the owner's rule (2026-11-06): the
+ * Jira epics and tasks with their name as PIC (the assignee) whose timeline
+ * covers that week. Nothing past due outside it, and nothing marked [DELETED]
+ * — the item itself, its epic, or its row in the register. Tasks with no dates
+ * yet are offered for planning, only under epics they are PIC of. The page,
+ * the plan and the "report is in" count all use this one list.
+ */
+async function myTasks(who, person, week) {
+  const list = await jira.tasksForWeek(who.account.accountId, week, { withEpics: true })
+  if (list === UNAVAILABLE) return UNAVAILABLE
+  const live = (t) => !markedDeleted(t.summary) && !markedDeleted(t.parent?.summary)
+    && !markedDeleted(projectFor(who.roster, t.epic ? t.key : t.parent?.key)?.summary)
+  const picOf = new Set(who.roster.projects.filter((p) => p.pic === person && p.jiraKey).map((p) => p.jiraKey.toUpperCase()))
+  return {
+    week: list.week.filter(live),
+    overdue: [],
+    undated: list.undated.filter((t) => !t.epic && live(t) && picOf.has(String(t.parent?.key || '').toUpperCase())),
+  }
+}
+
 /*
  * THE WEEK, AS THE MEMBER SEES IT.
  *
@@ -72,12 +96,14 @@ export async function weekFor(person, email, week) {
   if (who === UNAVAILABLE) return UNAVAILABLE
   if (!who.person) return { jira: 'unlinked' }
   if (!who.account) return { jira: 'unmatched', names: who.person.jiraNames || [] }
-  const list = await jira.tasksForWeek(who.account.accountId, week)
+  const list = await myTasks(who, person, week)
   if (list === UNAVAILABLE) return { jira: 'off' }
   const updates = await k.updates.find({ week, person }).toArray()
   const upd = Object.fromEntries(updates.map((u) => [u.jiraKey, u]))
   const decorate = (t) => {
-    const p = projectFor(who.roster, t.parent?.key)
+    // An epic is its own project; a task is under its epic's.
+    const p = projectFor(who.roster, t.epic ? t.key : t.parent?.key)
+      || (t.epic ? { key: t.key, summary: t.summary, jiraKey: t.key } : null)
     const u = upd[t.key]
     return {
       key: t.key,
@@ -90,6 +116,7 @@ export async function weekFor(person, email, week) {
       sprintEnd: t.sprintEnd,
       sprintName: t.sprintName,
       type: t.type,
+      epic: !!t.epic,
       url: t.url,
       parent: t.parent,
       project: p ? { key: p.key, summary: p.summary, jiraKey: p.jiraKey } : null,
@@ -192,7 +219,7 @@ export async function submit(week, me, body, now = Date.now()) {
   if (!issue) return fail(404, 'There is no such Jira task.')
   if (issue.accountId !== who.account.accountId) return fail(403, `${key} is not assigned to you in Jira.`)
 
-  const project = projectFor(who.roster, issue.parent?.key)
+  const project = projectFor(who.roster, issue.parent?.key) || projectFor(who.roster, key)
   const nick = who.person.nick
   const id = `${week}.${me.person}.${key}`
   const at = new Date(now).toISOString()
@@ -231,7 +258,7 @@ export async function submit(week, me, body, now = Date.now()) {
   await k.updates.updateOne({ _id: id }, { $set: { jira: result } })
 
   // Into the week, so the dashboard and the reminders count it.
-  const list = await jira.tasksForWeek(who.account.accountId, week).catch(() => null)
+  const list = await myTasks(who, me.person, week).catch(() => null)
   const due = list && list !== UNAVAILABLE ? [...list.week, ...list.overdue].map((t) => t.key) : [key]
   const reported = new Set((await k.updates.find({ week, person: me.person }).toArray()).map((x) => x.jiraKey))
   const allIn = due.every((x) => reported.has(x))
@@ -432,12 +459,12 @@ export async function confirmPlan(week, me, now = Date.now()) {
   const who = await whoInJira(me.person, me.email)
   if (who === UNAVAILABLE) return UNAVAILABLE
   if (!who.account) return fail(409, 'Your Jira account could not be found from your name on the team.')
-  const list = await jira.tasksForWeek(who.account.accountId, week)
+  const list = await myTasks(who, me.person, week)
   if (list === UNAVAILABLE) return fail(409, 'Jira is not connected on the server.')
   const tasks = [...list.week, ...list.overdue].filter((t) => !t.done || list.week.includes(t))
   if (!tasks.length) return fail(400, 'No Jira task of yours covers this week yet. Add one, or set dates on one, first.')
   const entry = await weekly.mirrorTasks(week, me.person, tasks.map((t) => {
-    const p = projectFor(who.roster, t.parent?.key)
+    const p = projectFor(who.roster, t.epic ? t.key : t.parent?.key)
     return {
       id: weekly.jiraTaskId(t.key),
       title: `${t.key} ${t.summary}`.trim(),
