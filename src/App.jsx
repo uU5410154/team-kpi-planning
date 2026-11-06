@@ -1177,8 +1177,8 @@ export default function App() {
             * THE HEADER: which page this is, and the few things that apply to
             * every page — the export, the light/dark switch, the file menu.
             *
-            * On a phone the ☰ opens the menu over the page; on a computer it
-            * folds the menu to icons and back. The export becomes an icon on a
+            * On a phone the ☰ opens the menu over the page; a computer has no
+            * ☰, the menu folds from its own button. The export becomes an icon on a
             * phone, where a 390px row has no room for its words.
             */}
           <Box
@@ -1204,14 +1204,15 @@ export default function App() {
               backdropFilter: 'blur(14px)',
             }}
             >
-              <Tooltip title={phone ? 'Menu' : navMini ? 'Open the menu' : 'Fold the menu'}>
-                <IconButton
-                  onClick={() => (phone ? setNavOpen(true) : setNavMini((m) => !m))}
-                  aria-label="menu"
-                >
-                  <MenuIcon />
-                </IconButton>
-              </Tooltip>
+              {/* Only a phone needs ☰: there the menu is hidden. On a computer
+                  the menu is always on screen and folds from its own button. */}
+              {phone && (
+                <Tooltip title="Menu">
+                  <IconButton onClick={() => setNavOpen(true)} aria-label="menu">
+                    <MenuIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
               {CurrentIcon && <IconTile icon={CurrentIcon} color={PAGE_COLOR[tab]} size={phone ? 32 : 38} />}
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="h4" noWrap sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.1rem' } }}>
