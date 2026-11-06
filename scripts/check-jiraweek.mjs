@@ -319,6 +319,25 @@ try {
     check('  and the reminder to plan next week', /Don’t forget next week’s plan|Don't forget next week's plan/.test(txt))
     check('  only the not-updated one is open to start with',
       (await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task]')].map((x) => x.getAttribute('data-jira-task')))).join() === 'FNP-2010')
+    const head = await pg.evaluate(() => {
+      const g = document.querySelector('[data-jira-task="FNP-2010"]')?.closest('[data-project-group]')
+      const nx = document.querySelector('[data-next-step]')
+      const btn = document.querySelector('[data-next-action]')
+      return {
+        group: g?.getAttribute('data-project-group'),
+        header: g?.querySelector('button')?.innerText.replace(/\s+/g, ' '),
+        next: nx?.innerText.replace(/\s+/g, ' '),
+        anim: btn ? getComputedStyle(btn).animationName : null,
+        hello: document.body.innerText.includes('Hello'),
+      }
+    })
+    check('  each task sits under its project header, saying how many are left', !!head.group && /to update/i.test(head.header || ''), head.header)
+    check('  the next step names the task to update, on a pulsing button', /Update 1 task/.test(head.next || '') && /FNP-2010/.test(head.next || '') && !!head.anim && head.anim !== 'none' && !head.hello, `${head.next} · ${head.anim}`)
+    // The button takes them to that task's progress box.
+    await pg.click('[data-next-action]')
+    await sleep(700)
+    check('  and pressing it puts them in that task\'s progress box',
+      await pg.evaluate(() => document.activeElement?.closest('[data-jira-task]')?.getAttribute('data-jira-task') === 'FNP-2010'))
     // Fill in the card and submit.
     await pg.evaluate(() => {
       const card = document.querySelector('[data-jira-task="FNP-2010"]')

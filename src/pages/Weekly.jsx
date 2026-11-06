@@ -13,14 +13,16 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import LockIcon from '@mui/icons-material/LockOutlined'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import AiAssist from '../components/AiAssist.jsx'
 import JiraWeek from '../components/JiraWeek.jsx'
 import { activeInWeek } from '../lib/manager.js'
 import Markdown from '../components/Markdown.jsx'
 import { STATUS } from '../lib/palette.js'
 import {
-  Pill, IconTile, WelcomeBanner, personColor,
+  Pill, IconTile, personColor,
 } from '../components/Brand.jsx'
+import { pulseSx } from '../components/pulse.js'
 import * as api from '../lib/api.js'
 import {
   addWeeks, weekLabel, weekNo, weekTitle, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
@@ -39,6 +41,50 @@ import {
  * The server decides who sees what (see /api/weekly in server/index.js). This
  * page only lays out what it is sent.
  */
+
+/**
+ * THE NEXT STEP for the week on screen: one line saying what to do, and, when
+ * there is something to do, the one button that does it, pulsing softly so it
+ * is the first thing the eye lands on.
+ */
+function NextStep({ next }) {
+  const todo = !!(next.action && next.onClick)
+  return (
+    <Paper
+      variant="outlined"
+      data-next-step
+      sx={{
+        flex: 1,
+        minWidth: 260,
+        p: { xs: 1.5, sm: 2 },
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        flexWrap: 'wrap',
+        borderColor: todo ? 'primary.main' : 'divider',
+      }}
+    >
+      <Box sx={{ flex: 1, minWidth: 200 }}>
+        <Typography variant="overline" sx={{ color: todo ? 'primary.light' : 'text.secondary', lineHeight: 1.4, display: 'block' }}>
+          Next step
+        </Typography>
+        <Typography variant="h4" sx={{ fontWeight: 700 }}>{next.label}</Typography>
+        {next.sub && <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>{next.sub}</Typography>}
+      </Box>
+      {todo && (
+        <Button
+          variant="contained"
+          onClick={next.onClick}
+          endIcon={<ArrowForwardIcon />}
+          sx={[{ flexShrink: 0 }, next.pulse && pulseSx]}
+          data-next-action
+        >
+          {next.action}
+        </Button>
+      )}
+    </Paper>
+  )
+}
 
 // Where somebody stands, as a pill colour. The word is always on the pill too.
 const PILL_TONE = {
@@ -899,6 +945,24 @@ export default function Weekly({
   }
   const required = (data?.team || []).filter((r) => r.required)
   const plansIn = required.filter((r) => r.entry?.planSubmittedAt).length
+  // A Jira week's own next step: the next task to update, then next week's
+  // plan; a week ahead is planned by its dates and confirmed.
+  const jwReady = jiraMode && data && jw.week === data.week
+  const jiraTodo = jwReady ? [...(jw.overdue || []), ...(jw.tasks || [])].filter((t) => !t.update) : []
+  const toTask = (key) => {
+    const card = document.querySelector(`[data-jira-task="${key}"]`)
+    if (!card) { toMyWeek(); return }
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setTimeout(() => card.querySelector('textarea')?.focus({ preventScroll: true }), 400)
+  }
+  const confirmPlan = async () => {
+    try {
+      await api.confirmJiraPlan(data.week)
+      load(data.week)
+    } catch (e) {
+      setError(e.message)
+    }
+  }
   const next = (() => {
     if (!data) return null
     if (data.locked) return { label: 'This week is closed', sub: 'It locked at 08:00 the following Monday and is kept as the record.' }
@@ -907,30 +971,49 @@ export default function Weekly({
         ? { label: `${plansIn} of ${required.length} plans in`, sub: 'Open anybody below to read their week.' }
         : { label: 'Your account is not linked yet', sub: 'Ask an administrator to link it to your name on the Access tab.' }
     }
-    if (!planIn) return { label: 'Send your plan for the week', sub: `Due ${bangkokTime(d.planDue)}, Bangkok time`, onClick: toMyWeek }
-    if (!reportIn) return { label: 'Report how the week went', sub: `Due ${bangkokTime(d.reportDue)} — Sunday 15:00 is the second chance`, onClick: toMyWeek }
-    return { label: 'All in for this week — thank you', sub: 'You can still edit until it locks.', onClick: toMyWeek }
+    if (jwReady) {
+      const n = weekNo(data.week)
+      if (data.week > data.current) {
+        return planIn
+          ? { label: `Week ${n} is planned`, sub: 'You can still change the dates on your tasks until the week starts.' }
+          : {
+            label: `Plan week ${n}`,
+            sub: 'Set dates on the Jira tasks you will work on (below), then confirm.',
+            action: `My plan for week ${n} is set`,
+            onClick: confirmPlan,
+            pulse: true,
+          }
+      }
+      if (jiraTodo.length) {
+        const t = jiraTodo[0]
+        return {
+          label: `Update ${jiraTodo.length} task${jiraTodo.length === 1 ? '' : 's'} for week ${n}`,
+          sub: `Next: ${t.key} · ${t.summary}`,
+          action: 'Update next task',
+          onClick: () => toTask(t.key),
+          pulse: true,
+        }
+      }
+      if (data.week === data.current) {
+        return {
+          label: 'Every task is updated — plan next week',
+          sub: `Set dates on your tasks for week ${weekNo(addWeeks(data.week, 1))}, before Monday 08:00.`,
+          action: `Plan week ${weekNo(addWeeks(data.week, 1))}`,
+          onClick: () => go(1),
+          pulse: true,
+        }
+      }
+      return { label: `Week ${n} is all updated — thank you`, sub: 'You can still change an update until the week locks.' }
+    }
+    if (!planIn) return { label: 'Send your plan for the week', sub: `Due ${bangkokTime(d.planDue)}, Bangkok time`, action: 'Write my plan', onClick: toMyWeek, pulse: true }
+    if (!reportIn) return { label: 'Report how the week went', sub: `Due ${bangkokTime(d.reportDue)} — Sunday 15:00 is the second chance`, action: 'Write my report', onClick: toMyWeek, pulse: true }
+    return { label: 'All in for this week — thank you', sub: 'You can still edit until it locks.' }
   })()
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      {data && (
-        <WelcomeBanner
-          eyebrow={`Weekly check-in · ${weekTitle(data.week)}`}
-          title={`Hello ${hello}`}
-          subtitle={admin && required.length
-            ? `${plansIn} of ${required.length} plans are in for this week.`
-            : 'Your plan on Monday, how it went on Friday. Everything is in Bangkok time.'}
-          next={next}
-        />
-      )}
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: 1, minWidth: 260 }}>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-            The plan for the week is due <strong>Monday 08:00</strong>; how it went is due <strong>Friday 15:00</strong>,
-            with Sunday 15:00 as the second chance. A week stays editable until the next Monday 08:00. Bangkok time.
-          </Typography>
-        </Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+        {next && <NextStep next={next} />}
         {data && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <IconButton onClick={() => go(-1)} aria-label="previous week"><ChevronLeftIcon /></IconButton>
@@ -955,6 +1038,10 @@ export default function Weekly({
           </Box>
         )}
       </Box>
+      <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1.5 }}>
+        Plan due <strong>Monday 08:00</strong> · update due <strong>Friday 15:00</strong> (Sunday 15:00 is the second chance)
+        · a week stays editable until the next Monday 08:00. Bangkok time.
+      </Typography>
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {/* Here as well as under My week: an administrator with no week of

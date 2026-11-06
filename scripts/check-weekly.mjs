@@ -290,7 +290,7 @@ try {
     await page.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await page.waitForFunction(() => document.body.innerText.includes('My week'), { timeout: 15000 })
     const text = await page.evaluate(() => document.body.innerText)
-    check('A MEMBER LANDS ON THEIR WEEK', text.includes('Weekly check-in') && text.includes('My week'))
+    check('A MEMBER LANDS ON THEIR WEEK, WITH THE NEXT STEP', /next step/i.test(text) && /write my (plan|report)/i.test(text) && text.includes('My week') && !text.includes('Hello'), text.slice(0, 300).replace(/\s+/g, ' '))
     check('  with their own draft in it', await page.evaluate(() => [...document.querySelectorAll('textarea')].some((t) => t.value === 'Kade’s private focus')))
     check('  AND NOTHING OF A COLLEAGUE’S WEEK, NOT EVEN THEIR FOCUS', !text.includes('OCR pilot') && !text.includes('What the team is focused on'))
     check('  and none of the colleague’s blocker', !text.includes('Waiting for 200 sample'))

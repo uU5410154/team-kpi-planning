@@ -467,7 +467,7 @@ try {
     const wk = await text(m)
     check('THEIR WEEK, AND NOBODY ELSE’S: no team list, no colleague’s focus',
       !wk.includes('KADE-ONLY') && !wk.includes('What the team is focused on') && !wk.includes('The team this week'))
-    check('  THE WEEK CARRIES ITS NUMBER', /Week \d{1,2}\b/.test(wk) && /Weekly check-in · Week \d{1,2} · /.test(wk))
+    check('  THE WEEK CARRIES ITS NUMBER', /Week \d{1,2}\n/.test(wk) && /\d{1,2} \w{3} \d{4} · this week/.test(wk))
     check('  no Excel export and no file menu — both are the whole plan',
       !(await m.evaluate(() => [...document.querySelectorAll('button')].some((b) => /Export Excel/.test(b.textContent) || b.getAttribute('aria-label') === 'More'))))
     check('  the side menu shows their own progress, not the team’s', wk.includes('Your projects, finished') && !wk.includes('Saving hours, committed'))

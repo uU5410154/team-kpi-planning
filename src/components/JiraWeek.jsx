@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Box, Paper, Typography, Button, TextField, Alert, ToggleButton, ToggleButtonGroup, Checkbox, FormControlLabel,
-  Autocomplete, CircularProgress, IconButton, Link, MenuItem,
+  Autocomplete, CircularProgress, IconButton, Link, MenuItem, Collapse, ButtonBase,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import EventIcon from '@mui/icons-material/EventOutlined'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import FolderIcon from '@mui/icons-material/FolderOutlined'
+import { alpha } from '@mui/material/styles'
 import * as api from '../lib/api.js'
 import { addWeeks, weekNo, weekTitle } from '../lib/weekly.js'
 import AiAssist from './AiAssist.jsx'
 import { Pill } from './Brand.jsx'
 import { ago } from './FollowUp.jsx'
+import { pulseSx } from './pulse.js'
 
 /**
  * A MEMBER'S WEEK, FROM JIRA.
@@ -40,7 +44,7 @@ const workdays = (week) => {
 /* ------------------------------------------------------------ one task */
 
 function TaskCard({
-  task, week, overdue, planning, canWrite, writable, aiOn, highlight, onSaved,
+  task, week, overdue, planning, canWrite, writable, aiOn, highlight, onSaved, grouped = false,
 }) {
   const u = task.update
   const [progress, setProgress] = useState(u?.progress || '')
@@ -123,9 +127,11 @@ function TaskCard({
     >
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-            {projectKey ? `${projectKey} · ` : ''}{project}
-          </Typography>
+          {!grouped && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+              {projectKey ? `${projectKey} · ` : ''}{project}
+            </Typography>
+          )}
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flexWrap: 'wrap' }}>
             <Link href={task.url} target="_blank" rel="noopener" underline="hover" sx={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
               {task.key}<OpenInNewIcon sx={{ fontSize: 13 }} />
@@ -337,6 +343,60 @@ function NewProject({ week, onDone, onCancel, writable }) {
   )
 }
 
+/* ------------------------------------------------- one project's tasks */
+
+/**
+ * A PROJECT HEADER and the tasks under it, so it is plain which project each
+ * update is for. The header says how many of its tasks still need an update,
+ * and folds the project away once it is done with.
+ */
+function ProjectGroup({
+  name, projectKey, rows, planning, children,
+}) {
+  const left = rows.filter(({ t }) => !t.update).length
+  const [open, setOpen] = useState(true)
+  return (
+    <Box component="section" data-project-group={projectKey || 'none'} aria-label={`project ${name}`} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <ButtonBase
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        sx={(t) => ({
+          justifyContent: 'flex-start',
+          textAlign: 'left',
+          gap: 1.25,
+          px: { xs: 1.25, sm: 1.75 },
+          py: 1.25,
+          borderRadius: 2,
+          border: 1,
+          borderColor: alpha(t.palette.primary.main, 0.35),
+          borderLeft: `4px solid ${t.palette.primary.main}`,
+          bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.13 : 0.07),
+          '&:hover': { bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.18 : 0.1) },
+        })}
+      >
+        <FolderIcon sx={{ color: 'primary.light', fontSize: 22, flexShrink: 0 }} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {projectKey && (
+            <Typography variant="caption" sx={{ color: 'primary.light', fontWeight: 700, letterSpacing: 0.4, display: 'block', lineHeight: 1.3 }}>
+              {projectKey}
+            </Typography>
+          )}
+          <Typography variant="h4" sx={{ fontWeight: 700, fontSize: { xs: '1rem', sm: '1.1rem' } }}>{name}</Typography>
+        </Box>
+        {planning
+          ? <Pill label={`${rows.length} task${rows.length === 1 ? '' : 's'}`} tone="neutral" />
+          : left
+            ? <Pill label={`${left} to update`} tone="warn" />
+            : <Pill label="All updated" tone="good" />}
+        <ExpandMoreIcon sx={{ color: 'text.secondary', transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'none', flexShrink: 0 }} />
+      </ButtonBase>
+      <Collapse in={open} unmountOnExit={false}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pl: { xs: 0, sm: 2 } }}>{children}</Box>
+      </Collapse>
+    </Box>
+  )
+}
+
 /* ------------------------------------------------------------ the week */
 
 export default function JiraWeek({
@@ -358,6 +418,17 @@ export default function JiraWeek({
   const todo = rows.filter((r) => !isUpdated(r.t))
   const doneRows = rows.filter((r) => isUpdated(r.t))
   const shown = planning ? rows : filter === 'todo' ? todo : filter === 'done' ? doneRows : rows
+  // The tasks under their projects, in the order the projects first appear —
+  // so a project with a task past due comes first.
+  const groups = useMemo(() => {
+    const by = new Map()
+    for (const r of shown) {
+      const key = r.t.project?.key || r.t.parent?.key || ''
+      if (!by.has(key)) by.set(key, { key, name: r.t.project?.summary || r.t.parent?.summary || 'No project', rows: [] })
+      by.get(key).rows.push(r)
+    }
+    return [...by.values()]
+  }, [shown])
 
   const confirm = async () => {
     setBusy(true)
@@ -412,13 +483,20 @@ export default function JiraWeek({
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Week {weekNo(addWeeks(week, 1))}: set dates on the Jira tasks you will work on, before Monday 08:00.
               </Typography>
-              <Button size="small" onClick={() => onGoWeek(1)} sx={{ alignSelf: 'flex-start' }}>Plan week {weekNo(addWeeks(week, 1))} →</Button>
+              <Button
+                size="small"
+                variant={todo.length === 0 && week === current ? 'contained' : 'text'}
+                onClick={() => onGoWeek(1)}
+                sx={[{ alignSelf: 'flex-start' }, todo.length === 0 && week === current && pulseSx]}
+              >
+                Plan week {weekNo(addWeeks(week, 1))} →
+              </Button>
             </>
           )}
           {canWrite && (planIn
             ? <Typography variant="caption" sx={{ color: 'text.secondary' }}>Plan for week {weekNo(week)} recorded {planInAt ? ago(planInAt) : ''}.</Typography>
             : (
-              <Button size="small" variant="outlined" onClick={confirm} disabled={busy} sx={{ alignSelf: 'flex-start' }}>
+              <Button size="small" variant={planning ? 'contained' : 'outlined'} onClick={confirm} disabled={busy} sx={[{ alignSelf: 'flex-start' }, planning && pulseSx]}>
                 My plan for week {weekNo(week)} is set
               </Button>
             ))}
@@ -426,19 +504,24 @@ export default function JiraWeek({
       </Box>
       {note && <Alert severity={note.tone} sx={{ py: 0 }} onClose={() => setNote(null)}>{note.text}</Alert>}
 
-      {shown.map(({ t, overdue }) => (
-        <TaskCard
-          key={`${t.key}:${t.update?.submittedAt || ''}`}
-          task={t}
-          week={week}
-          overdue={overdue}
-          planning={planning}
-          canWrite={canWrite}
-          writable={jw.writable}
-          aiOn={aiOn}
-          highlight={!!focusKey && t.project?.key === focusKey}
-          onSaved={onReload}
-        />
+      {groups.map((g) => (
+        <ProjectGroup key={g.key || 'none'} name={g.name} projectKey={g.key} rows={g.rows} planning={planning}>
+          {g.rows.map(({ t, overdue }) => (
+            <TaskCard
+              key={`${t.key}:${t.update?.submittedAt || ''}`}
+              task={t}
+              week={week}
+              overdue={overdue}
+              planning={planning}
+              canWrite={canWrite}
+              writable={jw.writable}
+              aiOn={aiOn}
+              highlight={!!focusKey && t.project?.key === focusKey}
+              onSaved={onReload}
+              grouped
+            />
+          ))}
+        </ProjectGroup>
       ))}
       {shown.length === 0 && (
         <Typography variant="body2" sx={{ color: 'text.secondary', py: 1 }}>
