@@ -47,7 +47,8 @@ console.log('\n--- the leaked key ---')
     const llm = await import('../server/llm.js')
     process.env.LOTUS_API_KEY = leaked
     const st = llm.status()
-    check('THE KEY FROM THE REFERENCE DOCUMENT IS REFUSED, NOT USED', st.configured === false && /leaked/.test(st.reason))
+    // Allowed by the owner's choice until a new key is issued.
+    check('THE KEY FROM THE REFERENCE DOCUMENT IS USED', st.configured === true)
     process.env.LOTUS_API_KEY = 'some-new-key'
     check('  a new one is accepted', llm.status().configured === true)
     delete process.env.LOTUS_API_KEY

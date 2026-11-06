@@ -1,22 +1,18 @@
-import { createHash } from 'node:crypto'
-
 /**
  * THE LOTUS LLM: the company's own model, behind an OpenAI-compatible
  * chat-completions endpoint.
  *
  * Called from the server only. The key is LOTUS_API_KEY in the Render
  * dashboard and never reaches a browser, a log line or the repository — which
- * is public. There is deliberately no fallback key in this file: the one in
- * the internal reference document was committed to another repository and is
- * marked leaked, so it is recognised by its fingerprint and refused, rather
- * than quietly used.
+ * is public. There is deliberately no fallback key in this file.
+ *
+ * The key from the internal reference document used to be refused here,
+ * because it is marked leaked. The owner chose to use it anyway (2026-11-06)
+ * until the Lotus platform team issues a new one, so any key set is used.
  *
  * With no key set, every AI feature reports itself unavailable and the app
  * works exactly as it did without it.
  */
-
-const LEAKED = '505eb6116928ab9ee43f0337bd5ed03440427cbd29b25fc9d7d1081f415b87e9'
-const fingerprint = (k) => createHash('sha256').update(String(k || '')).digest('hex')
 
 const cfg = () => ({
   url: process.env.LOTUS_LLM_URL || 'https://api-cpxis.lotuss.com/llm/v1/chat/completions',
@@ -29,9 +25,6 @@ const cfg = () => ({
 export function status() {
   const c = cfg()
   if (!c.key) return { configured: false, reason: 'LOTUS_API_KEY is not set on the server.' }
-  if (fingerprint(c.key) === LEAKED) {
-    return { configured: false, reason: 'LOTUS_API_KEY is the leaked key from the reference document. Ask the Lotus platform team for a new one.' }
-  }
   return { configured: true, model: c.model }
 }
 
