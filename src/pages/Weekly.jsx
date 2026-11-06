@@ -213,6 +213,72 @@ const blankTask = () => ({
   carriedFrom: null, done: null, pct: null, blocker: '', blockerCategory: null, newDate: null, affects: null,
 })
 
+/* ------------------------------------------------- the person's projects */
+
+/*
+ * YOUR PROJECTS, ALREADY ON THE PAGE.
+ *
+ * The projects this person is PIC of and that are not finished, listed in
+ * their week without having to go looking: active ones first, then anything
+ * past its date, then by due date. One click puts a task on the project; one
+ * already on this week's plan says so instead.
+ */
+const OPEN_PROJECTS_SHOWN = 8
+
+function MyProjects({ projects, onAdd, readOnly, onPlan }) {
+  const [all, setAll] = useState(false)
+  if (!projects.length) return null
+  const shown = all ? projects : projects.slice(0, OPEN_PROJECTS_SHOWN)
+  return (
+    <Box
+      component="section"
+      aria-label="your projects"
+      sx={{ border: 1, borderColor: 'divider', borderRadius: '14px', p: { xs: 1.5, sm: 2 } }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+        <Typography variant="h4">Your projects</Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {projects.length} open, where you are PIC{readOnly ? '' : ' — add a task to put one on this week’s plan'}
+        </Typography>
+      </Box>
+      {shown.map((p) => {
+        const planned = onPlan.has(p.key)
+        return (
+          <Box
+            key={p.key}
+            data-my-project={p.key}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderTop: 1, borderColor: 'divider', flexWrap: { xs: 'wrap', sm: 'nowrap' },
+            }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{p.jiraKey || p.key}</Typography>
+            <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.summary}>
+              {p.summary}
+            </Typography>
+            {p.active && <Pill label="Active" tone="info" />}
+            {p.overdue && <Pill label="Past due" tone="bad" />}
+            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', minWidth: 72, textAlign: 'right' }}>
+              {p.due ? `due ${fmtDay(p.due)}` : 'no due date'}
+            </Typography>
+            {planned
+              ? <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', minWidth: 96, textAlign: 'right' }}>on this week’s plan</Typography>
+              : !readOnly && (
+                <Button size="small" startIcon={<AddIcon />} onClick={() => onAdd(p.key)} sx={{ whiteSpace: 'nowrap', minWidth: 96 }} aria-label={`add a task on ${p.jiraKey || p.key}`}>
+                  Add task
+                </Button>
+              )}
+          </Box>
+        )
+      })}
+      {projects.length > OPEN_PROJECTS_SHOWN && (
+        <Button size="small" onClick={() => setAll((x) => !x)} sx={{ mt: 0.5 }}>
+          {all ? 'Show fewer' : `Show all ${projects.length}`}
+        </Button>
+      )}
+    </Box>
+  )
+}
+
 /* ------------------------------------------------------------ one task */
 
 /** The heading a project is listed under in the project picker. */
@@ -618,6 +684,23 @@ export default function Weekly({
     }).sort((a, b) => rank[a.mine] - rank[b.mine])
   }, [plan, myId])
   const projectByKey = useMemo(() => Object.fromEntries(projects.map((p) => [p.key, p])), [projects])
+  // This person's open projects, for the list in their week.
+  const myOpen = useMemo(() => {
+    if (!myId) return []
+    return (plan?.projects || [])
+      .filter((p) => !p.deleted && p.pic === myId && p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded'
+        && p.timeline?.state !== 'finished')
+      .map((p) => ({
+        key: p.key,
+        jiraKey: p.jiraKey || null,
+        summary: p.summary || '',
+        due: p.due || p.timeline?.plannedEnd || null,
+        active: p.active === true,
+        overdue: !!p.timeline?.overdue,
+      }))
+      .sort((a, b) => (b.active - a.active) || (b.overdue - a.overdue)
+        || String(a.due || '9999').localeCompare(String(b.due || '9999')))
+  }, [plan, myId])
 
   const load = useCallback(async (w) => {
     setError(null)
@@ -956,6 +1039,13 @@ export default function Weekly({
             helperText={readOnly ? undefined : 'A few sentences. This is what your manager sees first.'}
           />
           <AiAssist available={aiOn} disabled={readOnly} field="focus" text={draft.focus} onText={(t) => edit({ focus: t })} />
+
+          <MyProjects
+            projects={myOpen}
+            readOnly={readOnly}
+            onPlan={new Set(draft.tasks.map((t) => t.projectKey).filter(Boolean))}
+            onAdd={(key) => edit({ tasks: [...draft.tasks, { ...blankTask(), projectKey: key }] })}
+          />
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             {askedAbout && (

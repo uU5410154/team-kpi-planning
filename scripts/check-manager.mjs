@@ -417,6 +417,19 @@ try {
     check('  the side menu shows their own progress, not the team’s', wk.includes('Your projects, finished') && !wk.includes('Saving hours, committed'))
     const tabsM = await m.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim()))
     check('  the scorecard tab is theirs', tabsM.includes('My scorecard') && !tabsM.includes('Overall team'), tabsM.join(' | '))
+    // Their open projects are listed in their week without asking.
+    if (process.env.SHOT_DIR) { await m.evaluate(() => document.querySelector('section[aria-label="your projects"]')?.scrollIntoView({ block: 'center' })); await m.screenshot({ path: `${process.env.SHOT_DIR}/my-projects.png` }) }
+    const mine = await m.evaluate(() => [...document.querySelectorAll('[data-my-project]')].map((x) => x.getAttribute('data-my-project')))
+    check('THEIR PROJECTS ARE ON THE PAGE ALREADY', wk.includes('Your projects') && mine.length > 0 && !mine.includes('FNP-267'), mine.join(','))
+    check('  one already planned says so', (await m.evaluate(() => document.querySelector('[data-my-project="FNP-379"]')?.textContent || '')).includes('on this week’s plan'))
+    const addOn = await m.evaluate(() => {
+      const row = [...document.querySelectorAll('[data-my-project]')].find((x) => [...x.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Add task'))
+      if (!row) return null
+      ;[...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Add task').click()
+      return row.getAttribute('data-my-project')
+    })
+    await sleep(300)
+    check('  ONE CLICK PUTS A TASK ON A PROJECT', !!addOn && (await m.evaluate((k) => !!document.querySelector(`[data-task-project="${k}"]`), addOn)), addOn)
     // Clicking a task's project field opens the list on their own projects.
     await m.evaluate(() => [...document.querySelectorAll('label')].find((l) => /^Project/.test(l.textContent))?.parentElement.querySelector('input')?.focus())
     await m.evaluate(() => [...document.querySelectorAll('label')].find((l) => /^Project/.test(l.textContent))?.parentElement.querySelector('input')?.click())
