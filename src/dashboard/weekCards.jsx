@@ -21,6 +21,7 @@ import {
   activeWords, ACTIVE_WHY,
 } from '../lib/manager.js'
 import CardFrame from './CardFrame.jsx'
+import { plainError } from '../lib/api.js'
 import Loading from '../components/Loading.jsx'
 
 /*
@@ -87,7 +88,7 @@ export function ActiveCard({ ctx, f }) {
           context={c.active
             ? `${activeWords(c, when)} · ${week ? `week ${weekNo(week)}` : 'this week'}`
             : `Nothing covers ${when}: no dates, no Jira work, no update — switch one on in the Timeline`}
-          help={ACTIVE_HELP + (ctx.nowJiraError ? ` Jira could not be read just now, so Jira work is not counted: ${ctx.nowJiraError}` : '')}
+          help={ACTIVE_HELP + (ctx.nowJiraError ? ` Jira could not be read just now, so Jira work is not counted. ${plainError(ctx.nowJiraError)}` : '')}
         />
       )}
     </CardFrame>
@@ -275,7 +276,7 @@ export function OwnersCard({ ctx, f }) {
           )}
           {(ctx.prevJiraError || ctx.nowJiraError) && (
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }} data-coverage-error>
-              Jira could not be read just now, so only what people sent in shows{ctx.nowJiraError ? ', and Jira work does not make a project active' : ''}: {ctx.prevJiraError || ctx.nowJiraError}
+              Jira could not be read just now, so only what people sent in shows{ctx.nowJiraError ? ', and Jira work does not make a project active' : ''}. {plainError(ctx.prevJiraError || ctx.nowJiraError)}
             </Typography>
           )}
           {ctx.unknownKeys?.length > 0 && (

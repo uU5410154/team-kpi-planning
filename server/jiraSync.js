@@ -79,6 +79,8 @@ export async function runSync({ trigger = 'manual', scenario = null } = {}) {
     addedKeys: merged.addedKeys.slice(0, 20),
     fromCreated: merged.fromCreated,
     missingInJira: fetched.missing || [],
+    // Said plainly, so a typo in the register is fixed rather than wondered at.
+    missingNote: jira.skippedNote(fetched.missing || []),
     epicsOnBoard: board.epics.length,
     tasksSeen: rolled.tasks || 0,
     adjusted: merged.projects.filter((p) => p.adjustedDue).length,

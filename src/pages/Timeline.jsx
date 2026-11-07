@@ -20,7 +20,9 @@ import * as api from '../lib/api.js'
 import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
 import { STATUS, CHART, OBJ_BY_ID } from '../lib/palette.js'
-import { fmtHours, isDate, timelineOf, pinFinishPatch, unpinFinishPatch } from '../lib/model.js'
+import {
+  fmtHours, isDate, timelineOf, pinFinishPatch, unpinFinishPatch, timelinessOf,
+} from '../lib/model.js'
 import { syncStatus } from '../lib/storage.js'
 import { alpha } from '@mui/material/styles'
 import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
@@ -202,7 +204,6 @@ export default function Timeline({
   const ROW_H = 36
   const KID_H = 26
   const asOf = settings.asOfDate
-  const t = plan.totals.timeliness
 
   /*
    * Jira, through our own server.
@@ -352,6 +353,7 @@ export default function Timeline({
           severity: 'success',
           text: `Already up to date — ${fetched.issues.length} issues checked, and all ${board.epics.length} epics `
             + `in ${board.project} are on the register.`,
+          note: api.unknownNote(fetched.missing),
         })
         return
       }
@@ -366,9 +368,7 @@ export default function Timeline({
           r.added
             ? `${r.added} new epic${r.added === 1 ? '' : 's'} added as Watch (${r.addedKeys.slice(0, 5).join(', ')}${r.addedKeys.length > 5 ? '…' : ''})`
             : null,
-          (fetched.missing || []).length
-            ? `${fetched.missing.length} key${fetched.missing.length === 1 ? '' : 's'} not in Jira: ${fetched.missing.slice(0, 3).join(', ')}`
-            : null,
+          api.unknownNote(fetched.missing),
           r.fromCreated
             ? `${r.fromCreated} start${r.fromCreated === 1 ? '' : 's'} taken from when the ticket was raised`
             : null,
@@ -388,7 +388,7 @@ export default function Timeline({
         note: 'This is in your browser. Use “Sync for everyone” to run it against the shared plan.',
       })
     } catch (e) {
-      setSyncNote({ severity: 'error', text: e.message })
+      setSyncNote({ severity: 'error', text: api.plainError(e) })
     } finally {
       setSyncing(false)
     }
@@ -425,7 +425,7 @@ export default function Timeline({
       const issues = (r.byParent && r.byParent[key]) || []
       setKids((prev) => new Map(prev).set(key, { loading: false, error: null, rows: issues }))
     } catch (e) {
-      setKids((prev) => new Map(prev).set(key, { loading: false, error: e.message, rows: [] }))
+      setKids((prev) => new Map(prev).set(key, { loading: false, error: api.plainError(e), rows: [] }))
     }
   }
 
@@ -506,7 +506,7 @@ export default function Timeline({
     try {
       const r = await api.jiraSyncShared()
       if (!r.ok) {
-        setSyncNote({ severity: 'error', text: r.error || 'The server could not run the sync.' })
+        setSyncNote({ severity: 'error', text: api.plainError(r.error || 'The server could not run the sync.') })
         return
       }
       setSyncNote({
@@ -522,10 +522,11 @@ export default function Timeline({
           // one that silently ignored it.
           r.skippedExcluded ? `${r.skippedExcluded} excluded project${r.skippedExcluded === 1 ? '' : 's'} not touched` : null,
         ].filter(Boolean).join(' · '),
-        note: r.wrote ? 'Reload the page to see it — everyone else will get it when they do.' : null,
+        note: [r.missingNote || api.unknownNote(r.missingInJira), r.wrote ? 'Reload the page to see it — everyone else will get it when they do.' : null]
+          .filter(Boolean).join(' '),
       })
     } catch (e) {
-      setSyncNote({ severity: 'error', text: e.message })
+      setSyncNote({ severity: 'error', text: api.plainError(e) })
     } finally {
       setSharing(false)
     }
@@ -579,7 +580,7 @@ export default function Timeline({
     } catch (e) {
       // The register keeps the change; the ticket did not take it. Saying so
       // is the whole point — a silent half-write is how two systems drift.
-      setSyncNote({ severity: 'error', text: `Saved here, but Jira refused it: ${e.message}` })
+      setSyncNote({ severity: 'error', text: `Saved here, but Jira refused it: ${api.plainError(e)}` })
     } finally {
       setSaving(false)
     }
@@ -613,7 +614,7 @@ export default function Timeline({
         setCandidates(null)
       }
     } catch (e) {
-      setSyncNote({ severity: 'error', text: e.message })
+      setSyncNote({ severity: 'error', text: api.plainError(e) })
     } finally {
       setFinding(false)
     }
@@ -1361,9 +1362,13 @@ export default function Timeline({
                   */}
                 {tl.running
                   ? `in progress since ${tl.actualStart}`
-                  : tl.actualStart
-                    ? 'started, not finished'
-                    : 'not started'}
+                  : tl.state === 'finished'
+                    ? 'done — no finish date recorded'
+                    : tl.actualStart
+                      ? 'started, not finished'
+                      : tl.tasksDone > 0
+                        ? `${tl.tasksDone} of ${tl.tasksTotal} tasks done`
+                        : 'not started'}
               </Typography>
             )}
           </Box>
@@ -1443,7 +1448,17 @@ export default function Timeline({
       </Box>
     </Tooltip>
   )
+  /*
+   * The figures follow the search box and the filters: they describe the bars
+   * on screen, and the line says whether that is everything or a part of it.
+   */
+  const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || !ours || onlyActive
+  // Undated projects are never on the chart; how many there are is the register's figure.
+  const t = { ...timelinessOf(rows), noDates: filtering ? 0 : plan.totals.timeliness.noDates }
   const stats = [
+    <Typography key="scope" component="span" variant="caption" data-stat-scope={filtering ? 'filtered' : 'all'} sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+      {filtering ? 'Of those shown:' : 'All projects:'}
+    </Typography>,
     stat('planned', t.planned, 'planned', 'With a plan: a start or a due date on the register'),
     stat('finished', t.finished, 'finished', 'Finished, with a date to say when', t.finished ? STATUS.good : undefined),
     stat('running', t.running, 'running', 'Started and not yet finished'),
@@ -1525,12 +1540,8 @@ export default function Timeline({
             shared plan — an administrator's job. A team member reads. */}
         {!readOnly && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', ml: 'auto' }}>
-          {jira == null ? <Loading label="Checking Jira…" />
-            : (
-              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', maxWidth: 260, display: narrow ? 'none' : 'block' }}>
-                {jira.configured ? `${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account}` : 'not configured on the server'}
-              </Typography>
-            )}
+          {/* Which Jira, and as whom, is in the buttons' tooltips rather than a line of its own. */}
+          {jira == null && <Loading label="Checking Jira…" />}
           <Button
             size="small"
             variant="outlined"
@@ -1555,11 +1566,11 @@ export default function Timeline({
               </Button>
             </span>
           </Tooltip>
-          <Tooltip title="Runs the same sync on the server against the SHARED plan — the one everybody loads. This is what the 07:00 job does every morning.">
+          <Tooltip title={`Runs the same sync on the server against the SHARED plan — the one everybody loads. This is what the 07:00 job does every morning.${jira?.configured ? ` Reads ${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account}.` : ''}`}>
             <span>
               <Button
                 size="small"
-                variant="contained"
+                variant="outlined"
                 startIcon={narrow ? null : <SyncIcon />}
                 sx={narrow ? jiraBtn : undefined}
                 disabled={!jira?.configured || syncing || sharing}

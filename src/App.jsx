@@ -1280,18 +1280,18 @@ export default function App() {
               {canWrite && (narrow ? (
                 <Tooltip title="Export Excel">
                   <span>
-                    <IconButton color="primary" onClick={handleExport} disabled={exporting} aria-label="Export Excel">
+                    <IconButton onClick={handleExport} disabled={exporting} aria-label="Export Excel">
                       {exporting ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
                     </IconButton>
                   </span>
                 </Tooltip>
               ) : (
                 <Button
-                  variant="contained"
+                  variant="outlined"
                   startIcon={<DownloadIcon />}
                   onClick={handleExport}
                   disabled={exporting}
-                  sx={{ flexShrink: 0, whiteSpace: 'nowrap', px: 2.25, py: 0.9 }}
+                  sx={{ flexShrink: 0, whiteSpace: 'nowrap', color: 'text.primary', borderColor: 'divider' }}
                 >
                   {exporting ? 'Building…' : 'Export Excel'}
                 </Button>

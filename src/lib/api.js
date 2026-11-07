@@ -20,6 +20,36 @@ const j = async (res) => {
   return body
 }
 
+/*
+ * AN ERROR, IN WORDS A PERSON CAN READ: never a blob of JSON or a page of HTML
+ * that a proxy in front of Jira sent back. Jira's own message is kept where it
+ * gave one ("An issue with key 'FNP-1446' does not exist").
+ */
+export function plainError(e) {
+  const raw = String(e?.message ?? e ?? '').trim()
+  if (!raw) return 'Something went wrong. Try again.'
+  // {"errorMessages":["…"]} somewhere in it: just the messages.
+  const json = raw.match(/\{[\s\S]*\}/)
+  if (json) {
+    try {
+      const j = JSON.parse(json[0])
+      const msgs = [...(j.errorMessages || []), ...Object.values(j.errors || {}), j.error, j.message]
+        .filter((x) => typeof x === 'string' && x.trim())
+      if (msgs.length) return `${raw.slice(0, json.index).replace(/[:\s]+$/, '')}${raw.slice(0, json.index).trim() ? ': ' : ''}${msgs.join(' ')}`.trim()
+    } catch { /* not JSON after all */ }
+  }
+  if (/<\s*(!doctype|html|head|body|title)\b/i.test(raw)) {
+    const code = (raw.match(/\b(\d{3})\b/) || [])[1]
+    return `Jira is not answering just now${code ? ` (${code})` : ''}. Try again in a few minutes.`
+  }
+  return raw.length > 400 ? `${raw.slice(0, 400)}…` : raw
+}
+
+/** "Jira does not know FNP-1446 — check the key on the Projects page.", or null. */
+export const unknownNote = (keys = []) => (keys?.length
+  ? `Jira does not know ${keys.slice(0, 5).join(', ')}${keys.length > 5 ? ` and ${keys.length - 5} more` : ''} — check ${keys.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
+  : null)
+
 export async function storeStatus() {
   try {
     const h = await j(await fetch('/api/health'))
