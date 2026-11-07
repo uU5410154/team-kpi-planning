@@ -208,6 +208,14 @@ export const saveDashboardLayout = async (items) => j(await fetch('/api/dashboar
 }))
 export const resetDashboardLayout = async () => j(await fetch('/api/dashboard/layout', { method: 'DELETE' }))
 
+/** The Projects register's hidden columns, the same for everybody. */
+export const projectColumns = async () => j(await fetch('/api/projects/columns'))
+export const saveProjectColumns = async (hidden) => j(await fetch('/api/projects/columns', {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ hidden }),
+}))
+
 /** Ask a project's owner for an update, by email. */
 export const followUp = async (projectKey) => j(await fetch('/api/followups', {
   method: 'POST',

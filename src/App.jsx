@@ -223,6 +223,9 @@ export default function App() {
   // own ThemeProvider, so theme.breakpoints is not reachable from here; 600px
   // is MUI's `sm`, the same line every page below draws.
   const phone = useMediaQuery('(max-width:599.95px)')
+  // A tablet: the menu is on screen, and beside it the header has no room
+  // for the words on its buttons either. (MUI's `md`, written out likewise.)
+  const narrow = useMediaQuery('(max-width:899.95px)')
   const plan = useMemo(() => computePlan(state), [state])
 
   /*
@@ -1237,10 +1240,10 @@ export default function App() {
 
               <Box sx={{ flex: 1 }} />
 
-              <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone={phone} />
+              <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone={narrow} />
 
               {/* The chatbot: an administrator's, and only when the AI is there. */}
-              {canWrite && aiOn && (phone ? (
+              {canWrite && aiOn && (narrow ? (
                 <Tooltip title="Ask about the plan">
                   <IconButton onClick={() => setChatOpen(true)} aria-label="Ask about the plan">
                     <AutoAwesomeIcon fontSize="small" />
@@ -1258,7 +1261,7 @@ export default function App() {
               ))}
 
               {/* The workbook is the whole team's plan: an administrator's. */}
-              {canWrite && (phone ? (
+              {canWrite && (narrow ? (
                 <Tooltip title="Export Excel">
                   <span>
                     <IconButton color="primary" onClick={handleExport} disabled={exporting} aria-label="Export Excel">
@@ -1372,6 +1375,8 @@ export default function App() {
               blocked={plan.invalid}
               onGoTo={setTab}
               jump={jump?.tab === 'projects' ? jump : null}
+              canWrite={canWrite}
+              onShowTimeline={showOnTimeline}
             />
           )}
           {allowed && tab === 'weekly' && (

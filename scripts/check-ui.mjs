@@ -555,10 +555,16 @@ try {
   await new Promise((r) => setTimeout(r, 300))
 
   const roiBeforeCapex = await page.evaluate((r) => document.querySelector('tbody tr').children[r]?.innerText.trim(), roiCol)
-  // The row itself is inert now — only the button opens the dialog.
+  // The row body opens the project's DETAIL popup, not the cost sheet — only
+  // the receipt button opens that.
   await clickRowCell(roiCol)
-  await new Promise((r) => setTimeout(r, 400))
-  check('clicking the row body does NOT open the dialog', (await dialogOpen()) === false)
+  await new Promise((r) => setTimeout(r, 600))
+  const rowOpened = await dialogText()
+  check('clicking the row body opens the project detail, NOT the cost sheet',
+    /open full page/i.test(rowOpened) && !/Monthly cost/i.test(rowOpened), rowOpened.slice(0, 80).replace(/\n/g, ' / '))
+  await page.keyboard.press('Escape')
+  await new Promise((r) => setTimeout(r, 500))
+  check('  and Esc closes it', (await dialogOpen()) === false)
 
   const openViaButton = () => page.evaluate(() => {
     const btn = document.querySelector('tbody tr button[aria-label="open cost breakdown"]')

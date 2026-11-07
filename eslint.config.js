@@ -58,6 +58,7 @@ export default [
       'scripts/check-ui.mjs', 'scripts/check-sharedload.mjs', 'scripts/check-apps.mjs',
       'scripts/check-auth.mjs', 'scripts/check-commitment.mjs', 'scripts/check-heldfinish.mjs',
       'scripts/check-jira.mjs', 'scripts/check-timeline.mjs', 'scripts/check-weekly.mjs', 'scripts/check-approvals.mjs', 'scripts/check-mail.mjs', 'scripts/check-ai.mjs', 'scripts/check-manager.mjs', 'scripts/check-jiraweek.mjs',
+      'scripts/check-projects-page.mjs',
     ],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },

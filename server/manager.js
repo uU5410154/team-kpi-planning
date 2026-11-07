@@ -3,6 +3,7 @@ import * as weekly from './weekly.js'
 import * as auth from './auth.js'
 import * as mail from './mail.js'
 import { weekOf } from '../src/lib/weekly.js'
+import { cleanHiddenColumns } from '../src/lib/projectColumns.js'
 
 /**
  * THE MANAGER DASHBOARD'S OWN STORAGE.
@@ -90,6 +91,35 @@ export async function resetLayout() {
   if (!k) return UNAVAILABLE
   await k.layout.deleteOne({ _id: LAYOUT_ID })
   return { items: null }
+}
+
+/* ------------------------------------------------- the register's columns */
+
+/*
+ * Which columns of the Projects register are hidden, for everybody. Kept in
+ * the same collection as the dashboard layout, as its own document: it is the
+ * same kind of thing — how a shared page is arranged — and not in the plan,
+ * which is saved whole from whichever browser saves last.
+ */
+const COLUMNS_ID = 'projects-columns'
+
+export async function getProjectColumns() {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const doc = await k.layout.findOne({ _id: COLUMNS_ID })
+  return doc
+    ? { hidden: cleanHiddenColumns(doc.hidden) || [], updatedAt: doc.updatedAt, updatedBy: doc.updatedBy }
+    : { hidden: [] }
+}
+
+export async function saveProjectColumns(hidden, by) {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const clean = cleanHiddenColumns(hidden)
+  if (!clean) return { error: 'Hidden columns are a list of column names.' }
+  const doc = { hidden: clean, updatedAt: new Date().toISOString(), updatedBy: by }
+  await k.layout.updateOne({ _id: COLUMNS_ID }, { $set: doc }, { upsert: true })
+  return doc
 }
 
 /* ----------------------------------------------------------- follow-ups */

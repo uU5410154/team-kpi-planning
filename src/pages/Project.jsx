@@ -77,7 +77,7 @@ function TaskLine({ t }) {
 }
 
 export default function Project({
-  plan, projectKey, canWrite, onUpdate, onBack, onShowTimeline,
+  plan, projectKey, canWrite, onUpdate, onBack, onShowTimeline, inDialog = false, actions = null,
 }) {
   const p = plan.projects.find((x) => x.key === projectKey)
     || plan.projects.find((x) => String(x.jiraKey || '').toUpperCase() === String(projectKey || '').toUpperCase())
@@ -104,7 +104,7 @@ export default function Project({
 
   if (!p) {
     return (
-      <Alert severity="warning" action={<Button color="inherit" size="small" onClick={onBack}>Back</Button>}>
+      <Alert severity="warning" action={onBack && <Button color="inherit" size="small" onClick={onBack}>{inDialog ? 'Close' : 'Back'}</Button>}>
         There is no project {projectKey} in the register.
       </Alert>
     )
@@ -136,7 +136,8 @@ export default function Project({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Box>
-        <Button size="small" startIcon={<ArrowBackIcon />} onClick={onBack} sx={{ mb: 1, color: 'text.secondary' }}>Back</Button>
+        {/* In the register's popup the dialog has its own close button. */}
+        {!inDialog && <Button size="small" startIcon={<ArrowBackIcon />} onClick={onBack} sx={{ mb: 1, color: 'text.secondary' }}>Back</Button>}
         <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 } }}>
           <Box sx={{
             display: 'flex', alignItems: 'flex-start', gap: 1.5, flexWrap: 'wrap',
@@ -186,6 +187,7 @@ export default function Project({
                   onSet={(v) => keys.forEach((k) => onUpdate(k, { active: v }))}
                 />
               )}
+              {actions}
               <Button size="small" startIcon={<TimelineIcon />} onClick={() => onShowTimeline?.(p.key)}>Timeline</Button>
               {canWrite && (
                 <FollowUp

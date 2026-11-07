@@ -1,11 +1,20 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { Pill, statusTone } from '../components/Brand.jsx'
 import { projectOnHold } from '../lib/hold.js'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
   FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
+  Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery,
 } from '@mui/material'
+import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
+import OpenInFullIcon from '@mui/icons-material/OpenInFull'
+import FilterListIcon from '@mui/icons-material/FilterList'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import ProjectDetailDialog from '../components/ProjectDetailDialog.jsx'
+import * as api from '../lib/api.js'
+import { PROJECT_COLUMNS } from '../lib/projectColumns.js'
 import SaveIcon from '@mui/icons-material/Save'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SearchIcon from '@mui/icons-material/Search'
@@ -26,7 +35,7 @@ import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
 import ImportDialog from '../components/ImportDialog.jsx'
 import { exportFiltered, readProjectsFile, planImport } from '../lib/projectIO.js'
-import { useTheme } from '@mui/material/styles'
+import { useTheme, alpha } from '@mui/material/styles'
 
 const COMMIT_COLOR = {
   commit: STATUS.good,
@@ -270,12 +279,103 @@ function AlsoServes({ project, onChange }) {
  */
 const SESSION_START = Date.now()
 
+/*
+ * A click on a row opens the project — unless it landed on something that
+ * does its own thing: an input, a dropdown, a button, a chip, a link.
+ */
+const OWN_CLICK = 'input, textarea, button, a, label, [role="button"], [role="combobox"], [role="option"], .MuiInputBase-root, .MuiSelect-select, .MuiChip-root, .MuiCheckbox-root'
+
+/**
+ * THE REGISTER ON A PHONE: one card a project, the few facts that tell them
+ * apart, and a tap opens the project. Editing is for a wider screen; on a
+ * phone this is for looking something up.
+ */
+function PhoneList({ rows, assignees, onOpen }) {
+  if (!rows.length) {
+    return (
+      <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
+        No projects match these filters.
+      </Paper>
+    )
+  }
+  return (
+    <Paper variant="outlined" component="ul" aria-label="projects" sx={{ listStyle: 'none', m: 0, p: 0, overflow: 'hidden' }}>
+      {rows.map((p, i) => {
+        const owner = assignees.find((x) => x.id === p.pic)
+        const muted = OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam
+        return (
+          <Box component="li" key={p.key} sx={{ borderTop: i === 0 ? 0 : 1, borderColor: 'divider' }}>
+            <Box
+              component="button"
+              type="button"
+              onClick={() => onOpen(p.key)}
+              data-project-card={p.key}
+              sx={{
+                all: 'unset',
+                boxSizing: 'border-box',
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                px: 1.75,
+                py: 1.25,
+                minHeight: 56,
+                cursor: 'pointer',
+                color: 'text.primary',
+                opacity: muted ? 0.6 : 1,
+                '&:hover, &:focus-visible': { bgcolor: 'action.hover' },
+                '&:focus-visible': { outline: 2, outlineColor: 'primary.main', outlineOffset: -2 },
+              }}
+            >
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    fontWeight: 600,
+                    lineHeight: 1.35,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {p.summary || p.key}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }} noWrap>
+                  {p.jiraKey || 'no key'} · {owner?.nick || <Box component="span" sx={{ color: STATUS.critical }}>no PIC</Box>}
+                  {' · '}
+                  <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums', color: 'text.primary' }}>
+                    {p.savingHours == null ? 'TBC' : fmtHours(p.savingHours)}
+                  </Box>
+                  {' hrs/mth'}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.25, flexShrink: 0 }}>
+                {projectOnHold(p)
+                  ? <Pill label="On Hold" tone="warn" />
+                  : (p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
+                {p.pastDue && <Typography variant="caption" sx={{ color: STATUS.critical, fontWeight: 600 }}>past due</Typography>}
+              </Box>
+              <ChevronRightIcon sx={{ color: 'text.disabled', flexShrink: 0 }} />
+            </Box>
+          </Box>
+        )
+      })}
+    </Paper>
+  )
+}
+
 export default function Projects({
   plan, onUpdate, onBulk, onAdd, onDelete, onImport,
   onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo, jump = null,
+  canWrite = true, onShowTimeline,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
+  // A phone gets a list of cards rather than the wide table; between a phone
+  // and a wide screen the table scrolls sideways with its first columns held.
+  const phone = useMediaQuery(theme.breakpoints.down('sm'), { noSsr: true })
+  const wide = useMediaQuery(theme.breakpoints.up('md'), { noSsr: true })
   const { projects, people, finance: fin } = plan
   const sym = fin.symbol
   const horizon = fin.horizonMonths
@@ -318,6 +418,118 @@ export default function Projects({
   const [busy, setBusy] = useState(false)
   const fileRef = useRef(null)
   const costProject = costKey == null ? null : projects.find((x) => x.key === costKey) || null
+  // The project open in the detail popup, by key for the same reason.
+  const [detailKey, setDetailKey] = useState(null)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [allTiles, setAllTiles] = useState(false)
+
+  /*
+   * THE COLUMNS AN ADMINISTRATOR HAS HIDDEN, for everybody. Read from the
+   * server; with no database there is nothing shared to read, so every column
+   * shows and the Columns menu says why it cannot save.
+   */
+  const [hidden, setHidden] = useState(() => new Set())
+  const [colsNote, setColsNote] = useState(null)
+  const [colsEl, setColsEl] = useState(null)
+  useEffect(() => {
+    let stop = false
+    api.projectColumns()
+      .then((r) => { if (!stop) { setHidden(new Set(r.hidden || [])); setColsNote(null) } })
+      .catch(() => { if (!stop) setColsNote('Column choices are kept in the shared database, which is not reachable — every column is shown.') })
+    return () => { stop = true }
+  }, [])
+  const show = (id) => !hidden.has(id)
+  const notSaved = (e) => (/unavailable/i.test(e.message)
+    ? 'Not saved — the shared database is not reachable, so every column stays shown.'
+    : `Not saved — ${e.message}`)
+  const toggleColumn = async (id) => {
+    const before = hidden
+    const next = new Set(hidden)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setHidden(next)
+    try {
+      const r = await api.saveProjectColumns(PROJECT_COLUMNS.map((c) => c.id).filter((c) => next.has(c)))
+      setHidden(new Set(r.hidden || []))
+      setColsNote(null)
+    } catch (e) {
+      setHidden(before)
+      setColsNote(notSaved(e))
+    }
+  }
+  const showAllColumns = async () => {
+    const before = hidden
+    setHidden(new Set())
+    try { await api.saveProjectColumns([]); setColsNote(null) } catch (e) { setHidden(before); setColsNote(notSaved(e)) }
+  }
+
+  /*
+   * THE HELD COLUMNS. The select box, the cost-sheet button, the Jira key and
+   * — on a screen wide enough to spare it — the project's name stay put while
+   * the rest of the table scrolls under them, so a row is never a line of
+   * numbers with no name. Their offsets are measured, not guessed: the cells
+   * are as wide as their content and padding make them.
+   */
+  const stickyIds = ['select', 'cost', ...(show('jiraKey') ? ['jiraKey'] : []), ...(wide ? ['summary'] : [])]
+  const headRefs = useRef({})
+  const [lefts, setLefts] = useState({})
+  const stickyKey = stickyIds.join()
+  useLayoutEffect(() => {
+    if (phone) return undefined
+    const ids = stickyKey.split(',')
+    const measure = () => {
+      const out = {}
+      let x = 0
+      for (const id of ids) {
+        out[id] = x
+        x += headRefs.current[id]?.getBoundingClientRect().width || 0
+      }
+      setLefts((prev) => (JSON.stringify(prev) === JSON.stringify(out) ? prev : out))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ids.forEach((id) => headRefs.current[id] && ro.observe(headRefs.current[id]))
+    return () => ro.disconnect()
+  }, [stickyKey, phone])
+  const lastSticky = stickyIds[stickyIds.length - 1]
+  const stick = (id, head = false) => (stickyIds.includes(id) ? {
+    className: 'held',
+    ref: head ? (el) => { headRefs.current[id] = el } : undefined,
+    style: {
+      position: 'sticky',
+      left: lefts[id] ?? 0,
+      zIndex: head ? 4 : 2,
+      ...(id === lastSticky ? { boxShadow: `inset -1px 0 0 ${theme.palette.divider}` } : {}),
+    },
+  } : {})
+
+  // The cue that there is more to the right: a soft fade at the edge.
+  const scrollRef = useRef(null)
+  const [moreRight, setMoreRight] = useState(false)
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return undefined
+    checkScroll()
+    const ro = new ResizeObserver(checkScroll)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [checkScroll, phone, hidden])
+
+  // Mid-edit, a click elsewhere on the row is how the edit is finished — it
+  // must not also throw a popup over the page.
+  const editing = useRef(false)
+  const openFromRow = (e, key) => {
+    if (editing.current) return
+    if (!e.currentTarget.contains(e.target)) return   // a menu, rendered in a portal
+    if (e.target.closest(OWN_CLICK)) return
+    if (window.getSelection?.()?.toString()) return
+    setDetailKey(key)
+  }
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -390,6 +602,10 @@ export default function Projects({
     () => (filterParts.length ? filterParts.join(', ') : 'the whole register'),
     [filterParts],
   )
+  // How many of the dropdown filters are set — the count on a phone's
+  // Filters button, where the dropdowns themselves are folded away.
+  const dropdownsOn = (fPic.length > 0) + (fSub.length > 0)
+    + [fObj, fCommit, fGap, fTeam, fHc].filter((f) => f !== 'all').length
 
   const teams = useMemo(
     () => [...new Set(projects.map((p) => p.team).filter(Boolean))].sort(),
@@ -411,7 +627,7 @@ export default function Projects({
     || [fObj, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
 
   const head = (id, label, align = 'left', minWidth) => (
-    <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined}>
+    <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined} {...stick(id, true)}>
       <TableSortLabel
         active={sort.by === id}
         direction={sort.by === id ? sort.dir : 'asc'}
@@ -538,29 +754,86 @@ export default function Projects({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Alert severity="info" variant="outlined">
-        Every cell is editable — name, team, programme, <strong>PIC</strong>, <strong>saving hrs/month</strong>,{' '}
-        <strong>mandays</strong>, <strong>objective</strong> and <strong>commit level</strong> — and each edit
-        recalculates the dashboard, the scorecards and the export live. <strong>FTE</strong> is the exception: it is
-        computed from the saving hours at the ratio on the Model tab, exactly as the source workbook computes its own
-        column. Use <strong>Add project</strong> for anything not yet in the source file, and the bin icon to remove a
-        row. Saving hours are <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.{' '}
-        <strong>Click any row</strong> (away from its editable cells) to open its cost sheet — infrastructure{' '}
-        <strong>CAPEX</strong>, monthly <strong>OPEX</strong> and the Jan–Dec grid behind the Investment column.
+      {/* The how-to, folded to one line: on a phone the whole of it filled
+          the first screen before a single project showed. */}
+      <Alert
+        severity="info"
+        variant="outlined"
+        sx={{ '& .MuiAlert-message': { width: '100%' } }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+          <Box component="span" sx={{ flex: '1 1 260px' }}>
+            {phone
+              ? <>Tap a project to open its detail.</>
+              : <>Every cell is editable and recalculates the dashboard, scorecards and export live. <strong>Click a project</strong> (its <OpenInFullIcon sx={{ fontSize: 13, verticalAlign: '-2px' }} /> icon, or the row away from its editable cells) to open its detail; the <ReceiptLongIcon sx={{ fontSize: 14, verticalAlign: '-2px' }} /> icon opens its cost sheet.</>}
+          </Box>
+          <Link
+            component="button"
+            onClick={() => setAboutOpen((o) => !o)}
+            aria-expanded={aboutOpen}
+            sx={{ fontWeight: 600, fontSize: '0.8125rem', display: 'inline-flex', alignItems: 'center' }}
+          >
+            {aboutOpen ? 'Less' : 'About this page'}
+            <ExpandMoreIcon sx={{ fontSize: 16, transform: aboutOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+          </Link>
+        </Box>
+        <Collapse in={aboutOpen} unmountOnExit>
+          <Box sx={{ mt: 1 }}>
+            Every cell is editable — name, team, programme, <strong>PIC</strong>, <strong>saving hrs/month</strong>,{' '}
+            <strong>mandays</strong>, <strong>objective</strong> and <strong>commit level</strong> — and each edit
+            recalculates the dashboard, the scorecards and the export live. <strong>FTE</strong> is the exception: it is
+            computed from the saving hours at the ratio on the Model tab, exactly as the source workbook computes its own
+            column. Use <strong>Add project</strong> for anything not yet in the source file, and the bin icon to remove a
+            row. Saving hours are <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.{' '}
+            <strong>Click a project</strong> — the expand icon beside its name, or the row away from its editable cells —
+            to open its detail: owner, dates, the weekly check-ins and the active switch. The receipt icon at the start of
+            each row (or <strong>Cost sheet</strong> in the detail) opens its cost sheet — infrastructure{' '}
+            <strong>CAPEX</strong>, monthly <strong>OPEX</strong> and the Jan–Dec grid behind the Investment column.
+          </Box>
+        </Collapse>
       </Alert>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         {/* Wraps: beside the side menu a 1500px screen leaves about 1,200px,
             which is less than the search box and six filters need in one row. */}
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} useFlexGap flexWrap="wrap" alignItems={{ lg: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
           <TextField
             size="small"
             placeholder="Search key, project, team, assignee…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-            sx={{ minWidth: 280, flex: 1 }}
+            sx={{ minWidth: { xs: 0, sm: 280 }, flex: { xs: '1 1 0', sm: '1 1 280px' } }}
           />
+          {phone && (
+            <Button
+              variant="outlined"
+              onClick={() => setFiltersOpen((o) => !o)}
+              aria-expanded={filtersOpen}
+              aria-controls="project-filters"
+              startIcon={<FilterListIcon />}
+              sx={{ flexShrink: 0, color: 'text.primary', borderColor: 'divider' }}
+            >
+              Filters{dropdownsOn ? ` (${dropdownsOn})` : ''}
+            </Button>
+          )}
+          {/* The dropdowns. On a phone, folded behind the Filters button and
+              two to a line when open. Wider, they sit in the row with the
+              search box (display: contents) — stretched to fill each line on
+              a tablet, at their own widths on a wide screen. */}
+          <Box
+            id="project-filters"
+            sx={phone ? {
+              display: filtersOpen ? 'grid' : 'none',
+              width: '100%',
+              gap: 1.5,
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              '& .MuiFormControl-root': { minWidth: 0 },
+            } : {
+              display: 'contents',
+              '& .MuiFormControl-root': { flex: { xs: '1 1 140px', lg: '0 0 auto' } },
+            }}
+          >
           <FormControl size="small" sx={{ minWidth: 170 }}>
             <InputLabel>Objective</InputLabel>
             <Select label="Objective" value={fObj} onChange={(e) => setFObj(e.target.value)}>
@@ -666,7 +939,8 @@ export default function Projects({
               <MenuItem value="pastdue">Past due, not done</MenuItem>
             </Select>
           </FormControl>
-        </Stack>
+          </Box>
+        </Box>
 
         <Stack direction="row" spacing={{ xs: 1, sm: 2 }} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -770,7 +1044,17 @@ export default function Projects({
 
       {/* Filter-aware totals — always reflects exactly what the table shows */}
       <Paper variant="outlined" sx={{ p: 0, overflow: 'hidden' }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', bgcolor: 'action.hover' }}>
+        {/* Two to a line on a phone, as many as fit wider. Each tile draws its
+            own right and bottom rule, and the strip runs a pixel past the
+            frame on those sides so the outer ones are clipped away. */}
+        <Box sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          bgcolor: 'action.hover',
+          mr: '-1px',
+          mb: '-1px',
+        }}
+        >
           {[
             { label: 'Projects in view', value: agg.count.toLocaleString(), sub: agg.tbc ? `${agg.tbc} still TBC` : 'all quantified' },
             {
@@ -806,7 +1090,7 @@ export default function Projects({
               label: 'CAPEX',
               value: fmtMoneyShort(agg.capex, sym),
               sub: agg.capex == null ? 'none entered' : 'one-off, not depreciated',
-              help: 'Infrastructure, licences and hardware bought once, across the in-plan rows in view. Click any project row to enter or edit it. No depreciation is applied — the whole amount is charged against the project.',
+              help: 'Infrastructure, licences and hardware bought once, across the in-plan rows in view. Open a project\'s cost sheet (the receipt icon on its row) to enter or edit it. No depreciation is applied — the whole amount is charged against the project.',
             },
             {
               label: 'OPEX / year',
@@ -829,16 +1113,17 @@ export default function Projects({
               tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? STATUS.good : STATUS.critical,
               help: `Return over ${horizon} months on the whole investment — build cost plus CAPEX — against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are in EITHER side, so this is never a whole-book benefit divided by a partial cost.`,
             },
-          ].map((t, i) => (
+          ].filter((_, i) => !phone || allTiles || i < 4).map((t) => (
             <Box
               key={t.label}
               sx={{
-                flex: '1 1 150px',
-                px: 2,
-                py: 1.5,
-                borderLeft: i === 0 ? 'none' : 1,
+                flex: { xs: '1 1 40%', sm: '1 1 150px' },
+                px: { xs: 1.5, sm: 2 },
+                py: { xs: 1.25, sm: 1.5 },
+                borderRight: 1,
+                borderBottom: 1,
                 borderColor: 'divider',
-                minWidth: 130,
+                minWidth: 0,
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -867,6 +1152,20 @@ export default function Projects({
             </Box>
           ))}
         </Box>
+        {/* On a phone the money figures wait behind a tap: eleven tiles were
+            six screens' worth of rows before the first project. */}
+        {phone && (
+          <Button
+            fullWidth
+            size="small"
+            onClick={() => setAllTiles((o) => !o)}
+            aria-expanded={allTiles}
+            endIcon={<ExpandMoreIcon sx={{ transform: allTiles ? 'rotate(180deg)' : 'none' }} />}
+            sx={{ borderRadius: 0, color: 'text.secondary', py: 0.75 }}
+          >
+            {allTiles ? 'Fewer figures' : 'All figures — cost, CAPEX, OPEX, ROI'}
+          </Button>
+        )}
       </Paper>
 
 
@@ -925,51 +1224,127 @@ export default function Projects({
             } finally { setBusy(false) }
           }}
         />
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 260px', display: { xs: 'none', sm: 'block' } }}>
           {rows.length === projects.length
             ? 'exports every project; filter the table first to export a subset'
             : `exports the ${rows.length} row${rows.length === 1 ? '' : 's'} shown, not all ${projects.length}`}
           {' · an import only touches the rows named in the file'}
         </Typography>
+        {/* Which columns the register shows: an administrator's choice, made
+            once for everybody. A phone shows cards, not columns. */}
+        {canWrite && !phone && (
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<ViewColumnOutlinedIcon />}
+              onClick={(e) => setColsEl(e.currentTarget)}
+              aria-haspopup="menu"
+              data-columns-button
+              sx={{ ml: 'auto' }}
+            >
+              Columns{hidden.size ? ` (${PROJECT_COLUMNS.length - hidden.size}/${PROJECT_COLUMNS.length})` : ''}
+            </Button>
+            <Menu
+              anchorEl={colsEl}
+              open={!!colsEl}
+              onClose={() => setColsEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              MenuListProps={{ dense: true, 'aria-label': 'columns' }}
+            >
+              <Box sx={{ px: 2, pt: 0.5, pb: 1, maxWidth: 280 }}>
+                <Typography variant="subtitle2">Columns</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                  Shown to everyone who opens the register. The project name, the select box and the cost-sheet button always show.
+                </Typography>
+                {colsNote && (
+                  <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', mt: 0.5 }} data-columns-note>
+                    {colsNote}
+                  </Typography>
+                )}
+              </Box>
+              <Divider />
+              {PROJECT_COLUMNS.map((c) => (
+                <MenuItem key={c.id} onClick={() => toggleColumn(c.id)} data-column={c.id}>
+                  <ListItemIcon>
+                    <Checkbox size="small" edge="start" checked={show(c.id)} tabIndex={-1} disableRipple sx={{ p: 0.25 }} />
+                  </ListItemIcon>
+                  <ListItemText primary={c.label} />
+                </MenuItem>
+              ))}
+              <Divider />
+              <MenuItem onClick={showAllColumns} disabled={!hidden.size}>
+                <ListItemText primary="Show every column" sx={{ pl: 0.5 }} />
+              </MenuItem>
+            </Menu>
+          </>
+        )}
       </Box>
 
-      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '72vh' }}>
-        <Table size="small" stickyHeader sx={{ '& th, & td': { px: 1.25 } }}>
+      {phone ? (
+        <PhoneList rows={rows} assignees={assignees} onOpen={setDetailKey} />
+      ) : (
+      <Box sx={{ position: 'relative' }}>
+      <TableContainer
+        component={Paper}
+        variant="outlined"
+        ref={scrollRef}
+        onScroll={checkScroll}
+        sx={{ maxHeight: '72vh' }}
+        data-register-table
+      >
+        <Table
+          size="small"
+          stickyHeader
+          sx={{
+            '& th, & td': { px: 1.25 },
+            // The held columns are opaque, so what scrolls under them is
+            // hidden, and take the row's hover and selected tint on top.
+            '& td.held': { bgcolor: 'background.paper' },
+            '& th.held': { bgcolor: 'background.paper' },
+            '& tr.MuiTableRow-hover:hover td.held': {
+              backgroundImage: `linear-gradient(${theme.palette.action.hover}, ${theme.palette.action.hover})`,
+            },
+            '& tr.Mui-selected td.held': {
+              backgroundImage: `linear-gradient(${theme.palette.action.selected}, ${theme.palette.action.selected})`,
+            },
+            '& tbody tr': { cursor: 'pointer' },
+          }}
+        >
           <TableHead>
             <TableRow>
-              <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }}>
+              <TableCell padding="checkbox" {...stick('select', true)}>
                 <Checkbox size="small" checked={allSelected} indeterminate={sel.size > 0 && !allSelected} onChange={toggleAll} />
               </TableCell>
-              {/* Opening the cost panel is an explicit button, not a click
-                  anywhere on the row — a row full of editable cells is a bad
-                  click target, and an accidental popup mid-edit is worse. */}
-              <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }} />
-              {head('jiraKey', 'Jira', 'left', 88)}
+              {/* The cost sheet has a button of its own; a click on the rest
+                  of the row opens the project's detail instead. */}
+              <TableCell padding="checkbox" {...stick('cost', true)} />
+              {show('jiraKey') && head('jiraKey', 'Jira', 'left', 88)}
               {/* A floor on a phone only: there the table squeezed this column
                   to the width of its smallest input, and the team / programme
                   fields under each name were a few letters wide. Wider
                   screens keep the column-width balance tuned below. */}
               {head('summary', 'Project', 'left', { xs: 220, md: 0 })}
-              <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>
-              <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>
-              {head('savingHours', 'Saving hrs/mth', 'right')}
+              {show('objective') && <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>}
+              {show('pic') && <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>}
+              {show('savingHours') && head('savingHours', 'Saving hrs/mth', 'right')}
               {/* The other half of the QUANTIFIED benefit: money that is money
                   rather than time, so it sits next to the hours it adds to. */}
-              {head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 96)}
+              {show('cashBenefit') && head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 96)}
               {/* And beside them the part no number carries: a case made only
                   of figures is half a case. */}
-              <TableCell sx={{ minWidth: 150, maxWidth: 170, width: 160 }}>Soft benefits</TableCell>
-              {head('fte', 'FTE', 'right')}
-              {head('manday', 'Mandays', 'right')}
-              {/* One column, not three: the table already runs to the edge of
-                  its container, so the build/CAPEX/OPEX split lives in the
-                  tooltip and in the dialog a row-click opens. */}
-              {head('investment', 'Investment', 'right', 84)}
-              {head('roi', 'ROI', 'right', 78)}
-              {head('paybackMonths', 'Payback', 'right', 74)}
-              <TableCell sx={{ minWidth: 104 }}>Commit</TableCell>
-              <TableCell sx={{ minWidth: 92, maxWidth: 104, width: 104 }}>Status</TableCell>
-              <TableCell padding="checkbox" />
+              {show('softBenefits') && <TableCell sx={{ minWidth: 150, maxWidth: 170, width: 160 }}>Soft benefits</TableCell>}
+              {show('fte') && head('fte', 'FTE', 'right')}
+              {show('manday') && head('manday', 'Mandays', 'right')}
+              {/* One column, not three: the build/CAPEX/OPEX split lives in
+                  the tooltip and in the cost sheet. */}
+              {show('investment') && head('investment', 'Investment', 'right', 84)}
+              {show('roi') && head('roi', 'ROI', 'right', 78)}
+              {show('payback') && head('paybackMonths', 'Payback', 'right', 74)}
+              {show('commit') && <TableCell sx={{ minWidth: 104 }}>Commit</TableCell>}
+              {show('status') && <TableCell sx={{ minWidth: 92, maxWidth: 104, width: 104 }}>Status</TableCell>}
+              {show('delete') && <TableCell padding="checkbox" />}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -980,9 +1355,13 @@ export default function Projects({
                   key={p.key}
                   hover
                   selected={sel.has(p.key)}
-                  sx={{ opacity: OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam ? 0.55 : 1 }}
+                  onMouseDown={() => { editing.current = !!document.activeElement?.matches?.('input, textarea') }}
+                  onClick={(e) => openFromRow(e, p.key)}
+                  // Faded cell by cell, not as a row: a see-through row would
+                  // let the scrolled columns show through the held ones.
+                  sx={OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam ? { '& > td > *': { opacity: 0.55 } } : undefined}
                 >
-                  <TableCell padding="checkbox">
+                  <TableCell padding="checkbox" {...stick('select')}>
                     <Checkbox
                       size="small"
                       checked={sel.has(p.key)}
@@ -993,14 +1372,15 @@ export default function Projects({
                       })}
                     />
                   </TableCell>
-                  <TableCell padding="checkbox">
-                    <Tooltip title={`Effort, CAPEX, monthly cost and notes for ${p.jiraKey || p.key}`}>
+                  <TableCell padding="checkbox" {...stick('cost')}>
+                    <Tooltip title={`Cost sheet: effort, CAPEX, monthly cost and notes for ${p.jiraKey || p.key}`}>
                       <IconButton size="small" onClick={() => setCostKey(p.key)} aria-label="open cost breakdown">
                         <ReceiptLongIcon sx={{ fontSize: 17, color: p.comment ? STATUS.good : undefined }} />
                       </IconButton>
                     </Tooltip>
                   </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
+                  {show('jiraKey') && (
+                  <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }} {...stick('jiraKey')}>
                     <TextCell
                       value={p.jiraKey}
                       placeholder="no key"
@@ -1009,13 +1389,28 @@ export default function Projects({
                       bold
                     />
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 320, minWidth: 240 }}>
-                    <TextCell
-                      value={p.summary}
-                      placeholder="Project name"
-                      onChange={(v) => onUpdate(p.key, { summary: v || 'Untitled' })}
-                      bold
-                    />
+                  )}
+                  <TableCell sx={{ maxWidth: 320, minWidth: 240 }} {...stick('summary')}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                      <TextCell
+                        value={p.summary}
+                        placeholder="Project name"
+                        onChange={(v) => onUpdate(p.key, { summary: v || 'Untitled' })}
+                        bold
+                      />
+                      {/* The way into the project: its detail, in a popup. */}
+                      <Tooltip title={`Open ${p.jiraKey || p.key} — owner, dates, weekly check-ins`}>
+                        <IconButton
+                          size="small"
+                          onClick={() => setDetailKey(p.key)}
+                          aria-label={`open project ${p.summary}`}
+                          data-open-project={p.key}
+                          sx={{ flexShrink: 0, color: 'text.secondary', p: 0.4 }}
+                        >
+                          <OpenInFullIcon sx={{ fontSize: 15 }} />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
                     <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', mt: 0.25 }}>
                       <TextCell
                         value={p.team}
@@ -1037,6 +1432,7 @@ export default function Projects({
                       />
                     </Box>
                   </TableCell>
+                  {show('objective') && (
                   <TableCell>
                     <Select
                       size="small"
@@ -1069,6 +1465,8 @@ export default function Projects({
                       onChange={(ids) => onUpdate(p.key, { objectives: ids })}
                     />
                   </TableCell>
+                  )}
+                  {show('pic') && (
                   <TableCell>
                     <Select
                       size="small"
@@ -1088,6 +1486,8 @@ export default function Projects({
                       ))}
                     </Select>
                   </TableCell>
+                  )}
+                  {show('savingHours') && (
                   <TableCell align="right">
                     {/* Still editable — it is a real figure and worth keeping
                         on the record. Struck through because it is not ours:
@@ -1105,6 +1505,8 @@ export default function Projects({
                       </Box>
                     </Tooltip>
                   </TableCell>
+                  )}
+                  {show('cashBenefit') && (
                   <TableCell align="right">
                     <Tooltip title={p.monetaryAnnualBenefit
                       ? `${fmtMoney(p.monetaryAnnualBenefit, sym)} a year of cash benefit, on top of ${fmtMoney((p.hoursMonthlyBenefit || 0) * 12, sym)} from the hours. Both count toward the ROI.`
@@ -1119,12 +1521,16 @@ export default function Projects({
                       </Box>
                     </Tooltip>
                   </TableCell>
+                  )}
+                  {show('softBenefits') && (
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <SoftBenefitCell
                       value={p.softBenefits}
                       onChange={(v) => onUpdate(p.key, { softBenefits: v })}
                     />
                   </TableCell>
+                  )}
+                  {show('fte') && (
                   <TableCell align="right">
                     {/* Derived, not typed. The source workbook computes its
                         own column the same way — ROUND(saving/(22*8), 1) — so
@@ -1147,6 +1553,8 @@ export default function Projects({
                       </Typography>
                     </Tooltip>
                   </TableCell>
+                  )}
+                  {show('manday') && (
                   <TableCell align="right">
                     {p.tasks && p.tasks.length ? (
                       // Derived from the tasks, so it is a result, not an input.
@@ -1174,19 +1582,23 @@ export default function Projects({
                       />
                     )}
                   </TableCell>
+                  )}
+                  {show('investment') && (
                   <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
                     {p.investment == null ? (
-                      <Tooltip title={`No mandays and no CAPEX yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate. Click the row to add CAPEX or a monthly operating cost.`}>
+                      <Tooltip title={`No mandays and no CAPEX yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate. Open the cost sheet (the receipt icon) to add CAPEX or a monthly operating cost.`}>
                         <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
                       </Tooltip>
                     ) : (
-                      <Tooltip title={`Build ${fmtMoney(p.buildCost ?? 0, sym)} + CAPEX ${fmtMoney(p.capex ?? 0, sym)} = ${fmtMoney(p.investment, sym)} one-off${p.opexRunRate > 0 ? `, plus ${fmtMoney(p.opexRunRate, sym)} a month of OPEX (${fmtMoney(p.opexYear, sym)} in 2026)` : ', with no monthly operating cost'}. Click the row for the month-by-month table.`}>
+                      <Tooltip title={`Build ${fmtMoney(p.buildCost ?? 0, sym)} + CAPEX ${fmtMoney(p.capex ?? 0, sym)} = ${fmtMoney(p.investment, sym)} one-off${p.opexRunRate > 0 ? `, plus ${fmtMoney(p.opexRunRate, sym)} a month of OPEX (${fmtMoney(p.opexYear, sym)} in 2026)` : ', with no monthly operating cost'}. The cost sheet (the receipt icon) has the month-by-month table.`}>
                         <Typography variant="body2" sx={{ fontSize: '0.8125rem', fontVariantNumeric: 'tabular-nums', cursor: 'help' }}>
                           {fmtMoneyShort(p.investment, sym)}
                         </Typography>
                       </Tooltip>
                     )}
                   </TableCell>
+                  )}
+                  {show('roi') && (
                   <TableCell align="right">
                     {p.roi == null ? (
                       <Tooltip title={
@@ -1212,6 +1624,8 @@ export default function Projects({
                       </Tooltip>
                     )}
                   </TableCell>
+                  )}
+                  {show('payback') && (
                   <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
                     {p.paybackMonths == null ? (
                       <Tooltip title={
@@ -1241,6 +1655,8 @@ export default function Projects({
                       </Tooltip>
                     )}
                   </TableCell>
+                  )}
+                  {show('commit') && (
                   <TableCell>
                     <Select
                       size="small"
@@ -1265,6 +1681,8 @@ export default function Projects({
                       ))}
                     </Select>
                   </TableCell>
+                  )}
+                  {show('status') && (
                   <TableCell>
                     {/* A pill, coloured by where the work is; the word is on it
                         too. Whatever Jira calls it is shown as it is. */}
@@ -1291,6 +1709,8 @@ export default function Projects({
                       </Tooltip>
                     )}
                   </TableCell>
+                  )}
+                  {show('delete') && (
                   <TableCell padding="checkbox">
                     <Tooltip title="Delete this project">
                       <IconButton
@@ -1303,12 +1723,13 @@ export default function Projects({
                       </IconButton>
                     </Tooltip>
                   </TableCell>
+                  )}
                 </TableRow>
               )
             })}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={16} align="center" sx={{ py: 6, color: 'text.secondary' }}>
+                <TableCell colSpan={3 + PROJECT_COLUMNS.length} align="center" sx={{ py: 6, color: 'text.secondary', cursor: 'default' }}>
                   No projects match these filters.
                 </TableCell>
               </TableRow>
@@ -1316,6 +1737,26 @@ export default function Projects({
           </TableBody>
         </Table>
       </TableContainer>
+      {/* More to the right: a soft fade at the edge says so. */}
+      <Box
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          top: 1,
+          right: 1,
+          bottom: 1,
+          width: 28,
+          pointerEvents: 'none',
+          borderTopRightRadius: 14,
+          borderBottomRightRadius: 14,
+          background: `linear-gradient(to right, transparent, ${alpha(theme.palette.background.paper, 0.92)})`,
+          opacity: moreRight ? 1 : 0,
+          transition: 'opacity .2s',
+        }}
+        data-scroll-cue={moreRight ? 'on' : 'off'}
+      />
+      </Box>
+      )}
 
       {/* Looked up by key on every render, so a CAPEX typed inside it moves the
           ROI in the header of the very same dialog. */}
@@ -1324,6 +1765,17 @@ export default function Projects({
         fileName={importing?.fileName}
         onClose={() => setImporting(null)}
         onApply={() => { onImport(importing.result); setImporting(null) }}
+      />
+
+      <ProjectDetailDialog
+        projectKey={detailKey}
+        plan={plan}
+        canWrite={canWrite}
+        phone={phone}
+        onUpdate={onUpdate}
+        onClose={() => setDetailKey(null)}
+        onCostSheet={(k) => setCostKey(k)}
+        onShowTimeline={onShowTimeline}
       />
 
       <ProjectCostDialog

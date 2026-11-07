@@ -640,6 +640,23 @@ app.delete('/api/dashboard/layout', adminOnly, async (_req, res) => {
   return res.json(r)
 })
 
+/*
+ * The Projects register's hidden columns: one choice, made by an
+ * administrator, that everybody who opens the register sees.
+ */
+app.get('/api/projects/columns', async (_req, res) => {
+  const r = await manager.getProjectColumns()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
+})
+
+app.put('/api/projects/columns', adminOnly, async (req, res) => {
+  const r = await manager.saveProjectColumns(req.body?.hidden, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(400).json(r)
+  return res.json(r)
+})
+
 /* Ask a project's owner for an update, and see who has been asked. */
 app.post('/api/followups', adminOnly, async (req, res) => {
   const key = String(req.body?.projectKey || '').trim().slice(0, 40)
