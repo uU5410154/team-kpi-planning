@@ -124,6 +124,31 @@ app.use('/api', async (req, res, next) => {
  */
 const seesAll = (req) => req.me?.role === 'admin' && req.query.view !== 'member'
 
+/*
+ * ...AND AS WHICH MEMBER. `?view=member&as=james` from an administrator reads
+ * the app exactly as James is sent it — his week, his Jira tasks, his
+ * decisions — so "View as a team member" shows somebody's real view rather
+ * than an unlinked account's empty one. READS ONLY: it applies to GET and
+ * nothing else, the week comes back not writable, and every write still goes
+ * as the administrator's own account, which the server judges as usual.
+ */
+app.use('/api', async (req, res, next) => {
+  const as = String(req.query.as || '').trim()
+  if (!as || req.method !== 'GET' || req.me?.role !== 'admin' || req.query.view !== 'member') return next()
+  try {
+    const r = await weekly.roster()
+    if (r === store.UNAVAILABLE) return unavailable(res)
+    if (!r.people.some((p) => p.id === as)) return res.status(400).json({ error: `There is nobody called ${as} on the team.` })
+    const users = await auth.listUsers()
+    const acct = users === store.UNAVAILABLE ? null
+      : users.find((u) => u.person === as && u.status === 'active') || users.find((u) => u.person === as) || null
+    req.me = { ...req.me, person: as, email: acct?.email || null, previewAs: as }
+    return next()
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Could not read that member’s view.' })
+  }
+})
+
 /** Writes to the plan, Jira and the account list: administrators only. */
 const adminOnly = (req, res, next) => (req.me?.role === 'admin'
   ? next()
@@ -266,6 +291,9 @@ app.post('/api/jira/children', async (req, res) => {
 
 const unavailable = (res) =>
   res.status(503).json({ error: 'Scenario store unavailable — your work is still saved in this browser.' })
+// The same outage, said to somebody at the sign-in page, who has no work to lose yet.
+const signInUnavailable = (res) =>
+  res.status(503).json({ error: 'Signing in is not possible just now: the app cannot reach its database. Try again in a minute or two.' })
 
 const cleanName = (n) => String(n || '').trim().slice(0, 80)
 
@@ -498,7 +526,9 @@ app.get('/api/weekly/:week/jira', jiraWrap(async (req) => {
   const week = req.params.week === 'current' ? weekOf() : req.params.week
   if (!isWeek(week)) return { status: 400, error: 'A week is named by its Monday, as YYYY-MM-DD.' }
   if (!req.me.person) return { jira: 'unlinked', week }
-  return jiraWeek.weekFor(req.me.person, req.me.email, week)
+  const r = await jiraWeek.weekFor(req.me.person, req.me.email, week)
+  // An administrator previewing a member: that member's week, to read only.
+  return req.me.previewAs && r && typeof r === 'object' ? { ...r, writable: false, previewAs: req.me.previewAs } : r
 }))
 app.post('/api/weekly/:week/jira/plan', jiraWrap((req) => jiraWeek.confirmPlan(req.params.week, req.me)))
 app.post('/api/weekly/:week/jira/:key/update', jiraWrap((req) => jiraWeek.submit(req.params.week, req.me, { ...req.body, jiraKey: req.params.key })))
@@ -575,7 +605,9 @@ app.get('/api/weekly/:week', async (req, res) => {
     deadlines: deadlines(week),
     locked: isLocked(week, now),
     // Whether THIS person may write THIS week: theirs to fill in, and still open.
-    writable: !!me.person && canWriteWeek(week, now),
+    // Never while an administrator is previewing somebody else's week.
+    writable: !!me.person && !me.previewAs && canWriteWeek(week, now),
+    previewAs: me.previewAs || null,
     person: me.person || null,
     mine,
     mineStanding: mine ? weekly.standing(week, mine.draft ? null : mine, now) : null,
@@ -784,7 +816,7 @@ app.post('/api/auth/register', async (req, res) => {
   if (bad) return res.status(400).json({ error: bad })
   if (auth.locked()) return res.status(503).json({ error: auth.LOCKED_MESSAGE })
   const r = await auth.register(email, password)
-  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r === store.UNAVAILABLE) return signInUnavailable(res)
   if (r.error) return res.status(409).json({ error: r.error })
   return res.json({
     user: r.user,
@@ -799,7 +831,7 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {}
   if (auth.locked()) return res.status(503).json({ error: auth.LOCKED_MESSAGE })
   const r = await auth.login(email, password)
-  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r === store.UNAVAILABLE) return signInUnavailable(res)
   if (r.error) return res.status(401).json({ error: r.error })
   setCookie(res, r.token)
   return res.json({ user: r.user })

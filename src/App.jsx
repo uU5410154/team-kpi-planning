@@ -1,4 +1,5 @@
 import WeekSwitcher from './components/WeekSwitcher.jsx'
+import ViewAsBanner from './components/ViewAsBanner.jsx'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, Typography,
@@ -206,10 +207,20 @@ export default function App() {
   const [viewAsMember, setViewAsMember] = useState(() => {
     try { return localStorage.getItem('fa-kpi-view-as') === 'member' } catch { return false }
   })
+  // WHICH member: any of the team, so the preview is somebody's real view.
+  const [viewAsPerson, setViewAsPerson] = useState(() => {
+    try { return localStorage.getItem('fa-kpi-view-as-person') || null } catch { return null }
+  })
   const previewing = me?.role === 'admin' && viewAsMember
-  const viewer = previewing ? { ...me, role: 'user', previewing: true } : me
-  // Set before any page below asks the server for anything.
-  api.setViewAs(previewing ? 'member' : null)
+  const previewPerson = previewing ? (viewAsPerson || me?.person || null) : null
+  const viewer = previewing ? { ...me, role: 'user', previewing: true, person: previewPerson } : me
+  // Set before any page below asks the server for anything. Somebody else's
+  // view is asked for by name (`as`); one's own needs no name.
+  api.setViewAs(previewing ? 'member' : null, previewPerson && previewPerson !== me?.person ? previewPerson : null)
+  const pickPreview = (id) => {
+    setViewAsPerson(id || null)
+    try { if (id) localStorage.setItem('fa-kpi-view-as-person', id); else localStorage.removeItem('fa-kpi-view-as-person') } catch { /* private window */ }
+  }
   const toggleView = (on) => {
     setViewAsMember(on)
     try { localStorage.setItem('fa-kpi-view-as', on ? 'member' : 'admin') } catch { /* private window */ }
@@ -277,7 +288,7 @@ export default function App() {
    * member can open is drawn from; `plan` stays whole underneath, for saving.
    */
   const member = viewer?.role === 'user'
-  const myPerson = me?.person || null
+  const myPerson = (previewing ? previewPerson : me?.person) || null
   const shown = useMemo(() => (member ? memberView(plan, myPerson) : plan), [member, plan, myPerson])
   useEffect(() => {
     if (!canWrite) { setAiOn(false); return }
@@ -1037,7 +1048,7 @@ export default function App() {
   const CurrentIcon = current?.icon || null
   // What the welcome banner calls somebody: their nickname on the team when
   // the account is linked to one, otherwise the name in their address.
-  const hello = (me?.person && state.people.find((p) => p.id === me.person)?.nick)
+  const hello = (myPerson && state.people.find((p) => p.id === myPerson)?.nick)
     || (me?.local ? 'there' : displayName(me?.email))
   const goTo = (o) => {
     setJump({ ...o, n: Date.now() })
@@ -1248,6 +1259,17 @@ export default function App() {
               )}
 
               {sharedLoading && !phone && <Loading label="Loading the shared plan…" />}
+              {/* An edit reaches the shared plan a few seconds later: said, so nobody wonders. */}
+              {canWrite && !phone && !sharedLoading && linkedToDb.current && (dirty || saving) && (
+                dbNotice || plan.invalid.length
+                  ? <Typography variant="caption" data-save-status="unsaved" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>Not saved yet</Typography>
+                  : <Box data-save-status="saving"><Loading label="Saving…" /></Box>
+              )}
+              {canWrite && !phone && !sharedLoading && linkedToDb.current && !dirty && !saving && lastSaved && (
+                <Typography variant="caption" data-save-status="saved" title={`Saved to the shared plan ${new Date(lastSaved).toLocaleString()}`} sx={{ color: 'text.disabled', whiteSpace: 'nowrap' }}>
+                  Saved
+                </Typography>
+              )}
 
               <Box sx={{ flex: 1 }} />
 
@@ -1337,17 +1359,9 @@ export default function App() {
 
         {/* Keyed on the view, so switching it rebuilds the page and every page
             asks the server again under the new rules. */}
-        <Box key={previewing ? 'member' : 'admin'} sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
+        <Box key={previewing ? `member:${previewPerson || ''}` : 'admin'} sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
           {previewing && (
-            <Alert
-              severity="info"
-              variant="outlined"
-              sx={{ mb: 2.5, alignItems: 'center' }}
-              action={<Button color="inherit" size="small" onClick={() => toggleView(false)}>Back to administrator</Button>}
-            >
-              <strong>Viewing as a team member.</strong> This is what your team sees, with your own week as {hello}.
-              Nothing you see here changes the plan.
-            </Alert>
+            <ViewAsBanner people={state.people} person={previewPerson} self={me?.person || null} onPick={pickPreview} onBack={() => toggleView(false)} />
           )}
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is

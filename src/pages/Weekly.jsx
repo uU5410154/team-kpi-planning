@@ -604,7 +604,7 @@ function WeekSummary({
         const p = t.projectKey ? projectByKey[t.projectKey] : null
         const impact = slipImpact(t, p?.due)
         return (
-          <Box key={t.id} sx={{ borderLeft: 3, borderColor: t.done === true ? STATUS.good : t.done === false ? STATUS.warning : 'divider', pl: 1.25 }}>
+          <Box key={t.id} sx={{ borderLeft: 3, borderColor: t.hold ? 'divider' : t.done === true ? STATUS.good : t.done === false ? STATUS.warning : 'divider', pl: 1.25 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.title}</Typography>
               <PriorityPill priority={t.priority} />
@@ -614,22 +614,34 @@ function WeekSummary({
             <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
               {[
                 t.projectKey && `${t.projectKey}${p ? ` · ${p.summary}` : ''}`,
-                t.jiraKey,
-                `expected ${fmtDay(t.expected)}`,
-                t.effort !== null && `${t.effort} d`,
+                t.jiraKey && !String(t.title || '').startsWith(t.jiraKey) && t.jiraKey,
+                t.expected && `expected ${fmtDay(t.expected)}`,
+                t.effort != null && `${t.effort} d`,
+                t.reportedAt && `sent ${new Date(t.reportedAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
               ].filter(Boolean).join(' · ')}
             </Typography>
-            {t.done === true && <Typography variant="caption" sx={{ color: STATUS.good }}>Finished</Typography>}
-            {t.done === false && (
+            {/* What they wrote on it: the update itself, not just whether it finished. */}
+            {t.progress && (
+              <Typography variant="body2" data-team-progress sx={{ color: 'text.secondary', whiteSpace: 'pre-wrap', wordBreak: 'break-word', mt: 0.25 }}>
+                {t.progress}
+              </Typography>
+            )}
+            {t.hold && (
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                On hold{t.reason && !/^on hold$/i.test(t.reason.trim()) ? ` — ${t.reason}` : ''}
+              </Typography>
+            )}
+            {!t.hold && t.done === true && <Typography variant="caption" sx={{ color: STATUS.good }}>Finished</Typography>}
+            {!t.hold && t.done === false && (
               <Box>
                 <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block' }}>
-                  Not finished{t.pct !== null ? ` · ${t.pct}%` : ''} · new date {fmtDay(t.newDate)}
+                  Not finished{t.pct != null ? ` · ${t.pct}%` : ''}{t.newDate ? ` · new date ${fmtDay(t.newDate)}` : ''}
                   {t.blockerCategory ? ` · ${CATEGORY_LABEL[t.blockerCategory]}` : ''}
-                  {t.affects !== null ? ` · ${t.affects ? 'says it pushes the deadline' : 'says the deadline holds'}` : ''}
+                  {t.affects != null ? ` · ${t.affects ? 'says it pushes the deadline' : 'says the deadline holds'}` : ''}
                 </Typography>
-                {t.blocker && (
+                {(t.blocker || t.reason) && (
                   <Typography variant="caption" sx={{ display: 'block', whiteSpace: 'pre-wrap' }}>
-                    Blocker: {t.blocker}
+                    Blocker: {t.blocker || t.reason}
                   </Typography>
                 )}
                 {impact.byDate !== null && (
@@ -700,6 +712,8 @@ export default function Weekly({
   useEffect(() => {
     api.aiStatus().then((r) => setAiOn(!!r.configured)).catch(() => setAiOn(false))
   }, [])
+  // Each member's Jira week, for the team list: what is due, not only what was sent.
+  const [teamJira, setTeamJira] = useState({})
   // The AI's summary of the week on screen, for an administrator.
   const [summary, setSummary] = useState(null)
   useEffect(() => {
@@ -717,6 +731,18 @@ export default function Weekly({
     loadPending()
     api.jiraStatus().then(setJira).catch(() => setJira({ configured: false }))
   }, [admin, loadPending])
+  const teamIds = (data?.team || []).map((r) => r.person).join(',')
+  useEffect(() => {
+    if (!admin || !data?.week || !jira?.configured || !teamIds) return undefined
+    let stop = false
+    setTeamJira({})
+    for (const person of teamIds.split(',')) {
+      api.jiraWeekOf(data.week, person)
+        .then((r) => { if (!stop) setTeamJira((m) => ({ ...m, [person]: r })) })
+        .catch(() => { if (!stop) setTeamJira((m) => ({ ...m, [person]: null })) })
+    }
+    return () => { stop = true }
+  }, [admin, data?.week, jira?.configured, teamIds])
 
   /*
    * The projects a task can be on. The person's own come first and are what
@@ -1115,9 +1141,9 @@ export default function Weekly({
           {summary.summaries[0]
             ? <Markdown text={summary.summaries[0].text} />
             : (
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                The AI writes this by itself once each deadline has passed — Monday 08:00, Friday 15:00 and Sunday 15:00 —
-                and emails it to the administrators.
+              <Typography variant="body2" sx={{ color: 'text.secondary' }} data-no-summary>
+                No summary yet for {weekTitle(data.week)}. The AI writes one by itself once each deadline has passed —
+                Monday 08:00, Friday 15:00 and Sunday 15:00 — and emails it to the administrators.
               </Typography>
             )}
           {summary.summaries[0] && (
@@ -1383,9 +1409,18 @@ export default function Weekly({
           {data.team.map((row) => {
             const isOpen = open.has(row.person)
             const e = row.entry
+            const tj = teamJira[row.person]
+            // A week run from Jira: counted against what is DUE (their Jira week), not only what was sent.
+            const jiraRow = tj?.jira === 'on' || e?.mode === 'jira' || (e?.tasks || []).some((t) => t.source === 'jira')
             const total = e?.tasks?.length || 0
-            const done = e?.tasks?.filter((t) => t.done === true).length || 0
-            const blocked = e?.tasks?.filter((t) => t.done === false).length || 0
+            const hold = e?.tasks?.filter((t) => t.hold).length || 0
+            const done = e?.tasks?.filter((t) => !t.hold && t.done === true).length || 0
+            const blocked = e?.tasks?.filter((t) => !t.hold && t.done === false).length || 0
+            const due = tj?.jira === 'on' ? [...(tj.overdue || []), ...(tj.tasks || [])] : null
+            const sentOn = due ? due.filter((t) => t.update).length : total
+            const latest = jiraRow
+              ? [...(e?.tasks || [])].filter((t) => t.progress).sort((a, b) => String(b.reportedAt || '').localeCompare(String(a.reportedAt || '')))[0] || null
+              : null
             return (
               <Box key={row.person} sx={{ borderTop: 1, borderColor: 'divider', pt: 1.25 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -1396,9 +1431,15 @@ export default function Weekly({
                   </Typography>
                   {admin && <StandingChip label="Plan" value={row.standing?.plan} />}
                   {admin && <StandingChip label="Report" value={row.standing?.report} />}
-                  {admin && total > 0 && (
+                  {admin && jiraRow && (
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }} data-team-counts={row.person}>
+                      {due ? `${sentOn} of ${due.length} task${due.length === 1 ? '' : 's'} updated` : tj === undefined && jira?.configured ? 'Reading Jira…' : `${total} task${total === 1 ? '' : 's'} updated`}
+                      {done ? ` · ${done} finished` : ''}{blocked ? ` · ${blocked} not finished` : ''}{hold ? ` · ${hold} on hold` : ''}
+                    </Typography>
+                  )}
+                  {admin && !jiraRow && total > 0 && (
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      {total} task{total === 1 ? '' : 's'}{done ? ` · ${done} finished` : ''}{blocked ? ` · ${blocked} not finished` : ''}
+                      {total} task{total === 1 ? '' : 's'}{done ? ` · ${done} finished` : ''}{blocked ? ` · ${blocked} not finished` : ''}{hold ? ` · ${hold} on hold` : ''}
                     </Typography>
                   )}
                   <Box sx={{ flex: 1 }} />
@@ -1416,7 +1457,13 @@ export default function Weekly({
                     </IconButton>
                   )}
                 </Box>
-                {!isOpen && (
+                {/* Collapsed: the focus they wrote — or, for a week run from Jira (which has no
+                    focus), the latest update they sent. */}
+                {!isOpen && (jiraRow && !row.focus ? (
+                  <Typography variant="body2" sx={{ color: latest ? 'text.secondary' : 'text.disabled', mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                    {latest ? `${latest.jiraKey || latest.title}: ${latest.progress}` : 'No task updated yet.'}
+                  </Typography>
+                ) : (
                   <Typography
                     variant="body2"
                     sx={{
@@ -1425,7 +1472,7 @@ export default function Weekly({
                   >
                     {row.focus || 'No focus written yet.'}
                   </Typography>
-                )}
+                ))}
                 {admin && (
                   <Collapse in={isOpen} unmountOnExit>
                     <Box sx={{ mt: 1 }}>

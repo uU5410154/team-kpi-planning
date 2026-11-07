@@ -136,8 +136,15 @@ export const saveApps = async (name, apps) =>
  * account is still what it is, and the server still decides what it may do.
  */
 let viewAs = null
-export const setViewAs = (v) => { viewAs = v === 'member' ? 'member' : null }
-const vq = (url) => (viewAs ? `${url}${url.includes('?') ? '&' : '?'}view=member` : url)
+let viewAsPerson = null
+/** Preview as a member — and, given a person, as THAT member (their week, their Jira tasks). */
+export const setViewAs = (v, person = null) => {
+  viewAs = v === 'member' ? 'member' : null
+  viewAsPerson = viewAs && person ? String(person) : null
+}
+const vq = (url) => (viewAs
+  ? `${url}${url.includes('?') ? '&' : '?'}view=member${viewAsPerson ? `&as=${encodeURIComponent(viewAsPerson)}` : ''}`
+  : url)
 
 export const weeklySettings = async () => j(await fetch(vq('/api/weekly/settings')))
 
@@ -342,7 +349,11 @@ const send = async (method, url, body) => jp(await fetch(url, {
 }))
 
 /** One's own Jira tasks for a week: { jira: 'on'|'off'|'unlinked'|'unmatched', tasks, overdue, undated }. */
-export const jiraWeek = async (week) => jp(await fetch(`/api/weekly/${encodeURIComponent(week)}/jira`))
+export const jiraWeek = async (week) => jp(await fetch(vq(`/api/weekly/${encodeURIComponent(week)}/jira`)))
+/** An administrator's look at one member's Jira week, as that member is sent it (read only). */
+export const jiraWeekOf = async (week, person) => jp(await fetch(
+  `/api/weekly/${encodeURIComponent(week)}/jira?view=member&as=${encodeURIComponent(person)}`,
+))
 /** Submit one task's update; it is posted to the task in Jira. */
 export const submitTaskUpdate = async (week, key, body) =>
   send('POST', `/api/weekly/${encodeURIComponent(week)}/jira/${encodeURIComponent(key)}/update`, body)
