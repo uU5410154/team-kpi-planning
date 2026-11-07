@@ -703,6 +703,8 @@ try {
     failComment.delete('FNP-2017')
     await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task="FNP-2017"] button')].find((b) => b.textContent.trim() === 'Retry posting')?.click())
     await pg.waitForSelector('[data-posted="FNP-2017"]', { timeout: 10000 }).catch(() => {})
+    // The confirmation shows first; the card leaves the list once the week reloads.
+    await pg.waitForFunction(() => !document.querySelector('[data-jira-task="FNP-2017"]'), { timeout: 10000 }).catch(() => {})
     const retried = await pg.evaluate(() => ({
       flash: document.querySelector('[data-posted="FNP-2017"]')?.innerText || '',
       still: !!document.querySelector('[data-jira-task="FNP-2017"]'),
