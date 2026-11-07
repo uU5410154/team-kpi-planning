@@ -128,7 +128,9 @@ try {
     String(onScreen).replace(/,/g, '') === String(MANDAY_ON), String(onScreen))
 
   const toldSo = await page.evaluate(() => document.body.innerText)
-  check('the app says where the plan came from', /shared database/i.test(toldSo),
+  // A routine load is not announced: the green "Loaded Baseline from the
+  // shared database" toast covered the page on every visit (QA, 2026-11-07).
+  check('a routine load is quiet — no toast about the shared database', !/from the shared database/i.test(toldSo),
     (toldSo.match(/Loaded[^\n]*/) || [''])[0])
 
   /* ---------- 1b. a SECOND visit, the seed already mirrored ---------- */

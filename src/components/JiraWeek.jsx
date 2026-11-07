@@ -454,7 +454,7 @@ function TaskCard({
               {[['yes', 'Finished'], ['no', 'Not finished'], ['hold', 'On hold']].map(([v, label]) => {
                 const on = (hold ? 'hold' : done === null ? null : done ? 'yes' : 'no') === v
                 return (
-                  <ToggleButton key={v} value={v} sx={toggleSx(STATUS_TONE[v])}>
+                  <ToggleButton key={v} value={v} disableFocusRipple sx={toggleSx(STATUS_TONE[v])}>
                     {on && <CheckIcon sx={{ fontSize: 16 }} />}
                     {label}
                   </ToggleButton>
@@ -831,9 +831,9 @@ export default function JiraWeek({
         <Box sx={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column', gap: 1 }}>
           {!planning && (
             <ToggleButtonGroup size="small" exclusive value={filter} onChange={(_e, v) => v && setFilter(v)} aria-label="which tasks" sx={{ flexWrap: 'wrap' }}>
-              <ToggleButton value="todo" sx={focusRingSx}>Not updated yet ({todo.length})</ToggleButton>
-              <ToggleButton value="done" sx={focusRingSx}>Already updated ({doneRows.length})</ToggleButton>
-              <ToggleButton value="all" sx={focusRingSx}>All ({rows.length})</ToggleButton>
+              <ToggleButton value="todo" disableFocusRipple sx={focusRingSx}>Not updated yet ({todo.length})</ToggleButton>
+              <ToggleButton value="done" disableFocusRipple sx={focusRingSx}>Already updated ({doneRows.length})</ToggleButton>
+              <ToggleButton value="all" disableFocusRipple sx={focusRingSx}>All ({rows.length})</ToggleButton>
             </ToggleButtonGroup>
           )}
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
