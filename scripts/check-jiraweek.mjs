@@ -659,7 +659,7 @@ try {
     await bp.goto(`${base}/#dashboard`, { waitUntil: 'networkidle0' })
     await bp.waitForSelector('[data-decision="FNP-2002"]', { timeout: 15000 }).catch(() => {})
     check('THE DASHBOARD SHOWS THE DECISION ASKED FOR', (await bp.evaluate(() => document.querySelector('[data-decision="FNP-2002"]')?.textContent || '')).includes('Load without the late file?'))
-    await bp.evaluate(() => [...document.querySelectorAll('[data-decision="FNP-2002"] button')].find((b) => b.textContent.trim() === 'Decided').click())
+    await bp.evaluate(() => [...document.querySelectorAll('[data-decision="FNP-2002"] button')].find((b) => b.textContent.trim() === 'Mark decided').click())
     await bp.waitForSelector('[data-decision="FNP-2002"] input', { timeout: 5000 }).catch(() => {})
     await bp.focus('[data-decision="FNP-2002"] input')
     await bp.keyboard.type('Yes, load it and true up next week.')

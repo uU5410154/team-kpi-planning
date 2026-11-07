@@ -310,23 +310,23 @@ try {
     check('  the summary card says why there is no summary', /not switched on/i.test(sum), sum.replace(/\n/g, ' | '))
     const own = await sect(a, 'who holds what')
     check('WHO HOLDS WHAT: by owner, last week and this week',
-      own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /NOT DONE · 60%/i.test(own)
+      own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /Not done, 60%/i.test(own)
       && own.includes('Validate the forecast with FP&A'), own.slice(0, 400).replace(/\n/g, ' | '))
     check('  EACH TASK SHOWS WHAT THE MEMBER WROTE ABOUT IT, NOT JUST ITS NAME', own.includes('Built the driver tree for three regions')
       && /In the way: Waiting on IT/.test(own), own.slice(0, 500).replace(/\n/g, ' | '))
     check('  THE ANSWERED FOLLOW-UP SAYS SO', /UPDATED .*AGO|UPDATED JUST NOW/i.test(own))
     check('  a project with no owner cannot be followed up', own.includes('No owner to ask'))
-    // The week switcher in the top bar: any week, and straight back.
+    // The week switcher in the page header: any week, and straight back.
     const shownWeek = () => a.evaluate(() => document.querySelector('[data-week-shown]')?.getAttribute('data-week-shown'))
-    check('THE TOP BAR HAS A WEEK SWITCHER, ON THIS WEEK', (await shownWeek()) === WEEK, String(await shownWeek()))
+    check('THE DASHBOARD HEADER HAS A WEEK SWITCHER, ON THIS WEEK', (await shownWeek()) === WEEK, String(await shownWeek()))
     await a.click('[aria-label="previous week"]')
     await a.waitForFunction(() => /Week before/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
     const back = await sect(a, 'who holds what')
     check('  A WEEK BACK: the dashboard is about that week and the one before', (await shownWeek()) === addWeeks(WEEK, -1)
-      && /Week before/i.test(back) && !/This week · week/i.test(back), back.slice(0, 200).replace(/\n/g, ' | '))
+      && /Week before/i.test(back) && !/This week \(W\d+\)/i.test(back), back.slice(0, 200).replace(/\n/g, ' | '))
     await a.click('[data-week-today]')
-    await a.waitForFunction(() => /This week · week/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
-    check('  "This week" brings it back', (await shownWeek()) === WEEK && /This week · week/i.test(await sect(a, 'who holds what')))
+    await a.waitForFunction(() => /This week \(W\d+\)/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
+    check('  "This week" brings it back', (await shownWeek()) === WEEK && /This week \(W\d+\)/i.test(await sect(a, 'who holds what')))
     // Kade has no account: the button says why.
 
     for (const width of [390, 768]) {

@@ -297,7 +297,7 @@ try {
     check('THE ACTIVE TILE, THE CARD’S COUNT AND ITS ROWS AGREE', shown > 0 && shown === said && said === listed, `tile ${shown} · card ${said} · rows ${listed} — ${act.replace(/\n/g, ' | ')}`)
     check('  THE TILE SAYS WHY: by dates and by Jira work', /by dates/.test(act) && /Jira work this week/.test(act), act.replace(/\n/g, ' | '))
     check('A PROJECT ACTIVE ONLY BY ITS JIRA WORK IS LISTED, and says so',
-      await a.evaluate((k) => (document.querySelector(`section[aria-label="who holds what"] [data-project="${k}"]`)?.innerText || '').includes('has Jira work this week'), P_JIRA.key), P_JIRA.key)
+      await a.evaluate((k) => (document.querySelector(`section[aria-label="who holds what"] [data-project="${k}"]`)?.innerText || '').includes('Jira this week'), P_JIRA.key), P_JIRA.key)
     const upd = await sect(a, 'Updated this week')
     check('UPDATED THIS WEEK COUNTS THE TWO PROJECTS JAMES UPDATED, of the same active total',
       /\n2\n/.test(`\n${upd}\n`) && upd.includes(`of ${shown} active`), upd.replace(/\n/g, ' | '))
@@ -314,7 +314,7 @@ try {
     await sleep(300)
     check('  Cancel sends nothing', (await D.collection('kpi_followups').countDocuments()) === sentBefore)
     const heldCell = await a.evaluate((k) => document.querySelector(`[data-followup="${k}"]`)?.innerText || '', P_HELD.key)
-    check('A PROJECT ON HOLD OFFERS NO FOLLOW-UP, and says why', /On hold — no update needed/.test(heldCell)
+    check('A PROJECT ON HOLD OFFERS NO FOLLOW-UP, and says why', /On hold, no update needed/.test(heldCell)
       && !(await a.$(`button[aria-label="follow up ${P_HELD.key}"]`)), `${P_HELD.key}: ${heldCell}`)
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/active-dashboard.png` })
 

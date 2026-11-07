@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useLayoutEffect } from 'react'
 import { Box, Typography, useTheme } from '@mui/material'
-import { CHART, STATUS } from '../lib/palette.js'
+import { CHART } from '../lib/palette.js'
 
 /* ------------------------------------------------------------------ */
 /* shared chrome                                                       */
@@ -52,15 +52,16 @@ function Tip({ tip, tokens }) {
         top: Math.max(8, tip.y - 10),
         pointerEvents: 'none',
         zIndex: 5,
-        px: 1.25,
-        py: 0.75,
-        maxWidth: 280,
-        borderRadius: 1,
-        bgcolor: tokens.surface,
-        border: `1px solid ${tokens.border}`,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+        px: 3,
+        py: 2,
+        maxWidth: 300,
+        borderRadius: '6px',
+        bgcolor: 'bg.raised',
+        border: 1,
+        borderColor: 'border.subtle',
+        boxShadow: (t) => (t.palette.mode === 'dark' ? '0 8px 24px rgba(0,0,0,.45)' : '0 8px 24px rgba(16,24,40,.12)'),
         fontSize: '0.75rem',
-        lineHeight: 1.5,
+        lineHeight: '16px',
         color: tokens.textPrimary,
         fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'pre-line',
@@ -75,10 +76,16 @@ export function Legend({ items }) {
   const tokens = useChartTokens()
   if (items.length < 2) return null
   return (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 1.5 }}>
+    <Box sx={{
+      display: 'flex', flexWrap: 'wrap', columnGap: 4, rowGap: 1, mt: 3,
+    }}
+    >
       {items.map((it) => (
-        <Box key={it.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: it.color, flexShrink: 0 }} />
+        <Box key={it.label} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{
+            width: 8, height: 8, borderRadius: it.round ? '50%' : '2px', bgcolor: it.color, flexShrink: 0,
+          }}
+          />
           <Typography variant="caption" sx={{ color: tokens.textSecondary }}>{it.label}</Typography>
         </Box>
       ))}
@@ -91,35 +98,49 @@ export function Legend({ items }) {
 /* ------------------------------------------------------------------ */
 
 export function Meter({ value, target, label, sublabel, format = (n) => Math.round(n).toLocaleString() }) {
-  const tokens = useChartTokens()
   const pct = target > 0 ? value / target : 0
+  // The scale runs to 125% of the target so going over it still shows.
   const clamped = Math.min(1.25, Math.max(0, pct))
-  const fill = pct >= 1 ? tokens.seq[5] : pct >= 0.85 ? tokens.seq[4] : tokens.seq[3]
+  const tone = pct >= 1 ? 'success' : pct >= 0.9 ? 'warning' : 'danger'
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 0.75 }}>
-        <Typography variant="caption" sx={{ color: tokens.textSecondary }}>{label}</Typography>
-        <Typography variant="caption" sx={{ color: tokens.textSecondary, fontVariantNumeric: 'tabular-nums' }}>
-          {format(value)} / {format(target)}
+      <Box sx={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 3, mb: 2,
+      }}
+      >
+        <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary' }}>{label}</Typography>
+        <Typography variant="body2" className="tabular" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+          <Box component="span" sx={{ color: 'text.primary', fontWeight: 500 }}>{format(value)}</Box>
+          {` of ${format(target)}`}
         </Typography>
       </Box>
-      <Box sx={{ position: 'relative', height: 10, borderRadius: '5px', bgcolor: tokens.gridline, overflow: 'hidden' }}>
+      <Box sx={{
+        position: 'relative', height: 4, borderRadius: '2px', bgcolor: 'bg.subtle',
+      }}
+      >
         <Box
-          sx={{
-            position: 'absolute', inset: 0, width: `${(clamped / 1.25) * 100}%`,
-            bgcolor: fill, borderRadius: '5px', transition: 'width .3s ease',
-          }}
+          sx={(t) => ({
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: `${(clamped / 1.25) * 100}%`,
+            bgcolor: t.palette.tone[tone].solid,
+            borderRadius: '2px',
+            transition: 'width 180ms ease-out',
+          })}
         />
+        {/* The target: a tick at 80% of the track (100% of 125%). */}
         <Box
+          aria-hidden
           sx={{
-            position: 'absolute', left: `${(1 / 1.25) * 100}%`, top: -2, bottom: -2,
-            width: 2, bgcolor: tokens.textPrimary, opacity: 0.55,
+            position: 'absolute', left: `${(1 / 1.25) * 100}%`, top: -4, bottom: -4, width: 2, ml: '-1px', bgcolor: 'text.secondary', borderRadius: '1px',
           }}
         />
       </Box>
       {sublabel && (
-        <Typography variant="caption" sx={{ color: tokens.muted, mt: 0.75, display: 'block' }}>
+        <Typography variant="caption" component="div" sx={{ color: 'text.secondary', mt: 2 }}>
           {sublabel}
         </Typography>
       )}
@@ -131,16 +152,16 @@ export function Meter({ value, target, label, sublabel, format = (n) => Math.rou
 /* Horizontal bar — magnitude, one hue                                 */
 /* ------------------------------------------------------------------ */
 
-const LABEL_W = 78
+const LABEL_W = 84
 const RIGHT_PAD = 62
-const ROW_H = 26
+const ROW_H = 28
 
 export function HBar({ data, valueFormat = (n) => Math.round(n).toLocaleString(), unit = '' }) {
   const tokens = useChartTokens()
   const [ref, W] = useMeasure()
   const { tip, show, hide } = useTooltip(ref)
 
-  const gap = 8
+  const gap = 4
   const h = data.length * (ROW_H + gap) + 12
   const max = Math.max(1, ...data.map((d) => d.value))
   const track = Math.max(0, W - LABEL_W - RIGHT_PAD)
@@ -154,12 +175,12 @@ export function HBar({ data, valueFormat = (n) => Math.round(n).toLocaleString()
             const w = (d.value / max) * track
             return (
               <g key={d.label}>
-                <text x={LABEL_W - 10} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize="12" fill={tokens.textSecondary}>
+                <text x={LABEL_W - 12} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize="13" fill={tokens.textSecondary}>
                   {d.label}
                 </text>
-                <rect x={LABEL_W} y={y + 4} width={track} height={ROW_H - 8} rx="4" fill={tokens.gridline} opacity="0.5" />
+                <rect x={LABEL_W} y={y + 8} width={track} height={ROW_H - 16} rx="2" fill={tokens.gridline} opacity="0.6" />
                 <rect
-                  x={LABEL_W} y={y + 4} width={Math.max(0, w)} height={ROW_H - 8} rx="4"
+                  x={LABEL_W} y={y + 8} width={Math.max(0, w)} height={ROW_H - 16} rx="2"
                   fill={d.color || tokens.seq[4]}
                   style={{ cursor: 'pointer' }}
                   onMouseMove={(e) => show(e, `${d.label}\n${valueFormat(d.value)}${unit}${d.note ? `\n${d.note}` : ''}`)}
@@ -167,7 +188,7 @@ export function HBar({ data, valueFormat = (n) => Math.round(n).toLocaleString()
                 />
                 {/* direct label — the relief for the light-mode contrast WARN */}
                 <text
-                  x={W - RIGHT_PAD + 8} y={y + ROW_H / 2 + 4} fontSize="12" fontWeight="600"
+                  x={W - 4} y={y + ROW_H / 2 + 4} fontSize="13" fontWeight="500" textAnchor="end"
                   fill={tokens.textPrimary} style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
                   {valueFormat(d.value)}
@@ -191,7 +212,7 @@ export function StackedHBar({ rows, series, valueFormat = (n) => Math.round(n).t
   const [ref, W] = useMeasure()
   const { tip, show, hide } = useTooltip(ref)
 
-  const gap = 10
+  const gap = 4
   const h = rows.length * (ROW_H + gap) + 12
   const max = Math.max(1, ...rows.map((r) => series.reduce((a, s) => a + (r.values[s.id] || 0), 0)))
   const track = Math.max(0, W - LABEL_W - RIGHT_PAD)
@@ -207,11 +228,11 @@ export function StackedHBar({ rows, series, valueFormat = (n) => Math.round(n).t
               let acc = 0
               return (
                 <g key={r.label}>
-                  <text x={LABEL_W - 10} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize="12" fill={tokens.textSecondary}>
+                  <text x={LABEL_W - 12} y={y + ROW_H / 2 + 4} textAnchor="end" fontSize="13" fill={tokens.textSecondary}>
                     {r.label}
                   </text>
                   {total === 0 && (
-                    <rect x={LABEL_W} y={y + 4} width={track} height={ROW_H - 8} rx="4" fill={tokens.gridline} opacity="0.4" />
+                    <rect x={LABEL_W} y={y + 8} width={track} height={ROW_H - 16} rx="2" fill={tokens.gridline} opacity="0.6" />
                   )}
                   {series.map((s) => {
                     const v = r.values[s.id] || 0
@@ -223,17 +244,17 @@ export function StackedHBar({ rows, series, valueFormat = (n) => Math.round(n).t
                     return (
                       <rect
                         key={s.id}
-                        x={x0 + 1} y={y + 4} width={w} height={ROW_H - 8} rx="3" fill={s.color}
+                        x={x0 + 1} y={y + 8} width={w} height={ROW_H - 16} rx="2" fill={s.color}
                         style={{ cursor: 'pointer' }}
                         onMouseMove={(e) =>
-                          show(e, `${r.label} · ${s.label}\n${valueFormat(v)} hrs (${Math.round((v / (total || 1)) * 100)}% of their book)`)
+                          show(e, `${r.label}, ${s.label}\n${valueFormat(v)} hrs (${Math.round((v / (total || 1)) * 100)}% of their book)`)
                         }
                         onMouseLeave={hide}
                       />
                     )
                   })}
                   <text
-                    x={W - RIGHT_PAD + 8} y={y + ROW_H / 2 + 4} fontSize="12" fontWeight="600"
+                    x={W - 4} y={y + ROW_H / 2 + 4} fontSize="13" fontWeight="500" textAnchor="end"
                     fill={tokens.textPrimary} style={{ fontVariantNumeric: 'tabular-nums' }}
                   >
                     {valueFormat(total)}
@@ -259,27 +280,23 @@ export function GateScatter({
   xLabel = 'Mandays invested', yLabel = 'Saving hours', fmt = (v) => Math.round(v).toLocaleString(),
 }) {
   const tokens = useChartTokens()
+  const theme = useTheme()
   const ref = useRef(null)
   const { tip, show, hide } = useTooltip(ref)
+  const pass = theme.palette.tone?.success?.solid || '#3FA672'
+  const fail = theme.palette.tone?.danger?.solid || '#D0545B'
 
+  const { maxX, maxY } = useMemo(() => ({
+    maxX: Math.max(10, ...points.map((p) => p.x)) * 1.08,
+    maxY: Math.max(10, ...points.map((p) => p.y)) * 1.15,
+  }), [points])
+
+  // Nothing to plot: one quiet line, not an empty frame the size of a chart.
   if (!points.length) {
     return (
-      <Box
-        sx={{
-          height,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          textAlign: 'center',
-          px: 4,
-          border: `1px dashed ${tokens.gridline}`,
-          borderRadius: 1,
-        }}
-      >
-        <Typography variant="body2" sx={{ color: tokens.textSecondary, maxWidth: 420 }}>
-          {emptyMessage || 'Nothing to plot yet.'}
-        </Typography>
-      </Box>
+      <Typography variant="body2" sx={{ color: 'text.secondary', py: 2 }}>
+        {emptyMessage || 'Nothing to plot yet.'}
+      </Typography>
     )
   }
 
@@ -289,11 +306,6 @@ export function GateScatter({
   const padR = 16
   const W = 700 // viewBox units — the svg scales to its container
   const H = height
-
-  const { maxX, maxY } = useMemo(() => ({
-    maxX: Math.max(10, ...points.map((p) => p.x)) * 1.08,
-    maxY: Math.max(10, ...points.map((p) => p.y)) * 1.15,
-  }), [points])
 
   // Log y — one epic at 1,262h beside a dozen under 20h is otherwise an
   // unreadable line of dots on the floor.
@@ -340,9 +352,9 @@ export function GateScatter({
           <line x1={padL} x2={W - padR} y1={H - padB} y2={H - padB} stroke={tokens.baseline} strokeWidth="1" />
           <line x1={padL} x2={padL} y1={padT} y2={H - padB} stroke={tokens.baseline} strokeWidth="1" />
 
-          <path d={gatePath} stroke={tokens.textSecondary} strokeWidth="2" strokeDasharray="5 4" fill="none" opacity="0.75" />
+          <path d={gatePath} stroke={tokens.textSecondary} strokeWidth="1.5" strokeDasharray="5 4" fill="none" opacity="0.8" />
           <text
-            x={xScale(capX)} y={capY} textAnchor="middle" fontSize="11" fontWeight="600"
+            x={xScale(capX)} y={capY} textAnchor="middle" fontSize="11" fontWeight="500"
             fill={tokens.textSecondary}
             stroke={tokens.surface} strokeWidth="4" paintOrder="stroke"
           >
@@ -350,20 +362,20 @@ export function GateScatter({
           </text>
 
           {points.map((p) => {
-            const pass = p.y >= gate * p.x
+            const clears = p.y >= gate * p.x
             return (
               <circle
                 key={p.key}
                 cx={xScale(p.x)}
                 cy={yScale(p.y)}
                 r={p.y > maxY / 4 ? 9 : 6}
-                fill={pass ? STATUS.good : STATUS.critical}
+                fill={clears ? pass : fail}
                 fillOpacity="0.82"
                 stroke={tokens.surface}
                 strokeWidth="2"
                 style={{ cursor: 'pointer' }}
                 onMouseMove={(e) =>
-                  show(e, `${p.key} — ${p.summary}\n${p.note || `${fmt(p.x)} → ${fmt(p.y)}`}\n${pass ? 'PASSES' : 'FAILS'} the gate`)
+                  show(e, `${p.key}, ${p.summary}\n${p.note || `${fmt(p.x)} → ${fmt(p.y)}`}\n${clears ? 'Clears' : 'Below'} the gate`)
                 }
                 onMouseLeave={hide}
               />
@@ -382,8 +394,8 @@ export function GateScatter({
       {/* status colour never carries meaning alone */}
       <Legend
         items={[
-          { label: 'Clears the gate', color: STATUS.good },
-          { label: 'Below the gate — review scope or effort', color: STATUS.critical },
+          { label: 'Clears the gate', color: pass, round: true },
+          { label: 'Below the gate: review scope or effort', color: fail, round: true },
         ]}
       />
     </>

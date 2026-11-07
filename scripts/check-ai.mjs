@@ -350,15 +350,15 @@ try {
     console.log('\n--- the Dashboard ---')
     const d = await as(boss, { width: 1440, height: 900 })
     await d.goto(`${base}/`, { waitUntil: 'networkidle0' })
-    await d.waitForFunction(() => document.body.innerText.includes('This week ·'), { timeout: 15000 }).catch(() => {})
+    await d.waitForFunction(() => /Plans in \d+ of \d+/.test(document.querySelector('section[aria-label="this week"]')?.innerText || ''), { timeout: 15000 }).catch(() => {})
     await d.waitForFunction(() => document.body.innerText.includes('AP blocker seen'), { timeout: 8000 }).catch(() => {})
     const sect = (label) => d.evaluate((l) => document.querySelector(`section[aria-label="${l}"]`)?.innerText || '', label)
     const wk = await sect('this week')
     check('THE DASHBOARD SHOWS THIS WEEK — each person, their focus and where they stand',
-      /Plans in \d+ of \d+ · reports in 1 of \d+/.test(wk) && wk.includes('AP automation') && /REPORT: ON TIME/i.test(wk) && /PLAN: /i.test(wk),
+      /Plans in \d+ of \d+, reports in 1 of \d+/.test(wk) && wk.includes('AP automation') && /Report on time/i.test(wk) && /Plan (on time|late|missing|not due yet)/i.test(wk),
       wk.slice(0, 300).replace(/\n/g, ' | '))
     const wait = await sect('waiting for your decision')
-    check('  THE DATE CHANGES WAITING FOR A DECISION', /1 request to move/.test(wait) && wait.includes('FNP-88') && wait.includes('15 Dec'),
+    check('  THE DATE CHANGES WAITING FOR A DECISION', /1 date change/.test(wait) && wait.includes('FNP-88') && wait.includes('15 Dec'),
       wait.replace(/\n/g, ' | '))
     check('  THE AI’S SUMMARY OF THE WEEK', (await sect('the week, summarised')).includes('AP blocker seen'))
     const chatsBefore = (await call('GET', '/api/ai/chats', undefined, boss)).body.chats.length
@@ -376,7 +376,7 @@ try {
     }
     const dp = await as(boss, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
     await dp.goto(`${base}/`, { waitUntil: 'networkidle0' })
-    await dp.waitForFunction(() => document.body.innerText.includes('This week ·'), { timeout: 15000 }).catch(() => {})
+    await dp.waitForFunction(() => /Plans in \d+ of \d+/.test(document.querySelector('section[aria-label="this week"]')?.innerText || ''), { timeout: 15000 }).catch(() => {})
     check('  and on a phone nothing spills sideways', (await dp.evaluate(() => document.documentElement.scrollWidth)) <= 390)
     // Previewing as a member: no Dashboard, so nothing of this to leak.
     await dp.evaluate(() => localStorage.setItem('fa-kpi-view-as', 'member'))
