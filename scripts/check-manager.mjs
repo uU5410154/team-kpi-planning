@@ -337,7 +337,7 @@ try {
       check(`  @${width}px the switcher fits, with no sideways scroll`, r.sw2 && r.sw <= r.cw + 1, JSON.stringify(r))
       await n.browserContext().close()
     }
-    // Follow up asks first; the answer comes once "Send the email" is pressed.
+    // Follow up asks first; the answer comes once "Send email" is pressed.
     await a.evaluate(() => document.querySelector('button[aria-label="follow up FNP-267"]')?.click())
     await a.waitForSelector('[data-followup-send]', { timeout: 5000 }).catch(() => {})
     await a.evaluate(() => document.querySelector('[data-followup-send]')?.click())

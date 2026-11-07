@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Autocomplete, TextField, InputAdornment, Box, Typography, IconButton, Dialog, createFilterOptions,
+  Autocomplete, TextField, InputAdornment, Box, Typography, IconButton, Dialog, Tooltip, createFilterOptions,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
+import CloseIcon from '@mui/icons-material/Close'
 import FolderIcon from '@mui/icons-material/FolderOutlined'
-import { IconTile, PAGE_COLOR, personColor } from './Brand.jsx'
+import { IconTile } from './Brand.jsx'
 
 /*
  * ONE BOX TO GET ANYWHERE.
@@ -37,7 +38,7 @@ export default function GlobalSearch({
 
   const options = useMemo(() => {
     const out = tabs.map((t) => ({
-      type: 'page', id: `page:${t.id}`, label: t.label, sub: 'Page', tab: t.id, icon: t.icon, color: PAGE_COLOR[t.id],
+      type: 'page', id: `page:${t.id}`, label: t.label, sub: null, tab: t.id, icon: t.icon,
     }))
     const seen = new Set()
     const nick = Object.fromEntries((plan?.people || []).map((x) => [x.id, x.nick]))
@@ -48,11 +49,10 @@ export default function GlobalSearch({
         type: 'project',
         id: `project:${p.key}`,
         label: p.summary || p.key,
-        sub: [p.jiraKey || p.key, nick[p.pic] || null].filter(Boolean).join(' · '),
+        sub: [p.jiraKey || p.key, nick[p.pic] || null].filter(Boolean).join(', '),
         keys: `${p.key} ${p.jiraKey || ''} ${p.program || ''}`,
         tab: admin ? 'projects' : 'timeline',
         q: p.jiraKey || p.key,
-        color: PAGE_COLOR.projects,
       })
     }
     if (admin) {
@@ -61,10 +61,9 @@ export default function GlobalSearch({
           type: 'person',
           id: `person:${person.id}`,
           label: person.name || person.nick,
-          sub: [person.nick, person.role].filter(Boolean).join(' · '),
+          sub: [person.nick, person.role].filter(Boolean).join(', '),
           tab: 'people',
           person: person.id,
-          color: personColor(plan.people, person.id),
           initials: (person.nick || person.name || '?').slice(0, 2),
         })
       }
@@ -107,21 +106,22 @@ export default function GlobalSearch({
       getOptionLabel={(o) => o.label}
       isOptionEqualToValue={(a, b) => a.id === b.id}
       openOnFocus
+      forcePopupIcon={false}
       autoHighlight
       blurOnSelect
       clearOnBlur
-      noOptionsText="Nothing by that name"
-      sx={{ width: phone ? '100%' : { md: 240, lg: 300 } }}
-      slotProps={{ paper: { sx: { minWidth: 320 } } }}
+      noOptionsText="Nothing matches. Try a project key, a name or a page."
+      sx={{ width: '100%', maxWidth: phone ? 'none' : 360 }}
+      slotProps={{ paper: { sx: { minWidth: 320 } }, listbox: { sx: { maxHeight: phone ? '70vh' : '60vh' } } }}
       renderOption={(props, o) => {
         const { key, ...rest } = props
         return (
-          <Box component="li" key={key} {...rest} sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+          <Box component="li" key={key} {...rest} sx={{ display: 'flex', alignItems: 'center', gap: 2.5 }}>
             {o.type === 'person'
-              ? <IconTile text={o.initials} color={o.color} size={26} />
-              : <IconTile icon={o.icon || FolderIcon} color={o.color} size={26} />}
+              ? <IconTile text={o.initials} size={24} />
+              : <IconTile icon={o.icon || FolderIcon} size={24} />}
             <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>{o.label}</Typography>
+              <Typography variant="body1" noWrap>{o.label}</Typography>
               {o.sub && <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block' }}>{o.sub}</Typography>}
             </Box>
           </Box>
@@ -136,17 +136,27 @@ export default function GlobalSearch({
           InputProps={{
             ...params.InputProps,
             startAdornment: (
-              <InputAdornment position="start"><SearchIcon fontSize="small" sx={{ color: 'text.secondary' }} /></InputAdornment>
+              <InputAdornment position="start" sx={{ ml: 0.5, mr: 0 }}><SearchIcon fontSize="small" sx={{ color: 'text.tertiary' }} /></InputAdornment>
             ),
             endAdornment: phone ? params.InputProps.endAdornment : (
-              <Typography
+              <Box
                 component="kbd"
+                aria-hidden
                 sx={{
-                  fontSize: '0.68rem', color: 'text.disabled', border: 1, borderColor: 'divider', borderRadius: '5px', px: 0.6, mr: 0.5,
+                  fontSize: '0.75rem',
+                  lineHeight: '18px',
+                  minWidth: 20,
+                  textAlign: 'center',
+                  color: 'text.tertiary',
+                  border: 1,
+                  borderColor: 'border.strong',
+                  borderRadius: '4px',
+                  px: 1,
+                  mr: 1,
                 }}
               >
                 /
-              </Typography>
+              </Box>
             ),
           }}
           inputProps={{ ...params.inputProps, 'aria-label': 'Search' }}
@@ -158,16 +168,21 @@ export default function GlobalSearch({
   if (!phone) return box
   return (
     <>
-      <IconButton onClick={() => setOpen(true)} aria-label="Search">
-        <SearchIcon fontSize="small" />
-      </IconButton>
+      <Tooltip title="Search">
+        <IconButton onClick={() => setOpen(true)} aria-label="Search" sx={{ width: 40, height: 40 }}>
+          <SearchIcon />
+        </IconButton>
+      </Tooltip>
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        fullWidth
-        PaperProps={{ sx: { alignSelf: 'flex-start', mt: 2, p: 1.5 } }}
+        fullScreen
+        aria-label="Search"
       >
-        {box}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 3, borderBottom: 1, borderColor: 'border.subtle' }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>{box}</Box>
+          <IconButton onClick={() => setOpen(false)} aria-label="close search" sx={{ width: 40, height: 40 }}><CloseIcon /></IconButton>
+        </Box>
       </Dialog>
     </>
   )

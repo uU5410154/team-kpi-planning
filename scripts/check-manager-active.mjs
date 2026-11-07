@@ -308,7 +308,7 @@ try {
     await a.evaluate((k) => document.querySelector(`button[aria-label="follow up ${k}"]`)?.click(), P_JIRA.key)
     await a.waitForSelector('[data-followup-confirm]', { timeout: 5000 }).catch(() => {})
     const conf = await a.evaluate(() => document.querySelector('[data-followup-confirm]')?.innerText || '')
-    check('FOLLOW UP ASKS FIRST: who gets it and what it asks', /Email Kade about/i.test(conf) && /this week’s update/.test(conf) && /Send the email/.test(conf), conf.replace(/\n/g, ' | '))
+    check('FOLLOW UP ASKS FIRST: who gets it and what it asks', /Email Kade about/i.test(conf) && /this week’s update/.test(conf) && /Send email/.test(conf), conf.replace(/\n/g, ' | '))
     check('  AND NOTHING IS SENT YET', (await D.collection('kpi_followups').countDocuments()) === sentBefore)
     await a.evaluate(() => [...document.querySelectorAll('[data-followup-confirm] button')].find((b) => b.textContent.trim() === 'Cancel')?.click())
     await sleep(300)

@@ -1,51 +1,86 @@
+import { useState } from 'react'
 import {
-  Alert, Box, Button, FormControl, InputLabel, MenuItem, Select, Typography,
+  Box, Button, Menu, MenuItem, ListItemIcon, ListItemText, Tooltip, Typography,
 } from '@mui/material'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
+import CheckIcon from '@mui/icons-material/Check'
 
 /*
  * "VIEWING AS A TEAM MEMBER" — and which one.
  *
- * An administrator picks anybody on the team and sees exactly what that
- * person is sent: their Weekly page (their Jira week), their projects on the
- * Timeline, their scorecard. Read only: the server answers the preview's reads
- * as that member and refuses nothing it would not refuse the administrator,
- * and the week comes back not writable.
+ * A slim bar under the top bar (docs/DESIGN.md §2). An administrator picks
+ * anybody on the team and sees exactly what that person is sent: their Weekly
+ * page (their Jira week), their projects on the Timeline, their scorecard.
+ * Read only: the server answers the preview's reads as that member, and the
+ * week comes back not writable.
  */
 export default function ViewAsBanner({
   people = [], person = null, self = null, onPick, onBack,
 }) {
+  const [at, setAt] = useState(null)
   const team = people.filter((p) => p && p.id && !p.deleted)
   const nick = team.find((p) => p.id === person)?.nick || null
+  const name = (p) => p.nick || p.name || p.id
+  const tip = person
+    ? `What ${person === self ? 'your team sees, with your own week' : `${nick || person} sees: their week and their projects`}. Read only: nothing you do here changes anything.`
+    : 'Pick somebody to see their week and their projects exactly as they do.'
   return (
-    <Alert
-      severity="info"
-      variant="outlined"
+    <Box
       data-view-as={person || ''}
-      sx={{ mb: 2.5, alignItems: 'center', '& .MuiAlert-message': { flex: 1, minWidth: 0 } }}
-      action={<Button color="inherit" size="small" onClick={onBack}>Back to administrator</Button>}
+      role="region"
+      aria-label="viewing as a team member"
+      sx={{
+        position: 'sticky',
+        top: { xs: 52, sm: 56 },
+        zIndex: (t) => t.zIndex.appBar - 1,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        minHeight: 40,
+        px: { xs: 3, sm: 5, md: 6 },
+        bgcolor: 'bg.subtle',
+        borderBottom: 1,
+        borderColor: 'border.subtle',
+      }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-        <Typography variant="body2" sx={{ flex: '1 1 260px', minWidth: 0 }}>
-          <strong>Viewing as a team member{nick ? `: ${nick}` : ''}.</strong>{' '}
-          {person
-            ? `This is what ${person === self ? 'your team sees, with your own week' : `${nick || person} sees — their week and their projects`}. Read only: nothing you do here changes anything.`
-            : 'Pick somebody to see their week and their projects exactly as they do.'}
-        </Typography>
-        <FormControl size="small" sx={{ minWidth: 170 }}>
-          <InputLabel id="view-as-label">View as</InputLabel>
-          <Select
-            labelId="view-as-label"
-            label="View as"
-            value={person || ''}
-            onChange={(e) => onPick?.(e.target.value || null)}
-            inputProps={{ 'aria-label': 'view as which member' }}
+      <Box
+        aria-hidden
+        sx={(t) => ({
+          width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bgcolor: t.palette.tone.info.solid,
+        })}
+      />
+      <Tooltip title={tip}>
+        <Typography variant="body2" component="div" sx={{ flex: 1, minWidth: 0, color: 'text.secondary' }} noWrap>
+          Viewing as
+          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}> a team member</Box>
+          {': '}
+          <Button
+            variant="text"
+            size="small"
+            onClick={(e) => setAt(e.currentTarget)}
+            aria-haspopup="menu"
+            aria-label="view as which member"
+            endIcon={<ArrowDropDownIcon />}
+            sx={{
+              minHeight: 28, py: 0, px: 1, ml: -0.5, color: 'text.primary', fontWeight: 500, verticalAlign: 'baseline', '& .MuiButton-endIcon': { ml: 0 },
+            }}
           >
-            {team.map((p) => (
-              <MenuItem key={p.id} value={p.id}>{p.nick || p.name || p.id}{p.id === self ? ' (you)' : ''}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
-    </Alert>
+            {nick || 'pick someone'}
+          </Button>
+        </Typography>
+      </Tooltip>
+      <Menu anchorEl={at} open={!!at} onClose={() => setAt(null)}>
+        {team.map((p) => (
+          <MenuItem key={p.id} selected={p.id === person} onClick={() => { setAt(null); onPick?.(p.id) }}>
+            <ListItemIcon>{p.id === person && <CheckIcon fontSize="small" />}</ListItemIcon>
+            <ListItemText primary={`${name(p)}${p.id === self ? ' (you)' : ''}`} />
+          </MenuItem>
+        ))}
+      </Menu>
+      <Button variant="text" size="small" onClick={onBack} sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+        Back
+        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' }, whiteSpace: 'pre' }}>{' to administrator'}</Box>
+      </Button>
+    </Box>
   )
 }

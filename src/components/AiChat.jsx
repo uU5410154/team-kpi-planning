@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Drawer, Box, Typography, IconButton, TextField, Button, Select, MenuItem, Tooltip, Alert,
+  Drawer, Box, Typography, IconButton, TextField, ButtonBase, Select, MenuItem, Tooltip, Alert,
 } from '@mui/material'
-import { alpha, useTheme } from '@mui/material/styles'
 import CloseIcon from '@mui/icons-material/Close'
 import SendIcon from '@mui/icons-material/ArrowUpward'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import * as api from '../lib/api.js'
 import Loading from './Loading.jsx'
 import Markdown from './Markdown.jsx'
@@ -35,7 +33,6 @@ const STARTERS = [
 export default function AiChat({
   open, onClose, phone, seed,
 }) {
-  const theme = useTheme()
   const [chats, setChats] = useState([])
   const [chat, setChat] = useState(null)
   const [text, setText] = useState('')
@@ -104,13 +101,24 @@ export default function AiChat({
       onClose={onClose}
       PaperProps={{
         sx: {
-          width: phone ? '100%' : 460, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', borderLeft: 1, borderColor: 'divider',
+          width: phone ? '100%' : 440,
+          maxWidth: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          bgcolor: 'bg.raised',
+          borderLeft: 1,
+          borderColor: 'border.subtle',
+          borderTopLeftRadius: phone ? 0 : 12,
+          borderBottomLeftRadius: phone ? 0 : 12,
+          boxShadow: (t) => (t.palette.mode === 'dark' ? '0 8px 24px rgba(0,0,0,.45)' : '0 8px 24px rgba(16,24,40,.12)'),
         },
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-        <AutoAwesomeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-        <Typography variant="h4" sx={{ flex: 1 }}>Ask about the plan</Typography>
+      <Box sx={{
+        display: 'flex', alignItems: 'center', gap: 1, height: 56, flexShrink: 0, pl: 4, pr: 2, borderBottom: 1, borderColor: 'border.subtle',
+      }}
+      >
+        <Typography variant="h2" component="h2" sx={{ flex: 1 }}>Ask about the plan</Typography>
         <Tooltip title="New conversation">
           <IconButton size="small" onClick={() => { setChat(null); setError(null) }} aria-label="new conversation"><AddIcon fontSize="small" /></IconButton>
         </Tooltip>
@@ -119,11 +127,13 @@ export default function AiChat({
             <IconButton size="small" onClick={remove} aria-label="delete conversation"><DeleteOutlineIcon fontSize="small" /></IconButton>
           </Tooltip>
         )}
-        <IconButton size="small" onClick={onClose} aria-label="close"><CloseIcon fontSize="small" /></IconButton>
+        <Tooltip title="Close">
+          <IconButton size="small" onClick={onClose} aria-label="close"><CloseIcon fontSize="small" /></IconButton>
+        </Tooltip>
       </Box>
 
       {chats.length > 0 && (
-        <Box sx={{ px: 2, pt: 1.5 }}>
+        <Box sx={{ px: 4, pt: 3 }}>
           <Select
             size="small"
             fullWidth
@@ -132,12 +142,13 @@ export default function AiChat({
             onChange={(e) => pick(e.target.value)}
             inputProps={{ 'aria-label': 'earlier conversations' }}
             renderValue={(v) => (v ? (chats.find((c) => c.id === v)?.title || 'This conversation') : `Earlier conversations (${chats.length})`)}
+            MenuProps={{ slotProps: { paper: { sx: { maxWidth: 400 } } } }}
           >
-            <MenuItem value=""><em>New conversation</em></MenuItem>
+            <MenuItem value="">New conversation</MenuItem>
             {chats.map((c) => (
               <MenuItem key={c.id} value={c.id}>
                 <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" noWrap>{c.title}</Typography>
+                  <Typography variant="body1" noWrap>{c.title}</Typography>
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                     {new Date(c.updatedAt).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' })}
                   </Typography>
@@ -148,24 +159,42 @@ export default function AiChat({
         </Box>
       )}
 
-      <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      <Box sx={{
+        flex: 1, overflowY: 'auto', px: 4, py: 4, display: 'flex', flexDirection: 'column', gap: 3,
+      }}
+      >
         {opening && <Loading variant="block" label="Opening the conversation…" />}
         {!opening && messages.length === 0 && (
           <Box>
-            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
-              Ask anything about the register, the timeline, the money or the weekly check-ins — in English or Thai.
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+              Ask about the register, the timeline, the money or the weekly check-ins, in English or Thai.
             </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+            <Typography variant="subtitle2" component="h3" sx={{ color: 'text.secondary', mb: 1 }}>Try one of these</Typography>
+            <Box sx={{ borderTop: 1, borderColor: 'border.subtle' }}>
               {STARTERS.map((q) => (
-                <Button
+                <ButtonBase
                   key={q}
-                  variant="outlined"
                   onClick={() => send(q)}
                   disabled={busy}
-                  sx={{ justifyContent: 'flex-start', textAlign: 'left', fontWeight: 500, color: 'text.primary' }}
+                  sx={{
+                    display: 'flex',
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    textAlign: 'left',
+                    minHeight: 44,
+                    px: 2,
+                    py: 2,
+                    borderBottom: 1,
+                    borderColor: 'border.subtle',
+                    typography: 'body1',
+                    lineHeight: '22px',
+                    color: 'text.primary',
+                    transition: 'background-color 120ms',
+                    '&:hover': { bgcolor: 'action.hover' },
+                  }}
                 >
                   {q}
-                </Button>
+                </ButtonBase>
               ))}
             </Box>
           </Box>
@@ -174,11 +203,10 @@ export default function AiChat({
           <Box
             key={i}
             sx={{
-              alignSelf: 'flex-end', maxWidth: '85%', px: 1.5, py: 1, borderRadius: '14px 14px 4px 14px',
-              bgcolor: alpha(theme.palette.primary.main, 0.16), border: 1, borderColor: alpha(theme.palette.primary.main, 0.25),
+              alignSelf: 'flex-end', maxWidth: '85%', px: 3, py: 2, borderRadius: '8px', bgcolor: 'bg.subtle',
             }}
           >
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{m.content}</Typography>
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: '22px' }}>{m.content}</Typography>
           </Box>
         ) : (
           <Box key={i} sx={{ maxWidth: '100%' }}>
@@ -186,12 +214,12 @@ export default function AiChat({
           </Box>
         )))}
         {busy && <Loading label="Reading the plan…" />}
-        {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+        {error && <Alert severity="error" variant="outlined" onClose={() => setError(null)}>{error}</Alert>}
         <div ref={end} />
       </Box>
 
-      <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+      <Box sx={{ p: 3, borderTop: 1, borderColor: 'border.subtle' }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
           <TextField
             fullWidth
             multiline
@@ -203,18 +231,28 @@ export default function AiChat({
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
             inputProps={{ 'aria-label': 'ask a question' }}
           />
-          <IconButton
-            color="primary"
-            onClick={() => send()}
-            disabled={busy || !text.trim()}
-            aria-label="send"
-            sx={{ bgcolor: 'primary.main', color: '#fff', '&:hover': { bgcolor: 'primary.dark' }, '&.Mui-disabled': { bgcolor: 'action.hover' } }}
-          >
-            <SendIcon fontSize="small" />
-          </IconButton>
+          <Tooltip title="Send">
+            <span>
+              <IconButton
+                onClick={() => send()}
+                disabled={busy || !text.trim()}
+                aria-label="send"
+                sx={{
+                  width: 40,
+                  height: 40,
+                  bgcolor: 'primary.main',
+                  color: '#fff',
+                  '&:hover': { bgcolor: 'primary.dark' },
+                  '&.Mui-disabled': { bgcolor: 'action.disabledBackground', color: 'text.disabled' },
+                }}
+              >
+                <SendIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
-        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 0.75 }}>
-          Answers come from the app&rsquo;s data, read by AI. Check anything you act on. Your conversations are kept for you only.
+        <Typography variant="caption" sx={{ color: 'text.tertiary', display: 'block', mt: 2 }}>
+          Answers are AI readings of the app&rsquo;s data. Check anything you act on. Only you can see your conversations.
         </Typography>
       </Box>
     </Drawer>

@@ -1,20 +1,22 @@
 import { keyframes } from '@emotion/react'
-import { alpha } from '@mui/material/styles'
 
 /**
- * A SOFT PULSE for the one button that is the next thing to do: a ring that
- * grows out of the button and fades, every couple of seconds. Quiet enough
- * for the dark, muted look, and off for anyone who has asked their system for
- * less motion.
+ * A SINGLE SOFT FADE on what somebody was just sent to — the next thing to
+ * do, or the row a link pointed at: the primary tint, once, fading out over
+ * 1.2s. No ring and no repeat (docs/DESIGN.md §1.6), and nothing at all for
+ * anyone who has asked their system for less motion.
+ *
+ * Drawn as an inset shade over the element's own background, so a filled
+ * button keeps its colour underneath. Called with the theme, as before:
+ * `sx={[base, on && pulseSx]}`.
  */
-const ring = keyframes`
-  0%   { box-shadow: 0 0 0 0 var(--pulse-ring); }
-  70%  { box-shadow: 0 0 0 9px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
+const fade = keyframes`
+  from { box-shadow: inset 0 0 0 999px var(--pulse-tint); }
+  to   { box-shadow: inset 0 0 0 999px transparent; }
 `
 
 export const pulseSx = (t) => ({
-  '--pulse-ring': alpha(t.palette.primary.main, 0.6),
-  animation: `${ring} 1.8s ease-out infinite`,
+  '--pulse-tint': t.palette.primary.tint || 'rgba(61,111,217,0.14)',
+  animation: `${fade} 1.2s ease-out 1`,
   '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
 })

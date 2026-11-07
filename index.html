@@ -6,17 +6,22 @@
          under 16px (every compact cell in the register) takes focus; iOS
          still lets people pinch-zoom. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <meta name="theme-color" content="#080b26" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f2f3fb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0F1318" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F5F6F8" media="(prefers-color-scheme: light)" />
     <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png" />
     <link rel="icon" type="image/png" sizes="64x64" href="/icon-64.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
-    <meta name="description" content="F&A Tech Team — 2026 objective and KPI planning workbench" />
+    <meta name="description" content="F&A Tech team: 2026 objective and KPI planning" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <title>F&amp;A Tech · 2026 KPI Planning</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet" />
+    <title>F&amp;A Tech KPI planning 2026</title>
+    <!-- The page colour before the app draws, so opening it never flashes white
+         (or dark, for somebody who chose light). -->
+    <script>
+      try { document.documentElement.style.background = localStorage.getItem('fa-kpi-mode') === 'light' ? '#F5F6F8' : '#0F1318' } catch (e) { document.documentElement.style.background = '#0F1318' }
+    </script>
   </head>
   <body>
     <div id="root"></div>

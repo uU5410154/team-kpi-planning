@@ -10,51 +10,90 @@
  * labels and every chart has a table view. Do not add a 6th slot without
  * re-running the validator.
  *
- * Chrome colours (navy) are UI, not data ink, and are defined in theme.js.
+ * Chrome colours are UI, not data ink, and are defined in theme.js.
  */
 
 export const CHART = {
+  /*
+   * The neutrals (surface, plane, text, grid) follow the chrome in theme.js —
+   * the cool slate of the "Ledger" system — so a chart sits on its section
+   * instead of as a different-coloured slab in it. The series and the
+   * sequential ramps are untouched: those are the validated part.
+   */
   light: {
-    surface: '#fcfcfb',
-    plane: '#f9f9f7',
-    textPrimary: '#0b0b0b',
-    textSecondary: '#52514e',
-    muted: '#898781',
-    gridline: '#e1e0d9',
-    baseline: '#c3c2b7',
-    border: 'rgba(11,11,11,0.10)',
+    surface: '#ffffff',
+    plane: '#f5f6f8',
+    textPrimary: '#161b22',
+    textSecondary: '#4f5866',
+    muted: '#6b7482',
+    gridline: '#e3e6eb',
+    baseline: '#cbd1d9',
+    border: 'rgba(16,24,40,0.10)',
     // categorical slots 1..5 — fixed order, never cycled
     series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4'],
     // single-hue sequential ramp (blue), light -> dark
     seq: ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#2a78d6', '#256abf', '#184f95'],
-    deemphasis: '#c3c2b7',
+    deemphasis: '#cbd1d9',
   },
-  /*
-   * The neutrals follow the chrome — navy rather than charcoal — so a chart
-   * sits on its panel instead of as a grey slab in it. The series and the
-   * sequential ramp are untouched: those are the validated part.
-   */
   dark: {
-    surface: '#0f1338',
-    plane: '#080b26',
-    textPrimary: '#eef0ff',
-    textSecondary: '#a5aad6',
-    muted: '#7d82ad',
-    gridline: '#232a5c',
-    baseline: '#343c78',
-    border: 'rgba(129,140,248,0.16)',
+    surface: '#151a21',
+    plane: '#0f1318',
+    textPrimary: '#e6e9ee',
+    textSecondary: '#a2aab7',
+    muted: '#78828f',
+    gridline: '#252d38',
+    baseline: '#344050',
+    border: 'rgba(162,170,183,0.16)',
     series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'],
     seq: ['#0d366b', '#104281', '#184f95', '#256abf', '#2a78d6', '#3987e5', '#6da7ec'],
-    deemphasis: '#4a5080',
+    deemphasis: '#4a5361',
   },
 }
 
-/** Status palette — fixed, never themed, never reused as a series colour. */
+/*
+ * STATUS TONES — what a colour MEANS, per mode (docs/DESIGN.md §1.1).
+ *
+ *   fg     text on the tint: a pill's word, a delta beside a figure
+ *   solid  small marks only: a 6px dot, a thin progress bar, a chart bar
+ *   tint   the pill's background
+ *
+ * A status never fills a button or a large area, and never colours a big
+ * number: the figure stays in the text colour and the tone sits beside it.
+ */
+const tint = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16)
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+}
+const tones = (rows, a, neutralTint) => Object.fromEntries(Object.entries(rows).map(([k, [fg, solid]]) => [
+  k, { fg, solid, tint: k === 'neutral' ? neutralTint : tint(solid, a) },
+]))
+export const TONES = {
+  dark: tones({
+    success: ['#6CC495', '#3FA672'],
+    warning: ['#E0A955', '#C98A2E'],
+    danger: ['#EC8A8F', '#D0545B'],
+    info: ['#8DB3F0', '#4F86D9'],
+    neutral: ['#A2AAB7', '#6B7482'],
+  }, 0.14, 'rgba(162,170,183,0.12)'),
+  light: tones({
+    success: ['#1F7A4D', '#2E9461'],
+    warning: ['#8F5A0B', '#B87A1E'],
+    danger: ['#B3343B', '#C8454C'],
+    info: ['#2C5FB3', '#3F74CC'],
+    neutral: ['#4F5866', '#8A93A3'],
+  }, 0.10, 'rgba(79,88,102,0.08)'),
+}
+
+/**
+ * Status colours for marks drawn the same in both modes (chart bars, the
+ * gate dots). Fixed, never reused as a series colour. Prefer TONES[mode]
+ * where the mode is known: it carries a text colour for each tone as well.
+ */
 export const STATUS = {
-  good: '#0ca30c',
-  warning: '#fab219',
-  serious: '#ec835a',
-  critical: '#d03b3b',
+  good: '#3FA672',
+  warning: '#C98A2E',
+  serious: '#CC7A45',
+  critical: '#D0545B',
 }
 
 /**
