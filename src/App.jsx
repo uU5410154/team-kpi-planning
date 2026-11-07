@@ -231,6 +231,8 @@ export default function App() {
   const stateRef = useRef(null)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
+  // Whether THIS browser has saved an edit since it opened: what "Saved" in the header means.
+  const [savedHere, setSavedHere] = useState(false)
   const fileRef = useRef(null)
   const firstRender = useRef(true)
 
@@ -562,6 +564,7 @@ export default function App() {
       )
       setDirty(false)
       setLastSaved(r.updatedAt)
+      setSavedHere(true)
       linkedToDb.current = true
       // The browser and the database now hold the same thing; mark it so the
       // next visit can take a newer plan without asking.
@@ -628,6 +631,7 @@ export default function App() {
         )
         setDirty(false)
         setLastSaved(r.updatedAt)
+        setSavedHere(true)
         // The browser and the database agree again — mark it, exactly as the
         // Save button does. Without this the automatic save moved the
         // database on and left the browser's mark behind, so the next visit
@@ -1265,7 +1269,7 @@ export default function App() {
                   ? <Typography variant="caption" data-save-status="unsaved" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>Not saved yet</Typography>
                   : <Box data-save-status="saving"><Loading label="Saving…" /></Box>
               )}
-              {canWrite && !phone && !sharedLoading && linkedToDb.current && !dirty && !saving && lastSaved && (
+              {canWrite && !phone && !sharedLoading && linkedToDb.current && !dirty && !saving && savedHere && lastSaved && (
                 <Typography variant="caption" data-save-status="saved" title={`Saved to the shared plan ${new Date(lastSaved).toLocaleString()}`} sx={{ color: 'text.disabled', whiteSpace: 'nowrap' }}>
                   Saved
                 </Typography>

@@ -492,8 +492,6 @@ function TaskDecision({ d, onDecide }) {
           <TextField
             size="small"
             fullWidth
-            multiline
-            maxRows={4}
             label="What was decided"
             helperText="Also written on the task in Jira."
             value={note}
