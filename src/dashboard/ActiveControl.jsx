@@ -42,7 +42,9 @@ export default function ActiveControl({
   const wk = `week ${weekNo(week)}`
   const tip = `${on ? 'Active' : 'Not active'} in ${wk} — ${mode === 'auto' ? 'by its dates' : 'set by an administrator'}. Click to change.`
   const pick = (v) => { setAt(null); onSet?.(v) }
-  const big = size !== 'small'
+  // 'dot': just the dot, for a narrow column — the word is in the tooltip.
+  const dot = size === 'dot'
+  const big = size !== 'small' && !dot
   return (
     <>
       <Tooltip title={tip}>
@@ -57,8 +59,8 @@ export default function ActiveControl({
             alignItems: 'center',
             gap: 0.6,
             flexShrink: 0,
-            px: big ? 1.25 : 0.75,
-            py: big ? 0.5 : 0.25,
+            px: big ? 1.25 : dot ? 0.6 : 0.75,
+            py: big ? 0.5 : dot ? 0.6 : 0.25,
             borderRadius: '999px',
             border: 1,
             borderColor: 'divider',
@@ -75,9 +77,11 @@ export default function ActiveControl({
             bgcolor: on ? 'primary.main' : 'transparent',
           }}
           />
-          <Typography component="span" sx={{ fontSize: big ? '0.8rem' : '0.66rem', fontWeight: 600, lineHeight: 1.4 }}>
-            {big ? `${on ? 'Active' : 'Not active'} · ${WORD[mode]}` : WORD[mode]}
-          </Typography>
+          {!dot && (
+            <Typography component="span" sx={{ fontSize: big ? '0.8rem' : '0.66rem', fontWeight: 600, lineHeight: 1.4 }}>
+              {big ? `${on ? 'Active' : 'Not active'} · ${WORD[mode]}` : WORD[mode]}
+            </Typography>
+          )}
         </ButtonBase>
       </Tooltip>
       <Menu anchorEl={at} open={!!at} onClose={() => setAt(null)} onClick={(e) => e.stopPropagation()}>

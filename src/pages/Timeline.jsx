@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Chip, TextField, Select, MenuItem, FormControl, InputLabel,
-  FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress, useMediaQuery,
+  FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress, useMediaQuery, Collapse,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
+import FilterListIcon from '@mui/icons-material/FilterList'
+import Loading from '../components/Loading.jsx'
 import SyncIcon from '@mui/icons-material/Sync'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -180,9 +182,25 @@ export default function Timeline({
    * the columns narrow, and the month track keeps a floor and scrolls instead.
    */
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
-  const NAME_W = phone ? 150 : 300
-  const SLIP_W = phone ? 72 : 96
+  /*
+   * NARROW is about the room the page has, not the window: a tablet with the
+   * menu open leaves the page a phone's width, and gets a phone's columns and
+   * a phone's folded filters.
+   */
+  const [boxW, setBoxW] = useState(0)
+  const narrow = phone || (boxW > 0 && boxW < 640)
+  const NAME_W = narrow ? 160 : 280
+  const SLIP_W = narrow ? 64 : 80
   const PINNED_W = NAME_W + SLIP_W
+  /*
+   * THE CHART IS THE PAGE. Everything above it is one title line, one toolbar
+   * and one line of figures, and the chart takes the rest of the window with
+   * its own scroll — so the month header stays in sight however far down the
+   * list somebody reads. Rows are dense enough for a screen to hold a couple
+   * of dozen projects rather than nine.
+   */
+  const ROW_H = 36
+  const KID_H = 26
   const asOf = settings.asOfDate
   const t = plan.totals.timeliness
 
@@ -210,10 +228,16 @@ export default function Timeline({
    * server, the chart simply has no markers.
    */
   const [weekly, setWeekly] = useState({})
+  // Still waiting for the check-ins: said beside the figures, so markers that
+  // have not arrived yet are not read as "nothing blocked".
+  const [weeklyIn, setWeeklyIn] = useState(false)
   const [story, setStory] = useState(null)
   useEffect(() => {
     let dead = false
-    api.weeklyByProject().then((r) => { if (!dead) setWeekly(r.byProject || {}) }).catch(() => {})
+    api.weeklyByProject()
+      .then((r) => { if (!dead) setWeekly(r.byProject || {}) })
+      .catch(() => {})
+      .finally(() => { if (!dead) setWeeklyIn(true) })
     return () => { dead = true }
   }, [])
   /** Everything the check-ins say about the register lines behind one bar. */
@@ -633,6 +657,33 @@ export default function Timeline({
 
   const [scale, setScale] = useState('month')
   const scrollRef = useRef(null)
+  const rootRef = useRef(null)
+  // On a phone the filters fold behind one button.
+  const [showFilters, setShowFilters] = useState(false)
+
+  /*
+   * How much room the chart has: its width, so the month view never squeezes
+   * its bars into a sliver beside the pinned columns, and its height, which is
+   * whatever the window has left below the toolbar — so the chart fills the
+   * screen and scrolls inside itself, header row always in sight.
+   */
+  const [fitH, setFitH] = useState(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return undefined
+    const fit = () => {
+      setBoxW(el.clientWidth)
+      const top = el.getBoundingClientRect().top + window.scrollY
+      setFitH(Math.max(phone ? 360 : 420, Math.round(window.innerHeight - top - 16)))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    // The whole page too: an alert opening above the chart moves it down.
+    if (rootRef.current) ro.observe(rootRef.current)
+    window.addEventListener('resize', fit)
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit) }
+  }, [phone])
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
@@ -762,8 +813,12 @@ export default function Timeline({
    */
   const PER_UNIT = { month: 0, week: 46, day: 26 }
   const days = Math.max(1, Math.round((span.to - span.from) / DAY))
+  // The month view fits the width it is given — unless that leaves the bars
+  // too little room beside the pinned columns, when it keeps a floor and
+  // scrolls instead (a phone, or a tablet with the menu open).
+  const MONTH_MIN = 560
   const trackPx = scale === 'month'
-    ? (phone ? 560 : null)
+    ? (phone || (boxW > 0 && boxW - PINNED_W < MONTH_MIN) ? MONTH_MIN : null)
     : Math.max(720, Math.round(days * (scale === 'day' ? PER_UNIT.day : PER_UNIT.week / 7)))
 
   const pct = (ms) => ((ms - span.from) / (span.to - span.from)) * 100
@@ -797,7 +852,9 @@ export default function Timeline({
         if (ms >= span.from) {
           out.push({
             ms,
-            label: d.getUTCMonth() === 0 ? `${MONTHS[0]} ${String(d.getUTCFullYear()).slice(2)}` : MONTHS[d.getUTCMonth()],
+            // January is the year itself: "Jan 26" did not fit a month's width,
+            // and clipped to "Jan 2" it read as a date.
+            label: d.getUTCMonth() === 0 ? String(d.getUTCFullYear()) : MONTHS[d.getUTCMonth()],
             strong: d.getUTCMonth() === 0,
           })
         }
@@ -1003,7 +1060,7 @@ export default function Timeline({
           sx={{
             display: 'flex',
             alignItems: 'center',
-            minHeight: depth ? 28 : 34,
+            minHeight: depth ? KID_H : ROW_H,
             borderBottom: 1,
             borderColor: 'divider',
             opacity: row.outsideTeam ? 0.6 : 1,
@@ -1016,12 +1073,13 @@ export default function Timeline({
           <Box sx={{
             width: NAME_W,
             flexShrink: 0,
-            px: 1.5,
-            py: 0.5,
+            alignSelf: 'stretch',
+            px: 1,
+            py: 0.25,
             display: 'flex',
             alignItems: 'center',
             gap: 0.5,
-            pl: 1.5 + depth * 2,
+            pl: 0.75 + depth * 2,
             // Pinned: the calendar slides underneath it on the finer scales,
             // and a bar with no name against it is a bar nobody can use.
             position: 'sticky',
@@ -1050,10 +1108,10 @@ export default function Timeline({
               role={depth === 0 ? 'button' : undefined}
               aria-label={depth === 0 ? `weekly updates for ${row.jiraKey || row.projectKey}` : undefined}
             >
-              <Typography variant="body2" noWrap sx={{ fontSize: depth ? '0.72rem' : '0.78rem', fontWeight: depth ? 400 : 600 }}>
+              <Typography variant="body2" noWrap title={row.title} sx={{ fontSize: depth ? '0.72rem' : '0.78rem', fontWeight: depth ? 400 : 600, lineHeight: 1.3 }}>
                 {row.title}
               </Typography>
-              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem' }}>
+              <Typography variant="caption" noWrap title={row.sub} sx={{ color: 'text.secondary', display: 'block', fontSize: '0.65rem', lineHeight: 1.3 }}>
                 {row.sub}
               </Typography>
             </Box>
@@ -1076,6 +1134,8 @@ export default function Timeline({
                 projects={row.projectKeys.map((k) => projectOf[k])}
                 week={thisWeek}
                 label={`active ${row.jiraKey || row.projectKey}`}
+                // Narrow, the column has no room for the word as well as the name.
+                size={narrow ? 'dot' : 'small'}
                 onSet={(v) => row.projectKeys.forEach((k) => onUpdate(k, { active: v }))}
               />
             )}
@@ -1085,7 +1145,10 @@ export default function Timeline({
             position: 'relative',
             flex: trackPx ? 'none' : 1,
             width: trackPx || 'auto',
-            height: depth ? 28 : 34,
+            // The full height of the row, so gridlines and the today line run
+            // unbroken from one row into the next.
+            alignSelf: 'stretch',
+            minHeight: depth ? KID_H - 1 : ROW_H - 1,
           }}
           >
             {ticks.map((tk) => (
@@ -1293,7 +1356,10 @@ export default function Timeline({
             width: SLIP_W,
             flexShrink: 0,
             px: 1,
-            textAlign: 'right',
+            alignSelf: 'stretch',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
             position: 'sticky',
             right: 0,
             bgcolor: depth ? 'background.default' : 'background.paper',
@@ -1308,9 +1374,10 @@ export default function Timeline({
                 label={tl.lateBy > 0 ? `+${tl.lateBy}d` : `${tl.lateBy}d`}
                 variant="outlined"
                 sx={{
-                  height: 19,
+                  height: 18,
                   fontSize: '0.65rem',
                   fontWeight: 700,
+                  '& .MuiChip-label': { px: 0.75 },
                   color: FINISH_COLOUR[finish] || STATUS.good,
                   borderColor: FINISH_COLOUR[finish] || STATUS.good,
                 }}
@@ -1345,45 +1412,126 @@ export default function Timeline({
     )
   }
 
-  const stat = (label, value, tone) => (
-    <Box sx={{ minWidth: 96 }}>
-      <Typography variant="h3" sx={{ color: tone || 'text.primary', lineHeight: 1.1 }}>{value}</Typography>
-      <Typography variant="caption" sx={{ color: 'text.secondary' }}>{label}</Typography>
-    </Box>
+  /*
+   * THE FIGURES, AS ONE LINE. They used to be a card of big numbers that
+   * pushed the chart below the fold; they are a caption to the chart, not a
+   * dashboard of their own. Each still says what it counts when hovered.
+   */
+  const stat = (key, value, label, tip, tone) => (
+    <Tooltip key={key} title={tip}>
+      <Box component="span" data-stat={key} sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 0.5, whiteSpace: 'nowrap', cursor: 'default' }}>
+        <Typography component="span" sx={{ fontSize: '0.8rem', fontWeight: 700, lineHeight: 1.4, color: tone || 'text.primary', fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </Typography>
+        <Typography component="span" variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.4 }}>{label}</Typography>
+      </Box>
+    </Tooltip>
+  )
+  const stats = [
+    stat('planned', t.planned, 'planned', 'With a plan: a start or a due date on the register'),
+    stat('finished', t.finished, 'finished', 'Finished, with a date to say when', t.finished ? STATUS.good : undefined),
+    stat('running', t.running, 'running', 'Started and not yet finished'),
+    stat('overdue', t.overdue, 'past due', 'Past due, unfinished: the due date has gone by and nothing says it landed',
+      t.overdue ? STATUS.critical : undefined),
+    stat('ontime', `${t.onTime}/${t.judged}`, 'on time',
+      `${t.onTime} of the ${t.judged} judged against a date landed on time. A project is judged once it has a due date `
+        + 'and either a finish or a date already gone past.', t.onTime ? STATUS.good : 'text.secondary'),
+    stat('slip', t.avgSlip == null ? '—' : `${t.avgSlip}d`, 'avg slip', 'Average slip, over the late ones only',
+      t.avgSlip ? STATUS.warning : undefined),
+    t.noDates > 0 ? stat('undated', t.noDates, 'undated', 'No dates at all, so not on the chart', 'text.disabled') : null,
+  ].filter(Boolean)
+
+  // Narrow, how many filters are away from their defaults — on the button
+  // that hides them, so a short list is never a mystery.
+  const changed = [fPic !== 'all', fState !== 'all', !ours, onlyActive].filter(Boolean).length
+
+  // Small, quiet controls: a toolbar, not a form.
+  const jiraBtn = { fontSize: '0.75rem', px: 1, minWidth: 0 }
+  const dense = { '& .MuiInputBase-input': { py: 0.6, fontSize: '0.8rem' }, '& .MuiInputLabel-root': { fontSize: '0.8rem' } }
+  const switchLabel = { m: 0, gap: 0.25, '& .MuiFormControlLabel-label': { fontSize: '0.8rem', whiteSpace: 'nowrap' } }
+  const filters = (
+    <>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 120 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+        <InputLabel>PIC</InputLabel>
+        <Select label="PIC" value={fPic} onChange={(e) => setFPic(e.target.value)}>
+          {picks.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
+        </Select>
+      </FormControl>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 150 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
+        <InputLabel>State</InputLabel>
+        <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
+          <MenuItem value="all">Everything</MenuItem>
+          <MenuItem value="overdue">Past due, unfinished</MenuItem>
+          <MenuItem value="late">Behind schedule</MenuItem>
+          <MenuItem value="on">Finished on schedule</MenuItem>
+          <MenuItem value="ahead">Finished ahead of schedule</MenuItem>
+          <MenuItem value="running">Running now</MenuItem>
+          <MenuItem value="finished">Finished</MenuItem>
+          <MenuItem value="not started">Not started</MenuItem>
+        </Select>
+      </FormControl>
+      <FormControlLabel
+        sx={switchLabel}
+        control={<Switch size="small" checked={ours} onChange={(e) => setOurs(e.target.checked)} />}
+        label="Ours only"
+      />
+      <FormControlLabel
+        sx={switchLabel}
+        control={<Switch size="small" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} inputProps={{ 'aria-label': 'active projects only' }} />}
+        label={(
+          <Tooltip title="Active this week: its dates cover this week, or an administrator set it to always active">
+            <span>Active only ({activeKeys.size})</span>
+          </Tooltip>
+        )}
+      />
+    </>
   )
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: 1, minWidth: { xs: '100%', sm: 320 } }}>
-          <Typography variant="h2">Timeline</Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-            What was planned, and what actually happened. The outline is the plan; the solid bar is the outcome. The gap
-            between their right-hand edges is the slip.
-          </Typography>
+    <Box ref={rootRef} sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, minWidth: 0 }}>
+      {/* One line: what the page is, and — for an administrator — Jira. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', rowGap: 1 }}>
+        <Box sx={{ flex: '1 1 320px', minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', columnGap: 1.25, flexWrap: 'wrap' }}>
+            <Typography variant="h3" component="h1">Timeline</Typography>
+            {/* On a phone the legend under the chart says the same, and the room is the chart's. */}
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}>
+              What was planned, and what actually happened. The outline is the plan; the solid bar is the outcome. The
+              gap between their right-hand edges is the slip.
+            </Typography>
+          </Box>
           {/* A team member's: which projects these are, or why there are none. */}
           {note && (
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>{note}</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>{note}</Typography>
           )}
         </Box>
         {/* Reading Jira into the plan, or syncing it for everyone, changes the
             shared plan — an administrator's job. A team member reads. */}
         {!readOnly && (
-        <Box sx={{ textAlign: 'right' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', ml: 'auto' }}>
+          {jira == null ? <Loading label="Checking Jira…" />
+            : (
+              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', maxWidth: 260, display: narrow ? 'none' : 'block' }}>
+                {jira.configured ? `${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account}` : 'not configured on the server'}
+              </Typography>
+            )}
           <Button
+            size="small"
             variant="outlined"
-            startIcon={<PlaylistAddIcon />}
+            startIcon={narrow ? null : <PlaylistAddIcon />}
+            sx={narrow ? jiraBtn : undefined}
             disabled={!jira?.configured || finding}
             onClick={findNew}
-            sx={{ mr: 1 }}
           >
             {finding ? 'Looking…' : 'Find new epics'}
           </Button>
-          <Tooltip title="Reads Jira and updates YOUR copy of the register. Nobody else sees it until you save.">
+          <Tooltip title={`Reads Jira${jira?.configured ? ` (${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account})` : ''} and updates YOUR copy of the register. Nobody else sees it until you save.`}>
             <span>
               <Button
+                size="small"
                 variant="outlined"
-                startIcon={<SyncIcon />}
+                startIcon={narrow ? null : <SyncIcon />}
+                sx={narrow ? jiraBtn : undefined}
                 disabled={!jira?.configured || syncing || sharing}
                 onClick={sync}
               >
@@ -1394,8 +1542,10 @@ export default function Timeline({
           <Tooltip title="Runs the same sync on the server against the SHARED plan — the one everybody loads. This is what the 07:00 job does every morning.">
             <span>
               <Button
+                size="small"
                 variant="contained"
-                startIcon={<SyncIcon />}
+                startIcon={narrow ? null : <SyncIcon />}
+                sx={narrow ? jiraBtn : undefined}
                 disabled={!jira?.configured || syncing || sharing}
                 onClick={syncShared}
               >
@@ -1403,11 +1553,6 @@ export default function Timeline({
               </Button>
             </span>
           </Tooltip>
-          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.5 }}>
-            {jira == null ? 'checking…'
-              : jira.configured ? `${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account}`
-                : 'not configured on the server'}
-          </Typography>
         </Box>
         )}
       </Box>
@@ -1427,91 +1572,92 @@ export default function Timeline({
         </Alert>
       )}
       {jira && !jira.configured && (
-        <Alert severity="info">
+        <Alert severity="info" sx={{ py: 0, '& .MuiAlert-message': { fontSize: '0.8rem' } }}>
           Jira is not connected on the server, so actual dates have to be typed in by hand. To connect it, set{' '}
           <strong>JIRA_BASE_URL</strong>, <strong>JIRA_EMAIL</strong> and <strong>JIRA_API_TOKEN</strong> in the Render
           dashboard under Environment — the token stays on the server and is never sent to this page.
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, display: 'flex', gap: { xs: 2.5, sm: 4 }, flexWrap: 'wrap' }}>
-        {stat('with a plan', t.planned)}
-        {stat('finished', t.finished, STATUS.good)}
-        {stat('running now', t.running)}
-        {stat('past due, unfinished', t.overdue, t.overdue ? STATUS.critical : undefined)}
-        {stat('judged against a date', t.judged)}
-        {stat('of those, on time', t.onTime, t.onTime ? STATUS.good : 'text.secondary')}
-        {stat('average slip', t.avgSlip == null ? '—' : `${t.avgSlip}d`, t.avgSlip ? STATUS.warning : undefined)}
-        {t.noDates > 0 && stat('no dates at all', t.noDates, 'text.disabled')}
-      </Paper>
-
-      <Paper variant="outlined" sx={{ p: 1.5, display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+      {/* THE TOOLBAR: search, filters, and the scale, in one row that wraps. */}
+      <Paper
+        variant="outlined"
+        data-timeline="filters"
+        sx={{ px: 1, py: 0.75, display: 'flex', gap: 1, rowGap: 0.75, flexWrap: 'wrap', alignItems: 'center', borderRadius: 2.5 }}
+      >
         <TextField
           size="small"
           placeholder="Search key, project, programme"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          sx={{ minWidth: { xs: '100%', sm: 260 } }}
-          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          sx={{ flex: '1 1 160px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18 }} /></InputAdornment> }}
         />
-        <FormControl size="small" sx={{ minWidth: 140 }}>
-          <InputLabel>PIC</InputLabel>
-          <Select label="PIC" value={fPic} onChange={(e) => setFPic(e.target.value)}>
-            {picks.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 170 }}>
-          <InputLabel>State</InputLabel>
-          <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
-            <MenuItem value="all">Everything</MenuItem>
-            <MenuItem value="overdue">Past due, unfinished</MenuItem>
-            <MenuItem value="late">Behind schedule</MenuItem>
-            <MenuItem value="on">Finished on schedule</MenuItem>
-            <MenuItem value="ahead">Finished ahead of schedule</MenuItem>
-            <MenuItem value="running">Running now</MenuItem>
-            <MenuItem value="finished">Finished</MenuItem>
-            <MenuItem value="not started">Not started</MenuItem>
-          </Select>
-        </FormControl>
-        <FormControlLabel
-          control={<Switch size="small" checked={ours} onChange={(e) => setOurs(e.target.checked)} />}
-          label={<Typography variant="body2">Ours only</Typography>}
-        />
-        <FormControlLabel
-          control={<Switch size="small" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} inputProps={{ 'aria-label': 'active projects only' }} />}
-          label={(
-            <Tooltip title="Active this week: its dates cover this week, or an administrator set it to always active">
-              <Typography variant="body2">Active only ({activeKeys.size})</Typography>
-            </Tooltip>
-          )}
-        />
-        <Box sx={{ flex: 1 }} />
+        {narrow ? (
+          <Button
+            size="small"
+            variant="outlined"
+            color={showFilters || changed ? 'primary' : 'inherit'}
+            startIcon={<FilterListIcon />}
+            onClick={() => setShowFilters((v) => !v)}
+            aria-expanded={showFilters}
+            sx={{ flexShrink: 0, borderColor: 'divider' }}
+          >
+            Filters{changed ? ` (${changed})` : ''}
+          </Button>
+        ) : filters}
+        <Box sx={{ flex: 1, minWidth: 0 }} />
         <ToggleButtonGroup
           size="small"
           exclusive
           value={scale}
           onChange={(_e, v) => v && setScale(v)}
+          sx={{ '& .MuiToggleButton-root': { py: 0.4, px: 1.25, fontSize: '0.75rem', lineHeight: 1.4 } }}
         >
           <ToggleButton value="day">Day</ToggleButton>
           <ToggleButton value="week">Week</ToggleButton>
           <ToggleButton value="month">Month</ToggleButton>
         </ToggleButtonGroup>
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+        {narrow && (
+          <Collapse in={showFilters} sx={{ flexBasis: '100%' }}>
+            <Box sx={{ display: 'flex', gap: 1, rowGap: 1, flexWrap: 'wrap', alignItems: 'center', pt: 0.5 }}>
+              {filters}
+            </Box>
+          </Collapse>
+        )}
+      </Paper>
+
+      {/* THE FIGURES: one quiet line, with how many bars the filters left. */}
+      <Box
+        data-timeline="summary"
+        sx={{ display: 'flex', alignItems: 'center', columnGap: 2, rowGap: 0.25, flexWrap: 'wrap', px: 0.5 }}
+      >
+        {stats}
+        <Box sx={{ flex: 1 }} />
+        {!weeklyIn && <Loading label="Loading check-ins…" />}
+        <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
           {/* The count is of BARS, which after collapsing is the number of
               pieces of work — not the number of register lines behind them. */}
           {grouped.length} project{grouped.length === 1 ? '' : 's'} on the chart
           {grouped.length !== rows.length && ` · ${rows.length} register lines`}
         </Typography>
-      </Paper>
+      </Box>
 
-      <Paper variant="outlined">
-        <Box ref={scrollRef} sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '62vh' }}>
+      <Paper variant="outlined" sx={{ overflow: 'hidden', borderRadius: 2.5 }}>
+        <Box
+          ref={scrollRef}
+          data-timeline="chart"
+          sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: fitH ? `${fitH}px` : '70vh' }}
+        >
           <Box sx={{ minWidth: trackPx ? trackPx + PINNED_W : 'auto' }}>
             <Box sx={{
               display: 'flex',
               borderBottom: 1,
               borderColor: 'divider',
-              bgcolor: 'action.hover',
+              // Opaque, so rows scrolling underneath the pinned header do not
+              // show through it.
+              bgcolor: 'background.paper',
+              backgroundImage: (th) => `linear-gradient(${th.palette.action.hover}, ${th.palette.action.hover})`,
               position: 'sticky',
               top: 0,
               zIndex: 3,
@@ -1521,7 +1667,7 @@ export default function Timeline({
                 width: NAME_W,
                 flexShrink: 0,
                 px: 1.5,
-                py: 0.75,
+                py: 0.5,
                 position: 'sticky',
                 left: 0,
                 bgcolor: 'background.paper',
@@ -1531,18 +1677,23 @@ export default function Timeline({
                 <Typography variant="caption" sx={{ fontWeight: 700 }}>PROJECT</Typography>
               </Box>
               <Box sx={{ position: 'relative', flex: trackPx ? 'none' : 1, width: trackPx || 'auto', height: 26 }}>
-                {ticks.map((tk) => (
+                {ticks.map((tk, i) => (
                   <Box
                     key={tk.ms}
                     sx={{
                       position: 'absolute',
                       left: `${pct(tk.ms)}%`,
+                      // As wide as its month and no wider, so a long label
+                      // ("Jan 26") is clipped rather than run into the next.
+                      width: ticks[i + 1] ? `${pct(ticks[i + 1].ms) - pct(tk.ms)}%` : undefined,
                       top: 0,
                       bottom: 0,
                       borderLeft: tk.strong ? 2 : 1,
                       borderColor: tk.strong ? 'text.disabled' : 'divider',
                       pl: 0.4,
                       overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
                     }}
                   >
                     <Typography
@@ -1563,7 +1714,7 @@ export default function Timeline({
                 width: SLIP_W,
                 flexShrink: 0,
                 px: 1,
-                py: 0.75,
+                py: 0.5,
                 textAlign: 'right',
                 position: 'sticky',
                 right: 0,
@@ -1801,9 +1952,9 @@ export default function Timeline({
         )}
       </Popover>
 
-      <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: 2.5 }}>
         <Typography variant="h4" sx={{ mb: 1 }}>How to read it</Typography>
-        <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 1.5 }}>
+        <Box sx={{ display: 'flex', columnGap: 3, rowGap: 1, flexWrap: 'wrap', mb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Box sx={{ width: 34, height: 9, border: 1, borderColor: 'text.disabled', borderRadius: 0.5 }} />
             <Typography variant="caption">planned</Typography>

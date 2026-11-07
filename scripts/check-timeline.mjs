@@ -543,6 +543,49 @@ if (!exe) {
   check('  the week scale is labelled by date', /^\d+ \w+$/.test(week.firstTicks[0] || ''), week.firstTicks.join(' | '))
   check('  and the day scale by day number', /^\d+$/.test(day.firstTicks[0] || ''), day.firstTicks.join(' | '))
 
+  /* ---- the chart is the page ----
+   *
+   * The figures and the filters used to be two tall cards, and on a laptop the
+   * chart began two-thirds of the way down the screen with nine projects in
+   * view. They are now one toolbar and one line of figures; the chart takes the
+   * rest of the window and scrolls inside itself. Locked here at the sizes
+   * people actually use, from a phone to a desktop.
+   */
+  console.log('\n--- the chart is the page ---')
+  await scaleOf('Month')
+  const layoutAt = async (width, height) => {
+    await page.setViewport({ width, height })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('[data-keys]', { timeout: 15000 }).catch(() => {})
+    await new Promise((r) => setTimeout(r, 1500))
+    return page.evaluate(() => {
+      const H = window.innerHeight
+      const box = (sel) => document.querySelector(sel)?.getBoundingClientRect()
+      const rows = [...document.querySelectorAll('[data-keys]')]
+      const seen = rows.filter((r) => { const b = r.getBoundingClientRect(); return b.height > 0 && b.top >= 0 && b.bottom <= H })
+      return {
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        summary: Math.round(box('[data-timeline="summary"]')?.height || 0),
+        filters: Math.round(box('[data-timeline="filters"]')?.height || 0),
+        rowH: rows[0] ? Math.round(rows[0].getBoundingClientRect().height) : 0,
+        seen: seen.length,
+        all: rows.length,
+      }
+    })
+  }
+  for (const [w, h] of [[390, 844], [768, 1024], [1280, 800]]) {
+    const l = await layoutAt(w, h)
+    check(`NO SIDEWAYS PAGE SCROLL AT ${w}px`, l.overflow <= 0, `${l.overflow}px too wide`)
+  }
+  const wide = await layoutAt(1440, 900)
+  check('NO SIDEWAYS PAGE SCROLL AT 1440px', wide.overflow <= 0, `${wide.overflow}px too wide`)
+  check('THE FIGURES AND FILTERS TOGETHER TAKE UNDER 120px',
+    wide.summary > 0 && wide.filters > 0 && wide.summary + wide.filters < 120,
+    `figures ${wide.summary}px + filters ${wide.filters}px`)
+  check('AT LEAST 14 PROJECTS IN VIEW ON A 1440x900 SCREEN, WITHOUT SCROLLING',
+    wide.seen >= 14, `${wide.seen} of ${wide.all} rows, ${wide.rowH}px each`)
+  check('  rows stay readable, not crushed', wide.rowH >= 32, `${wide.rowH}px`)
+
   await browser.close()
   srv.kill()
 }
