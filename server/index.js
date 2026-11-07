@@ -37,7 +37,7 @@ try {
 
 const app = express()
 app.use(compression())
-app.use(express.json({ limit: '8mb' }))
+app.use(express.json({ limit: '20mb' }))
 
 /* ------------------------- who is asking ------------------------- */
 

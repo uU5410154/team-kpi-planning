@@ -13,7 +13,8 @@ import { MongoMemoryServer } from 'mongodb-memory-server'
 import { MongoClient } from 'mongodb'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
 import { weekOf, addWeeks } from '../src/lib/weekly.js'
 import { coversWeek, taskSpan, appendWeeklyEntry, ddmmyyyy } from '../server/jira.js'
@@ -492,12 +493,44 @@ try {
       box?.parentElement.querySelector('textarea, input')?.focus()
     })
     await pg.keyboard.type('Two accounts wait on AP')
+    // PICTURES: attached with the button, dropped onto the card, pasted anywhere on it.
+    const pngFile = new URL('../scratch-attach.png', import.meta.url)
+    writeFileSync(pngFile, Buffer.from(PNG.split(',')[1], 'base64'))
+    const input = await pg.$('[data-jira-task="FNP-2010"] input[type="file"]')
+    await input.uploadFile(fileURLToPath(pngFile))
+    await sleep(500)
+    const dropPaste = async (kind) => pg.evaluate(async (k, data) => {
+      const card = document.querySelector('[data-jira-task="FNP-2010"]')
+      const blob = await (await fetch(data)).blob()
+      const dt = new DataTransfer()
+      dt.items.add(new File([blob], `${k}.png`, { type: 'image/png' }))
+      if (k === 'drop') {
+        card.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }))
+        card.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
+      } else {
+        // Pasted into the blocker box, not the progress box: anywhere on the card counts.
+        const into = [...card.querySelectorAll('input, textarea')].at(-1)
+        into.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+      }
+    }, kind, PNG)
+    await dropPaste('drop')
+    await sleep(400)
+    await dropPaste('paste')
+    await sleep(400)
+    const pics = await pg.evaluate(() => ({
+      n: document.querySelectorAll('[data-jira-task="FNP-2010"] [data-attached-images] img').length,
+      full: document.querySelector('[data-jira-task="FNP-2010"] [data-attach-image]')?.disabled,
+    }))
+    check('A PICTURE CAN BE ATTACHED, DROPPED ON THE CARD, OR PASTED ANYWHERE ON IT', pics.n === 3, JSON.stringify(pics))
+    check('  three is the most, and the button says so by switching off', pics.full === true)
+    unlinkSync(pngFile)
     if (process.env.SHOT_DIR) await pg.screenshot({ path: `${process.env.SHOT_DIR}/jira-week.png`, fullPage: true })
     await pg.evaluate(() => document.querySelector('[aria-label="submit FNP-2010"]').click())
     await pg.waitForFunction(() => document.body.innerText.includes('Already updated (3)'), { timeout: 10000 }).catch(() => {})
     const after = await pg.evaluate(() => document.body.innerText)
     check('SUBMIT ON THE CARD POSTS IT AND MOVES IT TO "ALREADY UPDATED"', after.includes('Already updated (3)') && after.includes('Not updated yet (0)'))
     check('  the comment reached Jira', writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2010' && /Two accounts wait on AP/.test(JSON.stringify(x.body))))
+    check('  AND THE THREE PICTURES ARE ATTACHED TO THE ISSUE IN JIRA', writes.some((x) => x.kind === 'attach' && x.key === 'FNP-2010' && x.names.length === 3), JSON.stringify(writes.filter((x) => x.kind === 'attach').map((x) => [x.key, x.names])))
     await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Plan week \d+/.test(b.textContent.trim()))?.click())
     await pg.waitForSelector('[data-jira-task="FNP-2004"] input[type="date"]', { timeout: 10000 }).catch(() => {})
     const plan2 = await pg.evaluate(() => document.body.innerText)

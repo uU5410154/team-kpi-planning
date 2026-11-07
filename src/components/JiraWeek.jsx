@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, TextField, Alert, ToggleButton, ToggleButtonGroup, Checkbox, FormControlLabel,
-  Autocomplete, CircularProgress, IconButton, Link, MenuItem, Collapse, ButtonBase,
+  Autocomplete, CircularProgress, IconButton, Link, MenuItem, Collapse, ButtonBase, Dialog,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
+import AttachIcon from '@mui/icons-material/AttachFileOutlined'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import EventIcon from '@mui/icons-material/EventOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -34,6 +35,41 @@ import { mentionsHold } from '../lib/hold.js'
 const fmt = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '—')
 const MAX_IMAGES = 3
 const MAX_BYTES = 4 * 1024 * 1024
+// Bigger than this, a picture is scaled down before it is sent: a phone photo
+// or a 4K screenshot would otherwise be refused, and nobody needs every pixel.
+const SHRINK_OVER = 1.5 * 1024 * 1024
+const MAX_SIDE = 2000
+
+const readAsDataUrl = (blob) => new Promise((resolve, reject) => {
+  const rd = new FileReader()
+  rd.onload = () => resolve(rd.result)
+  rd.onerror = () => reject(rd.error)
+  rd.readAsDataURL(blob)
+})
+
+/** A picture as a data: URL, scaled down when it is big. */
+async function imageData(file) {
+  const data = await readAsDataUrl(file)
+  if (file.size <= SHRINK_OVER || file.type === 'image/gif') return data
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image()
+    i.onload = () => resolve(i)
+    i.onerror = reject
+    i.src = data
+  })
+  const k = Math.min(1, MAX_SIDE / Math.max(img.width, img.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(img.width * k)
+  canvas.height = Math.round(img.height * k)
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.85)
+}
+
+/** The image files in a paste or a drop, if any. */
+const imageFiles = (dt) => [...(dt?.items || [])]
+  .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+  .map((it) => it.getAsFile())
+  .filter(Boolean)
 
 /** The Monday and Friday of a week, as dates for a new task. */
 const workdays = (week) => {
@@ -77,19 +113,60 @@ function TaskCard({
   const [problems, setProblems] = useState([])
   const [dates, setDates] = useState({ start: task.start || '', due: task.due || '' })
 
-  // A screenshot pasted into the progress box is kept beside it, not in it.
+  /*
+   * PICTURES: pasted anywhere on the card (copy an image or take a screenshot,
+   * then Ctrl/Cmd+V), dropped onto it, or picked with "Attach image". Kept
+   * beside the text, sent to the Jira issue as attachments on Submit.
+   */
+  const [dragging, setDragging] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const fileRef = useRef(null)
+  const addImages = async (files) => {
+    const list = [...files].filter((f) => f && f.type?.startsWith('image/'))
+    if (!list.length) {
+      setMsg({ tone: 'error', text: 'Only pictures can be attached: PNG, JPEG, GIF or WebP.' })
+      return
+    }
+    let added = 0
+    for (const f of list) {
+      if (images.length + added >= MAX_IMAGES) {
+        setMsg({ tone: 'error', text: `Up to ${MAX_IMAGES} pictures per update.` })
+        break
+      }
+      try {
+        const data = await imageData(f)
+        if (data.length * 0.75 > MAX_BYTES) {
+          setMsg({ tone: 'error', text: 'That picture is too large, even scaled down (4 MB at most).' })
+          continue
+        }
+        added += 1
+        setImages((cur) => (cur.length >= MAX_IMAGES ? cur
+          : [...cur, { name: `${task.key}-${new Date().toISOString().slice(0, 10)}-${Date.now().toString(36)}${cur.length + 1}`, data }]))
+      } catch {
+        setMsg({ tone: 'error', text: 'That picture could not be read.' })
+      }
+    }
+    if (added) setMsg({ tone: 'info', text: `${added === 1 ? 'Picture' : `${added} pictures`} added — sent to ${task.key} in Jira when you submit.` })
+  }
   const onPaste = (e) => {
-    const files = [...(e.clipboardData?.items || [])].filter((it) => it.kind === 'file' && it.type.startsWith('image/')).map((it) => it.getAsFile())
+    const files = imageFiles(e.clipboardData)
     if (!files.length) return
     e.preventDefault()
-    for (const f of files) {
-      if (f.size > MAX_BYTES) { setMsg({ tone: 'error', text: 'That screenshot is over 4 MB.' }); continue }
-      const rd = new FileReader()
-      rd.onload = () => setImages((list) => (list.length >= MAX_IMAGES ? list
-        : [...list, { name: `${task.key}-${new Date().toISOString().slice(0, 10)}-${list.length + 1}`, data: rd.result }]))
-      rd.readAsDataURL(f)
-    }
+    addImages(files)
   }
+  const dropProps = canWrite && !planning ? {
+    onPaste,
+    onDragOver: (e) => {
+      if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDragging(true) }
+    },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false) },
+    onDrop: (e) => {
+      if (![...(e.dataTransfer?.types || [])].includes('Files')) return
+      e.preventDefault()
+      setDragging(false)
+      addImages(e.dataTransfer.files)
+    },
+  } : {}
 
   const submit = async () => {
     setBusy(true)
@@ -140,12 +217,14 @@ function TaskCard({
       variant="outlined"
       data-jira-task={task.key}
       data-task-project={task.project?.key || undefined}
+      {...dropProps}
       sx={{
         p: { xs: 1.5, sm: 2 },
         display: 'flex',
         flexDirection: 'column',
         gap: 1.25,
         boxShadow: highlight ? (th) => `0 0 0 2px ${th.palette.primary.main}` : 'none',
+        ...(dragging && { outline: '2px dashed', outlineColor: 'primary.main', outlineOffset: -4 }),
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
@@ -191,13 +270,12 @@ function TaskCard({
             label="This week's progress"
             value={progress}
             onChange={(e) => setProgress(e.target.value)}
-            onPaste={onPaste}
             disabled={!canWrite}
             multiline
             minRows={2}
             maxRows={10}
             fullWidth
-            helperText={canWrite ? 'What you did on it. Links are fine; paste a screenshot straight in.' : undefined}
+            helperText={canWrite ? 'What you did on it. Links are fine. Paste a picture here (Ctrl/Cmd+V), drop one on the card, or attach it below.' : undefined}
           />
           <AiAssist
             available={aiOn}
@@ -212,11 +290,45 @@ function TaskCard({
               status: hold ? 'On hold' : done === true ? 'Finished' : done === false ? 'Not finished' : '',
             }}
           />
+          {canWrite && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<AttachIcon />}
+                onClick={() => fileRef.current?.click()}
+                disabled={images.length >= MAX_IMAGES}
+                data-attach-image
+                sx={{ color: 'text.primary', borderColor: 'divider' }}
+              >
+                Attach image
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                hidden
+                aria-label={`attach an image to ${task.key}`}
+                onChange={(e) => { addImages(e.target.files); e.target.value = '' }}
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {images.length ? `${images.length} of ${MAX_IMAGES} pictures` : `Up to ${MAX_IMAGES} pictures — paste, drop or attach`}
+              </Typography>
+            </Box>
+          )}
           {images.length > 0 && (
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }} data-attached-images>
               {images.map((im, i) => (
                 <Box key={im.name} sx={{ position: 'relative', border: 1, borderColor: 'divider', borderRadius: 1.5, overflow: 'hidden' }}>
-                  <Box component="img" src={im.data} alt={`screenshot ${i + 1}`} sx={{ display: 'block', height: 72, maxWidth: 160, objectFit: 'cover' }} />
+                  <Box
+                    component="img"
+                    src={im.data}
+                    alt={`picture ${i + 1}`}
+                    onClick={() => setPreview(im.data)}
+                    title="Click to see it full size"
+                    sx={{ display: 'block', height: 72, maxWidth: 160, objectFit: 'cover', cursor: 'zoom-in' }}
+                  />
                   <IconButton size="small" aria-label={`remove screenshot ${i + 1}`} onClick={() => setImages((l) => l.filter((_x, j) => j !== i))} sx={{ position: 'absolute', top: 2, right: 2, bgcolor: 'rgba(0,0,0,.55)', p: 0.25 }}>
                     <CloseIcon sx={{ fontSize: 14, color: '#fff' }} />
                   </IconButton>
@@ -224,6 +336,9 @@ function TaskCard({
               ))}
             </Box>
           )}
+          <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="lg">
+            {preview && <Box component="img" src={preview} alt="picture, full size" onClick={() => setPreview(null)} sx={{ display: 'block', maxWidth: '90vw', maxHeight: '85vh', cursor: 'zoom-out' }} />}
+          </Dialog>
           {u?.attachments?.length > 0 && (
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>Already attached in Jira: {u.attachments.join(', ')}</Typography>
           )}
