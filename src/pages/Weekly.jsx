@@ -1,4 +1,5 @@
 import { projectOnHold } from '../lib/hold.js'
+import { needsUpdate } from '../lib/taskUpdate.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, IconButton, Tooltip, Chip, Alert, TextField, MenuItem, Autocomplete,
@@ -277,7 +278,10 @@ const blankTask = () => ({
  */
 const OPEN_PROJECTS_SHOWN = 8
 
-function MyProjects({ projects, onAdd, readOnly, onPlan }) {
+function MyProjects({
+  projects, onAdd, readOnly, onPlan, ahead = false,
+}) {
+  const whose = ahead ? 'next week’s plan' : 'this week’s plan'
   const [all, setAll] = useState(false)
   if (!projects.length) return null
   const shown = all ? projects : projects.slice(0, OPEN_PROJECTS_SHOWN)
@@ -290,7 +294,7 @@ function MyProjects({ projects, onAdd, readOnly, onPlan }) {
       <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', mb: 1 }}>
         <Typography variant="h4">Your projects</Typography>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          {projects.length} open, where you are PIC{readOnly ? '' : ' — add a task to put one on this week’s plan'}
+          {projects.length} open, where you are PIC{readOnly ? '' : ` — add a task to put one on ${whose}`}
         </Typography>
       </Box>
       {shown.map((p) => {
@@ -313,7 +317,7 @@ function MyProjects({ projects, onAdd, readOnly, onPlan }) {
               {p.due ? `due ${fmtDay(p.due)}` : 'no due date'}
             </Typography>
             {planned
-              ? <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', minWidth: 96, textAlign: 'right' }}>on this week’s plan</Typography>
+              ? <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', minWidth: 96, textAlign: 'right' }}>on {whose}</Typography>
               : !readOnly && (
                 <Button size="small" startIcon={<AddIcon />} onClick={() => onAdd(p.key)} sx={{ whiteSpace: 'nowrap', minWidth: 96 }} aria-label={`add a task on ${p.jiraKey || p.key}`}>
                   Add task
@@ -736,6 +740,25 @@ export default function Weekly({
     }).sort((a, b) => rank[a.mine] - rank[b.mine])
   }, [plan, myId])
   const projectByKey = useMemo(() => Object.fromEntries(projects.map((p) => [p.key, p])), [projects])
+  /*
+   * WHAT A NEW JIRA TASK CAN GO UNDER: a project with a Jira epic (the task is
+   * created under it) that is still open — not finished, not Done, not left
+   * out or deleted — one entry per epic, their own (PIC) first.
+   */
+  const taskProjects = useMemo(() => {
+    const rank = { pic: 0, helping: 1, other: 2 }
+    const closed = (s) => /^(done|closed|cancel)/i.test(String(s || '').trim())
+    const byKey = Object.fromEntries((plan?.projects || []).map((p) => [p.key, p]))
+    const seen = new Set()
+    return projects
+      .filter((p) => {
+        const row = byKey[p.key] || {}
+        return p.jiraKey && row.commitLevel !== 'excluded' && row.commitLevel !== 'nextyear'
+          && row.timeline?.state !== 'finished' && !closed(row.status) && !closed(row.jiraStatus)
+      })
+      .sort((a, b) => (rank[a.mine] - rank[b.mine]) || a.summary.localeCompare(b.summary))
+      .filter((p) => { const k = p.jiraKey.toUpperCase(); if (seen.has(k)) return false; seen.add(k); return true })
+  }, [projects, plan])
   // This person's open projects, for the list in their week.
   const myOpen = useMemo(() => {
     if (!myId) return []
@@ -752,6 +775,8 @@ export default function Weekly({
       }))
       .sort((a, b) => (b.active - a.active) || (b.overdue - a.overdue)
         || String(a.due || '9999').localeCompare(String(b.due || '9999')))
+      // Several register lines on one epic are one project to its PIC.
+      .filter((p, i, all) => !p.jiraKey || all.findIndex((x) => x.jiraKey === p.jiraKey) === i)
   }, [plan, myId, data?.week])
 
   /*
@@ -763,6 +788,10 @@ export default function Weekly({
   // undefined while it is being asked for; null when there is no week to ask about.
   const [jw, setJw] = useState(undefined)
   const [preset, setPreset] = useState(null)
+  // Next step's "Set dates / add tasks" opens the new-task form; a date saved
+  // on a week ahead lets it move on to "My plan is set".
+  const [addSignal, setAddSignal] = useState(0)
+  const [datesSaved, setDatesSaved] = useState({})
   const loadJira = useCallback(async (w) => {
     if (!w || w === 'current') return
     try { setJw(await api.jiraWeek(w)) } catch (e) { setJw({ jira: 'error', error: e.message }) }
@@ -960,12 +989,19 @@ export default function Weekly({
   // A Jira week's own next step: the next task to update, then next week's
   // plan; a week ahead is planned by its dates and confirmed.
   const jwReady = jiraMode && data && jw.week === data.week
-  const jiraTodo = jwReady ? [...(jw.overdue || []), ...(jw.tasks || [])].filter((t) => !t.update) : []
+  const jiraTodo = jwReady ? [...(jw.overdue || []), ...(jw.tasks || [])].filter((t) => needsUpdate(t, jw.writable)) : []
   const toTask = (key) => {
     const card = document.querySelector(`[data-jira-task="${key}"]`)
     if (!card) { toMyWeek(); return }
     card.scrollIntoView({ behavior: 'smooth', block: 'center' })
     setTimeout(() => card.querySelector('textarea')?.focus({ preventScroll: true }), 400)
+  }
+  // To the tasks with no dates, or else the new-task form.
+  const toPlanning = () => {
+    const undated = document.querySelector('[data-undated]')
+    if (undated) { undated.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
+    setAddSignal((x) => x + 1)
+    setTimeout(() => document.querySelector('[aria-label="new Jira task"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200)
   }
   const confirmPlan = async () => {
     try {
@@ -988,15 +1024,28 @@ export default function Weekly({
     if (jwReady) {
       const n = weekNo(data.week)
       if (data.week > data.current) {
-        return planIn
-          ? { label: `Week ${n} is planned`, sub: 'You can still change the dates on your tasks until the week starts.' }
-          : {
+        if (planIn) return { label: `Week ${n} is planned`, sub: 'You can still change the dates on your tasks until the week starts.' }
+        /*
+         * Nothing to confirm until something is planned: first dates or a new
+         * task, then "My plan is set" — one button, here only.
+         */
+        const covering = (jw.tasks || []).length
+        if (!covering && !datesSaved[data.week]) {
+          return {
             label: `Plan week ${n}`,
-            sub: 'Set dates on the Jira tasks you will work on (below), then confirm.',
-            action: `My plan for week ${n} is set`,
-            onClick: confirmPlan,
+            sub: `Nothing of yours in Jira covers week ${n} yet. Give your tasks dates in it, or add a task.`,
+            action: 'Set dates / add tasks',
+            onClick: toPlanning,
             pulse: true,
           }
+        }
+        return {
+          label: `Plan week ${n}`,
+          sub: `${covering} task${covering === 1 ? '' : 's'} of yours cover${covering === 1 ? 's' : ''} it. Add or re-date any others, then confirm.`,
+          action: `My plan for week ${n} is set`,
+          onClick: confirmPlan,
+          pulse: true,
+        }
       }
       if (jiraTodo.length) {
         const t = jiraTodo[0]
@@ -1172,10 +1221,13 @@ export default function Weekly({
             <JiraWeek
               week={data.week}
               current={data.current}
+              person={data.person}
               canWrite={!readOnly}
               jw={jw}
               onReload={() => { loadJira(data.week); load(data.week) }}
-              projects={projects}
+              onDatesSaved={() => setDatesSaved((m) => ({ ...m, [data.week]: true }))}
+              addSignal={addSignal}
+              projects={taskProjects}
               preset={preset}
               onPresetUsed={() => setPreset(null)}
               focusKey={focused}
@@ -1183,7 +1235,6 @@ export default function Weekly({
               planIn={planIn}
               planInAt={mine?.planSubmittedAt || null}
               onGoWeek={go}
-              onPlanned={() => load(data.week)}
               onProjectAdded={(r) => { if (r.project) onProjectsAdded?.([r.project]) }}
             />
           )}
@@ -1191,6 +1242,7 @@ export default function Weekly({
             <MyProjects
               projects={myOpen}
               readOnly={readOnly}
+              ahead={data.week > data.current}
               onPlan={new Set([...(jw.tasks || []), ...(jw.overdue || [])].map((t) => t.project?.key).filter(Boolean))}
               onAdd={(key) => setPreset(key)}
             />

@@ -20,6 +20,7 @@ import { weekOf, addWeeks } from '../src/lib/weekly.js'
 import { coversWeek, taskSpan, appendWeeklyEntry, ddmmyyyy } from '../server/jira.js'
 import { commentText } from '../server/jiraWeek.js'
 import { mentionsHold, projectOnHold } from '../src/lib/hold.js'
+import { needsUpdate, updateProblems, postedSummary } from '../src/lib/taskUpdate.js'
 import { lastWeekFromJira } from '../src/lib/manager.js'
 
 let failures = 0
@@ -74,6 +75,8 @@ put('FNP-5000', { summary: 'ERP Migration [DELETED]', type: 'Epic', assignee: AC
 put('FNP-2011', { summary: 'Under a deleted epic', assignee: ACC.james, parent: 'FNP-5000', start: day(WEEK, 0), due: day(WEEK, 2), status: 'To Do', cat: 'new' })
 const writes = []
 const taskJql = []
+// Keys whose comments Jira refuses, as a Jira that is down would.
+const failComment = new Set()
 const asRaw = (i) => ({
   key: i.key,
   fields: {
@@ -132,6 +135,7 @@ const fake = createServer(async (req, res) => {
     return send(201, { key, id: String(nextKey) })
   }
   let k = m(/^\/rest\/api\/3\/issue\/([A-Z]+-\d+)\/comment$/)
+  if (k && failComment.has(k[1])) return send(503, { errorMessages: ['Jira is down for maintenance'] })
   if (k) { writes.push({ kind: 'comment', key: k[1], body: json().body }); return send(201, { id: `c${writes.length}` }) }
   k = m(/^\/rest\/api\/3\/issue\/([A-Z]+-\d+)\/attachments$/)
   if (k) {
@@ -295,12 +299,21 @@ try {
     && desc1.indexOf(today) > desc1.indexOf('Original scope') && /Started the load/.test(desc1) && notDone.body.update?.jira?.description === 'updated', desc1.slice(0, 240))
   check(`  its first line starts with the date, dd-mm-yyyy (${today})`, /^\d{2}-\d{2}-\d{4}$/.test(today)
     && issues.get('FNP-2002').description.content.at(-4)?.content?.[0]?.text === today, JSON.stringify(issues.get('FNP-2002').description.content.at(-4)).slice(0, 160))
-  await call('POST', `/api/weekly/${WEEK}/jira/FNP-2002/update`, { progress: 'Loaded half of it', done: false, reason: 'Budget file late from FP&A' }, james)
+  const second = await call('POST', `/api/weekly/${WEEK}/jira/FNP-2002/update`, { progress: 'Loaded half of it', done: false, reason: 'Budget file late from FP&A' }, james)
   const desc2 = flat(issues.get('FNP-2002').description)
-  check('  A SECOND SUBMIT ADDS ANOTHER DATED ENTRY; NOTHING EARLIER IS CHANGED', desc2.startsWith(desc1)
-    && (desc2.match(new RegExp(today, 'g')) || []).length === 2 && desc2.indexOf('Loaded half of it') > desc2.indexOf('Started the load'), desc2.slice(0, 300))
+  check('  A SECOND SUBMIT THE SAME DAY REPLACES THAT DAY’S ENTRY; NOTHING EARLIER IS CHANGED', desc2.startsWith('Original scope: load FY25 budget by cost centre.')
+    && (desc2.match(new RegExp(today, 'g')) || []).length === 1 && desc2.includes('Loaded half of it') && !desc2.includes('Started the load')
+    && second.body.update?.jira?.descriptionReplaced === true, desc2.slice(0, 300))
   const fresh = appendWeeklyEntry(null, '**06-11-2026** — first entry')
   check('  an issue with no description gets the entry as its description', fresh.content.length === 1 && flat(fresh).startsWith('06-11-2026'))
+  {
+    const yesterday = appendWeeklyEntry(appendWeeklyEntry(null, '**05-11-2026** — old\n**Status:** Not finished'), '**06-11-2026** — today\n**Status:** Not finished')
+    const again = appendWeeklyEntry(yesterday, '**06-11-2026** — today\n**Status:** Finished', '**06-11-2026** — today\n**Status:** Not finished')
+    const edited = appendWeeklyEntry(yesterday, '**06-11-2026** — today\n**Status:** Finished', '**06-11-2026** — today\n**Status:** something else')
+    check('  only the same day’s entry, found exactly as written, is replaced; an entry edited in Jira is kept and the new one appended',
+      flat(again).includes('old') && (flat(again).match(/Not finished/g) || []).length === 1 && flat(again).includes('Finished') && (flat(again).match(/06-11-2026/g) || []).length === 1 && again.replaced === true
+      && (flat(edited).match(/06-11-2026/g) || []).length === 2 && !edited.replaced, `${flat(again)} // ${flat(edited)}`)
+  }
   check('  dd-mm-yyyy is Bangkok\'s date', ddmmyyyy(Date.parse('2026-11-06T18:30:00Z')) === '07-11-2026' && ddmmyyyy(Date.parse('2026-11-06T16:59:00Z')) === '06-11-2026')
   check('NOT FINISHED, WITH THE REASON', notDone.status === 200 && !writes.some((x) => x.kind === 'transition' && x.key === 'FNP-2002'))
   const entry2 = await D.collection('kpi_weekly').findOne({ week: WEEK, person: 'james' })
@@ -310,8 +323,43 @@ try {
     && again.tasks.find((t) => t.key === 'FNP-2002')?.update?.reason === 'Budget file late from FP&A')
 
   // ON HOLD: read from what they wrote, and the item moved to Hold in Jira.
-  check('"HOLD" IN AN UPDATE IS READ AS ON HOLD', ['This project is hold', 'Put on hold until Q1', 'โปรเจกต์นี้โฮลด์ไว้ก่อน', 'ระงับไว้ก่อน'].every(mentionsHold)
-    && !['Reconciled the forecast', 'No longer on hold, resumed work', 'Set the threshold', 'Household data loaded'].some(mentionsHold))
+  {
+    // The word as a status counts; the verb, or "hold" inside a longer word, does not (QA, 2026-11-07).
+    const HOLD = ['This project is hold', 'Put on hold until Q1', 'Budget owner is on leave, so this is on hold until 20 Nov', 'On hold — waiting for the budget',
+      'We put the project on hold', 'Put it on hold until January', 'Holding it for now while FP&A decides', 'Hold for now', 'Hold until the budget is approved',
+      'Paused until the new chart of accounts lands', 'Suspended by the CFO', 'Parked until Q1', 'Status: hold', 'The task was hold last week',
+      'Mapped 3 lines. Hold.', 'On-hold pending CFO sign-off', 'โปรเจกต์นี้โฮลด์ไว้ก่อน', 'ระงับไว้ก่อน', 'งานนี้ hold ไว้ก่อน', 'หยุดชั่วคราวรอ budget']
+    const NOT_HOLD = ['Reconciled the forecast', 'No longer on hold, resumed work', 'Set the threshold', 'Household data loaded',
+      'Mapped 140 of 210 cost lines. Will hold a review session with FP&A on Monday.', 'Added RTC; the stakeholders put the threshold logic on hold',
+      'We will hold the meeting on Friday', 'Hold a workshop with AP next week', 'Emailed the account holder', 'Mapped the holding company entities',
+      'Updated the shareholder list', 'Hold on, the file is still loading', 'Holding a call with IT tomorrow', 'Placeholder rows removed', 'บริษัทโฮลดิ้งส่งไฟล์แล้ว']
+    const missed = HOLD.filter((x) => !mentionsHold(x))
+    const wrong = NOT_HOLD.filter(mentionsHold)
+    check(`"HOLD" AS A STATUS IS READ AS ON HOLD (${HOLD.length} phrases)`, !missed.length, missed.join(' | '))
+    check(`  "hold a review", "threshold", "holder", "holding company" are NOT (${NOT_HOLD.length} phrases)`, !wrong.length, wrong.join(' | '))
+  }
+  check('WHAT IS MISSING FROM AN UPDATE IS SAID BY FIELD, BEFORE ANYTHING IS SENT', JSON.stringify(Object.keys(updateProblems({ progress: '', done: null })))
+    === '["progress","status"]' && Object.keys(updateProblems({ progress: 'x', done: false, hold: false, reason: '' })).join() === 'reason'
+    && !Object.keys(updateProblems({ progress: 'x', done: false, hold: true })).length)
+
+  // A POST JIRA DID NOT TAKE is kept here, and is still to do.
+  {
+    put('FNP-2016', { summary: 'Jira refuses this one', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
+    failComment.add('FNP-2016')
+    const fr = await call('POST', `/api/weekly/${WEEK}/jira/FNP-2016/update`, { progress: 'Did the thing', done: true }, james)
+    const fw = (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, james)).body
+    const ft = fw.tasks.find((t) => t.key === 'FNP-2016')
+    check('A FAILED JIRA POST IS KEPT HERE, SAYS WHY, AND STILL COUNTS AS TO DO', fr.status === 200 && fr.body.update?.jira?.state === 'failed'
+      && /maintenance|503/.test(fr.body.update.jira.error || '') && ft?.update?.jira?.state === 'failed' && needsUpdate(ft, fw.writable)
+      && !needsUpdate(fw.tasks.find((t) => t.key === 'FNP-2001'), fw.writable), JSON.stringify(ft?.update?.jira))
+    check('  with writes switched off on the server, the update kept here is all there is, and counts', !needsUpdate(ft, false))
+    failComment.delete('FNP-2016')
+    const rt = await call('POST', `/api/weekly/${WEEK}/jira/FNP-2016/update`, { progress: 'Did the thing', done: true }, james)
+    check('  sent again, it reaches Jira', rt.body.update?.jira?.state === 'posted' && /^Posted to FNP-2016 in Jira — comment, description, Done/.test(postedSummary('FNP-2016', rt.body.update.jira)),
+      postedSummary('FNP-2016', rt.body.update?.jira))
+    issues.delete('FNP-2016')
+    await D.collection('kpi_task_updates').deleteOne({ _id: `${WEEK}.james.FNP-2016` })
+  }
   put('FNP-2012', { summary: 'Vendor portal phase 2', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
   const held = await call('POST', `/api/weekly/${WEEK}/jira/FNP-2012/update`, { progress: 'This project is hold', hold: true }, james)
   check('ON HOLD IS SUBMITTED WITHOUT A REASON, AND MOVES THE ITEM TO HOLD IN JIRA', held.status === 200 && held.body.update?.hold === true
@@ -432,6 +480,8 @@ try {
     browser = await puppeteer.launch({ executablePath: chrome, headless: 'new', args: ['--no-sandbox'] })
     const pg = await (await browser.createBrowserContext()).newPage()
     await pg.setViewport({ width: 1280, height: 900 })
+    // A tab with an unsent draft asks before it goes; the checks always say yes.
+    pg.on('dialog', (d) => d.accept().catch(() => {}))
     const [n, v] = james.split('=')
     await pg.setCookie({ name: n, value: v, url: base })
     await pg.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
@@ -493,6 +543,30 @@ try {
       box?.parentElement.querySelector('textarea, input')?.focus()
     })
     await pg.keyboard.type('Two accounts wait on AP')
+    // AN UNSENT DRAFT survives going to another week and back, and a reload.
+    const cardState = () => pg.evaluate(() => {
+      const card = document.querySelector('[data-jira-task="FNP-2010"]')
+      const why = [...(card?.querySelectorAll('label') || [])].find((l) => /Why isn/.test(l.textContent))
+      return {
+        progress: card?.querySelector('textarea')?.value || null,
+        reason: why?.parentElement.querySelector('textarea, input')?.value || null,
+        restored: !!card?.querySelector('[data-draft-restored]'),
+        notFinished: [...(card?.querySelectorAll('button') || [])].find((b) => b.textContent.trim() === 'Not finished')?.getAttribute('aria-pressed'),
+      }
+    })
+    await sleep(300)
+    await pg.click('[aria-label="next week"]')
+    await pg.waitForFunction(() => document.body.innerText.includes('Planning week'), { timeout: 10000 }).catch(() => {})
+    await pg.click('[aria-label="previous week"]')
+    await pg.waitForSelector('[data-jira-task="FNP-2010"]', { timeout: 10000 }).catch(() => {})
+    const afterSwitch = await cardState()
+    check('AN UNSENT DRAFT SURVIVES A WEEK SWITCH', afterSwitch.progress === 'Tied out three of five accounts' && afterSwitch.reason === 'Two accounts wait on AP'
+      && afterSwitch.notFinished === 'true' && afterSwitch.restored, JSON.stringify(afterSwitch))
+    await pg.reload({ waitUntil: 'networkidle0' })
+    await pg.waitForSelector('[data-jira-task="FNP-2010"]', { timeout: 15000 }).catch(() => {})
+    const afterReload = await cardState()
+    check('  AND A RELOAD', afterReload.progress === 'Tied out three of five accounts' && afterReload.reason === 'Two accounts wait on AP' && afterReload.notFinished === 'true',
+      JSON.stringify(afterReload))
     // PICTURES: attached with the button, dropped onto the card, pasted anywhere on it.
     const pngFile = new URL('../scratch-attach.png', import.meta.url)
     writeFileSync(pngFile, Buffer.from(PNG.split(',')[1], 'base64'))
@@ -531,9 +605,46 @@ try {
     check('SUBMIT ON THE CARD POSTS IT AND MOVES IT TO "ALREADY UPDATED"', after.includes('Already updated (3)') && after.includes('Not updated yet (0)'))
     check('  the comment reached Jira', writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2010' && /Two accounts wait on AP/.test(JSON.stringify(x.body))))
     check('  AND THE THREE PICTURES ARE ATTACHED TO THE ISSUE IN JIRA', writes.some((x) => x.kind === 'attach' && x.key === 'FNP-2010' && x.names.length === 3), JSON.stringify(writes.filter((x) => x.kind === 'attach').map((x) => [x.key, x.names])))
+    const told = await pg.evaluate(() => ({
+      flash: document.querySelector('[data-posted="FNP-2010"]')?.innerText || '',
+      draft: Object.keys(localStorage).filter((k) => k.includes(':FNP-2010')),
+    }))
+    check('  AND SAYS SO WHERE THE CARD WAS: what reached Jira', /Posted to FNP-2010 in Jira — comment, 3 pictures, description/.test(told.flash), told.flash)
+    check('  the draft is gone once it is sent', told.draft.length === 0, told.draft.join())
+
+    // Done in Jira, then said Not finished: told before it is posted.
+    await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Already updated/.test(b.textContent.trim()))?.click())
+    await pg.waitForSelector('[data-jira-task="FNP-2001"]', { timeout: 5000 }).catch(() => {})
+    const pick = (key, label) => pg.evaluate((k, l) => [...document.querySelectorAll(`[data-jira-task="${k}"] button`)].find((b) => b.textContent.trim() === l)?.click(), key, label)
+    await pick('FNP-2001', 'Not finished')
+    await sleep(250)
+    const doneWarn = await pg.evaluate(() => ({
+      warn: document.querySelector('[data-jira-task="FNP-2001"] [data-done-warning]')?.innerText || '',
+      btn: document.querySelector('[aria-label="submit FNP-2001"]')?.innerText || '',
+    }))
+    check('RE-SUBMITTING AN ITEM DONE IN JIRA AS NOT FINISHED WARNS FIRST', /FNP-2001 is Done in Jira — this update won.t reopen it/.test(doneWarn.warn) && /Post anyway/.test(doneWarn.btn), JSON.stringify(doneWarn))
+    await pick('FNP-2001', 'Finished')
+    await sleep(250)
+    check('  and picking Finished again takes the warning away', !(await pg.evaluate(() => !!document.querySelector('[data-jira-task="FNP-2001"] [data-done-warning]'))))
+    await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Not updated yet/.test(b.textContent.trim()))?.click())
+
+    // ADD A TASK: only projects with a Jira epic that are still open, one per epic.
+    await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Add a task')?.click())
+    await pg.waitForSelector('[aria-label="new Jira task"] input', { timeout: 5000 }).catch(() => {})
+    await pg.click('[aria-label="new Jira task"] input')
+    await pg.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
+    const opts = await pg.evaluate(() => [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()))
+    const epicKeys = new Set([...seed.projects.filter((p) => p.jiraKey).map((p) => p.jiraKey), np.body.epic?.key])
+    const lead = opts.map((o) => o.split(' · ')[0])
+    check('"ADD A TASK" OFFERS ONLY PROJECTS WITH A JIRA EPIC, ONE PER EPIC, NONE FINISHED OR DELETED', opts.length > 0 && opts.length < seed.projects.length
+      && lead.every((k) => epicKeys.has(k)) && new Set(lead).size === lead.length && !opts.some((o) => /deleted/i.test(o))
+      && !lead.includes('FNP-868'), `${opts.length} of ${seed.projects.length}: ${opts.slice(0, 3).join(' | ')}`)
+    await pg.keyboard.press('Escape')
+    await pg.evaluate(() => [...document.querySelectorAll('[aria-label="new Jira task"] button')].find((b) => b.textContent.trim() === 'Cancel')?.click())
     await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Plan week \d+/.test(b.textContent.trim()))?.click())
     await pg.waitForSelector('[data-jira-task="FNP-2004"] input[type="date"]', { timeout: 10000 }).catch(() => {})
     const plan2 = await pg.evaluate(() => document.body.innerText)
+    check('  ONE "MY PLAN IS SET" AT MOST, IN THE NEXT STEP BAR', (await pg.evaluate(() => [...document.querySelectorAll('button')].filter((b) => /My plan for week/.test(b.textContent)).length)) <= 1)
     check('NEXT WEEK OPENS FOR PLANNING, WITH DATES TO SET', plan2.includes('Planning week') && plan2.includes('FNP-2004')
       && (await pg.evaluate(() => !!document.querySelector('[data-jira-task="FNP-2004"] input[type="date"]'))), plan2.slice(plan2.indexOf('My week'), plan2.indexOf('My week') + 500).replace(/\n/g, ' | '))
     if (process.env.SHOT_DIR) await pg.screenshot({ path: `${process.env.SHOT_DIR}/jira-plan.png`, fullPage: true })
@@ -558,6 +669,48 @@ try {
     check('  DECIDED THERE, IT LEAVES THE LIST AND IS WRITTEN ON THE TASK',
       !(await bp.evaluate(() => !!document.querySelector('[data-decision="FNP-2002"]')))
       && writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2002' && /true up next week/.test(JSON.stringify(x.body))))
+
+    // A CLOSED WEEK: the record, with nothing to plan or add.
+    await pg.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
+    await pg.waitForSelector('[data-jira-task], [data-next-step]', { timeout: 15000 }).catch(() => {})
+    for (let i = 0; i < 2; i++) {
+      const was = await pg.evaluate(() => document.querySelector('[data-next-step]')?.parentElement?.innerText || '')
+      await pg.click('[aria-label="previous week"]')
+      await pg.waitForFunction((w) => (document.querySelector('[data-next-step]')?.parentElement?.innerText || '') !== w && !/Reading your Jira|Loading week/.test(document.body.innerText), { timeout: 10000 }, was).catch(() => {})
+    }
+    await sleep(500)
+    const shut = await pg.evaluate(() => document.body.innerText)
+    check('A LOCKED WEEK HAS NO PLANNING PROMPTS AND NO ADD-A-TASK', /This week is closed/.test(shut) && !/Plan week \d+/.test(shut) && !/Don.t forget next week/.test(shut)
+      && !/Add a task/.test(shut) && !/New project/.test(shut), (shut.match(/Next step[^\n]*\n[^\n]*/) || [''])[0])
+
+    // A POST JIRA REFUSED: still to do on the page, with Retry posting on its card.
+    put('FNP-2017', { summary: 'Jira will refuse this', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
+    failComment.add('FNP-2017')
+    await call('POST', `/api/weekly/${WEEK}/jira/FNP-2017/update`, { progress: 'Drafted the memo', done: false, reason: 'Waiting on sign-off' }, james)
+    await pg.goto(`${base}/?again#weekly`, { waitUntil: 'networkidle0' })
+    await pg.waitForSelector('[data-jira-task="FNP-2017"]', { timeout: 15000 }).catch(() => {})
+    const fail = await pg.evaluate(() => {
+      const card = document.querySelector('[data-jira-task="FNP-2017"]')
+      return {
+        warn: card?.querySelector('[data-post-failed]')?.innerText || '',
+        retry: !!card && [...card.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Retry posting'),
+        next: document.querySelector('[data-next-step]')?.innerText.replace(/\s+/g, ' ') || '',
+        group: card?.closest('[data-project-group]')?.querySelector('button')?.innerText.replace(/\s+/g, ' ') || '',
+      }
+    })
+    check('A FAILED JIRA POST STAYS UNDER "NOT UPDATED YET", SAYS WHY, WITH RETRY POSTING', /NOT posted to FNP-2017 in Jira/.test(fail.warn) && /maintenance|503/.test(fail.warn) && fail.retry, JSON.stringify(fail))
+    check('  the Next step and the project block count it as to do', /Update 1 task/.test(fail.next) && /FNP-2017/.test(fail.next) && /1 to update/i.test(fail.group), `${fail.next} · ${fail.group}`)
+    failComment.delete('FNP-2017')
+    await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task="FNP-2017"] button')].find((b) => b.textContent.trim() === 'Retry posting')?.click())
+    await pg.waitForSelector('[data-posted="FNP-2017"]', { timeout: 10000 }).catch(() => {})
+    const retried = await pg.evaluate(() => ({
+      flash: document.querySelector('[data-posted="FNP-2017"]')?.innerText || '',
+      still: !!document.querySelector('[data-jira-task="FNP-2017"]'),
+    }))
+    check('  RETRY POSTS IT, AND THE CARD MOVES TO "ALREADY UPDATED" WITH A CONFIRMATION', /Posted to FNP-2017 in Jira/.test(retried.flash) && !retried.still
+      && writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2017' && /Drafted the memo/.test(JSON.stringify(x.body))), JSON.stringify(retried))
+    if (process.env.SHOT_DIR) await pg.screenshot({ path: `${process.env.SHOT_DIR}/jira-retried.png`, fullPage: true })
+    issues.delete('FNP-2017')
 
     const wide = await (async () => { await pg.setViewport({ width: 390, height: 844 }); await sleep(300); return pg.evaluate(() => document.documentElement.scrollWidth) })()
     check('NOTHING SPILLS SIDEWAYS AT 390px', wide <= 390, `scrollWidth ${wide}`)

@@ -4,6 +4,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import * as api from '../lib/api.js'
 import { BLOCKER_CATEGORIES } from '../lib/weekly.js'
 import { Pill } from './Brand.jsx'
+import { focusRingSx } from './focus.js'
 
 /*
  * HELP WITH WRITING, beside the box it helps with.
@@ -20,6 +21,19 @@ import { Pill } from './Brand.jsx'
  */
 
 const CATEGORY = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
+
+/*
+ * What the member is told when the AI fails. The server's own words ("The AI
+ * answered 500: {json}", a timeout, a refused key) are an administrator's to
+ * read in the logs; the member only needs to know nothing changed. A message
+ * meant for them — too many requests, say — is kept.
+ */
+export const AI_DOWN = 'The AI is not available right now — your text is unchanged.'
+export const friendlyAiError = (message) => {
+  const m = String(message || '')
+  if (!m || /AI answered|Request failed \(5|timed? ?out|refused the key|LOTUS_|not configured|fetch|network|ECONN|socket|JSON|\{/i.test(m)) return AI_DOWN
+  return `${m.replace(/\.?\s*$/, '.')} Your text is unchanged.`
+}
 
 export default function AiAssist({
   available, field, text, onText, task, onSuggest, disabled,
@@ -52,7 +66,7 @@ export default function AiAssist({
         setNote(kind === 'polish' ? 'Polished — read it over before you submit.' : 'Written up — read it over before you submit.')
       }
     } catch (e) {
-      setError(e.message)
+      setError(friendlyAiError(e.message))
     } finally {
       setBusy(null)
     }
@@ -64,7 +78,9 @@ export default function AiAssist({
       onClick={() => run(kind)}
       disabled={!!busy || empty}
       startIcon={busy === kind ? <CircularProgress size={12} /> : <AutoAwesomeIcon sx={{ fontSize: '15px !important' }} />}
-      sx={{ py: 0.1, minHeight: 0, fontSize: '0.74rem', color: 'text.secondary', '&:hover': { color: 'primary.light' } }}
+      sx={{
+        py: 0.1, minHeight: 0, fontSize: '0.74rem', color: 'text.secondary', '&:hover': { color: 'primary.light' }, ...focusRingSx,
+      }}
     >
       {label}
     </Button>
@@ -89,7 +105,7 @@ export default function AiAssist({
       {busy && busy !== 'blocker' && (
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>Writing… this can take a few seconds.</Typography>
       )}
-      {error && <Typography variant="caption" sx={{ color: 'error.main' }}>{error}</Typography>}
+      {error && <Typography variant="caption" sx={{ color: 'text.secondary' }} data-ai-error>{error}</Typography>}
       {note && !busy && <Typography variant="caption" sx={{ color: 'text.secondary' }} data-ai-note>{note}</Typography>}
       {suggestion && (
         <Box sx={{

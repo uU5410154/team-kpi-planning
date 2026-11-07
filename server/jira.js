@@ -955,10 +955,27 @@ export function adf(text) {
  * The owner's rule (2026-11-06): appended to the end, its first line starting
  * with the date as dd-mm-yyyy. What is already in the description is never
  * changed; an empty description becomes the entry.
+ *
+ * Submitted again the same day (`replace`: the text of that day's entry, as
+ * it was posted), the day's entry is REPLACED rather than a second one added
+ * under the same date — two contradicting entries for one day read as a
+ * mistake (QA, 2026-11-07). Only an entry found exactly as it was written is
+ * replaced; anything else, an edit somebody made in Jira included, is left
+ * alone and the new entry is appended as before.
  */
-export function appendWeeklyEntry(doc, text) {
+const plainOf = (node) => (node?.text || '') + (node?.content || []).map(plainOf).join('')
+
+export function appendWeeklyEntry(doc, text, replace = null) {
   const old = doc && doc.type === 'doc' && Array.isArray(doc.content) ? doc.content : []
   const entry = adf(text).content
+  if (replace && old.length) {
+    const was = adf(replace).content.map(plainOf)
+    for (let i = old.length - was.length; i >= 0; i--) {
+      if (was.every((t, j) => plainOf(old[i + j]) === t)) {
+        return { type: 'doc', version: 1, content: [...old.slice(0, i), ...entry, ...old.slice(i + was.length)], replaced: true }
+      }
+    }
+  }
   return { type: 'doc', version: 1, content: old.length ? [...old, { type: 'paragraph' }, ...entry] : entry }
 }
 
@@ -969,15 +986,16 @@ export function ddmmyyyy(at = Date.now()) {
   return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()}`
 }
 
-export async function addToDescription(key, text) {
+/** The update into the description; `replace` is the same day's earlier entry, if any. */
+export async function addToDescription(key, text, { replace = null } = {}) {
   if (!status().configured) return UNAVAILABLE
   if (!writable()) throw refuseWrites()
   const k = String(key || '').trim().toUpperCase()
   const raw = await call(`/rest/api/3/issue/${encodeURIComponent(k)}?fields=description`)
-  const doc = appendWeeklyEntry(raw?.fields?.description || null, text)
+  const { replaced, ...doc } = appendWeeklyEntry(raw?.fields?.description || null, text, replace)
   await call(`/rest/api/3/issue/${encodeURIComponent(k)}`, { method: 'PUT', body: { fields: { description: doc } } })
   cache.delete(k)
-  return { updated: true }
+  return { updated: true, replaced: !!replaced }
 }
 
 /** A comment on an issue, from plain text. */

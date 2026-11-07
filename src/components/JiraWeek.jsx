@@ -5,6 +5,7 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
+import CheckIcon from '@mui/icons-material/Check'
 import AttachIcon from '@mui/icons-material/AttachFileOutlined'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import EventIcon from '@mui/icons-material/EventOutlined'
@@ -16,8 +17,11 @@ import { addWeeks, weekNo, weekTitle } from '../lib/weekly.js'
 import AiAssist from './AiAssist.jsx'
 import { Pill } from './Brand.jsx'
 import { ago } from './FollowUp.jsx'
-import { pulseSx } from './pulse.js'
-import { mentionsHold } from '../lib/hold.js'
+import { mentionsHold, isHoldStatus } from '../lib/hold.js'
+import {
+  needsUpdate, failedPost, partialPost, postedSummary, updateProblems, readDraft, writeDraft, clearDraft, baseFields, differs, unsentDrafts,
+} from '../lib/taskUpdate.js'
+import { focusRingSx } from './focus.js'
 
 /**
  * A MEMBER'S WEEK, FROM JIRA.
@@ -32,7 +36,7 @@ import { mentionsHold } from '../lib/hold.js'
  * written to Jira, and a task or a project can be added.
  */
 
-const fmt = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '—')
+const fmt = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : 'no date')
 const MAX_IMAGES = 3
 const MAX_BYTES = 4 * 1024 * 1024
 // Bigger than this, a picture is scaled down before it is sent: a phone photo
@@ -80,17 +84,48 @@ const workdays = (week) => {
 
 /* ------------------------------------------------------------ one task */
 
+// Finished / Not finished / On hold: the picked one in its own colour, muted —
+// a tinted border, tinted text and a tick — so the choice reads at a glance.
+const STATUS_TONE = { yes: 'success', no: 'warning', hold: 'info' }
+const toggleSx = (tone) => (t) => ({
+  px: 1.5,
+  gap: 0.5,
+  ...focusRingSx,
+  '&&.Mui-selected, &&.Mui-selected:hover': {
+    color: t.palette[tone].light,
+    bgcolor: alpha(t.palette[tone].main, 0.1),
+    borderColor: alpha(t.palette[tone].main, 0.55),
+  },
+})
+
+/** The task's dates, or that it has none. */
+const span = (task) => {
+  const a = task.start || task.sprintStart
+  const b = task.due || task.sprintEnd
+  if (!a && !b) return 'No dates yet'
+  return `${fmt(a)} – ${fmt(b)}`
+}
+
 function TaskCard({
-  task, week, overdue, planning, canWrite, writable, aiOn, highlight, onSaved, grouped = false,
+  task, week, person, planning, canWrite, writable, aiOn, highlight, onSaved, onPosted, grouped = false,
 }) {
   const u = task.update
-  const [progress, setProgress] = useState(u?.progress || '')
-  const [done, setDone] = useState(u ? u.done : null)
+  const editing = canWrite && !planning
+  /*
+   * Where the fields start: an unsent draft kept in this browser (typed before
+   * a week switch, a page switch or a reload), else the last update.
+   */
+  const [start] = useState(() => {
+    const d = editing ? readDraft(person, week, task.key, u?.submittedAt) : null
+    return d ? { ...baseFields(u), ...d, restored: true } : { ...baseFields(u), holdAuto: false, picked: !!u, restored: false }
+  })
+  const [progress, setProgress] = useState(start.progress)
+  const [done, setDone] = useState(start.done)
   // On hold: picked by hand, or for them when the update says so ("this
   // project is hold"). A hand-picked choice is never overruled.
-  const [hold, setHold] = useState(!!u?.hold)
-  const [holdAuto, setHoldAuto] = useState(false)
-  const [picked, setPicked] = useState(!!u)
+  const [hold, setHold] = useState(!!start.hold)
+  const [holdAuto, setHoldAuto] = useState(!!start.holdAuto)
+  const [picked, setPicked] = useState(!!start.picked)
   useEffect(() => {
     if (picked) return
     const says = mentionsHold(progress)
@@ -103,15 +138,34 @@ function TaskCard({
     setHold(v === 'hold')
     setDone(v === 'yes')
   }
-  const [reason, setReason] = useState(u?.reason || '')
-  const [blocker, setBlocker] = useState(u?.blocker || '')
-  const [decision, setDecision] = useState(!!u?.decision)
-  const [decisionText, setDecisionText] = useState(u?.decisionText || '')
+  const [reason, setReason] = useState(start.reason)
+  const [blocker, setBlocker] = useState(start.blocker)
+  const [decision, setDecision] = useState(!!start.decision)
+  const [decisionText, setDecisionText] = useState(start.decisionText)
   const [images, setImages] = useState([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  const [problems, setProblems] = useState([])
+  const [serverProblems, setServerProblems] = useState([])
+  const [tried, setTried] = useState(false)
   const [dates, setDates] = useState({ start: task.start || '', due: task.due || '' })
+
+  // The unsent draft, kept as it is typed; gone once it says what the last update says.
+  const fields = {
+    progress, done, hold, holdAuto, picked, reason, blocker, decision, decisionText,
+  }
+  const dirty = editing && differs(fields, u)
+  useEffect(() => {
+    if (!editing) return
+    if (differs(fields, u)) writeDraft(person, week, task.key, u?.submittedAt, fields)
+    else clearDraft(person, week, task.key)
+    // fields is rebuilt every render; its members are the dependencies.
+  }, [editing, person, week, task.key, u?.submittedAt, progress, done, hold, holdAuto, picked, reason, blocker, decision, decisionText])
+
+  // What is missing, shown on the fields once Submit has been pressed, and
+  // cleared field by field as each is filled in.
+  const problems = updateProblems(fields)
+  const shownProblems = tried ? problems : {}
+  const incomplete = Object.keys(problems).length > 0
 
   /*
    * PICTURES: pasted anywhere on the card (copy an image or take a screenshot,
@@ -154,7 +208,7 @@ function TaskCard({
     e.preventDefault()
     addImages(files)
   }
-  const dropProps = canWrite && !planning ? {
+  const dropProps = editing ? {
     onPaste,
     onDragOver: (e) => {
       if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); setDragging(true) }
@@ -168,40 +222,44 @@ function TaskCard({
     },
   } : {}
 
-  const submit = async () => {
+  // Done in Jira, and now said not to be: posting does not reopen it, and the
+  // member is told so before it goes (QA, 2026-11-07).
+  const contradictsDone = editing && task.done && done !== null && done !== true
+
+  const post = async (body) => {
     setBusy(true)
     setMsg(null)
-    setProblems([])
+    setServerProblems([])
     try {
-      const r = await api.submitTaskUpdate(week, task.key, {
-        progress, done, hold, reason, blocker, decision, decisionText, images,
-      })
-      const j = r.update?.jira || {}
+      const r = await api.submitTaskUpdate(week, task.key, body)
+      clearDraft(person, week, task.key)
       setImages([])
-      setMsg(j.state === 'posted'
-        ? {
-          tone: String(j.hold || '').startsWith('not moved') || String(j.description || '').startsWith('not updated') ? 'warning' : 'success',
-          text: `Submitted and posted to ${task.key} in Jira (comment${j.description === 'updated' ? ' and description' : ''})${j.done ? ` — moved to ${j.done}` : ''}${
-            j.hold ? (String(j.hold).startsWith('not moved') ? `, but not put on hold: ${j.hold.replace(/^not moved: /, '')}` : ` — status ${j.hold}`) : ''}${
-            String(j.description || '').startsWith('not updated') ? `. The description was not changed — ${j.description.replace(/^not updated: /, '')}` : ''}.`,
-        }
-        : { tone: 'warning', text: `Submitted here, but not posted to Jira: ${j.error || 'writing to Jira is switched off.'}` })
+      onPosted?.(task, r.update)
       onSaved?.()
     } catch (e) {
       setMsg({ tone: 'error', text: e.message })
-      setProblems(e.problems || [])
+      setServerProblems(e.problems || [])
     } finally {
       setBusy(false)
     }
   }
+  const submit = () => {
+    setTried(true)
+    if (incomplete) return
+    post({
+      progress, done, hold, reason, blocker, decision, decisionText, images,
+    })
+  }
+  // The update kept here, sent again as it was: for a post Jira did not take.
+  const retry = () => post({ ...baseFields(u) })
 
   const saveDates = async () => {
     setBusy(true)
     setMsg(null)
     try {
       await api.planJiraTask(task.key, { start: dates.start || null, due: dates.due || null })
-      setMsg({ tone: 'success', text: 'Dates written to Jira.' })
-      onSaved?.()
+      onPosted?.(task, null, `Dates written to ${task.key} in Jira: ${fmt(dates.start)} – ${fmt(dates.due)}.`)
+      onSaved?.({ dates: true })
     } catch (e) {
       setMsg({ tone: 'error', text: e.message })
     } finally {
@@ -212,6 +270,11 @@ function TaskCard({
   const project = task.project?.summary || task.parent?.summary || 'No project'
   const projectKey = task.project?.key || task.parent?.key || null
   const posted = u?.jira?.state === 'posted'
+  const failed = failedPost(u, writable)
+  const partial = partialPost(u)
+  const heldInJira = !task.done && isHoldStatus(task.status)
+  // The project's own epic, inside its own block: the block already names it.
+  const ownEpic = grouped && task.epic
   return (
     <Paper
       variant="outlined"
@@ -235,37 +298,66 @@ function TaskCard({
             </Typography>
           )}
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flexWrap: 'wrap' }}>
-            <Link href={task.url} target="_blank" rel="noopener" underline="hover" sx={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+            <Link href={task.url} target="_blank" rel="noopener" underline="hover" sx={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 0.5, ...focusRingSx }}>
               {task.key}<OpenInNewIcon sx={{ fontSize: 13 }} />
             </Link>
-            <Typography variant="body1" sx={{ fontWeight: 600 }}>{task.summary}</Typography>
+            {ownEpic
+              ? <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }} data-own-epic>Project epic</Typography>
+              : <Typography variant="body1" sx={{ fontWeight: 600 }}>{task.summary}</Typography>}
           </Box>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            {task.status}{' · '}{fmt(task.start || task.sprintStart)} – {fmt(task.due || task.sprintEnd)}
+            {task.status}{' · '}{span(task)}
             {!task.start && !task.due && task.sprintName ? ` (${task.sprintName})` : ''}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
-          {task.epic && <Pill label="Epic" tone="info" title="A project in Jira with you as PIC" />}
-          {overdue && <Pill label="Past due" tone="bad" />}
+          {task.epic && !ownEpic && <Pill label="Epic" tone="info" title="A project in Jira with you as PIC" />}
           {task.done && <Pill label="Done in Jira" tone="good" />}
-          {!task.done && /hold|paused|suspended|parked/i.test(task.status || '') && <Pill label="On hold in Jira" tone="warn" />}
-          {u && <Pill label={`Updated ${ago(u.submittedAt)}`} tone={posted ? 'info' : 'warn'} title={posted ? 'Posted to Jira' : (u.jira?.error || 'Not posted to Jira')} />}
+          {heldInJira && <Pill label="On hold in Jira" tone="warn" />}
+          {u && <Pill label={`${failed ? 'Not posted' : 'Updated'} ${ago(u.submittedAt)}`} tone={posted ? 'info' : 'warn'} title={posted ? 'Posted to Jira' : (u.jira?.error || 'Not posted to Jira')} />}
         </Box>
       </Box>
+
+      {failed && (
+        <Alert
+          severity="warning"
+          variant="outlined"
+          sx={{ py: 0, alignItems: 'center' }}
+          data-post-failed
+          action={canWrite ? (
+            <Button color="inherit" size="small" onClick={retry} disabled={busy} startIcon={busy ? <CircularProgress size={12} color="inherit" /> : null} sx={focusRingSx}>
+              Retry posting
+            </Button>
+          ) : null}
+        >
+          Kept here, but NOT posted to {task.key} in Jira
+          {u.jira?.error ? `: ${String(u.jira.error).replace(/\.?\s*$/, '.')}` : u.jira?.state === 'pending' ? ': the post did not finish.' : '.'}
+          {' '}It still counts as to do until it reaches Jira.
+        </Alert>
+      )}
+      {!failed && partial.length > 0 && (
+        <Typography variant="caption" sx={{ color: 'warning.light' }} data-post-partial>
+          Posted as a comment, but {partial.join('; ')}.
+        </Typography>
+      )}
 
       {planning ? (
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           <TextField size="small" type="date" label="Start" value={dates.start} onChange={(e) => setDates((d) => ({ ...d, start: e.target.value }))} InputLabelProps={{ shrink: true }} disabled={!canWrite} />
           <TextField size="small" type="date" label="Due" value={dates.due} onChange={(e) => setDates((d) => ({ ...d, due: e.target.value }))} InputLabelProps={{ shrink: true }} disabled={!canWrite} />
           {canWrite && (
-            <Button size="small" variant="outlined" onClick={saveDates} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy || !writable || (dates.start === (task.start || '') && dates.due === (task.due || ''))}>
+            <Button size="small" variant="outlined" onClick={saveDates} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy || !writable || (dates.start === (task.start || '') && dates.due === (task.due || ''))} sx={focusRingSx}>
               Save dates
             </Button>
           )}
         </Box>
       ) : (
         <>
+          {start.restored && dirty && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', mb: -0.5 }} data-draft-restored>
+              Your unsent draft, kept in this browser — not posted yet.
+            </Typography>
+          )}
           <TextField
             label="This week's progress"
             value={progress}
@@ -275,7 +367,8 @@ function TaskCard({
             minRows={2}
             maxRows={10}
             fullWidth
-            helperText={canWrite ? 'What you did on it. Links are fine. Paste a picture here (Ctrl/Cmd+V), drop one on the card, or attach it below.' : undefined}
+            error={!!shownProblems.progress}
+            helperText={shownProblems.progress || (canWrite ? 'What you did on it. Links are fine. Paste a picture here (Ctrl/Cmd+V), drop one on the card, or attach it below.' : undefined)}
           />
           <AiAssist
             available={aiOn}
@@ -299,7 +392,7 @@ function TaskCard({
                 onClick={() => fileRef.current?.click()}
                 disabled={images.length >= MAX_IMAGES}
                 data-attach-image
-                sx={{ color: 'text.primary', borderColor: 'divider' }}
+                sx={{ color: 'text.primary', borderColor: 'divider', ...focusRingSx }}
               >
                 Attach image
               </Button>
@@ -343,7 +436,7 @@ function TaskCard({
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>Already attached in Jira: {u.attachments.join(', ')}</Typography>
           )}
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
             <ToggleButtonGroup
               size="small"
               exclusive
@@ -351,20 +444,29 @@ function TaskCard({
               onChange={(_e, v) => v && choose(v)}
               disabled={!canWrite}
               aria-label={`finished ${task.key}`}
+              aria-invalid={!!shownProblems.status || undefined}
+              sx={(t) => ({
+                alignSelf: 'flex-start',
+                flexWrap: 'wrap',
+                ...(shownProblems.status && { outline: `1px solid ${alpha(t.palette.error.main, 0.6)}`, outlineOffset: 2, borderRadius: '10px' }),
+              })}
             >
-              <ToggleButton value="yes">Finished</ToggleButton>
-              <ToggleButton value="no">Not finished</ToggleButton>
-              <ToggleButton value="hold">On hold</ToggleButton>
+              {[['yes', 'Finished'], ['no', 'Not finished'], ['hold', 'On hold']].map(([v, label]) => {
+                const on = (hold ? 'hold' : done === null ? null : done ? 'yes' : 'no') === v
+                return (
+                  <ToggleButton key={v} value={v} sx={toggleSx(STATUS_TONE[v])}>
+                    {on && <CheckIcon sx={{ fontSize: 16 }} />}
+                    {label}
+                  </ToggleButton>
+                )
+              })}
             </ToggleButtonGroup>
-            <FormControlLabel
-              control={<Checkbox size="small" checked={decision} onChange={(e) => setDecision(e.target.checked)} disabled={!canWrite} />}
-              label={<Typography variant="body2" sx={{ color: decision ? 'error.light' : 'text.primary' }}>Decision needed?</Typography>}
-            />
+            {shownProblems.status && <Typography variant="caption" sx={{ color: 'error.light' }} data-field-error="status">{shownProblems.status}</Typography>}
           </Box>
           {hold && canWrite && (
-            <Typography variant="caption" sx={{ color: 'warning.light', mt: -0.5 }} data-hold-note>
-              {holdAuto ? 'Your update says it is on hold, so On hold is picked. ' : ''}
-              Submit moves {task.key} to its Hold status in Jira.
+            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }} data-hold-note>
+              {holdAuto ? 'Your update says it is on hold, so On hold is picked — pick another if it is not. ' : ''}
+              {heldInJira ? 'Already on hold in Jira.' : `Submit moves ${task.key} to its Hold status in Jira.`}
             </Typography>
           )}
           {done === false && (
@@ -377,30 +479,59 @@ function TaskCard({
               multiline
               maxRows={4}
               fullWidth
+              error={!!shownProblems.reason}
+              helperText={shownProblems.reason}
             />
           )}
           <TextField size="small" label="Blocker (optional)" value={blocker} onChange={(e) => setBlocker(e.target.value)} disabled={!canWrite} multiline maxRows={4} fullWidth />
-          {decision && (
-            <TextField size="small" label="What decision is needed, and from whom?" value={decisionText} onChange={(e) => setDecisionText(e.target.value)} disabled={!canWrite} multiline maxRows={4} fullWidth />
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <FormControlLabel
+              sx={{ alignSelf: 'flex-start', mr: 0 }}
+              control={<Checkbox size="small" checked={decision} onChange={(e) => setDecision(e.target.checked)} disabled={!canWrite} />}
+              label={<Typography variant="body2">Decision needed?</Typography>}
+            />
+            {decision && (
+              <TextField
+                size="small"
+                label="What decision is needed, and from whom?"
+                value={decisionText}
+                onChange={(e) => setDecisionText(e.target.value)}
+                disabled={!canWrite}
+                multiline
+                maxRows={4}
+                fullWidth
+                error={!!shownProblems.decisionText}
+                helperText={shownProblems.decisionText}
+              />
+            )}
+          </Box>
+          {contradictsDone && (
+            <Alert severity="warning" variant="outlined" sx={{ py: 0 }} data-done-warning>
+              {task.key} is Done in Jira — this update won&rsquo;t reopen it. If the work is not finished, reopen it in Jira as well.
+            </Alert>
           )}
           {canWrite && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-              <Button variant="contained" onClick={submit} disabled={busy} startIcon={busy ? <CircularProgress size={14} /> : null} aria-label={`submit ${task.key}`}>
-                {u ? 'Submit again' : 'Submit'}
+              <Button variant="contained" onClick={submit} disabled={busy} startIcon={busy ? <CircularProgress size={14} /> : null} aria-label={`submit ${task.key}`} sx={focusRingSx}>
+                {contradictsDone ? 'Post anyway' : u ? 'Submit again' : 'Submit'}
               </Button>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {writable ? `Posts to ${task.key} in Jira — a comment, and a dated entry added to its description${done ? '; moves it to Done' : hold ? '; puts it on hold' : ''}.` : 'Kept here; writing to Jira is switched off on the server.'}
-              </Typography>
+              {tried && incomplete ? (
+                <Typography variant="caption" sx={{ color: 'error.light' }} data-submit-problem>Fill in the marked {Object.keys(problems).length === 1 ? 'field' : 'fields'} to submit.</Typography>
+              ) : (
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  {writable ? `Posts to ${task.key} in Jira — a comment, and a dated entry in its description${done && !task.done ? '; moves it to Done' : hold && !heldInJira ? '; puts it on hold' : ''}.` : 'Kept here; writing to Jira is switched off on the server.'}
+                </Typography>
+              )}
             </Box>
           )}
         </>
       )}
-      {problems.length > 0 && (
-        <Alert severity="warning" sx={{ py: 0 }}>
-          <Box component="ul" sx={{ m: 0, pl: 2 }}>{problems.map((p) => <li key={p}>{p}</li>)}</Box>
+      {serverProblems.length > 0 && (
+        <Alert severity="warning" variant="outlined" sx={{ py: 0 }}>
+          <Box component="ul" sx={{ m: 0, pl: 2 }}>{serverProblems.map((p) => <li key={p}>{p}</li>)}</Box>
         </Alert>
       )}
-      {msg && <Alert severity={msg.tone} sx={{ py: 0 }} onClose={() => setMsg(null)}>{msg.text}</Alert>}
+      {msg && !serverProblems.length && <Alert severity={msg.tone} variant="outlined" sx={{ py: 0 }} onClose={() => setMsg(null)}>{msg.text}</Alert>}
     </Paper>
   )
 }
@@ -515,13 +646,15 @@ function NewProject({ week, onDone, onCancel, writable }) {
 
 /**
  * A PROJECT BLOCK: one framed box holding the project's header and every task
- * under it, so it is plain which project each update is for. The header says how many of its tasks still need an update,
- * and folds the project away once it is done with.
+ * under it, so it is plain which project each update is for. The header says
+ * how many of its tasks still need an update, and folds the project away once
+ * it is done with. What was just posted from it is confirmed inside it, so the
+ * card that left for "Already updated" does not vanish without a word.
  */
 function ProjectGroup({
-  name, projectKey, rows, planning, children,
+  name, projectKey, rows, planning, writable, flashes = [], onDismiss, children,
 }) {
-  const left = rows.filter(({ t }) => !t.update).length
+  const left = rows.filter(({ t }) => needsUpdate(t, writable)).length
   const [open, setOpen] = useState(true)
   return (
     <Box
@@ -551,6 +684,7 @@ function ProjectGroup({
           borderBottom: open ? `1px solid ${alpha(t.palette.primary.main, 0.25)}` : 'none',
           bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.13 : 0.07),
           '&:hover': { bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.18 : 0.1) },
+          '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.light', outlineOffset: -2 },
         })}
       >
         <FolderIcon sx={{ color: 'primary.light', fontSize: 22, flexShrink: 0 }} />
@@ -563,14 +697,29 @@ function ProjectGroup({
           <Typography variant="h4" sx={{ fontWeight: 700, fontSize: { xs: '1rem', sm: '1.1rem' } }}>{name}</Typography>
         </Box>
         {planning
-          ? <Pill label={`${rows.length} task${rows.length === 1 ? '' : 's'}`} tone="neutral" />
+          ? rows.length > 0 && <Pill label={`${rows.length} task${rows.length === 1 ? '' : 's'}`} tone="neutral" />
           : left
             ? <Pill label={`${left} to update`} tone="warn" />
             : <Pill label="All updated" tone="good" />}
         <ExpandMoreIcon sx={{ color: 'text.secondary', transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'none', flexShrink: 0 }} />
       </ButtonBase>
       <Collapse in={open} unmountOnExit={false}>
-        <Box data-project-body sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, p: { xs: 1, sm: 1.5 } }}>{children}</Box>
+        <Box data-project-body sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, p: { xs: 1, sm: 1.5 } }}>
+          {flashes.map((f) => (
+            <Alert
+              key={f.id}
+              severity={f.tone}
+              variant="outlined"
+              icon={f.tone === 'success' ? <CheckIcon fontSize="inherit" /> : undefined}
+              onClose={() => onDismiss(f.id)}
+              sx={{ py: 0, bgcolor: 'transparent' }}
+              data-posted={f.key}
+            >
+              {f.text}
+            </Alert>
+          ))}
+          {children}
+        </Box>
       </Collapse>
     </Box>
   )
@@ -578,53 +727,97 @@ function ProjectGroup({
 
 /* ------------------------------------------------------------ the week */
 
+const groupKeyOf = (t) => t.project?.key || t.parent?.key || (t.epic ? t.key : '')
+const groupNameOf = (t) => t.project?.summary || t.parent?.summary || 'No project'
+// How long a confirmation stays when all went well; a warning stays until dismissed.
+const FLASH_MS = 9000
+
 export default function JiraWeek({
-  week, current, canWrite, jw, onReload, projects, preset, onPresetUsed, focusKey, aiOn, planIn, planInAt, onGoWeek, onPlanned, onProjectAdded,
+  week, current, person, canWrite, jw, onReload, projects, preset, onPresetUsed, focusKey, aiOn, planIn, planInAt, onGoWeek,
+  onProjectAdded, onDatesSaved, addSignal = 0,
 }) {
   const [filter, setFilter] = useState('todo')
   const [adding, setAdding] = useState(false)
   const [addingProject, setAddingProject] = useState(false)
   const [note, setNote] = useState(null)
-  const [busy, setBusy] = useState(false)
   useEffect(() => { if (preset) { setAdding(true) } }, [preset])
+  // "Set dates / add tasks" in the Next step bar: open the new-task form.
+  useEffect(() => { if (addSignal) setAdding(true) }, [addSignal])
 
   const planning = week > current
+  const writable = !!jw.writable
   const rows = useMemo(() => [
-    ...(jw.overdue || []).map((t) => ({ t, overdue: true })),
-    ...(jw.tasks || []).map((t) => ({ t, overdue: false })),
+    ...(jw.overdue || []).map((t) => ({ t })),
+    ...(jw.tasks || []).map((t) => ({ t })),
   ], [jw])
-  const isUpdated = (t) => !!t.update
-  const todo = rows.filter((r) => !isUpdated(r.t))
-  const doneRows = rows.filter((r) => isUpdated(r.t))
+  // A failed post is not an update: it stays to do, with a Retry on its card.
+  const todo = rows.filter((r) => needsUpdate(r.t, writable))
+  const doneRows = rows.filter((r) => !needsUpdate(r.t, writable))
   const shown = planning ? rows : filter === 'todo' ? todo : filter === 'done' ? doneRows : rows
-  // The tasks under their projects, in the order the projects first appear —
-  // so a project with a task past due comes first.
+
+  /*
+   * WHAT WAS JUST POSTED, confirmed in its project's block for a few seconds —
+   * a warning (part of it did not reach Jira) until it is dismissed.
+   */
+  const [flashes, setFlashes] = useState([])
+  const timers = useRef([])
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
+  const dismiss = (id) => setFlashes((l) => l.filter((f) => f.id !== id))
+  const onPosted = (task, update, text) => {
+    const j = update?.jira
+    const partial = partialPost(update)
+    let flash
+    if (text) flash = { tone: 'success', text }
+    else if (j?.state === 'posted') {
+      flash = partial.length
+        ? { tone: 'warning', text: `${postedSummary(task.key, j)} — but ${partial.join('; ')}.` }
+        : { tone: 'success', text: `${postedSummary(task.key, j)}.` }
+    } else if (!writable) flash = { tone: 'info', text: `Update on ${task.key} kept here — writing to Jira is switched off on the server.` }
+    else flash = { tone: 'warning', text: `Kept here, but not posted to ${task.key} in Jira: ${j?.error || 'Jira did not answer'}. It stays under Not updated yet, with Retry posting on its card.` }
+    const id = `${task.key}:${Date.now()}`
+    setFlashes((l) => [...l.filter((f) => f.key !== task.key), {
+      ...flash, id, key: task.key, group: groupKeyOf(task), name: groupNameOf(task),
+    }])
+    if (flash.tone === 'success' || flash.tone === 'info') timers.current.push(setTimeout(() => dismiss(id), FLASH_MS))
+  }
+
+  /*
+   * The tasks under their projects. The order is taken once per week, as the
+   * projects first appear, and kept: a project does not jump about the page
+   * because one of its tasks was just submitted.
+   */
+  const order = useRef({ week: null, keys: [] })
+  if (order.current.week !== week) order.current = { week, keys: [] }
+  for (const r of rows) {
+    const k = groupKeyOf(r.t)
+    if (!order.current.keys.includes(k)) order.current.keys.push(k)
+  }
   const groups = useMemo(() => {
     const by = new Map()
     for (const r of shown) {
-      const key = r.t.project?.key || r.t.parent?.key || (r.t.epic ? r.t.key : '')
-      if (!by.has(key)) by.set(key, { key, name: r.t.project?.summary || r.t.parent?.summary || 'No project', rows: [] })
+      const key = groupKeyOf(r.t)
+      if (!by.has(key)) by.set(key, { key, name: groupNameOf(r.t), rows: [] })
       by.get(key).rows.push(r)
     }
+    // A block whose last card just left still shows what was posted from it.
+    for (const f of flashes) if (!by.has(f.group)) by.set(f.group, { key: f.group, name: f.name, rows: [] })
     // The project's own epic first, then its tasks.
     for (const g of by.values()) g.rows.sort((a, b) => Number(!!b.t.epic) - Number(!!a.t.epic))
-    return [...by.values()]
-  }, [shown])
+    const at = (k) => { const i = order.current.keys.indexOf(k); return i < 0 ? 1e6 : i }
+    return [...by.values()].sort((a, b) => at(a.key) - at(b.key))
+  }, [shown, flashes])
 
-  const confirm = async () => {
-    setBusy(true)
-    setNote(null)
-    try {
-      const r = await api.confirmJiraPlan(week)
-      setNote({ tone: 'success', text: `Plan for ${weekTitle(week)} recorded: ${r.planned} task${r.planned === 1 ? '' : 's'}.` })
-      onPlanned?.()
-    } catch (e) {
-      setNote({ tone: 'error', text: e.message })
-    } finally {
-      setBusy(false)
+  // An unsent draft on any card: the tab asks before it closes. (The draft is
+  // kept in this browser either way; this is so nobody thinks it was sent.)
+  useEffect(() => {
+    const warn = (e) => {
+      if (unsentDrafts(person, addWeeks(current, -1)).length) { e.preventDefault(); e.returnValue = '' }
     }
-  }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [person, current])
 
+  const isCurrent = week === current
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }} component="section" aria-label="my Jira tasks">
       {!jw.writable && (
@@ -637,67 +830,77 @@ export default function JiraWeek({
       <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'stretch', flexWrap: 'wrap' }}>
         <Box sx={{ flex: 1, minWidth: 260, display: 'flex', flexDirection: 'column', gap: 1 }}>
           {!planning && (
-            <ToggleButtonGroup size="small" exclusive value={filter} onChange={(_e, v) => v && setFilter(v)} aria-label="which tasks">
-              <ToggleButton value="todo">Not updated yet ({todo.length})</ToggleButton>
-              <ToggleButton value="done">Already updated ({doneRows.length})</ToggleButton>
-              <ToggleButton value="all">All ({rows.length})</ToggleButton>
+            <ToggleButtonGroup size="small" exclusive value={filter} onChange={(_e, v) => v && setFilter(v)} aria-label="which tasks" sx={{ flexWrap: 'wrap' }}>
+              <ToggleButton value="todo" sx={focusRingSx}>Not updated yet ({todo.length})</ToggleButton>
+              <ToggleButton value="done" sx={focusRingSx}>Already updated ({doneRows.length})</ToggleButton>
+              <ToggleButton value="all" sx={focusRingSx}>All ({rows.length})</ToggleButton>
             </ToggleButtonGroup>
           )}
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             The Jira epics and tasks with you ({jw.account}) as PIC whose timeline covers {weekTitle(week)}.
           </Typography>
         </Box>
-        <Paper variant="outlined" sx={{ p: 1.5, minWidth: 240, maxWidth: { sm: 340 }, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-          {planning ? (
-            <>
-              <Typography variant="body2" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.75 }}><EventIcon fontSize="small" /> Planning week {weekNo(week)}</Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                Set dates on your Jira tasks so they fall in this week, or add new ones. Then confirm.
-              </Typography>
-            </>
-          ) : (
-            <>
-              <Typography variant="body2" sx={{ fontWeight: 700, color: 'warning.light', display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <EventIcon fontSize="small" /> Don&rsquo;t forget next week&rsquo;s plan
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                Week {weekNo(addWeeks(week, 1))}: set dates on the Jira tasks you will work on, before Monday 08:00.
-              </Typography>
-              <Button
-                size="small"
-                variant={todo.length === 0 && week === current ? 'contained' : 'text'}
-                onClick={() => onGoWeek(1)}
-                sx={[{ alignSelf: 'flex-start' }, todo.length === 0 && week === current && pulseSx]}
-              >
-                Plan week {weekNo(addWeeks(week, 1))} →
-              </Button>
-            </>
-          )}
-          {canWrite && (planIn
-            ? <Typography variant="caption" sx={{ color: 'text.secondary' }}>Plan for week {weekNo(week)} recorded {planInAt ? ago(planInAt) : ''}.</Typography>
-            : (
-              <Button size="small" variant={planning ? 'contained' : 'outlined'} onClick={confirm} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy} sx={[{ alignSelf: 'flex-start' }, planning && pulseSx]}>
-                My plan for week {weekNo(week)} is set
-              </Button>
-            ))}
-        </Paper>
+        {/* Planning prompts only where planning can still happen: the week
+            ahead, or this week's reminder about it. A past or closed week has
+            none. */}
+        {canWrite && (planning || isCurrent) && (
+          <Paper variant="outlined" sx={{ p: 1.5, minWidth: 240, maxWidth: { sm: 340 }, display: 'flex', flexDirection: 'column', gap: 0.75 }} data-plan-box>
+            {planning ? (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.75 }}><EventIcon fontSize="small" /> Planning week {weekNo(week)}</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Set dates on your Jira tasks so they fall in this week, or add new ones.
+                  {planIn ? '' : ' Then press “My plan is set” at the top.'}
+                </Typography>
+                {planIn && <Typography variant="caption" sx={{ color: 'text.secondary' }}>Plan for week {weekNo(week)} recorded {planInAt ? ago(planInAt) : ''}.</Typography>}
+              </>
+            ) : (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary', display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  <EventIcon fontSize="small" sx={{ color: 'warning.light' }} /> Don&rsquo;t forget next week&rsquo;s plan
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Week {weekNo(addWeeks(week, 1))}: set dates on the Jira tasks you will work on, before Monday 08:00.
+                </Typography>
+                <Button
+                  size="small"
+                  variant={todo.length === 0 ? 'outlined' : 'text'}
+                  onClick={() => onGoWeek(1)}
+                  sx={[{ alignSelf: 'flex-start' }, focusRingSx]}
+                >
+                  Plan week {weekNo(addWeeks(week, 1))} →
+                </Button>
+              </>
+            )}
+          </Paper>
+        )}
       </Box>
-      {note && <Alert severity={note.tone} sx={{ py: 0 }} onClose={() => setNote(null)}>{note.text}</Alert>}
+      {note && <Alert severity={note.tone} variant="outlined" sx={{ py: 0 }} onClose={() => setNote(null)}>{note.text}</Alert>}
 
       {groups.map((g) => (
-        <ProjectGroup key={g.key || 'none'} name={g.name} projectKey={g.key} rows={g.rows} planning={planning}>
-          {g.rows.map(({ t, overdue }) => (
+        <ProjectGroup
+          key={g.key || 'none'}
+          name={g.name}
+          projectKey={g.key}
+          rows={g.rows}
+          planning={planning}
+          writable={writable}
+          flashes={flashes.filter((f) => f.group === g.key)}
+          onDismiss={dismiss}
+        >
+          {g.rows.map(({ t }) => (
             <TaskCard
               key={`${t.key}:${t.update?.submittedAt || ''}`}
               task={t}
               week={week}
-              overdue={overdue}
+              person={person}
               planning={planning}
               canWrite={canWrite}
               writable={jw.writable}
               aiOn={aiOn}
               highlight={!!focusKey && t.project?.key === focusKey}
-              onSaved={onReload}
+              onSaved={(x) => { if (x?.dates) onDatesSaved?.(); onReload?.() }}
+              onPosted={onPosted}
               grouped
             />
           ))}
@@ -706,30 +909,42 @@ export default function JiraWeek({
       {shown.length === 0 && (
         <Typography variant="body2" sx={{ color: 'text.secondary', py: 1 }}>
           {rows.length === 0
-            ? `Nothing in Jira with you as PIC covers ${weekTitle(week)}. Add a task below, or give an undated one some dates.`
+            ? (canWrite
+              ? `Nothing in Jira with you as PIC covers ${weekTitle(week)} yet. ${planning ? 'Give a task below some dates, or add one.' : 'Add a task below, or give an undated one some dates.'}`
+              : `Nothing in Jira with you as PIC covered ${weekTitle(week)}.`)
             : filter === 'todo' ? 'Every task this week has an update. Thank you.' : 'Nothing updated yet this week.'}
         </Typography>
       )}
 
       {(jw.undated || []).length > 0 && canWrite && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }} data-undated>
           <Typography variant="h4">No dates yet</Typography>
           <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>
             Your open Jira tasks with no start or due date. Give one dates to put it in a week.
           </Typography>
           {jw.undated.map((t) => (
-            <TaskCard key={t.key} task={t} week={week} planning canWrite={canWrite} writable={jw.writable} onSaved={onReload} />
+            <TaskCard
+              key={t.key}
+              task={t}
+              week={week}
+              person={person}
+              planning
+              canWrite={canWrite}
+              writable={jw.writable}
+              onSaved={(x) => { if (x?.dates) onDatesSaved?.(); onReload?.() }}
+              onPosted={onPosted}
+            />
           ))}
         </Box>
       )}
 
       {canWrite && !adding && !addingProject && (
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button startIcon={<AddIcon />} onClick={() => setAdding(true)}>Add a task</Button>
-          <Button startIcon={<AddIcon />} onClick={() => setAddingProject(true)}>New project</Button>
+          <Button startIcon={<AddIcon />} onClick={() => setAdding(true)} sx={focusRingSx}>Add a task</Button>
+          <Button startIcon={<AddIcon />} onClick={() => setAddingProject(true)} sx={focusRingSx}>New project</Button>
         </Box>
       )}
-      {adding && (
+      {adding && canWrite && (
         <NewTask
           week={week}
           projects={projects}
@@ -744,7 +959,7 @@ export default function JiraWeek({
           }}
         />
       )}
-      {addingProject && (
+      {addingProject && canWrite && (
         <NewProject
           week={week}
           writable={jw.writable}

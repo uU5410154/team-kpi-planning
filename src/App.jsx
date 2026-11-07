@@ -149,6 +149,7 @@ export default function App() {
   const [wasReset] = useState(loadWasReset)
   const [state, setState] = useState(loadState)
   const [toast, setToast] = useState(null)
+  const shownNoAccess = useRef(false)
   const [menuEl, setMenuEl] = useState(null)
   /*
    * The side menu: folded to icons or open, remembered per browser — somebody
@@ -246,7 +247,16 @@ export default function App() {
   useEffect(() => {
     if (!viewer) return
     const mine = TABS.filter((t) => (t.roles || []).includes(viewer.role))
-    if (mine.length && !mine.some((t) => t.id === tab)) setTab(mine[0].id)
+    if (mine.length && !mine.some((t) => t.id === tab)) {
+      // Named in the link (a bookmark, a forwarded email), not just the
+      // default page: said once, quietly, rather than a silent jump.
+      const [named] = hashParts()
+      if (named && TABS.some((t) => t.id === named) && !shownNoAccess.current) {
+        shownNoAccess.current = true
+        setToast({ severity: 'info', muted: true, msg: 'That page is for administrators, so you are on your week instead.' })
+      }
+      setTab(mine[0].id)
+    }
   }, [viewer?.role, me, tab])
 
   useEffect(() => {
@@ -383,7 +393,7 @@ export default function App() {
    * Take the shared plan. One path, so the automatic case and the button can
    * never end up doing subtly different things.
    */
-  const takeShared = useCallback(async (entry, how) => {
+  const takeShared = useCallback(async (entry, how, { announce = false } = {}) => {
     const doc = await api.loadScenario(entry.name)
     if (!doc?.payload?.projects) throw new Error('That scenario has no projects in it.')
     let taken = null
@@ -405,10 +415,18 @@ export default function App() {
     linkedToDb.current = true
     setDbNotice(null)
     setTimeout(() => setDirty(false), 0)
-    setToast({
-      severity: 'success',
-      msg: `${how} "${entry.name}" from the shared database — ${doc.payload.projects.length} projects.`,
-    })
+    /*
+     * Said only when somebody pressed "Load it". The automatic load on every
+     * visit is routine: a bright toast about "the shared database" covered the
+     * page each time and told a member nothing they could use (QA, 2026-11-07).
+     */
+    if (announce) {
+      setToast({
+        severity: 'success',
+        muted: true,
+        msg: `${how} the latest shared plan — ${doc.payload.projects.length} projects.`,
+      })
+    }
   }, [])
 
   useEffect(() => {
@@ -1517,7 +1535,7 @@ export default function App() {
                   disabled={loadingShared}
                   onClick={async () => {
                     setLoadingShared(true)
-                    try { await takeShared(dbNotice, 'Loaded') } catch (e) {
+                    try { await takeShared(dbNotice, 'Loaded', { announce: true }) } catch (e) {
                       setToast({ severity: 'error', msg: e.message })
                     } finally { setLoadingShared(false) }
                   }}
@@ -1543,7 +1561,12 @@ export default function App() {
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
           {toast ? (
-            <Alert severity={toast.severity} variant="filled" onClose={() => setToast(null)}>
+            <Alert
+              severity={toast.severity}
+              variant={toast.muted ? 'outlined' : 'filled'}
+              onClose={() => setToast(null)}
+              sx={toast.muted ? { bgcolor: 'background.paper', color: 'text.primary' } : undefined}
+            >
               {toast.msg}
             </Alert>
           ) : undefined}

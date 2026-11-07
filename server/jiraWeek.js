@@ -263,6 +263,18 @@ export async function submit(week, me, body, now = Date.now()) {
     by: me.email,
     jira: { state: 'pending' },
   }
+  /*
+   * The same day's entry in the description, if this task was already updated
+   * today: replaced, not added to (see jira.appendWeeklyEntry). Taken from
+   * what was posted then, or rebuilt from the update kept here.
+   */
+  const prev = await k.updates.findOne({ _id: id })
+  let sameDay = null
+  if (prev?.jira?.description === 'updated' && prev.submittedAt && jira.ddmmyyyy(prev.submittedAt) === jira.ddmmyyyy(now)) {
+    sameDay = prev.jira.descriptionText || descriptionText({
+      nick: prev.nick || nick, week, u: prev, attachments: prev.jira.attachments || [], at: Date.parse(prev.submittedAt),
+    })
+  }
   await k.updates.updateOne({ _id: id }, { $set: doc }, { upsert: true })
 
   // To Jira: the screenshot, then the comment naming it, then Done.
@@ -275,10 +287,13 @@ export async function submit(week, me, body, now = Date.now()) {
     // And added to the description, so the issue itself says where it stands. A field
     // Jira will not let the app edit is reported, and does not stop the rest.
     try {
-      await jira.addToDescription(key, descriptionText({
+      const text = descriptionText({
         nick, week, u, attachments: names, at: now,
-      }))
+      })
+      const d = await jira.addToDescription(key, text, { replace: sameDay })
       result.description = 'updated'
+      result.descriptionText = text
+      if (d?.replaced) result.descriptionReplaced = true
     } catch (e) {
       if (e.writesOff) throw e
       result.description = `not updated: ${e.message}`
