@@ -657,6 +657,24 @@ app.put('/api/projects/columns', adminOnly, async (req, res) => {
   return res.json(r)
 })
 
+/* The Projects page's blocks and figures, as an administrator arranged them for everybody. */
+app.get('/api/projects/layout', async (_req, res) => {
+  const r = await manager.getProjectLayout()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
+})
+app.put('/api/projects/layout', adminOnly, async (req, res) => {
+  const r = await manager.saveProjectLayout(req.body?.layout, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(400).json(r)
+  return res.json(r)
+})
+app.delete('/api/projects/layout', adminOnly, async (_req, res) => {
+  const r = await manager.resetProjectLayout()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
+})
+
 /* Ask a project's owner for an update, and see who has been asked. */
 app.post('/api/followups', adminOnly, async (req, res) => {
   const key = String(req.body?.projectKey || '').trim().slice(0, 40)

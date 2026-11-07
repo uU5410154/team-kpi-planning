@@ -102,6 +102,17 @@ try {
   check('  and only known columns are kept', junk.status === 200 && JSON.stringify(junk.body.hidden) === '["roi"]', JSON.stringify(junk.body))
   await call('PUT', '/api/projects/columns', { hidden: [] }, boss)
 
+  console.log('\n--- the page layout, on the server ---')
+  check('NO LAYOUT SAVED TO BEGIN WITH: the default shows', (await call('GET', '/api/projects/layout', undefined, james)).body.layout === null)
+  check('A MEMBER CANNOT SAVE A LAYOUT (403)', (await call('PUT', '/api/projects/layout', { layout: { hiddenSections: ['filters'] } }, james)).status === 403)
+  check('a layout is an object', (await call('PUT', '/api/projects/layout', { layout: ['x'] }, boss)).status === 400)
+  const lj = await call('PUT', '/api/projects/layout', { layout: { sections: ['table', '$x', 'table'], hiddenSections: ['table', 'about', 'nope'], tiles: ['roi'], hiddenTiles: ['capex'], wideTiles: ['roi', 'zzz'] } }, boss)
+  check('  only known blocks and figures are kept, the table can never be hidden, nothing is lost',
+    lj.status === 200 && lj.body.layout.sections[0] === 'table' && lj.body.layout.sections.length === 5
+    && JSON.stringify(lj.body.layout.hiddenSections) === '["about"]' && lj.body.layout.tiles[0] === 'roi' && lj.body.layout.tiles.length === 11
+    && JSON.stringify(lj.body.layout.wideTiles) === '["roi"]', JSON.stringify(lj.body.layout))
+  check('  an administrator can put it back to the default', (await call('DELETE', '/api/projects/layout', undefined, boss)).body.layout === null)
+
   const chrome = [
     process.env.CHROME_PATH,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -169,6 +180,58 @@ try {
       return t.querySelectorAll('thead th').length === t.querySelector('tbody tr').children.length
     }))
     await d.browserContext().close()
+
+    console.log('\n--- an administrator arranges the page, for everybody ---')
+    const order = (pg) => pg.evaluate(() => [...document.querySelectorAll('[data-layout-block]')]
+      .map((b) => [b.dataset.layoutBlock, Number(getComputedStyle(b).order), b.getBoundingClientRect().top])
+      .sort((x, y) => x[2] - y[2]).map((x) => x[0]))
+    const tiles = (pg) => pg.evaluate(() => [...document.querySelectorAll('[data-tile]')].map((t) => t.dataset.tile))
+    check('the default order: note, filters, figures, tools, table', (await order(a)).join() === 'about,filters,figures,tools,table', (await order(a)).join())
+    await a.click('[data-edit-layout]')
+    await sleep(300)
+    await a.click('[aria-label="move Figures up"]')
+    await a.click('[aria-label="move Figures up"]')
+    await a.click('[data-toggle-block="about"]')
+    await a.click('[data-toggle-tile="capex"]')
+    await a.click('[aria-label="move ROI left"]')
+    await a.click('[aria-label="wider ROI"]')
+    await sleep(200)
+    if (process.env.SHOT) await a.screenshot({ path: `${process.env.SHOT}/layout-editing.png`, fullPage: false })
+    check('EDITING: a hidden block keeps its bar so it can be shown again', await a.evaluate(() => /hidden/i.test(document.querySelector('[data-layout-block="about"]')?.innerText || '')))
+    await a.click('[data-save-layout]')
+    await sleep(800)
+    const ao = await order(a)
+    check('SAVED: figures first, the note gone', ao.join() === 'figures,filters,tools,table', ao.join())
+    const at = await tiles(a)
+    check('  CAPEX hidden, ROI moved left of Investment', !at.includes('capex') && at.indexOf('roi') === at.indexOf('investment') - 1, at.join())
+    const saved = await call('GET', '/api/projects/layout', undefined, james)
+    check('  kept on the server, with who arranged it', saved.body.updatedBy === 'boss@lotuss.com' && saved.body.layout.wideTiles.includes('roi'), JSON.stringify(saved.body).slice(0, 200))
+    const d2 = await as(deputy, { width: 1280, height: 900 })
+    await d2.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+    await sleep(700)
+    check('ANOTHER ADMINISTRATOR SEES THE SAME LAYOUT', (await order(d2)).join() === 'figures,filters,tools,table' && !(await tiles(d2)).includes('capex'), (await order(d2)).join())
+    check('  ROI is wider than its neighbours', await d2.evaluate(() => {
+      const w = (id) => document.querySelector(`[data-tile="${id}"]`).getBoundingClientRect().width
+      return w('roi') > w('investment') * 1.3
+    }))
+    check('  and still no sideways scroll', await d2.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
+    // Cancel throws a draft away.
+    await d2.click('[data-edit-layout]')
+    await sleep(200)
+    await d2.click('[data-toggle-block="filters"]')
+    await d2.evaluate(() => [...document.querySelectorAll('[data-layout-toolbar] button')].find((b) => b.innerText.trim() === 'Cancel').click())
+    await sleep(300)
+    check('CANCEL LEAVES THE LAYOUT AS IT WAS', (await order(d2)).includes('filters'))
+    // Reset to default, saved.
+    await d2.click('[data-edit-layout]')
+    await sleep(200)
+    await d2.evaluate(() => [...document.querySelectorAll('[data-layout-toolbar] button')].find((b) => /Reset to default/.test(b.innerText)).click())
+    await d2.click('[data-save-layout]')
+    await sleep(800)
+    check('RESET TO DEFAULT puts everything back', (await order(d2)).join() === 'about,filters,figures,tools,table' && (await tiles(d2)).length === 11, (await order(d2)).join())
+    await d2.browserContext().close()
+    await a.reload({ waitUntil: 'networkidle0' })
+    await sleep(600)
 
     console.log('\n--- a project opens in a popup ---')
     const name = await a.evaluate(() => document.querySelector('[data-open-project]').textContent.trim())

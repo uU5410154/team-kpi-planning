@@ -15,6 +15,17 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ProjectDetailDialog from '../components/ProjectDetailDialog.jsx'
 import * as api from '../lib/api.js'
 import { PROJECT_COLUMNS } from '../lib/projectColumns.js'
+import {
+  PROJECT_SECTIONS, DEFAULT_PROJECT_LAYOUT, cleanProjectLayout, moveId, toggleId,
+} from '../lib/projectLayout.js'
+import LayoutIcon from '@mui/icons-material/DashboardCustomizeOutlined'
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
+import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
+import WidthWideOutlinedIcon from '@mui/icons-material/WidthWideOutlined'
+import WidthNormalOutlinedIcon from '@mui/icons-material/WidthNormalOutlined'
 import SaveIcon from '@mui/icons-material/Save'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SearchIcon from '@mui/icons-material/Search'
@@ -71,6 +82,51 @@ function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false
       inputProps={{ style: { fontSize: '0.8125rem', fontWeight: bold ? 500 : 400 } }}
       sx={{ width }}
     />
+  )
+}
+
+/**
+ * ONE BLOCK OF THE PAGE, where the layout puts it. In Edit layout it carries a
+ * bar to move it up or down and to hide or show it; a hidden block shows only
+ * that bar while editing, and nothing otherwise.
+ */
+function LayoutBlock({
+  id, label, order, hidden, editing, locked, first, last, onMove, onToggle, children,
+}) {
+  if (hidden && !editing) return null
+  return (
+    <Box
+      data-layout-block={id}
+      sx={{
+        order,
+        minWidth: 0,
+        ...(editing && {
+          outline: '1px dashed', outlineColor: 'divider', outlineOffset: 6, borderRadius: 2,
+        }),
+      }}
+    >
+      {editing && (
+        <Box sx={{
+          display: 'flex', alignItems: 'center', gap: 0.5, mb: hidden ? 0 : 1, opacity: hidden ? 0.55 : 1,
+        }}
+        >
+          <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary' }}>
+            {label}{hidden ? ' · hidden' : ''}
+          </Typography>
+          <Box sx={{ flex: 1 }} />
+          <Tooltip title="Move up"><span><IconButton size="small" disabled={first} onClick={() => onMove(-1)} aria-label={`move ${label} up`}><ArrowUpwardIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+          <Tooltip title="Move down"><span><IconButton size="small" disabled={last} onClick={() => onMove(1)} aria-label={`move ${label} down`}><ArrowDownwardIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+          {!locked && (
+            <Tooltip title={hidden ? 'Show' : 'Hide'}>
+              <IconButton size="small" onClick={onToggle} aria-label={`${hidden ? 'show' : 'hide'} ${label}`} data-toggle-block={id}>
+                {hidden ? <VisibilityOffOutlinedIcon sx={{ fontSize: 16 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 16 }} />}
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      )}
+      {!hidden && children}
+    </Box>
   )
 }
 
@@ -503,6 +559,55 @@ export default function Projects({
   }
 
   /*
+   * THE PAGE'S LAYOUT: which blocks and figure tiles show, in what order, as an
+   * administrator arranged it for everybody. undefined while loading, null
+   * when the shared database cannot be read (the default layout shows).
+   */
+  const [layoutSaved, setLayoutSaved] = useState(undefined)
+  const [layoutDraft, setLayoutDraft] = useState(null)
+  const [layoutBusy, setLayoutBusy] = useState(false)
+  const [layoutError, setLayoutError] = useState(null)
+  useEffect(() => {
+    let stop = false
+    api.projectLayout()
+      .then((r) => { if (!stop) setLayoutSaved({ ...r, layout: r.layout ? cleanProjectLayout(r.layout) : null }) })
+      .catch(() => { if (!stop) setLayoutSaved(null) })
+    return () => { stop = true }
+  }, [])
+  const editingLayout = !!layoutDraft
+  const lay = layoutDraft || layoutSaved?.layout || DEFAULT_PROJECT_LAYOUT
+  const editLayout = (fn) => setLayoutDraft((d) => fn(d || lay))
+  const saveLayout = async () => {
+    setLayoutBusy(true)
+    setLayoutError(null)
+    try {
+      const r = await api.saveProjectLayout(layoutDraft)
+      setLayoutSaved({ ...r, layout: cleanProjectLayout(r.layout) })
+      setLayoutDraft(null)
+    } catch (e) {
+      setLayoutError(/unavailable/i.test(e.message) ? 'Not saved — the shared database is not reachable.' : `Not saved — ${e.message}`)
+    } finally {
+      setLayoutBusy(false)
+    }
+  }
+  const block = (id) => {
+    const s = PROJECT_SECTIONS.find((x) => x.id === id)
+    const i = lay.sections.indexOf(id)
+    return {
+      id,
+      label: s.label,
+      locked: !!s.locked,
+      order: i + 1,
+      hidden: lay.hiddenSections.includes(id),
+      editing: editingLayout,
+      first: i === 0,
+      last: i === lay.sections.length - 1,
+      onMove: (by) => editLayout((d) => ({ ...d, sections: moveId(d.sections, id, by) })),
+      onToggle: () => editLayout((d) => ({ ...d, hiddenSections: toggleId(d.hiddenSections, id) })),
+    }
+  }
+
+  /*
    * THE HELD COLUMNS. The select box, the cost-sheet button, the Jira key and
    * — on a screen wide enough to spare it — the project's name stay put while
    * the rest of the table scrolls under them, so a row is never a line of
@@ -791,8 +896,110 @@ export default function Projects({
     }
   }, [rows, registerHours])
 
+  // The figures over the table, by id, for the layout to order and hide.
+  const tileById = Object.fromEntries([
+      { id: 'count', label: 'Projects in view', value: agg.count.toLocaleString(), sub: agg.tbc ? `${agg.tbc} still TBC` : 'all quantified' },
+      {
+        id: 'hours',
+        label: 'Saving hrs / month',
+        value: fmtHours(agg.hours),
+        sub: agg.deferred > 0
+          ? `${fmtHours(agg.deferred)} of it out of plan`
+          : `${fmtPct(agg.pctOfBook)} of the register`,
+        strong: true,
+        tone: agg.deferred > 0 ? STATUS.warning : undefined,
+      },
+      { id: 'done', label: 'Of which delivered', value: fmtHours(agg.done), sub: 'status Done' },
+      {
+        id: 'fte',
+        label: 'FTE',
+        value: agg.hc ? agg.hc.toFixed(1) : '—',
+        sub: 'FTE released',
+        help: `The source workbook's own FTE column, editable per row: saving hours ÷ ${fin.hoursPerFteMonth} hours per FTE month, rounded to one decimal on each project. Change the ratio on the Model tab — it drives this column's arithmetic and the accountant hourly rate together. Capacity released, not people removed from the payroll.`,
+      },
+      { id: 'manday', label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
+      {
+        id: 'benefit',
+        label: 'Benefit / year',
+        value: fmtMoneyShort(agg.annualBenefit, sym),
+        sub: `${fmtMoney(fin.acctHourRate, sym)} per saved hour`,
+        help: `Saving hours x the accountant rate, annualised. Covers every quantified row in view, whether or not it has an effort estimate.`,
+      },
+      {
+        id: 'build',
+        label: 'Build cost',
+        value: fmtMoneyShort(agg.buildCost, sym),
+        sub: agg.buildCost == null ? 'no mandays in view' : `${fmtMoney(fin.devDayRate, sym)} per manday`,
+        help: 'Mandays x the developer rate, across the in-plan rows in view that carry an effort estimate.',
+      },
+      {
+        id: 'capex',
+        label: 'CAPEX',
+        value: fmtMoneyShort(agg.capex, sym),
+        sub: agg.capex == null ? 'none entered' : 'one-off, not depreciated',
+        help: 'Infrastructure, licences and hardware bought once, across the in-plan rows in view. Open a project\'s cost sheet (the receipt icon on its row) to enter or edit it. No depreciation is applied — the whole amount is charged against the project.',
+      },
+      {
+        id: 'opex',
+        label: 'OPEX / year',
+        value: agg.opexYear > 0 ? fmtMoneyShort(agg.opexYear, sym) : '—',
+        sub: agg.opexRunRate > 0 ? `${fmtMoneyShort(agg.opexRunRate, sym)}/month run-rate` : 'none entered',
+        help: 'The 2026 monthly-cost grid added up: each running-cost line counted only in the months it is live. The run-rate underneath ignores start and end months — that is the steady-state monthly cost the ROI is measured against.',
+      },
+      {
+        id: 'investment',
+        label: 'Investment',
+        value: fmtMoneyShort(agg.investment, sym),
+        sub: agg.investment == null ? 'nothing costed in view' : 'build + CAPEX, returnable rows',
+        help: 'Build cost plus CAPEX, across only the rows in view that carry BOTH a known cost and a known benefit — the same set the ROI beside it divides. It is deliberately not the same as Build cost + CAPEX above, which cover every in-plan row on screen.',
+      },
+      {
+        id: 'roi',
+        label: 'ROI',
+        value: fmtRoi(agg.roi),
+        sub: agg.roi == null
+          ? 'needs mandays or CAPEX'
+          : `${agg.roiRows} of ${agg.inPlanCount} in-plan rows · gate ${fmtRoi(fin.roiGate)}`,
+        tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? STATUS.good : STATUS.critical,
+        help: `Return over ${horizon} months on the whole investment — build cost plus CAPEX — against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are in EITHER side, so this is never a whole-book benefit divided by a partial cost.`,
+      },
+  ].map((t) => [t.id, t]))
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Edit layout: an administrator arranges the page for everybody. */}
+      {canWrite && !phone && layoutSaved !== undefined && (
+        <Box sx={{ order: 0, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }} data-layout-toolbar>
+          {!editingLayout ? (
+            <>
+              <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
+                {layoutSaved === null
+                  ? 'The layout cannot be changed while the shared database is unavailable.'
+                  : layoutSaved.updatedBy ? `Layout arranged by ${layoutSaved.updatedBy} — the same for everybody.` : ''}
+              </Typography>
+              {layoutSaved !== null && (
+                <Button size="small" variant="outlined" startIcon={<LayoutIcon />} onClick={() => { setLayoutDraft(lay); setLayoutError(null) }} sx={{ color: 'text.primary', borderColor: 'divider' }} data-edit-layout>
+                  Edit layout
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
+                Move blocks up or down, hide what nobody needs, and arrange the figures with the arrows under each one. Saved for everybody.
+              </Typography>
+              <Button size="small" onClick={() => setLayoutDraft(DEFAULT_PROJECT_LAYOUT)}>Reset to default</Button>
+              <Button size="small" onClick={() => { setLayoutDraft(null); setLayoutError(null) }}>Cancel</Button>
+              <Button size="small" variant="contained" onClick={saveLayout} disabled={layoutBusy} startIcon={layoutBusy ? <CircularProgress size={14} /> : null} data-save-layout>
+                Save layout
+              </Button>
+            </>
+          )}
+          {layoutError && <Alert severity="error" sx={{ width: '100%', py: 0 }} onClose={() => setLayoutError(null)}>{layoutError}</Alert>}
+        </Box>
+      )}
+
+      <LayoutBlock {...block('about')}>
       {/* The how-to, folded to one line: on a phone the whole of it filled
           the first screen before a single project showed. */}
       <Alert
@@ -831,7 +1038,9 @@ export default function Projects({
           </Box>
         </Collapse>
       </Alert>
+      </LayoutBlock>
 
+      <LayoutBlock {...block('filters')}>
       <Paper variant="outlined" sx={{ p: 2 }}>
         {/* Wraps: beside the side menu a 1500px screen leaves about 1,200px,
             which is less than the search box and six filters need in one row. */}
@@ -1080,7 +1289,9 @@ export default function Projects({
           </Typography>
         )}
       </Paper>
+      </LayoutBlock>
 
+      <LayoutBlock {...block('figures')}>
       {/* Filter-aware totals — always reflects exactly what the table shows */}
       <Paper variant="outlined" sx={{ p: 0, overflow: 'hidden' }}>
         {/* Two to a line on a phone, as many as fit wider. Each tile draws its
@@ -1094,69 +1305,22 @@ export default function Projects({
           mb: '-1px',
         }}
         >
-          {[
-            { label: 'Projects in view', value: agg.count.toLocaleString(), sub: agg.tbc ? `${agg.tbc} still TBC` : 'all quantified' },
-            {
-              label: 'Saving hrs / month',
-              value: fmtHours(agg.hours),
-              sub: agg.deferred > 0
-                ? `${fmtHours(agg.deferred)} of it out of plan`
-                : `${fmtPct(agg.pctOfBook)} of the register`,
-              strong: true,
-              tone: agg.deferred > 0 ? STATUS.warning : undefined,
-            },
-            { label: 'Of which delivered', value: fmtHours(agg.done), sub: 'status Done' },
-            {
-              label: 'FTE',
-              value: agg.hc ? agg.hc.toFixed(1) : '—',
-              sub: 'FTE released',
-              help: `The source workbook's own FTE column, editable per row: saving hours ÷ ${fin.hoursPerFteMonth} hours per FTE month, rounded to one decimal on each project. Change the ratio on the Model tab — it drives this column's arithmetic and the accountant hourly rate together. Capacity released, not people removed from the payroll.`,
-            },
-            { label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
-            {
-              label: 'Benefit / year',
-              value: fmtMoneyShort(agg.annualBenefit, sym),
-              sub: `${fmtMoney(fin.acctHourRate, sym)} per saved hour`,
-              help: `Saving hours x the accountant rate, annualised. Covers every quantified row in view, whether or not it has an effort estimate.`,
-            },
-            {
-              label: 'Build cost',
-              value: fmtMoneyShort(agg.buildCost, sym),
-              sub: agg.buildCost == null ? 'no mandays in view' : `${fmtMoney(fin.devDayRate, sym)} per manday`,
-              help: 'Mandays x the developer rate, across the in-plan rows in view that carry an effort estimate.',
-            },
-            {
-              label: 'CAPEX',
-              value: fmtMoneyShort(agg.capex, sym),
-              sub: agg.capex == null ? 'none entered' : 'one-off, not depreciated',
-              help: 'Infrastructure, licences and hardware bought once, across the in-plan rows in view. Open a project\'s cost sheet (the receipt icon on its row) to enter or edit it. No depreciation is applied — the whole amount is charged against the project.',
-            },
-            {
-              label: 'OPEX / year',
-              value: agg.opexYear > 0 ? fmtMoneyShort(agg.opexYear, sym) : '—',
-              sub: agg.opexRunRate > 0 ? `${fmtMoneyShort(agg.opexRunRate, sym)}/month run-rate` : 'none entered',
-              help: 'The 2026 monthly-cost grid added up: each running-cost line counted only in the months it is live. The run-rate underneath ignores start and end months — that is the steady-state monthly cost the ROI is measured against.',
-            },
-            {
-              label: 'Investment',
-              value: fmtMoneyShort(agg.investment, sym),
-              sub: agg.investment == null ? 'nothing costed in view' : 'build + CAPEX, returnable rows',
-              help: 'Build cost plus CAPEX, across only the rows in view that carry BOTH a known cost and a known benefit — the same set the ROI beside it divides. It is deliberately not the same as Build cost + CAPEX above, which cover every in-plan row on screen.',
-            },
-            {
-              label: 'ROI',
-              value: fmtRoi(agg.roi),
-              sub: agg.roi == null
-                ? 'needs mandays or CAPEX'
-                : `${agg.roiRows} of ${agg.inPlanCount} in-plan rows · gate ${fmtRoi(fin.roiGate)}`,
-              tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? STATUS.good : STATUS.critical,
-              help: `Return over ${horizon} months on the whole investment — build cost plus CAPEX — against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are in EITHER side, so this is never a whole-book benefit divided by a partial cost.`,
-            },
-          ].filter((_, i) => !phone || allTiles || i < 4).map((t) => (
+          {/* In the layout's order, without the hidden ones (shown faded while
+              the layout is being edited); on a phone, four until asked. */}
+          {lay.tiles
+            .map((id) => tileById[id])
+            .filter((t) => t && (editingLayout || !lay.hiddenTiles.includes(t.id)))
+            .filter((_, i) => editingLayout || !phone || allTiles || i < 4)
+            .map((t, i, list) => {
+              const off = lay.hiddenTiles.includes(t.id)
+              const wide = lay.wideTiles.includes(t.id)
+              return (
             <Box
-              key={t.label}
+              key={t.id}
+              data-tile={t.id}
               sx={{
-                flex: { xs: '1 1 40%', sm: '1 1 150px' },
+                flex: { xs: wide ? '1 1 100%' : '1 1 40%', sm: wide ? '2 1 300px' : '1 1 150px' },
+                opacity: off ? 0.4 : 1,
                 px: { xs: 1.5, sm: 2 },
                 py: { xs: 1.25, sm: 1.5 },
                 borderRight: 1,
@@ -1188,8 +1352,17 @@ export default function Projects({
                 {t.value}
               </Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>{t.sub}</Typography>
+              {editingLayout && (
+                <Box sx={{ display: 'flex', gap: 0.25, mt: 0.5, opacity: 1 }} data-tile-controls={t.id}>
+                  <Tooltip title="Move left"><span><IconButton size="small" disabled={i === 0} onClick={() => editLayout((d) => ({ ...d, tiles: moveId(d.tiles, t.id, -1) }))} aria-label={`move ${t.label} left`}><ChevronLeftIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+                  <Tooltip title="Move right"><span><IconButton size="small" disabled={i === list.length - 1} onClick={() => editLayout((d) => ({ ...d, tiles: moveId(d.tiles, t.id, 1) }))} aria-label={`move ${t.label} right`}><ChevronRightIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+                  <Tooltip title={wide ? 'Narrower' : 'Wider'}><IconButton size="small" onClick={() => editLayout((d) => ({ ...d, wideTiles: toggleId(d.wideTiles, t.id) }))} aria-label={`${wide ? 'narrower' : 'wider'} ${t.label}`}>{wide ? <WidthNormalOutlinedIcon sx={{ fontSize: 16 }} /> : <WidthWideOutlinedIcon sx={{ fontSize: 16 }} />}</IconButton></Tooltip>
+                  <Tooltip title={off ? 'Show' : 'Hide'}><IconButton size="small" onClick={() => editLayout((d) => ({ ...d, hiddenTiles: toggleId(d.hiddenTiles, t.id) }))} aria-label={`${off ? 'show' : 'hide'} ${t.label}`} data-toggle-tile={t.id}>{off ? <VisibilityOffOutlinedIcon sx={{ fontSize: 16 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 16 }} />}</IconButton></Tooltip>
+                </Box>
+              )}
             </Box>
-          ))}
+              )
+            })}
         </Box>
         {/* On a phone the money figures wait behind a tap: eleven tiles were
             six screens' worth of rows before the first project. */}
@@ -1206,8 +1379,9 @@ export default function Projects({
           </Button>
         )}
       </Paper>
+      </LayoutBlock>
 
-
+      <LayoutBlock {...block('tools')}>
       {/*
         * Export what is on screen, and import it back.
         *
@@ -1320,7 +1494,9 @@ export default function Projects({
           </>
         )}
       </Box>
+      </LayoutBlock>
 
+      <LayoutBlock {...block('table')}>
       {phone ? (
         <PhoneList rows={rows} assignees={assignees} onOpen={setDetailKey} />
       ) : (
@@ -1780,6 +1956,7 @@ export default function Projects({
       />
       </Box>
       )}
+      </LayoutBlock>
 
       {/* Looked up by key on every render, so a CAPEX typed inside it moves the
           ROI in the header of the very same dialog. */}

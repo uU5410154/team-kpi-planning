@@ -4,6 +4,7 @@ import * as auth from './auth.js'
 import * as mail from './mail.js'
 import { weekOf } from '../src/lib/weekly.js'
 import { cleanHiddenColumns } from '../src/lib/projectColumns.js'
+import { cleanProjectLayout } from '../src/lib/projectLayout.js'
 
 /**
  * THE MANAGER DASHBOARD'S OWN STORAGE.
@@ -120,6 +121,41 @@ export async function saveProjectColumns(hidden, by) {
   const doc = { hidden: clean, updatedAt: new Date().toISOString(), updatedBy: by }
   await k.layout.updateOne({ _id: COLUMNS_ID }, { $set: doc }, { upsert: true })
   return doc
+}
+
+/* --------------------------------------------- the Projects page's layout */
+
+/*
+ * Which blocks and figure tiles the Projects page shows, in what order: one
+ * arrangement, made by an administrator, for everybody. Beside the dashboard
+ * layout and the register's columns, for the same reason as them.
+ */
+const PROJECTS_LAYOUT_ID = 'projects-layout'
+
+export async function getProjectLayout() {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const doc = await k.layout.findOne({ _id: PROJECTS_LAYOUT_ID })
+  return doc
+    ? { layout: cleanProjectLayout(doc.layout), updatedAt: doc.updatedAt, updatedBy: doc.updatedBy }
+    : { layout: null }
+}
+
+export async function saveProjectLayout(layout, by) {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const clean = cleanProjectLayout(layout)
+  if (!clean) return { error: 'A layout lists the page\'s blocks and figures.' }
+  const doc = { layout: clean, updatedAt: new Date().toISOString(), updatedBy: by }
+  await k.layout.updateOne({ _id: PROJECTS_LAYOUT_ID }, { $set: doc }, { upsert: true })
+  return doc
+}
+
+export async function resetProjectLayout() {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  await k.layout.deleteOne({ _id: PROJECTS_LAYOUT_ID })
+  return { layout: null }
 }
 
 /* ----------------------------------------------------------- follow-ups */

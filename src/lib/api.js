@@ -216,6 +216,14 @@ export const saveProjectColumns = async (hidden) => j(await fetch('/api/projects
   body: JSON.stringify({ hidden }),
 }))
 
+/** The Projects page's blocks and figures, as an administrator arranged them for everybody. */
+export const projectLayout = async () => j(await fetch('/api/projects/layout'))
+export const saveProjectLayout = async (layout) => j(await fetch('/api/projects/layout', {
+  method: 'PUT',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ layout }),
+}))
+
 /** Ask a project's owner for an update, by email. */
 export const followUp = async (projectKey) => j(await fetch('/api/followups', {
   method: 'POST',
