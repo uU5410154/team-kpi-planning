@@ -527,8 +527,9 @@ app.get('/api/weekly/:week/jira', jiraWrap(async (req) => {
   if (!isWeek(week)) return { status: 400, error: 'A week is named by its Monday, as YYYY-MM-DD.' }
   if (!req.me.person) return { jira: 'unlinked', week }
   const r = await jiraWeek.weekFor(req.me.person, req.me.email, week)
-  // An administrator previewing a member: that member's week, to read only.
-  return req.me.previewAs && r && typeof r === 'object' ? { ...r, writable: false, previewAs: req.me.previewAs } : r
+  // An administrator previewing a member: that member's week, to read only
+  // (the week itself comes back not writable from GET /api/weekly/:week).
+  return req.me.previewAs && r && typeof r === 'object' ? { ...r, previewAs: req.me.previewAs } : r
 }))
 app.post('/api/weekly/:week/jira/plan', jiraWrap((req) => jiraWeek.confirmPlan(req.params.week, req.me)))
 app.post('/api/weekly/:week/jira/:key/update', jiraWrap((req) => jiraWeek.submit(req.params.week, req.me, { ...req.body, jiraKey: req.params.key })))

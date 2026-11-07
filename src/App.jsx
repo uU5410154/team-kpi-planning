@@ -1274,7 +1274,7 @@ export default function App() {
               <Box sx={{ flex: 1 }} />
 
               {/* The manager can look at any week from the top bar. */}
-              {allowed && tab === 'dashboard' && canWrite && (
+              {allowed && tab === 'dashboard' && canWrite && !phone && (
                 <WeekSwitcher week={dashWeek} onChange={setDashWeek} compact={narrow} />
               )}
 
@@ -1355,6 +1355,16 @@ export default function App() {
               </Menu>
               <input ref={fileRef} type="file" accept="application/json" hidden onChange={handleImport} />
             </Box>
+            {/* On a phone the week switcher has a row of its own, under the title. */}
+            {phone && allowed && tab === 'dashboard' && canWrite && (
+              <Box sx={{
+                display: 'flex', justifyContent: 'center', mt: 0.5, py: 0.5, borderRadius: 4, border: 1, borderColor: 'divider',
+                bgcolor: (t) => alpha(t.palette.mode === 'dark' ? '#0a0c2e' : '#ffffff', 0.82), backdropFilter: 'blur(14px)',
+              }}
+              >
+                <WeekSwitcher week={dashWeek} onChange={setDashWeek} />
+              </Box>
+            )}
           </Box>
 
         {/* Keyed on the view, so switching it rebuilds the page and every page

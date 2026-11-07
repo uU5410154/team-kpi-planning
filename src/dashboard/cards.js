@@ -21,7 +21,7 @@ export const CARDS = {
   welcome: { title: 'Welcome', C: WelcomeCard, w: 6, h: 8, minW: 3, minH: 5, group: 'The year' },
   active: { title: 'Active projects', C: ActiveCard, w: 3, h: 4, minW: 2, minH: 3, group: 'Projects' },
   updated: { title: 'Updated this week', C: UpdatedCard, w: 3, h: 4, minW: 2, minH: 3, group: 'Projects' },
-  decisions: { title: 'Waiting for your decision', C: DecisionsCard, w: 6, h: 4, minW: 3, minH: 3, group: 'Weekly check-in' },
+  decisions: { title: 'Waiting for your decision', C: DecisionsCard, w: 6, h: 6, minW: 3, minH: 3, group: 'Weekly check-in' },
   owners: { title: 'Who holds what', C: OwnersCard, w: 12, h: 14, minW: 6, minH: 6, group: 'Projects' },
   teamWeek: { title: 'This week', C: TeamWeekCard, w: 7, h: 12, minW: 4, minH: 5, group: 'Weekly check-in' },
   summary: { title: 'The week, summarised', C: SummaryCard, w: 5, h: 7, minW: 3, minH: 4, group: 'Weekly check-in' },

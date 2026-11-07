@@ -305,11 +305,11 @@ export function OwnersCard({ ctx, f }) {
                         <RowFacts p={p} />
                       </Box>
                       <Box>
-                        <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>{lastHead}</Typography>
+                        <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6, display: 'block' }}>{lastHead}</Typography>
                         {lastLoading ? <Loading label="Loading from Jira…" /> : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} />}
                       </Box>
                       <Box>
-                        <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>{thisHead}</Typography>
+                        <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6, display: 'block' }}>{thisHead}</Typography>
                         <TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" />
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
