@@ -1,3 +1,4 @@
+import { mergeCatalog, APP_CATALOG_VERSION } from '../src/data/appCatalog.js'
 import express from 'express'
 import compression from 'compression'
 import path from 'node:path'
@@ -341,9 +342,23 @@ app.put('/api/scenarios/:name', adminOnly, async (req, res) => {
  * else. Arranging icons is not an edit that needs protecting from itself.
  */
 app.get('/api/scenarios/:name/apps', async (req, res) => {
-  const doc = await store.getScenario(cleanName(req.params.name))
+  const name = cleanName(req.params.name)
+  const doc = await store.getScenario(name)
   if (doc === store.UNAVAILABLE) return unavailable(res)
-  return res.json({ apps: Array.isArray(doc?.payload?.apps) ? doc.payload.apps : [] })
+  let apps = Array.isArray(doc?.payload?.apps) ? doc.payload.apps : []
+  /*
+   * THE F&A APP CATALOG, merged in once (per catalog version) on the shared
+   * plan: each app with its department, status and link, and its icon. An app
+   * already on the screen keeps its place; nothing is removed. APPS_CATALOG=off
+   * leaves the screen exactly as stored (the checks use that).
+   */
+  if (doc?.payload && name === (process.env.JIRA_SYNC_SCENARIO || 'Baseline') && process.env.APPS_CATALOG !== 'off'
+    && doc.payload.appsCatalog !== APP_CATALOG_VERSION) {
+    apps = mergeCatalog(apps)
+    const saved = await store.saveScenario(name, { ...doc.payload, apps, appsCatalog: APP_CATALOG_VERSION }, 'app catalog')
+    if (saved === store.UNAVAILABLE) return unavailable(res)
+  }
+  return res.json({ apps })
 })
 
 app.put('/api/scenarios/:name/apps', async (req, res) => {

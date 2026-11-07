@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, IconButton, Tooltip,
+  TextField, IconButton, Tooltip, ToggleButton, ToggleButtonGroup, MenuItem, Select, FormControl,
+  InputLabel, Autocomplete,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
@@ -12,6 +13,8 @@ import {
   safeUrl, tintOf, initialsOf,
 } from '../lib/homeScreen.js'
 import Loading from '../components/Loading.jsx'
+import { PILL } from '../components/Brand.jsx'
+import { APP_STATUSES, statusOf } from '../data/appCatalog.js'
 
 /*
  * The grid. One set of numbers, used by the layout, the hit-testing and the
@@ -20,7 +23,7 @@ import Loading from '../components/Loading.jsx'
  */
 const TILE = 92
 const ICON = 64
-const LABEL = 26
+const LABEL = 30
 const ROW = ICON + LABEL + 18
 const HOLD_MS = 450
 const MERGE_MS = 420
@@ -66,10 +69,25 @@ export default function Apps({ apps, onChange, loading = false }) {
   }, [])
 
   const items = apps || []
-  const folder = openFolder ? items.find((it) => it.id === openFolder) : null
 
-  /* The list being arranged: the screen, or the inside of an open folder. */
-  const shown = folder ? (folder.items || []) : items
+  /*
+   * WHERE EACH APP STANDS, AND WHOSE IT IS: the status tabs and the department
+   * filter. Filtering shows the matching apps on their own (folders opened up),
+   * in their screen order; arranging happens on the unfiltered screen.
+   */
+  const [status, setStatus] = useState('all')
+  const [dept, setDept] = useState('all')
+  const flat = useMemo(() => items.flatMap((it) => (isFolder(it) ? (it.items || []) : [it])), [items])
+  const departments = useMemo(() => [...new Set(flat.map((a) => a.department).filter(Boolean))].sort(), [flat])
+  const inDept = flat.filter((a) => dept === 'all' || a.department === dept)
+  const countOf = (id) => inDept.filter((a) => a.status === id).length
+  const filtering = status !== 'all' || dept !== 'all'
+  const filtered = filtering ? inDept.filter((a) => status === 'all' || a.status === status) : null
+
+  const folder = !filtering && openFolder ? items.find((it) => it.id === openFolder) : null
+
+  /* The list on screen: the filtered apps, the screen, or the inside of an open folder. */
+  const shown = filtered || (folder ? (folder.items || []) : items)
 
   const stop = useCallback(() => {
     clearTimeout(holdTimer.current)
@@ -107,6 +125,7 @@ export default function Apps({ apps, onChange, loading = false }) {
 
   const onPointerDown = (e, item) => {
     if (e.button != null && e.button !== 0) return
+    if (filtering) return
     const rect = surface.current.getBoundingClientRect()
     const startX = e.clientX
     const startY = e.clientY
@@ -224,7 +243,14 @@ export default function Apps({ apps, onChange, loading = false }) {
 
   /* Save an app from the dialog. */
   const save = (draft) => {
-    const clean = { name: draft.name.trim() || 'New app', url: draft.url.trim(), icon: draft.icon || null }
+    const clean = {
+      name: draft.name.trim() || 'New app',
+      url: draft.url.trim(),
+      icon: draft.icon || null,
+      department: (draft.department || '').trim() || null,
+      status: draft.status || null,
+      note: (draft.note || '').trim(),
+    }
     if (draft.id) {
       onChange(patchItem(items, draft.id, clean))
     } else if (folder) {
@@ -273,12 +299,52 @@ export default function Apps({ apps, onChange, loading = false }) {
           {editing ? (
             <Button variant="contained" startIcon={<DoneIcon />} onClick={() => setEditing(false)}>Done</Button>
           ) : (
-            <Button variant="outlined" startIcon={<EditIcon />} onClick={() => setEditing(true)}>Arrange</Button>
+            <Button variant="outlined" startIcon={<EditIcon />} onClick={() => { setStatus('all'); setDept('all'); setEditing(true) }}>Arrange</Button>
           )}
           <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setDialog({ mode: 'new' })}>
             Add app
           </Button>
         </Box>
+      </Box>
+
+      {/* Status tabs, and the department filter beside them. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }} data-app-filters>
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={status}
+          onChange={(_e, v) => { if (v) { setStatus(v); setEditing(false) } }}
+          aria-label="app status"
+          sx={{ flexWrap: 'wrap', '& .MuiToggleButton-root': { textTransform: 'none', px: 1.5, gap: 0.75 } }}
+        >
+          <ToggleButton value="all" data-status-tab="all">
+            All <Box component="span" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{inDept.length}</Box>
+          </ToggleButton>
+          {APP_STATUSES.filter((s) => countOf(s.id) > 0 || status === s.id).map((s) => (
+            <ToggleButton key={s.id} value={s.id} data-status-tab={s.id}>
+              <Box component="span" sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: PILL[s.tone] }} />
+              {s.label}
+              <Box component="span" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{countOf(s.id)}</Box>
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+        {departments.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 190, ml: { sm: 'auto' } }}>
+            <InputLabel id="app-dept">Department</InputLabel>
+            <Select
+              labelId="app-dept"
+              label="Department"
+              value={dept}
+              onChange={(e) => { setDept(e.target.value); setEditing(false) }}
+              data-dept-filter
+            >
+              <MenuItem value="all">All departments</MenuItem>
+              {departments.map((d) => (
+                <MenuItem key={d} value={d}>{d} ({flat.filter((a) => a.department === d).length})</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
       </Box>
 
       <Paper
@@ -305,7 +371,7 @@ export default function Apps({ apps, onChange, loading = false }) {
                 ? <Loading label="Loading your apps…" />
                 : (
                   <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                    Nothing here yet — add the first app.
+                    {filtering ? 'No app matches this status and department.' : 'Nothing here yet — add the first app.'}
                   </Typography>
                 )}
             </Box>
@@ -346,7 +412,23 @@ export default function Apps({ apps, onChange, loading = false }) {
                 }}
               >
                 <Box sx={{ position: 'relative' }}>
-                  <AppIcon item={item} merging={mergeInto === item.id} />
+                  <Tooltip
+                    placement="bottom"
+                    disableInteractive
+                    title={isFolder(item) ? '' : [item.department, statusOf(item.status)?.label, item.note, !safeUrl(item.url) ? 'No link yet' : null].filter(Boolean).join(' · ')}
+                  >
+                    <Box><AppIcon item={item} merging={mergeInto === item.id} /></Box>
+                  </Tooltip>
+                  {!isFolder(item) && statusOf(item.status) && (
+                    <Box
+                      aria-label={statusOf(item.status).label}
+                      data-app-status={item.status}
+                      sx={{
+                        position: 'absolute', right: -3, bottom: -3, width: 14, height: 14, borderRadius: '50%',
+                        bgcolor: PILL[statusOf(item.status).tone], border: 2, borderColor: 'background.paper',
+                      }}
+                    />
+                  )}
                   {editing && (
                     <IconButton
                       size="small"
@@ -393,13 +475,18 @@ export default function Apps({ apps, onChange, loading = false }) {
                   variant="caption"
                   align="center"
                   sx={{
-                    display: 'block',
+                    // Two lines, a little wider than the icon: "LOI Autocheck" reads
+                    // whole instead of "LOI Autoc…".
+                    width: TILE - 6,
+                    ml: `${-(TILE - 6 - ICON) / 2}px`,
                     mt: 0.5,
                     fontSize: '0.68rem',
                     lineHeight: 1.15,
                     overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    wordBreak: 'break-word',
                     color: 'text.primary',
                   }}
                 >
@@ -428,6 +515,7 @@ export default function Apps({ apps, onChange, loading = false }) {
         state={dialog}
         onClose={() => setDialog(null)}
         onSave={save}
+        departments={departments}
         onMoveOut={folder ? null : undefined}
       />
 
@@ -576,14 +664,16 @@ function FolderView({ folder, onClose, onRename, onOpenApp, onRemove, onEject, o
 }
 
 /** Add or edit one app: a name, a link, and a picture. */
-function AppDialog({ state, onClose, onSave }) {
-  const [draft, setDraft] = useState({ name: '', url: '', icon: null })
+function AppDialog({ state, onClose, onSave, departments = [] }) {
+  const [draft, setDraft] = useState({ name: '', url: '', icon: null, department: '', status: '', note: '' })
   const [error, setError] = useState(null)
 
   useEffect(() => {
     if (!state) return
     const it = state.item
-    setDraft(it ? { id: it.id, name: it.name, url: it.url || '', icon: it.icon || null } : { name: '', url: '', icon: null })
+    setDraft(it
+      ? { id: it.id, name: it.name, url: it.url || '', icon: it.icon || null, department: it.department || '', status: it.status || '', note: it.note || '' }
+      : { name: '', url: '', icon: null, department: '', status: '', note: '' })
     setError(null)
   }, [state])
 
@@ -654,6 +744,32 @@ function AppDialog({ state, onClose, onSave }) {
           onChange={(e) => setDraft((d) => ({ ...d, url: e.target.value }))}
           error={!!error}
           helperText={error || 'http and https only. Typed without one, https is assumed.'}
+        />
+        <Box sx={{ display: 'flex', gap: 1.5, mt: 2 }}>
+          <Autocomplete
+            freeSolo
+            options={departments}
+            value={draft.department}
+            onInputChange={(_e, v) => setDraft((d) => ({ ...d, department: v }))}
+            sx={{ flex: 1 }}
+            renderInput={(params) => <TextField {...params} size="small" label="Department" name="app-department" />}
+          />
+          <FormControl size="small" sx={{ flex: 1 }}>
+            <InputLabel id="app-status">Status</InputLabel>
+            <Select labelId="app-status" label="Status" value={draft.status} onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))} name="app-status">
+              <MenuItem value="">Not set</MenuItem>
+              {APP_STATUSES.map((s) => <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>)}
+            </Select>
+          </FormControl>
+        </Box>
+        <TextField
+          fullWidth
+          size="small"
+          label="Note (optional)"
+          name="app-note"
+          value={draft.note}
+          onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
+          sx={{ mt: 2 }}
         />
       </DialogContent>
       <DialogActions>

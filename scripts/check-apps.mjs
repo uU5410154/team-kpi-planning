@@ -19,6 +19,7 @@ import {
   patchItem, removeItem, safeUrl, suggestFolderName, initialsOf, tintOf, newId,
 } from '../src/lib/homeScreen.js'
 import { repairState } from '../src/lib/model.js'
+import { mergeCatalog, APP_CATALOG, statusOf } from '../src/data/appCatalog.js'
 
 // storage.js imports the seed as JSON, which Vite allows and Node does not.
 // Read the two ends separately rather than importing it: what matters here is
@@ -31,6 +32,26 @@ let failures = 0
 const check = (name, ok, detail = '') => {
   if (!ok) failures++
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`)
+}
+
+console.log('\n--- the F&A app catalog ---')
+{
+  const all = mergeCatalog([])
+  check('THE CATALOG GIVES 18 APPS, EACH WITH A DEPARTMENT, A STATUS AND AN ICON', all.length === 18
+    && all.every((a) => a.department && statusOf(a.status) && /^\/app-icons\/[a-z0-9-]+\.svg$/.test(a.icon)))
+  check('  every icon file exists', APP_CATALOG.every((a) => existsSync(new URL(`../public${a.icon}`, import.meta.url))))
+  check('  the statuses: 7 live, 1 UAT, 7 POC, 3 in development', ['GO-LIVE', 'UAT', 'POC', 'Under Development'].map((st) => all.filter((a) => a.status === st).length).join() === '7,1,7,3')
+  const mine = [
+    { id: 'a1', type: 'app', name: 'Jira', url: 'https://jira.example' },
+    { id: 'f1', type: 'folder', name: 'FA', items: [{ id: 'a2', type: 'app', name: 'lease master', url: 'https://mine.example', icon: 'data:image/png;base64,x' }, { id: 'a3', type: 'app', name: 'Other' }] },
+  ]
+  const merged = mergeCatalog(mine)
+  const lease = merged[1].items[0]
+  check('  AN APP ALREADY THERE KEEPS ITS PLACE, LINK AND PICTURE, AND GAINS DEPARTMENT AND STATUS',
+    merged[0].name === 'Jira' && lease.id === 'a2' && lease.url === 'https://mine.example' && lease.icon.startsWith('data:') && lease.department === 'Accounting' && lease.status === 'GO-LIVE')
+  check('  nothing is duplicated, nothing removed', merged.length === 2 + 17 && merged.filter((a) => /lease master/i.test(a.name)).length === 0)
+  check('  merging twice changes nothing', JSON.stringify(mergeCatalog(merged)) === JSON.stringify(merged))
+  check('  "upcoming" has no link, and says so', all.find((a) => a.name === 'Lotus Analytic hub').url === '' && /no link/i.test(all.find((a) => a.name === 'Lotus Analytic hub').note))
 }
 const names = (items) => items.map((it) => (isFolder(it) ? `[${it.name}:${it.items.map((x) => x.name).join(',')}]` : it.name)).join(' ')
 
