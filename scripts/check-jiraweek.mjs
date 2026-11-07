@@ -386,9 +386,13 @@ try {
         next: nx?.innerText.replace(/\s+/g, ' '),
         anim: btn ? getComputedStyle(btn).animationName : null,
         hello: document.body.innerText.includes('Hello'),
+        // One framed block: the header and the card share the same border.
+        framed: !!g && getComputedStyle(g).borderLeftWidth === '4px' && getComputedStyle(g.querySelector('button')).borderLeftWidth === '0px'
+          && g.getBoundingClientRect().bottom >= document.querySelector('[data-jira-task="FNP-2010"]').getBoundingClientRect().bottom,
       }
     })
     check('  each task sits under its project header, saying how many are left', !!head.group && /to update/i.test(head.header || ''), head.header)
+    check('  the project and its tasks are one framed block', head.framed)
     check('  the next step names the task to update, on a pulsing button', /Update 1 task/.test(head.next || '') && /FNP-2010/.test(head.next || '') && !!head.anim && head.anim !== 'none' && !head.hello, `${head.next} · ${head.anim}`)
     // The button takes them to that task's progress box.
     await pg.click('[data-next-action]')

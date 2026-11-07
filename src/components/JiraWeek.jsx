@@ -399,8 +399,8 @@ function NewProject({ week, onDone, onCancel, writable }) {
 /* ------------------------------------------------- one project's tasks */
 
 /**
- * A PROJECT HEADER and the tasks under it, so it is plain which project each
- * update is for. The header says how many of its tasks still need an update,
+ * A PROJECT BLOCK: one framed box holding the project's header and every task
+ * under it, so it is plain which project each update is for. The header says how many of its tasks still need an update,
  * and folds the project away once it is done with.
  */
 function ProjectGroup({
@@ -409,7 +409,21 @@ function ProjectGroup({
   const left = rows.filter(({ t }) => !t.update).length
   const [open, setOpen] = useState(true)
   return (
-    <Box component="section" data-project-group={projectKey || 'none'} aria-label={`project ${name}`} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <Box
+      component="section"
+      data-project-group={projectKey || 'none'}
+      aria-label={`project ${name}`}
+      sx={(t) => ({
+        display: 'flex',
+        flexDirection: 'column',
+        borderRadius: 2,
+        overflow: 'hidden',
+        border: 1,
+        borderColor: alpha(t.palette.primary.main, 0.35),
+        borderLeft: `4px solid ${t.palette.primary.main}`,
+        bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.04 : 0.02),
+      })}
+    >
       <ButtonBase
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -419,10 +433,7 @@ function ProjectGroup({
           gap: 1.25,
           px: { xs: 1.25, sm: 1.75 },
           py: 1.25,
-          borderRadius: 2,
-          border: 1,
-          borderColor: alpha(t.palette.primary.main, 0.35),
-          borderLeft: `4px solid ${t.palette.primary.main}`,
+          borderBottom: open ? `1px solid ${alpha(t.palette.primary.main, 0.25)}` : 'none',
           bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.13 : 0.07),
           '&:hover': { bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.18 : 0.1) },
         })}
@@ -444,7 +455,7 @@ function ProjectGroup({
         <ExpandMoreIcon sx={{ color: 'text.secondary', transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'none', flexShrink: 0 }} />
       </ButtonBase>
       <Collapse in={open} unmountOnExit={false}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pl: { xs: 0, sm: 2 } }}>{children}</Box>
+        <Box data-project-body sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, p: { xs: 1, sm: 1.5 } }}>{children}</Box>
       </Collapse>
     </Box>
   )
