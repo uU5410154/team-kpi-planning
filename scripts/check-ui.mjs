@@ -1945,7 +1945,7 @@ try {
     const ix = heads.indexOf('project')
     return {
       text: row.innerText.split(String.fromCharCode(10)).join(' ').slice(0, 40),
-      name: row.children[ix]?.querySelector('input')?.value ?? row.children[ix]?.innerText.trim(),
+      name: row.children[ix]?.querySelector('[data-open-project]')?.textContent.trim() ?? row.children[ix]?.querySelector('input')?.value ?? row.children[ix]?.innerText.trim(),
     }
   })
   const beforeAdd = await firstRow()

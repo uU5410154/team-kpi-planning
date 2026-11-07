@@ -171,11 +171,12 @@ try {
     await d.browserContext().close()
 
     console.log('\n--- a project opens in a popup ---')
-    const name = await a.evaluate(() => document.querySelector('[data-open-project]').closest('td').querySelector('input').value)
+    const name = await a.evaluate(() => document.querySelector('[data-open-project]').textContent.trim())
     await a.click('[data-open-project]')
     await sleep(800)
     let ds = await dialogs(a)
     check('CLICKING A PROJECT OPENS ITS DETAIL, with its name', ds.length === 1 && ds[0].includes(name) && /open full page/i.test(ds[0]), `${name} | ${(ds[0] || '').slice(0, 80)}`)
+    check('  the name is a link to it, not a text box', await a.evaluate(() => document.querySelector('[data-open-project]').tagName === 'BUTTON'))
     check('  and a link to the full page', await a.evaluate(() => !!document.querySelector('[role="dialog"] a[href^="#project/"]')))
     // An edit in the popup goes through the page's own update.
     await a.evaluate(() => document.querySelector('[role="dialog"] [aria-label="active project"]').click())
@@ -194,6 +195,16 @@ try {
     await a.keyboard.press('Escape')
     await sleep(500)
     check('ESC CLOSES THEM', (await dialogs(a)).length === 0)
+
+    // The pencil renames it, in place, without opening anything.
+    const rk = await a.evaluate(() => document.querySelector('[data-rename-project]').getAttribute('data-rename-project'))
+    await a.click(`[data-rename-project="${rk}"]`)
+    await sleep(300)
+    await a.keyboard.type(' (renamed)')
+    await a.keyboard.press('Enter')
+    await sleep(500)
+    const renamed = await a.evaluate((k) => document.querySelector(`[data-open-project="${k}"]`)?.textContent || '', rk)
+    check('THE PENCIL RENAMES A PROJECT IN PLACE, AND OPENS NOTHING', /\(renamed\)$/.test(renamed) && (await dialogs(a)).length === 0, renamed)
 
     // The row, away from its editable cells, opens it too.
     await a.evaluate(() => {

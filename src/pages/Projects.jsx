@@ -8,7 +8,7 @@ import {
   Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery,
 } from '@mui/material'
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
-import OpenInFullIcon from '@mui/icons-material/OpenInFull'
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import FilterListIcon from '@mui/icons-material/FilterList'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -48,7 +48,7 @@ const COMMIT_COLOR = {
 }
 
 /** Free-text cell that only commits on blur. */
-function TextCell({ value, onChange, placeholder, width, bold }) {
+function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false }) {
   const [draft, setDraft] = useState(value ?? '')
   const [focused, setFocused] = useState(false)
   if (!focused && draft !== (value ?? '')) setDraft(value ?? '')
@@ -59,6 +59,7 @@ function TextCell({ value, onChange, placeholder, width, bold }) {
       fullWidth={!width}
       value={draft}
       placeholder={placeholder}
+      autoFocus={autoFocus}
       onFocus={() => setFocused(true)}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
@@ -66,10 +67,48 @@ function TextCell({ value, onChange, placeholder, width, bold }) {
         const next = draft.trim() || null
         if (next !== (value ?? null)) onChange(next)
       }}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
       inputProps={{ style: { fontSize: '0.8125rem', fontWeight: bold ? 500 : 400 } }}
       sx={{ width }}
     />
+  )
+}
+
+/**
+ * THE PROJECT'S NAME: a link that opens its detail popup. The pencil beside it
+ * turns it into an editable box for renaming; leaving the box turns it back.
+ */
+function NameCell({ p, onOpen, onRename }) {
+  const [editing, setEditing] = useState(false)
+  if (editing) {
+    return (
+      <Box sx={{ flex: 1, minWidth: 0 }} onBlur={() => setEditing(false)} data-name-editing>
+        <TextCell value={p.summary} placeholder="Project name" onChange={onRename} bold autoFocus />
+      </Box>
+    )
+  }
+  return (
+    <>
+      <Link
+        component="button"
+        type="button"
+        onClick={() => onOpen(p.key)}
+        data-open-project={p.key}
+        underline="hover"
+        title={`Open ${p.jiraKey || p.key}: owner, dates, weekly check-ins`}
+        sx={{
+          flex: 1, minWidth: 0, textAlign: 'left', fontSize: '0.8125rem', fontWeight: 600, color: 'text.primary',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', py: 0.5,
+        }}
+      >
+        {p.summary || 'Untitled'}
+      </Link>
+      <Tooltip title="Rename">
+        <IconButton size="small" onClick={() => setEditing(true)} aria-label={`rename ${p.summary}`} data-rename-project={p.key} sx={{ flexShrink: 0, color: 'text.disabled', p: 0.4 }}>
+          <EditOutlinedIcon sx={{ fontSize: 14 }} />
+        </IconButton>
+      </Tooltip>
+    </>
   )
 }
 
@@ -96,7 +135,7 @@ function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }
         if (Number.isFinite(n) && n >= 0) { if (n !== value) onChange(n) }
         else setDraft(value == null ? '' : String(value))
       }}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
       inputProps={{
         style: {
           textAlign: 'right',
@@ -765,7 +804,7 @@ export default function Projects({
           <Box component="span" sx={{ flex: '1 1 260px' }}>
             {phone
               ? <>Tap a project to open its detail.</>
-              : <>Every cell is editable and recalculates the dashboard, scorecards and export live. <strong>Click a project</strong> (its <OpenInFullIcon sx={{ fontSize: 13, verticalAlign: '-2px' }} /> icon, or the row away from its editable cells) to open its detail; the <ReceiptLongIcon sx={{ fontSize: 14, verticalAlign: '-2px' }} /> icon opens its cost sheet.</>}
+              : <>Every cell is editable and recalculates the dashboard, scorecards and export live. <strong>Click a project&rsquo;s name</strong> (or its row, away from the editable cells) to open its detail; the pencil renames it; the <ReceiptLongIcon sx={{ fontSize: 14, verticalAlign: '-2px' }} /> icon opens its cost sheet.</>}
           </Box>
           <Link
             component="button"
@@ -1392,24 +1431,8 @@ export default function Projects({
                   )}
                   <TableCell sx={{ maxWidth: 320, minWidth: 240 }} {...stick('summary')}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                      <TextCell
-                        value={p.summary}
-                        placeholder="Project name"
-                        onChange={(v) => onUpdate(p.key, { summary: v || 'Untitled' })}
-                        bold
-                      />
-                      {/* The way into the project: its detail, in a popup. */}
-                      <Tooltip title={`Open ${p.jiraKey || p.key} — owner, dates, weekly check-ins`}>
-                        <IconButton
-                          size="small"
-                          onClick={() => setDetailKey(p.key)}
-                          aria-label={`open project ${p.summary}`}
-                          data-open-project={p.key}
-                          sx={{ flexShrink: 0, color: 'text.secondary', p: 0.4 }}
-                        >
-                          <OpenInFullIcon sx={{ fontSize: 15 }} />
-                        </IconButton>
-                      </Tooltip>
+                      {/* The way into the project: its name opens its detail, in a popup. */}
+                      <NameCell p={p} onOpen={setDetailKey} onRename={(v) => onUpdate(p.key, { summary: v || 'Untitled' })} />
                     </Box>
                     <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', mt: 0.25 }}>
                       <TextCell
