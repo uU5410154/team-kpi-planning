@@ -14,10 +14,11 @@ import {
   Pill, IconTile, personColor, PILL,
 } from '../components/Brand.jsx'
 import {
-  STATUS_LABEL, weekNo, weekTitle, bangkokTime, BLOCKER_CATEGORIES,
+  STATUS_LABEL, weekNo, weekTitle, bangkokTime, BLOCKER_CATEGORIES, addWeeks,
 } from '../lib/weekly.js'
 import {
   projectCounts, updatedCount, ownerRows, reportedWeek, blockersByType, slipping, workload, submissionTrend,
+  activeWords, ACTIVE_WHY,
 } from '../lib/manager.js'
 import CardFrame from './CardFrame.jsx'
 import Loading from '../components/Loading.jsx'
@@ -58,44 +59,65 @@ const ProjectLink = ({ p, onOpen }) => (
 
 /* --------------------------------------------------------------- counts */
 
+/** "this week", or "week 44" for a week picked from the switcher. */
+const weekWord = (ctx) => (ctx.isCurrent === false && ctx.now ? `week ${weekNo(ctx.now.week)}` : 'this week')
+
+export const ACTIVE_HELP = 'A project is active in a week, automatically, when any of these is true: its start-to-due dates '
+  + 'cover the week; an epic or task under it in Jira has dates covering the week; somebody sent an update on it that week; '
+  + 'or a decision asked for on one of its tasks is still open. An administrator can override that either way '
+  + '(Always / Never) on the Timeline or the project page. Register lines on the same Jira epic count once. The total '
+  + 'counts every project in the register, active or not.'
+
+/** The figure cards wait for the plan and for every signal, rather than showing a number that then changes. */
+const figureLoading = (ctx) => ctx.planLoading || ctx.now === undefined || !ctx.signalsReady
+
 export function ActiveCard({ ctx, f }) {
   const week = ctx.now?.week
-  const {
-    total, active, forced, byDates,
-  } = projectCounts(ctx.plan.projects, week || undefined)
+  const c = projectCounts(ctx.plan.projects, week || undefined, ctx.signals)
+  const when = weekWord(ctx)
   return (
     <CardFrame {...f} bare title="Active projects">
-      <StatTile
-        label="Active projects"
-        value={active}
-        unit={`of ${total} in the register`}
-        context={active
-          ? `${byDates} by their dates${forced ? ` · ${forced} switched on` : ''} · ${week ? `week ${weekNo(week)}` : 'this week'}`
-          : 'No project’s dates cover this week — switch one on in the Timeline'}
-        help="A project is active in a week when its start-to-due dates cover that week. An administrator can override that either way on the Timeline or the project page. The total counts every project in the register, active or not."
-      />
+      {figureLoading(ctx) ? (
+        <StatTile label="Active projects" value={<Loading label="Loading…" />} unit="" context="Reading the week, and Jira" help={ACTIVE_HELP} />
+      ) : (
+        <StatTile
+          label="Active projects"
+          value={c.active}
+          unit={`of ${c.total} in the register`}
+          context={c.active
+            ? `${activeWords(c, when)} · ${week ? `week ${weekNo(week)}` : 'this week'}`
+            : `Nothing covers ${when}: no dates, no Jira work, no update — switch one on in the Timeline`}
+          help={ACTIVE_HELP + (ctx.nowJiraError ? ` Jira could not be read just now, so Jira work is not counted: ${ctx.nowJiraError}` : '')}
+        />
+      )}
     </CardFrame>
   )
 }
 
 export function UpdatedCard({ ctx, f }) {
   const { now } = ctx
-  const { updated, active } = updatedCount(ctx.plan.projects, now)
+  const { updated, active } = updatedCount(ctx.plan.projects, now, ctx.signals)
   const planDue = now?.deadlines?.planDue
   const early = !now || now.now < planDue
   const share = active ? updated / active : 0
+  // Named for the week on screen: "Updated this week", or "Updated in week 44".
+  const label = ctx.isCurrent === false && now ? `Updated in week ${weekNo(now.week)}` : 'Updated this week'
   return (
     <CardFrame {...f} bare title="Updated this week">
-      <StatTile
-        label="Updated this week"
-        value={now ? updated : '—'}
-        unit={`of ${active} active`}
-        tone={early || !active ? undefined : share >= 1 ? 'good' : share >= 0.5 ? 'warning' : 'critical'}
-        context={now
-          ? `${Math.max(0, active - updated)} not updated yet · ${weekTitle(now.week)}`
-          : 'The weekly check-ins could not be read'}
-        help="An active project counts as updated when somebody's week has a task linked to it — saved or submitted. Follow up from the owners card to ask for one."
-      />
+      {figureLoading(ctx) && now !== null ? (
+        <StatTile label={label} value={<Loading label="Loading…" />} unit="" context="Reading the week, and Jira" />
+      ) : (
+        <StatTile
+          label={label}
+          value={now ? updated : '—'}
+          unit={`of ${active} active`}
+          tone={early || !active ? undefined : share >= 1 ? 'good' : share >= 0.5 ? 'warning' : 'critical'}
+          context={now
+            ? `${Math.max(0, active - updated)} not updated yet · ${weekTitle(now.week)}`
+            : 'The weekly check-ins could not be read'}
+          help="An active project counts as updated when somebody sent an update on a task under it that week (or, in the form, saved a task linked to it). Follow up from “Who holds what” to ask for one."
+        />
+      )}
     </CardFrame>
   )
 }
@@ -160,6 +182,8 @@ function TaskList({ tasks, empty, kind }) {
                 {t.nick}
                 {kind === 'this' && t.expected ? ` · expected ${fmtDay(t.expected)}` : ''}
                 {t.done === false && t.newDate ? ` · now ${fmtDay(t.newDate)}` : ''}
+                {/* Nobody wrote about it that week: what shows is Jira's status today. */}
+                {t.statusToday ? ' · (status today)' : ''}
               </Typography>
             </Box>
             {t.progress && <UpdateText text={t.progress} />}
@@ -175,10 +199,43 @@ function TaskList({ tasks, empty, kind }) {
   )
 }
 
+/** The follow-up for one row, or why there is none. */
+function RowFollowUp({ ctx, g, p, compact = true }) {
+  if (!g.person) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>No owner to ask</Typography>
+  // Does the owner hold any Jira work under it this week? If not, the email says to add a task.
+  const theirs = (p.keys || [p.key]).flatMap((k) => ctx.nowJira?.[k] || []).filter((t) => t.holder === g.nick || t.update?.nick === g.nick)
+  const note = ctx.nowJira && !theirs.length && !p.thisWeek.some((t) => t.person === g.person)
+    ? `${g.nick} has no task on it in Jira this week, so the email asks them to add one from their Weekly page.`
+    : null
+  const off = p.onHold ? 'On hold — no update needed'
+    : ctx.isCurrent === false ? 'Follow-ups ask about this week' : null
+  return (
+    <FollowUp compact={compact} projectKey={p.key} followup={p.followup} onSent={ctx.onFollowSent} owner={g.nick} summary={p.summary} note={note} off={off} />
+  )
+}
+
+/** Under a project's name: its key, due date, why it is on the list, how many register lines. */
+function RowFacts({ p }) {
+  return (
+    <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+      {p.jiraKey || p.key} · due {fmtDay(p.due)}
+      {p.why && p.why !== 'dates' ? ` · ${ACTIVE_WHY[p.why]}` : ''}
+      {p.lines > 1 ? ` · ${p.lines} register lines` : ''}
+      {p.onHold ? ' · on hold' : ''}
+    </Typography>
+  )
+}
+
 export function OwnersCard({ ctx, f }) {
   const [only, setOnly] = useState('all')
   const groups = ownerRows({
-    projects: ctx.plan.projects, people: ctx.plan.assignees || ctx.plan.people, now: ctx.now, prev: ctx.prev, followups: ctx.followups, prevJira: ctx.prevJira || null,
+    projects: ctx.plan.projects,
+    people: ctx.plan.assignees || ctx.plan.people,
+    now: ctx.now,
+    prev: ctx.prev,
+    followups: ctx.followups,
+    prevJira: ctx.prevJira || null,
+    signals: ctx.signals,
   })
   // Last week comes from Jira a moment after the rest: a spinner until it does.
   const lastLoading = ctx.prevJira === undefined
@@ -186,12 +243,18 @@ export function OwnersCard({ ctx, f }) {
     .map((g) => ({ ...g, projects: only === 'stale' ? g.projects.filter((p) => !p.thisWeek.length) : g.projects }))
     .filter((g) => g.projects.length)
   const count = groups.reduce((a, g) => a + g.projects.length, 0)
+  const past = ctx.isCurrent === false
+  const prevNo = ctx.prev ? weekNo(ctx.prev.week) : ctx.now ? weekNo(addWeeks(ctx.now.week, -1)) : ''
+  const lastHead = `${past ? 'Week before' : 'Last week'}${prevNo ? ` · week ${prevNo}` : ''}`
+  const thisHead = ctx.now ? `${past ? 'Week' : 'This week · week'} ${weekNo(ctx.now.week)}` : ''
+  const lastEmpty = ctx.prevJira ? `Nothing in Jira covered week ${prevNo}` : `No task in week ${prevNo}`
+  const loading = ctx.now === undefined || ctx.planLoading || (ctx.now && !ctx.signalsReady)
   return (
     <CardFrame
       {...f}
       title="Who holds what"
       label="who holds what"
-      sub={ctx.now ? `${count} active project${count === 1 ? '' : 's'} by owner — last week, this week, and a follow-up a click away` : undefined}
+      sub={ctx.now && !loading ? `${count} active project${count === 1 ? '' : 's'} by owner, ${past ? `week ${weekNo(ctx.now.week)}` : 'this week'} — the week before, the week, and a follow-up a click away` : undefined}
       action={(
         <ToggleButtonGroup size="small" exclusive value={only} onChange={(_e, v) => v && setOnly(v)}>
           <ToggleButton value="all" sx={{ textTransform: 'none', px: 1.5 }}>All</ToggleButton>
@@ -199,33 +262,75 @@ export function OwnersCard({ ctx, f }) {
         </ToggleButtonGroup>
       )}
     >
-      {ctx.now === undefined || ctx.now === null ? <Waiting ctx={ctx} /> : (
+      {ctx.now === null ? <Waiting ctx={ctx} /> : loading ? <Loading variant="block" label="Loading the week, and Jira…" /> : (
         <>
           {count === 0 && (
             <Box sx={{ py: 1 }}>
               <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-                No project is active this week: none has start and due dates covering week {weekNo(ctx.now.week)}, and none is
-                switched on. Give projects their dates, or set one to &ldquo;Always active&rdquo; on the Timeline.
+                No project is active in week {weekNo(ctx.now.week)}: none has dates covering it, no Jira work under any covers
+                it, nobody sent an update, and none is switched on. Set one to &ldquo;Always active&rdquo; on the Timeline.
               </Typography>
               <Button size="small" variant="outlined" onClick={() => ctx.onGoTo?.('timeline')}>Open the Timeline</Button>
             </Box>
           )}
-          {ctx.prevJiraError && (
-            <Typography variant="caption" sx={{ color: 'warning.light', display: 'block', mb: 1 }} data-coverage-error>
-              Week {ctx.prev ? weekNo(ctx.prev.week) : ''} could not be read from Jira, so only what people typed in shows: {ctx.prevJiraError}
+          {(ctx.prevJiraError || ctx.nowJiraError) && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }} data-coverage-error>
+              Jira could not be read just now, so only what people sent in shows{ctx.nowJiraError ? ', and Jira work does not make a project active' : ''}: {ctx.prevJiraError || ctx.nowJiraError}
+            </Typography>
+          )}
+          {ctx.unknownKeys?.length > 0 && (
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }} data-unknown-keys>
+              Jira does not know {ctx.unknownKeys.slice(0, 5).join(', ')}{ctx.unknownKeys.length > 5 ? ` and ${ctx.unknownKeys.length - 5} more` : ''} — check
+              {ctx.unknownKeys.length === 1 ? ' the key' : ' those keys'} on the Projects page. Everything else is read as usual.
             </Typography>
           )}
           {count > 0 && shown.length === 0 && (
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Every active project has an update this week.</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Every active project has an update {past ? 'that week' : 'this week'}.</Typography>
           )}
-          {shown.length > 0 && (
+          {shown.length > 0 && f.fill === false && (
+            /* On a phone: one card per project, the weeks one under the other. */
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }} data-owner-cards>
+              {shown.map((g) => (
+                <Box key={`h:${g.person || 'none'}`} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <IconTile text={g.nick.slice(0, 2)} color={personColor(ctx.plan.people, g.person)} size={26} />
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>{g.nick}</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>{g.projects.length} project{g.projects.length === 1 ? '' : 's'}</Typography>
+                  </Box>
+                  {g.projects.map((p) => (
+                    <Box key={p.key} data-project={p.key} sx={{ border: 1, borderColor: 'divider', borderRadius: '12px', p: 1.25, display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                      <Box>
+                        <ProjectLink p={p} onOpen={ctx.onOpenProject} />
+                        <RowFacts p={p} />
+                      </Box>
+                      <Box>
+                        <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>{lastHead}</Typography>
+                        {lastLoading ? <Loading label="Loading from Jira…" /> : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} />}
+                      </Box>
+                      <Box>
+                        <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>{thisHead}</Typography>
+                        <TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" />
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography variant="caption" sx={{ color: p.latest ? 'text.secondary' : 'text.disabled' }}>
+                          Latest update {p.latest ? ago(p.latest) : 'never'}
+                        </Typography>
+                        <RowFollowUp ctx={ctx} g={g} p={p} />
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              ))}
+            </Box>
+          )}
+          {shown.length > 0 && f.fill !== false && (
             <Box sx={{ overflowX: 'auto' }}>
               <Table size="small" sx={{ minWidth: 860, '& td': { verticalAlign: 'top' } }}>
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ width: '24%' }}>Project</TableCell>
-                    <TableCell sx={{ width: '28%' }}>{ctx.isCurrent === false ? 'Week before' : 'Last week'}{ctx.prev ? ` · week ${weekNo(ctx.prev.week)}` : ''}</TableCell>
-                    <TableCell sx={{ width: '26%' }}>{ctx.isCurrent === false ? 'Week' : 'This week · week'} {weekNo(ctx.now.week)}</TableCell>
+                    <TableCell sx={{ width: '28%' }}>{lastHead}</TableCell>
+                    <TableCell sx={{ width: '26%' }}>{thisHead}</TableCell>
                     <TableCell sx={{ width: '9%' }}>Latest update</TableCell>
                     <TableCell align="right" sx={{ width: '13%' }} />
                   </TableRow>
@@ -247,14 +352,12 @@ export function OwnersCard({ ctx, f }) {
                       <TableRow key={p.key} data-project={p.key}>
                         <TableCell>
                           <ProjectLink p={p} onOpen={ctx.onOpenProject} />
-                          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                            {p.jiraKey || p.key} · due {fmtDay(p.due)}
-                          </Typography>
+                          <RowFacts p={p} />
                         </TableCell>
                         <TableCell>
                           {lastLoading
                             ? <Loading label="Loading from Jira…" />
-                            : <TaskList tasks={p.lastWeek} kind="last" empty={ctx.prevJira ? 'Nothing in Jira covered last week' : 'No task last week'} />}
+                            : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} />}
                         </TableCell>
                         <TableCell><TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" /></TableCell>
                         <TableCell>
@@ -262,13 +365,7 @@ export function OwnersCard({ ctx, f }) {
                             {p.latest ? ago(p.latest) : 'never'}
                           </Typography>
                         </TableCell>
-                        <TableCell align="right">
-                          {g.person ? (
-                            <FollowUp compact projectKey={p.key} followup={p.followup} onSent={ctx.onFollowSent} />
-                          ) : (
-                            <Typography variant="caption" sx={{ color: 'text.disabled' }}>No owner to ask</Typography>
-                          )}
-                        </TableCell>
+                        <TableCell align="right"><RowFollowUp ctx={ctx} g={g} p={p} /></TableCell>
                       </TableRow>
                     )),
                   ])}
@@ -284,6 +381,23 @@ export function OwnersCard({ ctx, f }) {
 
 /* ------------------------------------------------- the week at a glance */
 
+/*
+ * One line on somebody's week when there is no focus to show: a week run from
+ * Jira has none, so it says how many tasks they have sent an update on.
+ */
+function weekLine(e) {
+  if (!e) return 'Nothing sent yet.'
+  const tasks = e.tasks || []
+  if (e.mode === 'jira' || tasks.some((t) => t.source === 'jira' || t.reportedAt)) {
+    const sent = tasks.filter((t) => t.reportedAt || t.done != null || t.hold)
+    if (!sent.length) return 'No task updated yet.'
+    const hold = sent.filter((t) => t.hold).length
+    const done = sent.filter((t) => t.done === true).length
+    return `${sent.length} task${sent.length === 1 ? '' : 's'} updated${done ? ` · ${done} done` : ''}${hold ? ` · ${hold} on hold` : ''}`
+  }
+  return 'No focus written yet.'
+}
+
 export function TeamWeekCard({ ctx, f }) {
   const week = ctx.now
   const team = week?.team || []
@@ -294,7 +408,7 @@ export function TeamWeekCard({ ctx, f }) {
     <CardFrame
       {...f}
       label="this week"
-      title={week ? `This week · ${weekTitle(week.week)}` : 'This week'}
+      title={week ? `${ctx.isCurrent === false ? 'The week' : 'This week'} · ${weekTitle(week.week)}` : 'This week'}
       sub={week && (`Plans in ${inCount('plan')} of ${required.length} · reports in ${inCount('report')} of ${required.length}`
         + (reportOpen ? ` · reports due ${bangkokTime(week.deadlines.reportDue)}` : ''))}
       action={<Button size="small" onClick={() => ctx.onGoTo?.('weekly')}>Open Weekly</Button>}
@@ -333,7 +447,7 @@ export function TeamWeekCard({ ctx, f }) {
                     overflow: 'hidden',
                   }}
                 >
-                  {row.focus || 'No focus written yet.'}
+                  {row.focus || weekLine(row.entry)}
                 </Typography>
               </Box>
             </ButtonBase>
@@ -373,10 +487,19 @@ function TaskDecision({ d, onDecide }) {
         {!open && <Button size="small" onClick={() => setOpen(true)}>Decided</Button>}
       </Box>
       {open && (
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <TextField size="small" fullWidth placeholder="What was decided (also written on the task in Jira)" value={note} onChange={(e) => setNote(e.target.value)} />
-          <Button size="small" variant="contained" onClick={save} disabled={busy || !note.trim()}>Save</Button>
-          <Button size="small" onClick={() => setOpen(false)}>Cancel</Button>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <TextField
+            size="small"
+            fullWidth
+            multiline
+            maxRows={4}
+            label="What was decided"
+            helperText="Also written on the task in Jira."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <Button size="small" variant="outlined" onClick={save} disabled={busy || !note.trim()} sx={{ mt: 0.5 }}>Save</Button>
+          <Button size="small" onClick={() => setOpen(false)} sx={{ mt: 0.5 }}>Cancel</Button>
         </Box>
       )}
       {error && <Typography variant="caption" sx={{ color: 'error.main' }}>{error}</Typography>}
@@ -399,10 +522,16 @@ export function DecisionsCard({ ctx, f }) {
       label="waiting for your decision"
       title="Waiting for your decision"
       sub={loading ? undefined : unread ? 'The waiting decisions could not be read just now.'
-        : parts.length ? parts.join(' · ') : 'No date changes or decisions are waiting.'}
+        : `${parts.length ? parts.join(' · ') : 'No date changes or decisions are waiting.'}${ctx.isCurrent === false ? ' · as of today, whichever week is shown' : ''}`}
       action={pending.length > 0 && <Button size="small" onClick={() => ctx.onGoTo?.('weekly')}>Decide</Button>}
     >
       {loading && <Loading variant="block" label="Loading decisions…" />}
+      {ctx.decided && (
+        <Typography variant="caption" data-decided sx={{ color: 'text.secondary', display: 'block', mb: 0.75, pl: 1, borderLeft: 2, borderColor: 'divider' }}>
+          Decided{ctx.decided.key ? ` on ${ctx.decided.key}` : ''}: “{ctx.decided.note}”
+          {ctx.decided.key ? ' — written on the task in Jira, and the member can see it.' : '.'}
+        </Typography>
+      )}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
         {asked.map((d) => <TaskDecision key={d.id} d={d} onDecide={ctx.onDecide} />)}
         {pending.map((p) => (
@@ -546,7 +675,7 @@ export function BlockersCard({ ctx, f }) {
 
 export function SlippingCard({ ctx, f }) {
   const list = slipping({
-    projects: ctx.plan.projects, asOf: ctx.plan.settings.asOfDate, weeks: [ctx.now, ctx.prev].filter(Boolean), pending: ctx.pending || [],
+    projects: ctx.plan.projects, asOf: ctx.plan.settings.asOfDate, weeks: [ctx.now, ctx.prev].filter(Boolean), pending: ctx.pending || [], signals: ctx.signals,
   })
   const nick = Object.fromEntries((ctx.plan.assignees || ctx.plan.people).map((p) => [p.id, p.nick]))
   // The weeks and the requests to move a date both feed it: wait for them.
@@ -574,7 +703,9 @@ export function SlippingCard({ ctx, f }) {
 }
 
 export function WorkloadCard({ ctx, f }) {
-  const rows = workload({ projects: ctx.plan.projects, people: ctx.plan.people, week: ctx.now })
+  const rows = workload({
+    projects: ctx.plan.projects, people: ctx.plan.people, week: ctx.now, signals: ctx.signals,
+  })
   const max = Math.max(5, ...rows.map((r) => r.days))
   return (
     <CardFrame {...f} label="workload this week" title="Workload this week" sub="Days of effort planned this week, and active projects held">

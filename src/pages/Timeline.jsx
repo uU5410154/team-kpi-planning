@@ -27,7 +27,7 @@ import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
 import HourglassIcon from '@mui/icons-material/HourglassTopOutlined'
 import { Pill } from '../components/Brand.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
-import { activeInWeek } from '../lib/manager.js'
+import { activitySignals, activeUnits } from '../lib/manager.js'
 import { weekOf, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
 
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
@@ -691,12 +691,27 @@ export default function Timeline({
   // The administrator's own word on what is being worked on now. Read by the
   // manager dashboard; nothing becomes active by itself.
   const [onlyActive, setOnlyActive] = useState(false)
-  // Active THIS week: by its dates, unless an administrator overrode it.
+  /*
+   * ACTIVE THIS WEEK, the dashboard's answer: its dates, Jira work covering the
+   * week, an update sent this week or an open decision — unless an
+   * administrator overrode it. The Jira and decision signals are an
+   * administrator's to read; a member's Timeline goes by dates and updates.
+   */
   const thisWeek = weekOf()
-  const activeKeys = useMemo(
-    () => new Set(plan.projects.filter((p) => activeInWeek(p, thisWeek)).map((p) => p.key)),
-    [plan.projects, thisWeek],
-  )
+  const [coverage, setCoverage] = useState(null)
+  const [openDecisions, setOpenDecisions] = useState(null)
+  useEffect(() => {
+    if (readOnly) return undefined
+    let dead = false
+    api.jiraCoverage(thisWeek).then((r) => { if (!dead && r?.jira === 'on') setCoverage(r.byProject || {}) }).catch(() => {})
+    api.decisions('open').then((r) => { if (!dead) setOpenDecisions(r.decisions || []) }).catch(() => {})
+    return () => { dead = true }
+  }, [readOnly, thisWeek])
+  const signals = useMemo(() => activitySignals({
+    projects: plan.projects, jira: coverage, decisions: openDecisions, history: weekly, weekMonday: thisWeek,
+  }), [plan.projects, coverage, openDecisions, weekly, thisWeek])
+  const activeList = useMemo(() => activeUnits(plan.projects, thisWeek, signals), [plan.projects, thisWeek, signals])
+  const activeKeys = useMemo(() => new Set(activeList.flatMap((u) => u.keys)), [activeList])
   const projectOf = useMemo(() => Object.fromEntries(plan.projects.map((p) => [p.key, p])), [plan.projects])
   // Sent here by the header search: that project, whatever was filtered before.
   useEffect(() => {
@@ -1133,6 +1148,7 @@ export default function Timeline({
               <ActiveControl
                 projects={row.projectKeys.map((k) => projectOf[k])}
                 week={thisWeek}
+                signals={signals}
                 label={`active ${row.jiraKey || row.projectKey}`}
                 // Narrow, the column has no room for the word as well as the name.
                 size={narrow ? 'dot' : 'small'}
@@ -1479,8 +1495,8 @@ export default function Timeline({
         sx={switchLabel}
         control={<Switch size="small" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} inputProps={{ 'aria-label': 'active projects only' }} />}
         label={(
-          <Tooltip title="Active this week: its dates cover this week, or an administrator set it to always active">
-            <span>Active only ({activeKeys.size})</span>
+          <Tooltip title="Active this week: its dates cover this week, Jira work under it does, somebody sent an update on it this week, or a decision on it is open — or an administrator set it to always active">
+            <span>Active only ({activeList.length})</span>
           </Tooltip>
         )}
       />

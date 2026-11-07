@@ -11,7 +11,8 @@ import 'react-resizable/css/styles.css'
 import * as api from '../lib/api.js'
 import { addWeeks } from '../lib/weekly.js'
 import { CARDS, DEFAULT_LAYOUT, GROUPS } from '../dashboard/cards.js'
-import { DRAG } from '../dashboard/CardFrame.jsx'
+import { activitySignals } from '../lib/manager.js'
+import CardFrame, { DRAG } from '../dashboard/CardFrame.jsx'
 import { ago } from '../components/FollowUp.jsx'
 import Loading from '../components/Loading.jsx'
 
@@ -33,7 +34,7 @@ const Grid = WidthProvider(GridLayout)
 const known = (items) => (items || []).filter((it) => CARDS[it.type])
 
 export default function Dashboard({
-  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null,
+  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null, planLoading = false,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -48,6 +49,13 @@ export default function Dashboard({
   const [prevJira, setPrevJira] = useState(undefined)
   // Why it could not, said on the card rather than quietly showing nothing.
   const [prevJiraError, setPrevJiraError] = useState(null)
+  // The same for the week shown: Jira work covering it makes a project active.
+  const [nowJira, setNowJira] = useState(undefined)
+  const [nowJiraError, setNowJiraError] = useState(null)
+  // Keys on the register that Jira does not know, from either week's answer.
+  const [unknownKeys, setUnknownKeys] = useState([])
+  // The decision just taken, said on the card (it leaves the list).
+  const [decided, setDecided] = useState(null)
   // Both undefined while they load, null when they could not be read.
   const [pending, setPending] = useState(undefined)
   // "A decision is needed" raised on a Jira task in somebody's weekly update.
@@ -66,6 +74,8 @@ export default function Dashboard({
     setPrev(undefined)
     setPrevJira(undefined)
     setPrevJiraError(null)
+    setNowJira(undefined)
+    setNowJiraError(null)
     setTrend(null)
     setSummary(undefined)
     setPrevSummary(undefined)
@@ -73,10 +83,23 @@ export default function Dashboard({
       .then(async (w) => {
         if (stop) return
         setNow(w)
+        setUnknownKeys([])
+        api.jiraCoverage(w.week)
+          .then((r) => {
+            if (stop) return
+            if (r?.skipped?.length) setUnknownKeys((k) => [...new Set([...k, ...r.skipped])])
+            if (r?.jira === 'on') setNowJira(r.byProject || {})
+            else {
+              setNowJira(null)
+              if (r?.jira === 'error') setNowJiraError(r.error || 'Jira could not be read.')
+            }
+          })
+          .catch((e) => { if (!stop) { setNowJira(null); setNowJiraError(e.message) } })
         try { const p = await api.loadWeek(addWeeks(w.week, -1)); if (!stop) setPrev(p) } catch { if (!stop) setPrev(null) }
         api.jiraCoverage(addWeeks(w.week, -1))
           .then((r) => {
             if (stop) return
+            if (r?.skipped?.length) setUnknownKeys((k) => [...new Set([...k, ...r.skipped])])
             if (r?.jira === 'on') setPrevJira(r.byProject || {})
             else {
               setPrevJira(null)
@@ -85,7 +108,7 @@ export default function Dashboard({
           })
           .catch((e) => { if (!stop) { setPrevJira(null); setPrevJiraError(e.message) } })
       })
-      .catch(() => { if (!stop) { setNow(null); setPrev(null); setPrevJira(null) } })
+      .catch(() => { if (!stop) { setNow(null); setPrev(null); setPrevJira(null); setNowJira(null) } })
     api.followups(week || 'current').then((r) => { if (!stop) setFollowups(r.followups || []) }).catch(() => {})
     return () => { stop = true }
   }, [week])
@@ -180,20 +203,45 @@ export default function Dashboard({
     } : it)))
   }
 
+  // The week on screen is this week (and not one picked from the switcher).
+  const isCurrent = now ? now.week === now.current : !week
+  /*
+   * WHAT MAKES A PROJECT ACTIVE, beside its dates: Jira work covering the week,
+   * an update sent that week, an open decision. One set of signals for every
+   * card, so the tiles, "Who holds what" and the project page agree. An open
+   * decision is about now, so it only counts on this week's dashboard.
+   */
+  const signals = useMemo(() => activitySignals({
+    projects: plan.projects,
+    week: now || null,
+    jira: nowJira || null,
+    decisions: isCurrent ? decisions || null : null,
+  }), [plan.projects, now, nowJira, decisions, isCurrent])
+  // Until each signal has answered (or failed), the counts would change under the reader.
+  const signalsReady = now !== undefined && nowJira !== undefined && (!isCurrent || decisions !== undefined)
   const ctx = {
     plan,
+    planLoading,
     mode,
     hello,
     now,
     prev,
     prevJira,
     prevJiraError,
-    isCurrent: !week,
+    nowJira,
+    nowJiraError,
+    signals,
+    signalsReady,
+    unknownKeys,
+    isCurrent,
     pending,
     decisions,
+    decided,
     onDecide: async (id, note) => {
-      await api.decide(id, note)
-      setDecisions((list) => (list || []).filter((d) => d.id !== id))
+      const d = (decisions || []).find((x) => x.id === id)
+      const r = await api.decide(id, note)
+      setDecisions((list) => (list || []).filter((x) => x.id !== id))
+      setDecided({ key: d?.jiraKey || '', note, jira: r?.jira || r?.decision?.jira || null, at: Date.now() })
     },
     followups,
     summary,
@@ -207,8 +255,16 @@ export default function Dashboard({
   }
   if (saved === undefined && layoutWait) return <Loading variant="block" label="Loading the dashboard…" />
   const card = (type) => {
-    const { C } = CARDS[type]
-    return <C ctx={ctx} f={{ editing, onRemove: () => remove(type), fill: !stacked }} />
+    const { C, title, group } = CARDS[type]
+    const f = { editing, onRemove: () => remove(type), fill: !stacked }
+    /*
+     * Until the shared plan has arrived, the year's figures would be the
+     * bundled copy's — numbers that then jump. A spinner instead.
+     */
+    if (planLoading && group === 'The year') {
+      return <CardFrame {...f} title={title} label={title}><Loading variant="block" label="Loading the shared plan…" /></CardFrame>
+    }
+    return <C ctx={ctx} f={f} />
   }
 
   /* ------------------------------------------------------- the toolbar */

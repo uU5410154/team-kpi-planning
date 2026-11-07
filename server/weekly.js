@@ -501,21 +501,46 @@ export async function byProject({ person } = {}) {
   const out = {}
   const slot = (k) => { out[k] = out[k] || { history: [], blockers: [], proposals: [] }; return out[k] }
   const latestReport = {}
+  const latestTask = new Set()
   for (const e of rows) {
     for (const t of e.tasks || []) {
       if (!t.projectKey) continue
+      // An update sent on a Jira task (the weekly update), rather than a form row.
+      const sent = !!t.reportedAt || t.source === 'jira'
       slot(t.projectKey).history.push({
         week: e.week, person: e.person, title: t.title, done: t.done, pct: t.pct, expected: t.expected,
         newDate: t.newDate, blocker: t.blocker || '', blockerCategory: t.blockerCategory, priority: t.priority,
-        affects: t.affects, carriedFrom: t.carriedFrom || null, updatedAt: e.updatedAt || null,
-        planIn: !!e.planSubmittedAt, reportIn: !!e.reportSubmittedAt,
+        affects: t.affects, carriedFrom: t.carriedFrom || null,
+        // What the member wrote, and whether they put it on hold.
+        progress: t.progress || '', reason: t.reason || '', hold: !!t.hold, jiraKey: t.jiraKey || null,
+        reportedAt: t.reportedAt || null,
+        updatedAt: t.reportedAt || e.updatedAt || null,
+        planIn: !!e.planSubmittedAt, reportIn: !!e.reportSubmittedAt || sent,
       })
-      // Open blockers come from the latest REPORTED week per person and project.
+      /*
+       * WHAT IS IN THE WAY NOW. A task updated from Jira: its latest update,
+       * whether or not the whole week's report is in (in the Jira flow that
+       * waits for every task) — an older week's blocker on it is history, not
+       * news. A form row: the latest REPORTED week per person and project, as
+       * before. Work put on hold is not "in the way".
+       */
+      if (sent && t.jiraKey) {
+        const k = `${t.jiraKey}|${e.person}`
+        if (latestTask.has(k)) continue
+        latestTask.add(k)
+        const why = t.blocker && !/^on hold$/i.test(String(t.blocker).trim()) ? t.blocker : (t.reason || '')
+        if (t.done === false && !t.hold && why) {
+          slot(t.projectKey).blockers.push({
+            week: e.week, person: e.person, title: t.title, blocker: why, blockerCategory: t.blockerCategory, newDate: t.newDate,
+          })
+        }
+        continue
+      }
       if (e.reportSubmittedAt) {
         const k = `${t.projectKey}|${e.person}`
         if (!(k in latestReport) || latestReport[k] === e.week) {
           latestReport[k] = e.week
-          if (t.done === false && t.blocker) {
+          if (t.done === false && !t.hold && t.blocker) {
             slot(t.projectKey).blockers.push({
               week: e.week, person: e.person, title: t.title, blocker: t.blocker, blockerCategory: t.blockerCategory, newDate: t.newDate,
             })

@@ -3,17 +3,19 @@ import {
   Box, ButtonBase, Menu, MenuItem, ListItemIcon, ListItemText, Tooltip, Typography,
 } from '@mui/material'
 import CheckIcon from '@mui/icons-material/Check'
-import { activeInWeek } from '../lib/manager.js'
+import { unitActive, unitSource, ACTIVE_WHY } from '../lib/manager.js'
 import { weekOf, weekNo } from '../lib/weekly.js'
 
 /*
  * WHETHER A PROJECT IS ACTIVE, AND WHO SAID SO.
  *
- * Active is worked out from the dates: a project whose start-to-due dates
- * cover this week is active this week. An administrator can override that
- * either way. Three choices, so the override can be taken off again:
+ * Active is automatic: a project whose dates cover this week, or with Jira
+ * work covering it, an update sent on it, or an open decision, is active this
+ * week (lib/manager.js activeSource; `signals` carries the last three). An
+ * administrator can override that either way. Three choices, so the override
+ * can be taken off again:
  *
- *   Automatic      the dates decide (nothing stored)
+ *   Automatic      the dates and the work decide (nothing stored)
  *   Always active  `active: true`
  *   Never active   `active: false`
  *
@@ -31,16 +33,18 @@ const modeOf = (projects) => {
 const WORD = { auto: 'Auto', on: 'Always', off: 'Never' }
 
 export default function ActiveControl({
-  projects = [], label, onSet, week = weekOf(), size = 'small',
+  projects = [], label, onSet, week = weekOf(), size = 'small', signals = null,
 }) {
   const [at, setAt] = useState(null)
   const live = projects.filter(Boolean)
   const mode = modeOf(live)
-  const on = live.length > 0 && live.every((p) => activeInWeek(p, week))
-  // What the dates alone would say, for the "Automatic" line of the menu.
-  const byDates = live.length > 0 && live.every((p) => activeInWeek({ ...p, active: undefined }, week))
+  // The same answer as the dashboard: any line active makes the work active.
+  const on = unitActive(live, week, signals)
+  // What "Automatic" would say — dates, Jira work, an update, a decision — for its line of the menu.
+  const autoWhy = unitSource(live.map((p) => ({ ...p, active: undefined })), week, signals)
+  const byAuto = autoWhy !== 'none'
   const wk = `week ${weekNo(week)}`
-  const tip = `${on ? 'Active' : 'Not active'} in ${wk} — ${mode === 'auto' ? 'by its dates' : 'set by an administrator'}. Click to change.`
+  const tip = `${on ? 'Active' : 'Not active'} in ${wk} — ${mode === 'auto' ? (byAuto ? ACTIVE_WHY[autoWhy] : 'automatic: nothing covers it') : 'set by an administrator'}. Click to change.`
   const pick = (v) => { setAt(null); onSet?.(v) }
   // 'dot': just the dot, for a narrow column — the word is in the tooltip.
   const dot = size === 'dot'
@@ -88,8 +92,9 @@ export default function ActiveControl({
         <MenuItem onClick={() => pick(undefined)} selected={mode === 'auto'}>
           <ListItemIcon>{mode === 'auto' && <CheckIcon fontSize="small" />}</ListItemIcon>
           <ListItemText
-            primary="Automatic — by its dates"
-            secondary={`${byDates ? 'Active' : 'Not active'} in ${wk}`}
+            primary="Automatic"
+            secondaryTypographyProps={{ sx: { whiteSpace: 'normal', maxWidth: 300 } }}
+            secondary={`${byAuto ? `Active in ${wk} — ${ACTIVE_WHY[autoWhy]}` : `Not active in ${wk}`}. Dates, Jira work, an update or an open decision make it active.`}
           />
         </MenuItem>
         <MenuItem onClick={() => pick(true)} selected={mode === 'on'}>

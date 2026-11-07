@@ -220,7 +220,8 @@ export async function followUp(projectKey, by, now = Date.now()) {
     lines: [
       `${projectKey}${project.summary ? ` — ${project.summary}` : ''}.`,
       'Please add this week’s update for it: what you are doing, and if it is not finished, what is in the way and when it will land.',
-      'The button opens your week with the project’s task ready to fill in. Save when you are done and your manager is told.',
+      'The button opens your week on the project. If none of its tasks is in your week yet, add one there (New task) and send the update on it.',
+      'When you send it, your manager is told.',
     ],
     button: { label: `Update ${projectKey}`, href: link },
   })

@@ -1363,6 +1363,7 @@ export default function App() {
               aiOn={canWrite && aiOn}
               onAsk={askAi}
               onOpenProject={openProject}
+              planLoading={sharedLoading}
             />
           )}
           {allowed && tab === 'project' && (
