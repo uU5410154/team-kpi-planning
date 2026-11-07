@@ -128,6 +128,9 @@ export function lastWeekFromJira(byProject = {}, prev = null) {
       done: t.done ? true : t.update ? t.update.done === true : null,
       hold: !t.done && (!!t.update?.hold || /hold/i.test(t.status || '')),
       blocker: t.update?.blocker || t.update?.reason || '',
+      progress: t.update?.progress || '',
+      reason: t.update?.reason || '',
+      reportedAt: t.update?.submittedAt || null,
       status: t.status,
       updatedAt: t.update?.submittedAt || null,
     }))

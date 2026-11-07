@@ -160,6 +160,7 @@ try {
     tasks: [{
       id: 'tlast1', title: 'Build the forecast model', projectKey: 'FNP-379', done: false, pct: 60, blocker: 'Waiting on IT for the data feed',
       blockerCategory: 'it', newDate: '2026-12-20', affects: true, expected: LAST, effort: 3, priority: 'must',
+      progress: 'Built the driver tree for three regions; the fourth waits on the feed.',
     }],
     unplanned: [],
     planSubmittedAt: new Date(Date.parse(`${LAST}T00:00:00Z`)).toISOString(),
@@ -309,6 +310,8 @@ try {
     check('WHO HOLDS WHAT: by owner, last week and this week',
       own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /NOT DONE · 60%/i.test(own)
       && own.includes('Validate the forecast with FP&A'), own.slice(0, 400).replace(/\n/g, ' | '))
+    check('  EACH TASK SHOWS WHAT THE MEMBER WROTE ABOUT IT, NOT JUST ITS NAME', own.includes('Built the driver tree for three regions')
+      && /In the way: Waiting on IT/.test(own), own.slice(0, 500).replace(/\n/g, ' | '))
     check('  THE ANSWERED FOLLOW-UP SAYS SO', /UPDATED .*AGO|UPDATED JUST NOW/i.test(own))
     check('  a project with no owner cannot be followed up', own.includes('No owner to ask'))
     // The week switcher in the top bar: any week, and straight back.

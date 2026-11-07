@@ -318,6 +318,7 @@ export async function submit(week, me, body, now = Date.now()) {
     expected: issue.due || null,
     done: u.done,
     pct: u.done ? 100 : null,
+    hold: !!u.hold,
     blocker: u.blocker || (u.done ? '' : u.reason || (u.hold ? 'On hold' : '')),
     progress: u.progress,
     reason: u.reason,
@@ -391,7 +392,7 @@ export async function coverage(week) {
       start: t.start,
       due: t.due,
       update: u ? {
-        nick: u.nick, done: u.done, hold: !!u.hold, reason: u.reason || '', blocker: u.blocker || '', submittedAt: u.submittedAt,
+        nick: u.nick, done: u.done, hold: !!u.hold, progress: u.progress || '', reason: u.reason || '', blocker: u.blocker || '', submittedAt: u.submittedAt,
       } : null,
     }
     for (const pk of linesOf[epicKey] || []) (byProject[pk] = byProject[pk] || []).push(item)

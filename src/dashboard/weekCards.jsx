@@ -101,32 +101,75 @@ export function UpdatedCard({ ctx, f }) {
 
 /* ---------------------------------------------------------- the owners */
 
+/** What somebody wrote about a task, three lines at most until clicked. */
+function UpdateText({ text }) {
+  const [open, setOpen] = useState(false)
+  const long = text.length > 180
+  return (
+    <Typography
+      variant="body2"
+      data-update-text
+      onClick={long ? () => setOpen((o) => !o) : undefined}
+      title={long && !open ? 'Click to read it all' : undefined}
+      sx={{
+        color: 'text.secondary',
+        mt: 0.5,
+        pl: 1,
+        borderLeft: 2,
+        borderColor: 'divider',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        lineHeight: 1.45,
+        cursor: long ? 'pointer' : 'default',
+        ...(!open && {
+          display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }),
+      }}
+    >
+      {text}
+    </Typography>
+  )
+}
+
+/*
+ * A project's tasks in one week: each with where it stands (Done, Not done,
+ * On hold, or no answer yet), who holds it, and what they wrote about it.
+ */
 function TaskList({ tasks, empty, kind }) {
   if (!tasks.length) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>{empty}</Typography>
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-      {tasks.map((t) => (
-        <Box key={`${t.person}.${t.id}`} sx={{ minWidth: 0 }}>
-          <Typography variant="body2" sx={{ lineHeight: 1.35 }}>{t.title}</Typography>
-          <Box sx={{
-            display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap', mt: 0.25,
-          }}
-          >
-            {kind === 'last' && t.hold && <Pill label="On hold" tone="warn" />}
-            {kind === 'last' && !t.hold && t.done === true && <Pill label="Done" tone="good" />}
-            {kind === 'last' && !t.hold && t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
-            {kind === 'last' && !t.hold && t.done == null && <Pill label="No answer" tone="neutral" />}
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {t.nick}
-              {kind === 'this' && t.expected ? ` · expected ${fmtDay(t.expected)}` : ''}
-              {kind === 'last' && t.done === false && t.newDate ? ` · now ${fmtDay(t.newDate)}` : ''}
-            </Typography>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+      {tasks.map((t) => {
+        // Answered: a report came in (or, last week, Jira already says Done).
+        const answered = t.done != null || !!t.reportedAt || !!t.progress
+        const hold = t.hold || (t.done === false && /^on hold$/i.test(String(t.blocker || '').trim()))
+        const why = t.done === false ? (t.reason || t.blocker || '') : ''
+        return (
+          <Box key={`${t.person}.${t.id}`} sx={{ minWidth: 0 }} data-week-task={t.jiraKey || t.id}>
+            <Typography variant="body2" sx={{ lineHeight: 1.35 }}>{t.title}</Typography>
+            <Box sx={{
+              display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap', mt: 0.25,
+            }}
+            >
+              {hold && <Pill label="On hold" tone="warn" />}
+              {!hold && t.done === true && <Pill label="Done" tone="good" />}
+              {!hold && t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
+              {!hold && t.done == null && (kind === 'last' || !answered) && <Pill label={kind === 'last' ? 'No answer' : 'Planned'} tone="neutral" />}
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {t.nick}
+                {kind === 'this' && t.expected ? ` · expected ${fmtDay(t.expected)}` : ''}
+                {t.done === false && t.newDate ? ` · now ${fmtDay(t.newDate)}` : ''}
+              </Typography>
+            </Box>
+            {t.progress && <UpdateText text={t.progress} />}
+            {why && !/^on hold$/i.test(why.trim()) && (
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
+                {hold ? 'Why on hold' : 'In the way'}: {why}
+              </Typography>
+            )}
           </Box>
-          {kind === 'last' && t.done === false && t.blocker && (
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>In the way: {t.blocker}</Typography>
-          )}
-        </Box>
-      ))}
+        )
+      })}
     </Box>
   )
 }

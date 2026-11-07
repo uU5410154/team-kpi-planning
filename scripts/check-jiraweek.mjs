@@ -372,12 +372,12 @@ try {
     await call('PUT', '/api/scenarios/Baseline', { payload: seed, updatedBy: 'test' }, 'service')
     const lw = lastWeekFromJira({ P1: [
       { key: 'FNP-1', summary: 'Done one', done: true, assignee: 'A', status: 'Done', update: null },
-      { key: 'FNP-2', summary: 'Said not done', done: false, assignee: 'B', status: 'In Progress', update: { nick: 'Bee', done: false, reason: 'Waiting on IT', submittedAt: 'x' } },
+      { key: 'FNP-2', summary: 'Said not done', done: false, assignee: 'B', status: 'In Progress', update: { nick: 'Bee', done: false, progress: 'Mapped 3 of 5 feeds', reason: 'Waiting on IT', submittedAt: 'x' } },
       { key: 'FNP-3', summary: 'Silent', done: false, assignee: 'C', status: 'To Do', update: null },
       { key: 'FNP-4', summary: 'Paused', done: false, assignee: 'D', status: 'On Hold', update: null },
     ] })
     check('  each reads Done, Not done (with why), no answer, or On hold', lw.P1[0].done === true && lw.P1[1].done === false && lw.P1[1].blocker === 'Waiting on IT'
-      && lw.P1[1].nick === 'Bee' && lw.P1[2].done === null && lw.P1[3].hold === true, JSON.stringify(lw.P1))
+      && lw.P1[1].nick === 'Bee' && lw.P1[1].progress === 'Mapped 3 of 5 feeds' && lw.P1[2].done === null && lw.P1[3].hold === true, JSON.stringify(lw.P1))
   }
   const adhoc = await call('PUT', `/api/weekly/${WEEK}/mine`, { mode: 'jira', focus: '', tasks: entry2.tasks, unplanned: [{ title: 'Audit request', effort: 0.5 }] }, james)
   const entry3 = await D.collection('kpi_weekly').findOne({ week: WEEK, person: 'james' })

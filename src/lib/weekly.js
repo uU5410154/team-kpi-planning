@@ -156,6 +156,8 @@ export function cleanTask(t = {}) {
     source: t.source === 'jira' ? 'jira' : null,
     progress: text(t.progress, 4000),
     reason: text(t.reason, 2000),
+    // Stopped on purpose: a kind of not finished.
+    hold: t.hold === true,
     decision: t.decision === true,
     decisionText: text(t.decisionText, 2000),
     start: isDay(t.start) ? t.start : null,
