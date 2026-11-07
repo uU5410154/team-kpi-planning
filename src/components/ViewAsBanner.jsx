@@ -78,8 +78,11 @@ export default function ViewAsBanner({
         ))}
       </Menu>
       <Button variant="text" size="small" onClick={onBack} sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-        Back
-        <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' }, whiteSpace: 'pre' }}>{' to administrator'}</Box>
+        {/* One span, so the words read as one line ("Back to administrator"); a phone shows "Back". */}
+        <span>
+          Back
+          <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}> to administrator</Box>
+        </span>
       </Button>
     </Box>
   )

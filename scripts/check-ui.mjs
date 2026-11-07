@@ -92,10 +92,10 @@ try {
   await new Promise((r) => setTimeout(r, 700))
 
   const leadCard = await page.evaluate(() => ({
-    label: document.body.innerText.includes('TEAM SAVING HOURS'),
-    personalLabel: document.body.innerText.includes('CREDITED SAVING HOURS'),
+    label: document.body.innerText.includes('Team saving hours'),
+    personalLabel: document.body.innerText.includes('Credited saving hours'),
     teamWording: document.body.innerText.includes("carries the team's overall KPI"),
-    value: document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? null,
+    value: document.body.innerText.match(/Team saving hours[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? null,
   }))
   check('the lead card is labelled as the team, not personal',
     leadCard.label && !leadCard.personalLabel, JSON.stringify(leadCard))
@@ -407,7 +407,7 @@ try {
 
   /* ---------- editing the portfolio ---------- */
   const teamHeadline = () => page.evaluate(() =>
-    Number((document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? '0').replace(/,/g, '')))
+    Number((document.body.innerText.match(/Team saving hours[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? '0').replace(/,/g, '')))
   const before2 = await teamHeadline()
   /*
    * The header counts the BOOK — every row on the register, including the ones
@@ -654,7 +654,7 @@ try {
 
   /* ---------- the rates are live from the Model tab ---------- */
   const annualTile = () => page.evaluate(() =>
-    document.body.innerText.match(/VALUE OF HOURS RELEASED\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null)
+    document.body.innerText.match(/Value of hours released\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null)
 
   await page.goto(`${base}/?money=2#dashboard`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 1200))
@@ -730,8 +730,8 @@ try {
   const fteTile = () => page.evaluate(() => {
     const t = document.body.innerText
     return {
-      fte: Number(t.match(/VALUE OF HOURS RELEASED[\s\S]*?([\d.]+)\s*FTE/)?.[1] ?? 0),
-      money: t.match(/VALUE OF HOURS RELEASED\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null,
+      fte: Number(t.match(/Value of hours released[\s\S]*?([\d.]+)\s*FTE/)?.[1] ?? 0),
+      money: t.match(/Value of hours released\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null,
     }
   })
   const ratioBefore = await fteTile()

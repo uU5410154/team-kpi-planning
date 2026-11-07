@@ -134,6 +134,9 @@ function UserRow({
         open={!!at}
         onClose={() => setAt(null)}
         keepMounted
+        // Closed, it takes no room at all: a hidden menu left in the layout
+        // can widen a phone's page.
+        sx={{ '&.MuiModal-hidden': { display: 'none' } }}
         anchorOrigin={{ vertical: 'top', horizontal: mini ? 'right' : 'left' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
         slotProps={{ paper: { sx: { minWidth: 240, mt: -1 } } }}
@@ -142,13 +145,12 @@ function UserRow({
           <MenuItem
             component="label"
             data-view-as-toggle
-            sx={{ pr: 1 }}
+            sx={{ pr: 2 }}
           >
             <ListItemIcon><PreviewIcon fontSize="small" /></ListItemIcon>
             <ListItemText primary="View as a team member" />
             <Switch
               size="small"
-              edge="end"
               checked={!!previewing}
               onChange={(e) => { onToggleView(e.target.checked); setAt(null) }}
               inputProps={{ 'aria-label': 'view as a team member' }}
@@ -326,6 +328,7 @@ export default function Sidebar(props) {
         // Mounted while closed, so the pages are in the document for anything
         // that looks for them, and the menu opens without a rebuild.
         ModalProps={{ keepMounted: true }}
+        sx={{ '&.MuiModal-hidden': { display: 'none' } }}
         PaperProps={{
           sx: {
             width: 280, maxWidth: '85vw', bgcolor: 'bg.sidebar', borderRight: 1, borderColor: 'border.subtle', boxShadow: 'none',
