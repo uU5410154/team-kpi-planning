@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Box, Typography, Button, ButtonBase, Skeleton, Table, TableBody, TableCell, TableHead, TableRow,
+  Box, Typography, Button, ButtonBase, Table, TableBody, TableCell, TableHead, TableRow,
   Link, ToggleButton, ToggleButtonGroup, Tooltip, LinearProgress, TextField,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
@@ -20,6 +20,7 @@ import {
   projectCounts, updatedCount, ownerRows, reportedWeek, blockersByType, slipping, workload, submissionTrend,
 } from '../lib/manager.js'
 import CardFrame from './CardFrame.jsx'
+import Loading from '../components/Loading.jsx'
 
 /*
  * THE MANAGER'S CARDS: what is active, what has been updated this week, who
@@ -46,7 +47,7 @@ function Waiting({ ctx, rows = 3 }) {
   if (ctx.now === null) {
     return <Typography variant="body2" sx={{ color: 'text.disabled' }}>The weekly check-ins could not be read just now.</Typography>
   }
-  return <>{Array.from({ length: rows }, (_x, i) => <Skeleton key={i} height={40} />)}</>
+  return <Loading variant="block" label={rows > 3 ? 'Loading the week…' : 'Loading…'} />
 }
 
 const ProjectLink = ({ p, onOpen }) => (
@@ -177,8 +178,10 @@ function TaskList({ tasks, empty, kind }) {
 export function OwnersCard({ ctx, f }) {
   const [only, setOnly] = useState('all')
   const groups = ownerRows({
-    projects: ctx.plan.projects, people: ctx.plan.assignees || ctx.plan.people, now: ctx.now, prev: ctx.prev, followups: ctx.followups, prevJira: ctx.prevJira,
+    projects: ctx.plan.projects, people: ctx.plan.assignees || ctx.plan.people, now: ctx.now, prev: ctx.prev, followups: ctx.followups, prevJira: ctx.prevJira || null,
   })
+  // Last week comes from Jira a moment after the rest: a spinner until it does.
+  const lastLoading = ctx.prevJira === undefined
   const shown = groups
     .map((g) => ({ ...g, projects: only === 'stale' ? g.projects.filter((p) => !p.thisWeek.length) : g.projects }))
     .filter((g) => g.projects.length)
@@ -248,7 +251,11 @@ export function OwnersCard({ ctx, f }) {
                             {p.jiraKey || p.key} · due {fmtDay(p.due)}
                           </Typography>
                         </TableCell>
-                        <TableCell><TaskList tasks={p.lastWeek} kind="last" empty={ctx.prevJira ? 'Nothing in Jira covered last week' : 'No task last week'} /></TableCell>
+                        <TableCell>
+                          {lastLoading
+                            ? <Loading label="Loading from Jira…" />
+                            : <TaskList tasks={p.lastWeek} kind="last" empty={ctx.prevJira ? 'Nothing in Jira covered last week' : 'No task last week'} />}
+                        </TableCell>
                         <TableCell><TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" /></TableCell>
                         <TableCell>
                           <Typography variant="caption" sx={{ color: p.latest ? 'text.primary' : 'text.disabled' }}>

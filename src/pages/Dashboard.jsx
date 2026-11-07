@@ -42,8 +42,9 @@ export default function Dashboard({
   // undefined: still loading; null: not available.
   const [now, setNow] = useState(undefined)
   const [prev, setPrev] = useState(undefined)
-  // Each project's Jira work whose timeline covers last week; null when Jira cannot say.
-  const [prevJira, setPrevJira] = useState(null)
+  // Each project's Jira work whose timeline covers last week: undefined while
+  // it loads, null when Jira cannot say.
+  const [prevJira, setPrevJira] = useState(undefined)
   // Why it could not, said on the card rather than quietly showing nothing.
   const [prevJiraError, setPrevJiraError] = useState(null)
   const [pending, setPending] = useState([])
@@ -60,7 +61,7 @@ export default function Dashboard({
     let stop = false
     setNow(undefined)
     setPrev(undefined)
-    setPrevJira(null)
+    setPrevJira(undefined)
     setPrevJiraError(null)
     setTrend(null)
     setSummary(undefined)
@@ -74,11 +75,14 @@ export default function Dashboard({
           .then((r) => {
             if (stop) return
             if (r?.jira === 'on') setPrevJira(r.byProject || {})
-            else if (r?.jira === 'error') setPrevJiraError(r.error || 'Jira could not be read.')
+            else {
+              setPrevJira(null)
+              if (r?.jira === 'error') setPrevJiraError(r.error || 'Jira could not be read.')
+            }
           })
-          .catch((e) => { if (!stop) setPrevJiraError(e.message) })
+          .catch((e) => { if (!stop) { setPrevJira(null); setPrevJiraError(e.message) } })
       })
-      .catch(() => { if (!stop) { setNow(null); setPrev(null) } })
+      .catch(() => { if (!stop) { setNow(null); setPrev(null); setPrevJira(null) } })
     api.followups(week || 'current').then((r) => { if (!stop) setFollowups(r.followups || []) }).catch(() => {})
     return () => { stop = true }
   }, [week])
