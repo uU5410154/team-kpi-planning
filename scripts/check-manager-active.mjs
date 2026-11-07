@@ -351,7 +351,7 @@ try {
     // His two tasks are both updated, so they sit under "Already updated": his Jira name and week say it is his.
     await v.waitForFunction(() => /Pipat Singhasiri|FNP-700[23]/.test(document.body.innerText), { timeout: 20000 }).catch(() => {})
     const vt = await v.evaluate(() => document.body.innerText)
-    check('VIEW AS: A PERSON PICKER', !!(await v.$('[data-view-as="james"]')) && /Viewing as James/.test(vt))
+    check('VIEW AS: A PERSON PICKER', !!(await v.$('[data-view-as="james"]')) && /Viewing as a team member: James/.test(vt))
     check('  AND JAMES’S OWN JIRA WEEK, not "not linked"', /Pipat Singhasiri|FNP-700[23]/.test(vt) && !/not linked/i.test(vt),
       (vt.match(/.{0,80}not linked.{0,80}/i) || [vt.slice(0, 200)])[0].replace(/\n/g, ' | '))
     check('  read only: nothing to submit', !(await v.evaluate(() => [...document.querySelectorAll('button')].some((b) => /^Send update|^Submit/.test(b.textContent.trim()) && !b.disabled))))

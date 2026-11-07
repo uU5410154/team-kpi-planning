@@ -26,7 +26,7 @@ export default function ViewAsBanner({
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
         <Typography variant="body2" sx={{ flex: '1 1 260px', minWidth: 0 }}>
-          <strong>Viewing as {nick ? `${nick}, a team member` : 'a team member'}.</strong>{' '}
+          <strong>Viewing as a team member{nick ? `: ${nick}` : ''}.</strong>{' '}
           {person
             ? `This is what ${person === self ? 'your team sees, with your own week' : `${nick || person} sees — their week and their projects`}. Read only: nothing you do here changes anything.`
             : 'Pick somebody to see their week and their projects exactly as they do.'}
