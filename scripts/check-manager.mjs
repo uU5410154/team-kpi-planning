@@ -16,7 +16,7 @@ import { weekOf, addWeeks } from '../src/lib/weekly.js'
 import { computePlan, DEFAULT_SETTINGS } from '../src/lib/model.js'
 import {
   projectCounts, updatedCount, ownerRows, slipping, workload, blockersByType, submissionTrend,
-  activeInWeek, activeSource,
+  activeInWeek, activeSource, activeUnits, workUnits,
 } from '../src/lib/manager.js'
 import { cleanLayout } from '../server/manager.js'
 import { DEFAULT_LAYOUT, EXTRA_CARDS } from '../src/dashboard/layout.js'
@@ -181,9 +181,10 @@ try {
     const plan = computePlan({ meta: seed.meta, people: seed.people, projects: seed.projects, settings: DEFAULT_SETTINGS })
     const counts = projectCounts(plan.projects, WEEK)
     const activeNow = plan.projects.filter((p) => !p.deleted && activeInWeek(p, WEEK))
+    // Counted per piece of work: register lines on one epic count once (FNP-1151 is three).
     check('ACTIVE: THE FOUR SWITCHED ON, plus those whose dates cover this week, of every project in the register',
-      counts.forced === 4 && counts.active === activeNow.length && counts.active === counts.forced + counts.byDates
-      && counts.total === plan.projects.filter((p) => !p.deleted).length, JSON.stringify(counts))
+      counts.forced === 4 && counts.active === activeUnits(plan.projects, WEEK).length && counts.active === counts.forced + counts.byDates
+      && counts.total === workUnits(plan.projects).length && counts.lines === plan.projects.filter((p) => !p.deleted).length, JSON.stringify(counts))
     const up = updatedCount(plan.projects, now)
     check('UPDATED THIS WEEK: one of the active has a task on it', up.updated === 1 && up.active === activeNow.length, JSON.stringify(up))
     const groups = ownerRows({ projects: plan.projects, people: plan.assignees, now, prev })
@@ -293,8 +294,9 @@ try {
     await a.goto(`${base}/`, { waitUntil: 'networkidle0' })
     await a.waitForFunction(() => document.querySelector('section[aria-label="who holds what"]')?.innerText.includes('Load the budget data'), { timeout: 15000 }).catch(() => {})
     const sect = (pg, l) => pg.evaluate((x) => document.querySelector(`section[aria-label="${x}"]`)?.innerText || '', l)
-    const total = seed.projects.filter((p) => !p.deleted).length
-    const nActive = seed.projects.filter((p) => !p.deleted && activeInWeek(p, WEEK)).length
+    // Per piece of work, as the tiles count: register lines on one epic once.
+    const total = workUnits(seed.projects).length
+    const nActive = activeUnits(seed.projects, WEEK).length
     const act = await sect(a, 'Active projects')
     check(`ACTIVE PROJECTS: ${nActive} (4 switched on, the rest by their dates), of every project in the register`,
       new RegExp(`\\b${nActive}\\b`).test(act) && act.includes(`of ${total}`) && act.includes('4 switched on'), act.replace(/\n/g, ' | '))
@@ -335,7 +337,10 @@ try {
       check(`  @${width}px the switcher fits, with no sideways scroll`, r.sw2 && r.sw <= r.cw + 1, JSON.stringify(r))
       await n.browserContext().close()
     }
+    // Follow up asks first; the answer comes once "Send the email" is pressed.
     await a.evaluate(() => document.querySelector('button[aria-label="follow up FNP-267"]')?.click())
+    await a.waitForSelector('[data-followup-send]', { timeout: 5000 }).catch(() => {})
+    await a.evaluate(() => document.querySelector('[data-followup-send]')?.click())
     await a.waitForFunction(() => document.body.innerText.includes('Link one on the Access tab'), { timeout: 8000 }).catch(() => {})
     check('FOLLOW UP SAYS WHY IT CANNOT', (await text(a)).includes('Link one on the Access tab'))
     await a.evaluate(() => [...document.querySelectorAll('section[aria-label="who holds what"] button')].find((b) => b.textContent.trim() === 'Not updated')?.click())
@@ -348,11 +353,13 @@ try {
     await a.evaluate(() => [...document.querySelectorAll('section[aria-label="who holds what"] button')].find((b) => b.textContent.trim() === 'All')?.click())
     await sleep(200)
     await a.evaluate(() => [...document.querySelectorAll('section[aria-label="who holds what"] button')].find((b) => b.textContent.trim() === 'PL Forecast')?.click())
-    await a.waitForFunction(() => document.body.innerText.includes('Week by week'), { timeout: 10000 }).catch(() => {})
+    // "Week by week" is drawn while the check-ins load (with a spinner): wait for them.
+    await a.waitForFunction(() => document.body.innerText.includes('Week by week')
+      && !document.querySelector('section[aria-label="week by week"] [data-loading]'), { timeout: 10000 }).catch(() => {})
     const pt = await text(a)
     check('A PROJECT’S NAME OPENS ITS PAGE', a.url().endsWith('#project/FNP-379') && pt.includes('PL Forecast'), a.url())
     check('  owner, due date and hours', pt.includes('Owner') && pt.includes('31 Aug 2026') && pt.includes('Saving hours / month'))
-    check('  WHAT IS IN THE WAY', pt.includes('Waiting on IT for the data feed'))
+    check('  WHAT IS IN THE WAY', pt.includes('Waiting on IT for the data feed'), pt.slice(pt.indexOf('PL Forecast'), pt.indexOf('PL Forecast') + 900).replace(/\n/g, ' | '))
     check('  AND EVERY WEEK’S TASKS', pt.includes('Build the forecast model') && pt.includes('Validate the forecast with FP&A'))
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/project-page.png` })
     await a.goBack({ waitUntil: 'networkidle0' })

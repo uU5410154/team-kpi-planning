@@ -11,7 +11,7 @@ import { projectOnHold } from '../lib/hold.js'
 import { fmtHours } from '../lib/model.js'
 import { OBJ_BY_ID } from '../lib/palette.js'
 import {
-  weekLabel, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES, PRIORITIES,
+  weekLabel, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES, PRIORITIES, weekOf,
 } from '../lib/weekly.js'
 import {
   Pill, IconTile, PAGE_COLOR, personColor, statusTone,
@@ -19,7 +19,9 @@ import {
 import FollowUp, { ago } from '../components/FollowUp.jsx'
 import Loading from '../components/Loading.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
-import { activeInWeek } from '../lib/manager.js'
+import {
+  activitySignals, unitSource, unitActive, ACTIVE_WHY,
+} from '../lib/manager.js'
 
 /**
  * ONE PROJECT, IN FULL.
@@ -53,8 +55,11 @@ function Fact({ label, children }) {
 }
 
 function TaskLine({ t }) {
+  // "On hold" written as the blocker is how the Jira flow records a hold; it is not in the way.
+  const hold = t.hold || (t.done === false && /^on hold$/i.test(String(t.blocker || '').trim()))
+  const why = !hold && t.done === false ? (t.blocker && !/^on hold$/i.test(t.blocker.trim()) ? t.blocker : t.reason || '') : ''
   return (
-    <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', py: 0.75 }}>
+    <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', py: 0.75 }} data-task-line={t.jiraKey || t.title}>
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.title}</Typography>
         <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
@@ -62,17 +67,33 @@ function TaskLine({ t }) {
           {t.priority ? ` · ${PRIORITY[t.priority]}` : ''}
           {t.expected ? ` · expected ${fmtDay(t.expected)}` : ''}
           {t.carriedFrom ? ` · carried from ${weekLabel(t.carriedFrom)}` : ''}
+          {t.reportedAt ? ` · sent ${ago(t.reportedAt)}` : ''}
         </Typography>
-        {t.done === false && t.blocker && (
+        {t.progress && (
+          <Typography
+            variant="body2"
+            data-progress
+            sx={{
+              color: 'text.secondary', mt: 0.5, pl: 1, borderLeft: 2, borderColor: 'divider', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.45,
+            }}
+          >
+            {t.progress}
+          </Typography>
+        )}
+        {hold && t.reason && !/^on hold$/i.test(t.reason.trim()) && (
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: 'text.secondary' }}>Why on hold: {t.reason}</Typography>
+        )}
+        {why && (
           <Typography variant="caption" sx={{ display: 'block', mt: 0.25 }}>
-            In the way{t.blockerCategory ? ` (${CATEGORY[t.blockerCategory]})` : ''}: {t.blocker}
+            In the way{t.blockerCategory ? ` (${CATEGORY[t.blockerCategory]})` : ''}: {why}
             {t.newDate ? ` · now ${fmtDay(t.newDate)}` : ''}
           </Typography>
         )}
       </Box>
-      {t.done === true && <Pill label="Done" tone="good" />}
-      {t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
-      {t.done == null && <Pill label={t.reportIn ? 'No answer' : 'Planned'} tone="neutral" />}
+      {hold && <Pill label="On hold" tone="warn" />}
+      {!hold && t.done === true && <Pill label="Done" tone="good" />}
+      {!hold && t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
+      {!hold && t.done == null && <Pill label={t.reportIn ? 'No answer' : 'Planned'} tone="neutral" />}
     </Box>
   )
 }
@@ -95,13 +116,26 @@ export default function Project({
   const [weekly, setWeekly] = useState(undefined)
   const [follow, setFollow] = useState([])
   const [jiraSite, setJiraSite] = useState(null)
+  // What makes it active this week beside its dates: Jira work, an open
+  // decision (and an update, from `weekly`). Undefined while asked for.
+  const [coverage, setCoverage] = useState(undefined)
+  const [openDecisions, setOpenDecisions] = useState(undefined)
+  const thisWeek = weekOf()
   useEffect(() => {
     let stop = false
     api.weeklyByProject().then((r) => { if (!stop) setWeekly(r.byProject || {}) }).catch(() => { if (!stop) setWeekly(null) })
     if (canWrite) api.followups(null).then((r) => { if (!stop) setFollow(r.followups || []) }).catch(() => {})
     api.jiraStatus().then((s) => { if (!stop) setJiraSite(s?.site || null) }).catch(() => {})
+    if (canWrite) {
+      api.jiraCoverage(thisWeek).then((r) => { if (!stop) setCoverage(r?.jira === 'on' ? r.byProject || {} : null) }).catch(() => { if (!stop) setCoverage(null) })
+    } else setCoverage(null)
+    api.decisions('open').then((r) => { if (!stop) setOpenDecisions(r.decisions || []) }).catch(() => { if (!stop) setOpenDecisions(null) })
     return () => { stop = true }
-  }, [projectKey, canWrite])
+  }, [projectKey, canWrite, thisWeek])
+  const signals = useMemo(() => activitySignals({
+    projects: plan.projects, jira: coverage || null, decisions: openDecisions || null, history: weekly || null, weekMonday: thisWeek,
+  }), [plan.projects, coverage, openDecisions, weekly, thisWeek])
+  const signalsReady = weekly !== undefined && coverage !== undefined && openDecisions !== undefined
 
   if (!p) {
     return (
@@ -128,9 +162,10 @@ export default function Project({
   const lastFollow = follow.filter((f) => keys.includes(f.projectKey)).sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0] || null
 
   const owner = plan.assignees?.find((x) => x.id === p.pic) || plan.people.find((x) => x.id === p.pic)
-  // Active this week: by its dates, unless an administrator overrode it.
-  const active = lines.length > 0 && lines.every((x) => activeInWeek(x))
-  const forced = lines.every((x) => x.active === true) ? 'switched on' : lines.every((x) => x.active === false) ? 'switched off' : 'by its dates'
+  // Active this week: the same answer as the dashboard's — dates, Jira work,
+  // an update, an open decision — unless an administrator overrode it.
+  const why = unitSource(lines, thisWeek, signals)
+  const active = unitActive(lines, thisWeek, signals)
   const hours = lines.reduce((a, x) => a + (x.savingHours || 0), 0)
   const jiraKey = String(p.jiraKey || '').trim()
 
@@ -167,7 +202,16 @@ export default function Project({
                     />
                   )
                   : (p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
-                <Pill label={active ? 'Active' : 'Not active'} tone={active ? 'info' : 'neutral'} title={`This week, ${forced}`} />
+                {signalsReady
+                  ? (
+                    <Box component="span" data-active-pill={active ? 'on' : 'off'} data-active-why={why} sx={{ display: 'inline-flex' }}>
+                      <Pill label={active ? 'Active' : 'Not active'} tone={active ? 'info' : 'neutral'} title={`This week: ${ACTIVE_WHY[why]}`} />
+                    </Box>
+                  )
+                  : <Loading label="Active?" />}
+                {signalsReady && active && why !== 'dates' && why !== 'forced-on' && (
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>{ACTIVE_WHY[why]}</Typography>
+                )}
                 {lines.length > 1 && <Typography variant="caption" sx={{ color: 'text.secondary' }}>{lines.length} register lines on this epic</Typography>}
               </Box>
             </Box>
@@ -185,6 +229,7 @@ export default function Project({
                   projects={lines}
                   size="medium"
                   label="active project"
+                  signals={signalsReady ? signals : null}
                   onSet={(v) => keys.forEach((k) => onUpdate(k, { active: v }))}
                 />
               )}

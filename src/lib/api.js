@@ -20,6 +20,36 @@ const j = async (res) => {
   return body
 }
 
+/*
+ * AN ERROR, IN WORDS A PERSON CAN READ: never a blob of JSON or a page of HTML
+ * that a proxy in front of Jira sent back. Jira's own message is kept where it
+ * gave one ("An issue with key 'FNP-1446' does not exist").
+ */
+export function plainError(e) {
+  const raw = String(e?.message ?? e ?? '').trim()
+  if (!raw) return 'Something went wrong. Try again.'
+  // {"errorMessages":["…"]} somewhere in it: just the messages.
+  const json = raw.match(/\{[\s\S]*\}/)
+  if (json) {
+    try {
+      const j = JSON.parse(json[0])
+      const msgs = [...(j.errorMessages || []), ...Object.values(j.errors || {}), j.error, j.message]
+        .filter((x) => typeof x === 'string' && x.trim())
+      if (msgs.length) return `${raw.slice(0, json.index).replace(/[:\s]+$/, '')}${raw.slice(0, json.index).trim() ? ': ' : ''}${msgs.join(' ')}`.trim()
+    } catch { /* not JSON after all */ }
+  }
+  if (/<\s*(!doctype|html|head|body|title)\b/i.test(raw)) {
+    const code = (raw.match(/\b(\d{3})\b/) || [])[1]
+    return `Jira is not answering just now${code ? ` (${code})` : ''}. Try again in a few minutes.`
+  }
+  return raw.length > 400 ? `${raw.slice(0, 400)}…` : raw
+}
+
+/** "Jira does not know FNP-1446 — check the key on the Projects page.", or null. */
+export const unknownNote = (keys = []) => (keys?.length
+  ? `Jira does not know ${keys.slice(0, 5).join(', ')}${keys.length > 5 ? ` and ${keys.length - 5} more` : ''} — check ${keys.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
+  : null)
+
 export async function storeStatus() {
   try {
     const h = await j(await fetch('/api/health'))
@@ -106,8 +136,15 @@ export const saveApps = async (name, apps) =>
  * account is still what it is, and the server still decides what it may do.
  */
 let viewAs = null
-export const setViewAs = (v) => { viewAs = v === 'member' ? 'member' : null }
-const vq = (url) => (viewAs ? `${url}${url.includes('?') ? '&' : '?'}view=member` : url)
+let viewAsPerson = null
+/** Preview as a member — and, given a person, as THAT member (their week, their Jira tasks). */
+export const setViewAs = (v, person = null) => {
+  viewAs = v === 'member' ? 'member' : null
+  viewAsPerson = viewAs && person ? String(person) : null
+}
+const vq = (url) => (viewAs
+  ? `${url}${url.includes('?') ? '&' : '?'}view=member${viewAsPerson ? `&as=${encodeURIComponent(viewAsPerson)}` : ''}`
+  : url)
 
 export const weeklySettings = async () => j(await fetch(vq('/api/weekly/settings')))
 
@@ -312,7 +349,11 @@ const send = async (method, url, body) => jp(await fetch(url, {
 }))
 
 /** One's own Jira tasks for a week: { jira: 'on'|'off'|'unlinked'|'unmatched', tasks, overdue, undated }. */
-export const jiraWeek = async (week) => jp(await fetch(`/api/weekly/${encodeURIComponent(week)}/jira`))
+export const jiraWeek = async (week) => jp(await fetch(vq(`/api/weekly/${encodeURIComponent(week)}/jira`)))
+/** An administrator's look at one member's Jira week, as that member is sent it (read only). */
+export const jiraWeekOf = async (week, person) => jp(await fetch(
+  `/api/weekly/${encodeURIComponent(week)}/jira?view=member&as=${encodeURIComponent(person)}`,
+))
 /** Submit one task's update; it is posted to the task in Jira. */
 export const submitTaskUpdate = async (week, key, body) =>
   send('POST', `/api/weekly/${encodeURIComponent(week)}/jira/${encodeURIComponent(key)}/update`, body)

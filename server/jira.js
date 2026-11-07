@@ -63,6 +63,61 @@ const auth = () => {
 }
 
 /*
+ * JIRA'S REFUSAL, IN PLAIN WORDS.
+ *
+ * Its own message when it gave one ("An issue with key 'FNP-1446' does not
+ * exist"), never a page of HTML from a proxy in front of it, and for the
+ * answers that mean "not now" or "not allowed" a line somebody can act on.
+ */
+export function jiraError(status, text = '') {
+  let msg = ''
+  try {
+    const j = JSON.parse(text)
+    msg = [...(j.errorMessages || []), ...Object.values(j.errors || {})].filter((x) => typeof x === 'string').join(' ')
+  } catch { /* not JSON */ }
+  if (!msg && !/<\s*(!doctype|html|head|body|title)\b/i.test(text)) {
+    const flat = String(text || '').replace(/\s+/g, ' ').trim()
+    if (flat && flat.length <= 200) msg = flat
+  }
+  const why = status === 401 ? 'Jira did not accept the app’s sign-in — the API token may have expired.'
+    : status === 403 ? 'Jira refused: the app’s account is not allowed to do that.'
+      : status === 429 ? 'Jira is busy (too many requests). Try again in a minute.'
+        : status >= 500 ? 'Jira is not answering just now. Try again in a few minutes.'
+          : null
+  const e = new Error(why ? `${why}${msg ? ` Jira said: ${msg}` : ''} (Jira ${status})` : `Jira ${status}: ${msg || 'the request was refused.'}`)
+  e.statusCode = status
+  return e
+}
+
+/*
+ * ONE KEY JIRA DOES NOT KNOW must not sink a whole batch. A deleted epic, a
+ * typo in the register, a project this account cannot see: any of them fails
+ * the whole `key IN (...)` / `parent IN (...)` query with a 400. So a batch
+ * that fails with a 400 is split in two and each half tried again, down to the
+ * one bad key, which is left out and reported in `skipped`.
+ */
+async function eachBatch(keys, size, ask, skipped) {
+  const run = async (batch) => {
+    try {
+      await ask(batch)
+    } catch (e) {
+      if (e.statusCode !== 400) throw e
+      if (batch.length === 1) { skipped.push(batch[0]); return }
+      const mid = Math.ceil(batch.length / 2)
+      await run(batch.slice(0, mid))
+      await run(batch.slice(mid))
+    }
+  }
+  for (let i = 0; i < keys.length; i += size) await run(keys.slice(i, i + size))
+  if (skipped.length) console.warn(`[jira] Jira does not know ${skipped.length} key(s): ${skipped.slice(0, 10).join(', ')}`)
+}
+
+/** What to tell a person about keys Jira does not know, or null. */
+export const skippedNote = (skipped = []) => (skipped.length
+  ? `Jira does not know ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? ` and ${skipped.length - 5} more` : ''} — check ${skipped.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
+  : null)
+
+/*
  * A small cache, because the Timeline asks for the same seventy keys every
  * time somebody opens the tab, and Jira rate-limits per account — one slow
  * page should not become a rate limit for everybody.
@@ -159,8 +214,8 @@ export async function issuesByKey(keys) {
   // register should say runs it, and the two had been kept apart by nothing
   // more than this field never being asked for.
   const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', c.startField, c.sprintField]
-  for (let i = 0; i < stillWanted.length; i += 50) {
-    const batch = stillWanted.slice(i, i + 50)
+  const skipped = []
+  await eachBatch(stillWanted, 50, async (batch) => {
     const body = {
       jql: `key IN (${batch.join(',')})`,
       fields,
@@ -176,19 +231,14 @@ export async function issuesByKey(keys) {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(20000),
     })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      const err = new Error(`Jira ${res.status}: ${text.slice(0, 200)}`)
-      err.statusCode = res.status
-      throw err
-    }
+    if (!res.ok) throw jiraError(res.status, await res.text().catch(() => ''))
     const data = await res.json()
     for (const raw of data.issues || []) {
       const issue = shape(raw, c)
       cache.set(issue.key, { at: Date.now(), value: issue })
       out.push(issue)
     }
-  }
+  }, skipped)
 
   const found = new Set(out.map((i) => i.key))
   return {
@@ -198,6 +248,8 @@ export async function issuesByKey(keys) {
     // Keys the register holds that Jira does not: a deleted ticket, a typo, or
     // a project this account cannot see. Reported rather than silently missing.
     missing: wanted.filter((k) => !found.has(k)),
+    // The ones Jira refused outright (it says the key does not exist).
+    skipped,
   }
 }
 
@@ -254,19 +306,17 @@ export async function childrenOf(keys) {
     return res
   }
 
-  for (let i = 0; i < parents.length; i += 20) {
-    const batch = parents.slice(i, i + 20)
+  const skipped = []
+  await eachBatch(parents, 20, async (batch) => {
     let res = await ask(batch, ordering)
     if (!res.ok && res.status === 400 && ordering !== 'created ASC') {
-      ordering = 'created ASC'
-      res = await ask(batch, ordering)
+      // Could be no Rank field — or a key Jira does not know. Try without Rank;
+      // a 400 again is about the keys, and the batch is split.
+      const retry = await ask(batch, 'created ASC')
+      if (retry.ok) ordering = 'created ASC'
+      res = retry
     }
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      const err = new Error(`Jira ${res.status}: ${text.slice(0, 200)}`)
-      err.statusCode = res.status
-      throw err
-    }
+    if (!res.ok) throw jiraError(res.status, await res.text().catch(() => ''))
     const data = await res.json()
     // Pushed in the order Jira answered in, and never sorted afterwards: the
     // order IS the data here.
@@ -275,11 +325,12 @@ export async function childrenOf(keys) {
       if (!parent || !byParent[parent]) continue
       byParent[parent].push({ ...shape(raw, c), type: raw.fields?.issuetype?.name || '' })
     }
-  }
+  }, skipped)
   return {
     byParent,
     total: Object.values(byParent).reduce((a, v) => a + v.length, 0),
     ordering,
+    skipped,
   }
 }
 
@@ -346,8 +397,8 @@ export async function rollupOf(keys) {
   const later = (a, b) => (!a ? b : (!b ? a : (a > b ? a : b)))
   const fields = ['status', 'duedate', 'resolutiondate', 'parent', 'labels', c.sprintField]
 
-  for (let i = 0; i < parents.length; i += 20) {
-    const batch = parents.slice(i, i + 20)
+  const skipped = []
+  await eachBatch(parents, 20, async (batch) => {
     let token = null
     for (let page = 0; page < 25; page++) {
       const res = await fetch(`${c.base}/rest/api/3/search/jql`, {
@@ -365,12 +416,7 @@ export async function rollupOf(keys) {
         }),
         signal: AbortSignal.timeout(25000),
       })
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        const err = new Error(`Jira ${res.status}: ${text.slice(0, 200)}`)
-        err.statusCode = res.status
-        throw err
-      }
+      if (!res.ok) throw jiraError(res.status, await res.text().catch(() => ''))
       const data = await res.json()
       for (const raw of data.issues || []) {
         const parent = raw.fields?.parent?.key
@@ -408,7 +454,7 @@ export async function rollupOf(keys) {
       // to have counted them all would be the lie this guard exists to avoid.
       if (page === 24) for (const k of batch) byParent[k].truncated = true
     }
-  }
+  }, skipped)
 
   let tasks = 0
   for (const k of parents) {
@@ -419,7 +465,9 @@ export async function rollupOf(keys) {
     agg.allDone = agg.total > 0 && agg.done === agg.total
     agg.anyStarted = agg.started > 0
   }
-  return { byParent, parents: parents.length, tasks, delayLabel: c.delayLabel }
+  return {
+    byParent, parents: parents.length, tasks, delayLabel: c.delayLabel, skipped,
+  }
 }
 
 /**
@@ -477,12 +525,7 @@ export async function updateIssue(key, patch) {
     body: JSON.stringify({ fields }),
     signal: AbortSignal.timeout(20000),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    const err = new Error(`Jira ${res.status}: ${text.slice(0, 300)}`)
-    err.statusCode = res.status
-    throw err
-  }
+  if (!res.ok) throw jiraError(res.status, await res.text().catch(() => ''))
   // What was just written is what Jira now holds, so the cached copy is stale
   // by definition — drop it rather than serve a five-minute-old contradiction.
   cache.delete(k)
@@ -528,12 +571,7 @@ export async function epics({ since = null } = {}) {
       body: JSON.stringify({ jql, fields, maxResults: 100, ...(token ? { nextPageToken: token } : {}) }),
       signal: AbortSignal.timeout(25000),
     })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      const err = new Error(`Jira ${res.status}: ${text.slice(0, 300)}`)
-      err.statusCode = res.status
-      throw err
-    }
+    if (!res.ok) throw jiraError(res.status, await res.text().catch(() => ''))
     const data = await res.json()
     for (const raw of data.issues || []) {
       out.push({ ...shape(raw, c), assignee: raw.fields?.assignee?.displayName || null })
@@ -635,17 +673,7 @@ async function call(path, { method = 'GET', body, headers = {}, raw = false } = 
     body: body === undefined ? undefined : (raw ? body : JSON.stringify(body)),
     signal: AbortSignal.timeout(30000),
   })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    let msg = text.slice(0, 300)
-    try {
-      const j = JSON.parse(text)
-      msg = [...(j.errorMessages || []), ...Object.values(j.errors || {})].join(' ') || msg
-    } catch { /* not JSON */ }
-    const err = new Error(`Jira ${res.status}: ${msg}`)
-    err.statusCode = res.status
-    throw err
-  }
+  if (!res.ok) throw jiraError(res.status, await res.text().catch(() => ''))
   if (res.status === 204) return null
   return res.json().catch(() => null)
 }
@@ -813,19 +841,7 @@ export async function coveringWeek(epicKeys, week) {
    * batch that fails is split in two and tried again, down to the one bad
    * key, which is left out and reported.
    */
-  const run = async (batch) => {
-    try {
-      all.push(...await search(batch))
-    } catch (e) {
-      if (e.statusCode !== 400) throw e
-      if (batch.length === 1) { skipped.push(batch[0]); return }
-      const mid = Math.ceil(batch.length / 2)
-      await run(batch.slice(0, mid))
-      await run(batch.slice(mid))
-    }
-  }
-  for (let i = 0; i < keys.length; i += 40) await run(keys.slice(i, i + 40))
-  if (skipped.length) console.warn(`[coverage] Jira does not know ${skipped.length} register key(s): ${skipped.slice(0, 10).join(', ')}`)
+  await eachBatch(keys, 40, async (batch) => { all.push(...await search(batch)) }, skipped)
   const items = all.filter((t) => coversWeek(t, week))
   items.skipped = skipped
   return items

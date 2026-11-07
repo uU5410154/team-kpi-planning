@@ -97,8 +97,9 @@ export default function Settings({ plan, state, onSettings, onPerson, scenarioNa
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Alert severity="info" variant="outlined">
-        These settings drive every number on the Dashboard, the Scorecards and the Excel export. Nothing here is stored
-        on a server — it lives in this browser and in the scenario files you save.
+        These settings drive every number on the Dashboard, the Scorecards and the Excel export. They are part of the
+        shared plan: a change here is saved to the server a few seconds later and everybody sees it the next time they
+        open the app.
       </Alert>
 
       <Grid container spacing={2.5}>

@@ -29,8 +29,8 @@ function EditBar({ title, onRemove, overlay }) {
         gap: 0.5,
         cursor: 'move',
         ...(overlay ? {
-          position: 'absolute', top: 6, left: 6, right: 6, zIndex: 3, px: 1, py: 0.25, borderRadius: '10px',
-          bgcolor: 'rgba(10, 12, 30, 0.82)', color: '#fff', border: 1, borderColor: 'divider',
+          flexShrink: 0, zIndex: 3, px: 1, py: 0.25, borderRadius: '10px',
+          bgcolor: 'action.hover', color: 'text.primary', border: 1, borderColor: 'divider',
         } : {}),
       }}
     >
@@ -58,10 +58,19 @@ export default function CardFrame({
 }) {
   const outline = editing ? { outline: '1px dashed', outlineColor: 'primary.main', outlineOffset: 2 } : {}
   if (bare) {
+    // Editing, the bar sits ABOVE the card's own content rather than over its
+    // title, so what is being moved can still be read.
     return (
-      <Box component="section" aria-label={label || title} sx={{ position: 'relative', height: fill ? '100%' : 'auto', overflow: fill ? 'auto' : 'visible', borderRadius: '16px', ...outline }}>
+      <Box
+        component="section"
+        aria-label={label || title}
+        sx={{
+          position: 'relative', height: fill ? '100%' : 'auto', overflow: fill ? 'auto' : 'visible', borderRadius: '16px', ...outline,
+          ...(editing ? { display: 'flex', flexDirection: 'column', gap: 0.5 } : {}),
+        }}
+      >
         {editing && <EditBar title={title} onRemove={onRemove} overlay />}
-        {children}
+        {editing ? <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{children}</Box> : children}
       </Box>
     )
   }
