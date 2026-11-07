@@ -128,7 +128,8 @@ const openCard = async (nick) => {
   const clicked = await page.evaluate((n) => {
     const tab = [...document.querySelectorAll('[role="tab"], button')]
       .find((b) => b.innerText.trim().split('\n')[0].trim() === n
-        || b.innerText.trim().startsWith(`${n} ·`))
+        || b.innerText.trim().startsWith(`${n} ·`)
+        || b.innerText.trim().startsWith(`${n} (`))
     if (!tab) return false
     tab.click()
     return true
@@ -141,6 +142,19 @@ const openCard = async (nick) => {
 const cardText = async (nick) => {
   const ok = await openCard(nick)
   if (!ok) return null
+  /*
+   * The rules and the full list of dates sit behind the card's Details
+   * control, as a reader opens them; the one-sentence commitment and the
+   * first dates are on the card without it.
+   */
+  await page.evaluate(() => {
+    const card = [...document.querySelectorAll('.MuiPaper-root')]
+      .find((el) => el.innerText.includes('My commitment'))
+    const more = card && [...card.querySelectorAll('button[aria-controls^="commit-rules"]')]
+      .find((b) => b.getAttribute('aria-expanded') === 'false')
+    if (more) more.click()
+  })
+  await new Promise((r) => setTimeout(r, 500))
   return page.evaluate(() => {
     const card = [...document.querySelectorAll('.MuiPaper-root')]
       .find((el) => el.innerText.includes('My commitment'))

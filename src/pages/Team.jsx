@@ -1,9 +1,70 @@
+import { useEffect, useRef, useState } from 'react'
 import {
-  Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Chip, Alert,
+  Box, Typography, Table, TableBody, TableCell, TableHead, TableRow, Tooltip,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
-import { OBJECTIVES, CHART, STATUS } from '../lib/palette.js'
-import { fmtHours, fmtPct, fmtRoi, fmtMoneyShort, targetUnit } from '../lib/model.js'
+import PersonOffOutlinedIcon from '@mui/icons-material/PersonOffOutlined'
+import { OBJECTIVES, CHART } from '../lib/palette.js'
+import { fmtHours, fmtPct, fmtMoneyShort, targetUnit } from '../lib/model.js'
+import {
+  PageHeader, Section, StatusPill, EmptyState, SectionSkeleton,
+} from '../components/ui.jsx'
+
+/**
+ * A horizontal scroller that says so: a 12px fade on whichever edge still has
+ * columns beyond it, and an `is-scrolled` class once it has moved, so a pinned
+ * first column can draw its edge only when something is sliding under it.
+ *
+ * A wide table must never be cut off by the page edge (docs/DESIGN.md §5); it
+ * scrolls inside its own section instead.
+ */
+export function ScrollX({ children, sx, label }) {
+  const ref = useRef(null)
+  const [edge, setEdge] = useState({ l: false, r: false })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const update = () => {
+      const l = el.scrollLeft > 1
+      const r = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+      setEdge((e) => (e.l === l && e.r === r ? e : { l, r }))
+    }
+    update()
+    el.addEventListener('scroll', update, { passive: true })
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    if (ro) {
+      ro.observe(el)
+      if (el.firstElementChild) ro.observe(el.firstElementChild)
+    }
+    return () => { el.removeEventListener('scroll', update); ro?.disconnect() }
+  }, [])
+  const fade = (t, side) => ({
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    [side]: 0,
+    width: 12,
+    pointerEvents: 'none',
+    zIndex: 3,
+    transition: 'opacity 120ms',
+    background: `linear-gradient(to ${side === 'right' ? 'left' : 'right'}, ${t.palette.mode === 'dark' ? 'rgba(0,0,0,0.40)' : 'rgba(16,24,40,0.10)'}, transparent)`,
+  })
+  return (
+    <Box sx={{ position: 'relative', minWidth: 0 }}>
+      <Box
+        ref={ref}
+        className={edge.l ? 'is-scrolled' : undefined}
+        role={label ? 'region' : undefined}
+        aria-label={label}
+        tabIndex={label && edge.r ? 0 : undefined}
+        sx={[{ overflowX: 'auto', minWidth: 0 }, ...(Array.isArray(sx) ? sx : [sx])]}
+      >
+        {children}
+      </Box>
+      <Box aria-hidden sx={(t) => ({ ...fade(t, 'right'), opacity: edge.r ? 1 : 0 })} />
+    </Box>
+  )
+}
 
 /**
  * Every scorecard side by side — the same grid as the workbook's
@@ -21,11 +82,50 @@ import { fmtHours, fmtPct, fmtRoi, fmtMoneyShort, targetUnit } from '../lib/mode
  * `own`: a team member's view. The plan arrives already narrowed to them, so
  * the grid is their card alone, and the team's totals are left off.
  */
-export default function Team({ plan, own = false }) {
+/** "dashboards/reports/portals" → "Dashboards, reports and portals delivered". */
+const countLabel = (unit = '') => {
+  const parts = String(unit).split('/').map((x) => x.trim()).filter(Boolean)
+  const said = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] || 'Items')
+  return `${said.charAt(0).toUpperCase()}${said.slice(1)} delivered`
+}
+
+export default function Team({ plan, own = false, loading = false }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { people, settings, finance: fin } = plan
   const sym = fin.symbol
+
+  const title = own ? 'My scorecard' : 'Overall team'
+  const description = own
+    ? 'Your 2026 targets, the weight of each on your card, and where each stands now.'
+    : 'Every scorecard side by side, as in the Overall_Objectives sheet of the export.'
+
+  const help = (
+    <>
+      <p>
+        Each objective is measured in its own unit, which is what lets one project answer to several without
+        being counted twice.
+      </p>
+      <p>
+        Objective 2 carries every saving hour in the plan. Objective 1 is on-time delivery, shown as the share of
+        projects that drifted. Objectives 4 and 5 count what was delivered, and objective 3 is a date.
+      </p>
+      <p>
+        So the saving-hours total is the hours once, not the sum of five rows. A target typed over the calculated
+        figure is shown in bold, and where a card states something different from the register, the register&rsquo;s
+        figure is printed beside the total.
+      </p>
+    </>
+  )
+
+  if (loading) {
+    return (
+      <Box>
+        <PageHeader title={title} description={description} />
+        <SectionSkeleton rows={7} />
+      </Box>
+    )
+  }
 
   /*
    * What a person's line for this objective says, in the unit that objective
@@ -36,198 +136,223 @@ export default function Team({ plan, own = false }) {
     const line = p.kpiLines.find((l) => l.objective === o.id && !l.custom)
     if (!line) return null
     const kind = line.targetKind
-    const target = kind === 'percent' ? fmtRoi((Number(line.target) || 0) / 100)
-      : kind === 'hours' ? `${fmtHours(line.target)} ${targetUnit(line, settings.savingBasis, sym)}`
-        : kind === 'number' ? `${Number(line.target).toLocaleString()} ${line.unit || ''}`.trim()
-          : String(line.target ?? '—')
+    // The unit is in the row's description, so the columns carry figures only.
+    const target = kind === 'percent' ? `Max ${Number(line.target) || 0}%`
+      : kind === 'hours' ? fmtHours(line.target)
+        : kind === 'number' ? Number(line.target).toLocaleString()
+          : String(line.target ?? '–')
+    const unitTip = kind === 'hours' ? targetUnit(line, settings.savingBasis, sym)
+      : kind === 'number' ? (line.unit || '') : ''
     const actual = kind === 'percent'
-      ? (line.creditedRatio == null ? '—' : fmtRoi(line.creditedRatio))
+      ? (line.creditedRatio == null ? null : fmtPct(line.creditedRatio))
       : kind === 'hours' ? fmtHours(p.byObjective[o.id] || 0)
         : kind === 'number' ? String(p.countByObjective?.[o.id] ?? 0)
-          : (line.creditedHours ? `${fmtHours(line.creditedHours)} hrs` : '—')
+          : (line.creditedHours ? `${fmtHours(line.creditedHours)} hrs` : null)
     const tone = kind === 'percent' && line.creditedRatio != null
-      ? (line.meetsTarget ? STATUS.good : STATUS.critical)
-      : 'text.primary'
-    return { line, target, actual, tone }
+      ? (line.meetsTarget ? 'success' : 'danger')
+      : null
+    return {
+      line, target, actual, tone, unitTip,
+    }
   }
 
-  const cell = { fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
-  // The pinned first column. 230px on a phone left the six people's figures a
-  // 130px window to be scrolled through one number at a time; there it narrows
-  // and wraps, and a rule marks where the scrolling part begins.
-  const stick = {
-    position: 'sticky', left: 0, bgcolor: 'background.paper',
-    minWidth: { xs: 128, sm: 230 }, maxWidth: { xs: 150, sm: 'none' },
-    // "dashboards/reports/portals" is one word to a browser, and at 150px
-    // it spilled over the first person's column.
+  const dash = <Box component="span" sx={{ color: 'text.tertiary' }}>–</Box>
+  const num = { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+  const groupEdge = { borderLeft: 1, borderLeftColor: 'border.subtle' }
+  /*
+   * The pinned first column. On a phone it narrows and wraps, so the people's
+   * figures keep most of the width; a hairline marks where the scrolling part
+   * begins, and deepens once something is sliding under it.
+   */
+  const stick = (head) => ({
+    position: 'sticky',
+    left: 0,
+    zIndex: head ? 3 : 1,
+    bgcolor: head ? 'bg.subtle' : 'bg.surface',
+    minWidth: { xs: 148, sm: 248 },
+    maxWidth: { xs: 160, sm: 280 },
+    width: { sm: 264 },
     overflowWrap: 'anywhere',
-    boxShadow: (t) => `inset -1px 0 0 ${t.palette.divider}`,
-  }
+    boxShadow: (t) => `inset -1px 0 0 ${t.palette.border.subtle}`,
+    '.is-scrolled &': { boxShadow: (t) => `inset -1px 0 0 ${t.palette.border.strong}, 4px 0 8px -4px ${t.palette.mode === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(16,24,40,0.12)'}` },
+    '.MuiTableRow-hover:hover > &': { bgcolor: 'bg.subtle' },
+  })
+
+  const teamMeta = own ? null : (
+    <>
+      {`Team total ${fmtHours(plan.totals.committedHours)} hrs/month committed, ${fmtMoneyShort(fin.annualBenefit, sym)} a year, return gate ${fmtPct(fin.roiGate)}.`}
+    </>
+  )
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box>
-        <Typography variant="h2">{own ? 'My scorecard' : 'Overall team'}</Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-          {own
-            ? 'What you are measured on this year: the target for each objective you hold, its weight on your card, and where it stands now. The weights total 100%.'
-            : <>Every scorecard side by side — the same grid as the <strong>Overall_Objectives</strong> sheet in the
-              export. Each person totals 100% across the objectives they hold.</>}
-        </Typography>
-      </Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+      <PageHeader title={title} description={description} help={help} />
 
       {own && people.length === 0 && (
-        <Alert severity="info" variant="outlined">
-          Your account is not linked to your name on the team yet, so there is no scorecard to show. Ask an
-          administrator to link it on the Access tab.
-        </Alert>
+        <Section>
+          <EmptyState
+            icon={PersonOffOutlinedIcon}
+            title="Your account is not linked to your name on the team yet"
+            body="Ask an administrator to link it on the Access page, and your scorecard appears here."
+          />
+        </Section>
       )}
 
       {people.length > 0 && (
-      <Paper variant="outlined" sx={{ overflowX: 'auto' }}>
-        <Table size="small" sx={{ '& th, & td': { px: 1.25 } }}>
-          <TableHead>
-            <TableRow>
-              <TableCell sx={{ ...stick, zIndex: 2 }}>
-                KPI line
-              </TableCell>
-              {people.map((p) => (
-                <TableCell key={p.id} align="center" colSpan={3} sx={{ borderLeft: 1, borderColor: 'divider' }}>
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {p.nick}{p.aggregatesTeam && ' · team'}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    {fmtHours(p.scorecardHours)} hrs · {p.scorecardCount} proj
-                  </Typography>
-                </TableCell>
-              ))}
-            </TableRow>
-            <TableRow>
-              <TableCell sx={{ ...stick, zIndex: 2 }} />
-              {people.map((p) => [
-                <TableCell key={`${p.id}-t`} align="right" sx={{ ...cell, borderLeft: 1, borderColor: 'divider' }}>Target</TableCell>,
-                <TableCell key={`${p.id}-w`} align="right" sx={cell}>Weight</TableCell>,
-                <TableCell key={`${p.id}-a`} align="right" sx={cell}>Now</TableCell>,
-              ])}
-            </TableRow>
-          </TableHead>
-
-          <TableBody>
-            {OBJECTIVES.map((o, i) => (
-              <TableRow key={o.id} hover>
-                <TableCell sx={{ ...stick, zIndex: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ width: 9, height: 9, borderRadius: '2px', bgcolor: CHART[mode].series[i], flexShrink: 0 }} />
-                    <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
-                        Obj {o.no} — {o.name}
+        <Section
+          title={own ? undefined : 'KPI lines by person'}
+          meta={teamMeta}
+          padded={false}
+          // One person's card reads as a compact table, not one stretched across the screen.
+          sx={own ? { maxWidth: 880 } : undefined}
+        >
+          <ScrollX label={own ? 'My scorecard' : 'Every scorecard, scroll sideways for more people'}>
+            <Table
+              size="small"
+              sx={{
+                minWidth: own ? 560 : undefined,
+                '& td, & th': { px: { xs: 2, sm: 3 } },
+                '& tbody td': { height: 52, verticalAlign: 'middle' },
+              }}
+            >
+              <TableHead>
+                <TableRow>
+                  {/* One cell over both header rows, so the pinned column
+                      never shows an empty second "KPI line" header. */}
+                  <TableCell rowSpan={2} sx={{ ...stick(true), verticalAlign: 'bottom' }}>
+                    KPI line
+                  </TableCell>
+                  {people.map((p) => (
+                    <TableCell key={p.id} colSpan={3} sx={{ ...groupEdge, pt: 2, pb: 1, height: 'auto' }}>
+                      <Typography variant="h3" component="div" sx={{ color: 'text.primary', whiteSpace: 'nowrap' }}>
+                        {p.nick}{p.aggregatesTeam && ' (team)'}
                       </Typography>
-                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        {o.measure === 'ratio' ? 'a return, at or above the gate'
-                          : o.measure === 'hours' ? 'saving hours a month'
-                            : o.measure === 'count' ? `${o.countUnit} delivered`
-                              : 'a delivery date'}
+                      <Typography variant="caption" component="div" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                        {fmtHours(p.scorecardHours)} hrs, {p.scorecardCount} project{p.scorecardCount === 1 ? '' : 's'}
                       </Typography>
-                    </Box>
-                  </Box>
-                </TableCell>
+                    </TableCell>
+                  ))}
+                </TableRow>
+                <TableRow>
+                  {people.map((p) => [
+                    <TableCell key={`${p.id}-t`} align="right" sx={{ ...groupEdge, minWidth: 96 }}>Target</TableCell>,
+                    <TableCell key={`${p.id}-w`} align="right" sx={{ minWidth: 64 }}>Weight</TableCell>,
+                    <TableCell key={`${p.id}-a`} align="right" sx={{ minWidth: 72 }}>Now</TableCell>,
+                  ])}
+                </TableRow>
+              </TableHead>
 
-                {people.map((p) => {
-                  const c = cellFor(p, o)
-                  if (!c) {
+              <TableBody>
+                {OBJECTIVES.map((o, i) => (
+                  <TableRow key={o.id} hover>
+                    <TableCell sx={stick(false)}>
+                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                        <Box
+                          aria-hidden
+                          sx={{
+                            width: 8, height: 8, borderRadius: '2px', mt: '6px', bgcolor: CHART[mode].series[i], flexShrink: 0,
+                          }}
+                        />
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                            Obj {o.no} — {o.name}
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                            {o.measure === 'ratio' ? 'Share of projects that drifted'
+                              : o.measure === 'hours' ? `Saving ${settings.savingBasis === 'annual' ? 'hours a year' : 'hours a month'}`
+                                : o.measure === 'count' ? countLabel(o.countUnit)
+                                  : 'A delivery date'}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </TableCell>
+
+                    {people.map((p) => {
+                      const c = cellFor(p, o)
+                      if (!c) {
+                        return [
+                          <TableCell key={`${p.id}-${o.id}-t`} colSpan={3} sx={{ ...groupEdge, color: 'text.tertiary' }}>
+                            Not held
+                          </TableCell>,
+                        ]
+                      }
+                      return [
+                        <TableCell key={`${p.id}-${o.id}-t`} align="right" sx={{ ...groupEdge, ...num }}>
+                          <Tooltip title={`${c.unitTip ? `${c.target} ${c.unitTip}. ` : ''}${c.line.overridden ? 'Typed over the calculated figure.' : 'From the project register.'}`}>
+                            <Box
+                              component="span"
+                              sx={{
+                                fontWeight: c.line.overridden ? 600 : 400,
+                                display: 'inline-block',
+                                maxWidth: 200,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                verticalAlign: 'bottom',
+                              }}
+                            >
+                              {c.target}
+                            </Box>
+                          </Tooltip>
+                        </TableCell>,
+                        <TableCell key={`${p.id}-${o.id}-w`} align="right" sx={num}>
+                          {fmtPct(c.line.weight)}
+                        </TableCell>,
+                        <TableCell key={`${p.id}-${o.id}-a`} align="right" sx={num}>
+                          {c.actual == null ? dash
+                            : c.tone ? (
+                              <Tooltip title={`${c.line.driftedCount ?? 0} of ${c.line.held ?? 0} projects drifted, limit ${c.line.target}%`}>
+                                <span><StatusPill tone={c.tone}>{c.actual}</StatusPill></span>
+                              </Tooltip>
+                            )
+                              : <Box component="span" sx={{ fontWeight: 500 }}>{c.actual}</Box>}
+                        </TableCell>,
+                      ]
+                    })}
+                  </TableRow>
+                ))}
+
+                {/* the two totals the sheet carries, for the same reason */}
+                <TableRow sx={{ '& td': { borderTop: 1, borderTopColor: 'border.strong' } }}>
+                  <TableCell sx={{ ...stick(false), fontWeight: 500 }}>
+                    Total saving hrs/mth
+                  </TableCell>
+                  {people.map((p) => [
+                    <TableCell key={`${p.id}-th`} align="right" sx={{ ...groupEdge, ...num, fontWeight: 600 }}>
+                      {fmtHours(p.kpiTotals.savingHours)}
+                    </TableCell>,
+                    <TableCell key={`${p.id}-tw`} />,
+                    <TableCell key={`${p.id}-ta`} align="right" sx={{ ...num, color: 'text.secondary' }}>
+                      {Math.abs(p.kpiTotals.savingHours - p.registerHours) > 0.5 ? (
+                        <Tooltip title="What the project register credits, where the card states something different">
+                          <span>Register {fmtHours(p.registerHours)}</span>
+                        </Tooltip>
+                      ) : ''}
+                    </TableCell>,
+                  ])}
+                </TableRow>
+                <TableRow sx={{ '& td': { borderBottom: 0 } }}>
+                  <TableCell sx={{ ...stick(false), fontWeight: 500 }}>
+                    Weight total
+                  </TableCell>
+                  {people.map((p) => {
+                    const sum = p.kpiLines.reduce((a, l) => a + l.weight, 0)
+                    const ok = Math.abs(sum - 1) < 1e-9
                     return [
-                      <TableCell key={`${p.id}-${o.id}-t`} align="center" colSpan={3}
-                        sx={{ ...cell, color: 'text.disabled', borderLeft: 1, borderColor: 'divider' }}>
-                        not held
+                      <TableCell key={`${p.id}-ws`} sx={groupEdge} />,
+                      <TableCell key={`${p.id}-wv`} align="right" sx={num}>
+                        <StatusPill tone={ok ? 'success' : 'danger'} title={ok ? 'Totals 100%' : 'Must total 100%'}>
+                          {fmtPct(sum)}
+                        </StatusPill>
                       </TableCell>,
+                      <TableCell key={`${p.id}-we`} />,
                     ]
-                  }
-                  return [
-                    <TableCell key={`${p.id}-${o.id}-t`} align="right" sx={{ ...cell, borderLeft: 1, borderColor: 'divider' }}>
-                      <Tooltip title={c.line.overridden ? 'Typed over the calculated figure' : 'From the project register'}>
-                        <span style={{ fontWeight: c.line.overridden ? 700 : 400 }}>{c.target}</span>
-                      </Tooltip>
-                    </TableCell>,
-                    <TableCell key={`${p.id}-${o.id}-w`} align="right" sx={cell}>
-                      {fmtPct(c.line.weight)}
-                    </TableCell>,
-                    <TableCell key={`${p.id}-${o.id}-a`} align="right" sx={{ ...cell, color: c.tone, fontWeight: 600 }}>
-                      {c.actual}
-                    </TableCell>,
-                  ]
-                })}
-              </TableRow>
-            ))}
-
-            {/* the two totals the sheet carries, for the same reason */}
-            <TableRow>
-              <TableCell sx={{ ...stick, zIndex: 1, borderTop: 2, borderColor: 'divider', fontWeight: 700 }}>
-                TOTAL SAVING HRS/MONTH
-              </TableCell>
-              {people.map((p) => [
-                <TableCell key={`${p.id}-th`} align="right"
-                  sx={{ ...cell, borderTop: 2, borderColor: 'divider', fontWeight: 800, borderLeft: 1 }}>
-                  {fmtHours(p.kpiTotals.savingHours)}
-                </TableCell>,
-                <TableCell key={`${p.id}-tw`} sx={{ borderTop: 2, borderColor: 'divider' }} />,
-                <TableCell key={`${p.id}-ta`} align="right"
-                  sx={{ ...cell, borderTop: 2, borderColor: 'divider', color: 'text.secondary' }}>
-                  {Math.abs(p.kpiTotals.savingHours - p.registerHours) > 0.5
-                    ? `reg ${fmtHours(p.registerHours)}`
-                    : ''}
-                </TableCell>,
-              ])}
-            </TableRow>
-            <TableRow>
-              <TableCell sx={{ ...stick, zIndex: 1, fontWeight: 700 }}>
-                WEIGHT TOTAL — must be 100%
-              </TableCell>
-              {people.map((p) => {
-                const sum = p.kpiLines.reduce((a, l) => a + l.weight, 0)
-                const ok = Math.abs(sum - 1) < 1e-9
-                return [
-                  <TableCell key={`${p.id}-ws`} sx={{ borderLeft: 1, borderColor: 'divider' }} />,
-                  <TableCell key={`${p.id}-wv`} align="right" sx={cell}>
-                    <Chip
-                      size="small"
-                      label={fmtPct(sum)}
-                      sx={{
-                        height: 20,
-                        fontWeight: 700,
-                        color: ok ? STATUS.good : STATUS.critical,
-                        borderColor: ok ? STATUS.good : STATUS.critical,
-                      }}
-                      variant="outlined"
-                    />
-                  </TableCell>,
-                  <TableCell key={`${p.id}-we`} />,
-                ]
-              })}
-            </TableRow>
-          </TableBody>
-        </Table>
-      </Paper>
+                  })}
+                </TableRow>
+              </TableBody>
+            </Table>
+          </ScrollX>
+        </Section>
       )}
-
-      <Paper variant="outlined" sx={{ p: 2.5 }}>
-        <Typography variant="h4" sx={{ mb: 1 }}>How to read it</Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
-          Each objective is measured in its own unit, which is what lets one project answer to several without
-          being counted twice. <strong>Obj 2</strong> carries every saving hour in the plan;{' '}
-          <strong>Obj 1</strong> is those same hours priced, expressed as a return the plan has to clear;{' '}
-          <strong>Obj 4</strong> and <strong>Obj 5</strong> count what was delivered;{' '}
-          <strong>Obj 3</strong> is a date. So the saving-hours total below is the hours ONCE — not the sum of
-          five rows. Where a figure has been typed over the calculated one it is shown in bold, and where a
-          card states something different from the register the register&rsquo;s figure is printed beside the
-          total.
-        </Typography>
-        {!own && (
-        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 1.5 }}>
-          Team total {fmtHours(plan.totals.committedHours)} hrs/month committed ·{' '}
-          {fmtMoneyShort(fin.annualBenefit, sym)} a year · gate {fmtRoi(fin.roiGate)}
-        </Typography>
-        )}
-      </Paper>
     </Box>
   )
 }
