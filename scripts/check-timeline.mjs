@@ -344,17 +344,28 @@ if (!exe) {
   await page.goto(`${url}/#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 4000))
 
-  const seen = await page.evaluate(() => ({
-    tab: [...document.querySelectorAll('button, [role="tab"]')].some((b) => b.innerText.trim() === 'Timeline'),
-    heading: /Timeline/.test(document.body.innerText),
-    // All three outcomes, not just that a legend exists: early, on the day
-    // and late are the distinction the chart is for.
-    legend: ['planned', 'ahead of schedule', 'on schedule', 'behind schedule']
-      .every((w) => new RegExp(w, 'i').test(document.body.innerText)),
-    warning: /never edited to match reality/i.test(document.body.innerText),
-    bars: document.querySelectorAll('[class*="MuiPaper"] div').length,
-    rows: (document.body.innerText.match(/(\d+) projects? on the chart/) || [])[1],
-  }))
+  const seen = await page.evaluate(async () => {
+    // The long explanation lives behind "About this page" now: open it and read it.
+    const about = [...document.querySelectorAll('button')].find((b) => b.innerText.trim() === 'About this page')
+    about?.click()
+    await new Promise((r) => setTimeout(r, 400))
+    const help = document.querySelector('[role="dialog"][aria-label="About this page"]')?.innerText || ''
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    const legend = document.querySelector('[data-timeline="legend"]')?.innerText || ''
+    return {
+      tab: [...document.querySelectorAll('button, [role="tab"]')].some((b) => b.innerText.trim() === 'Timeline'),
+      heading: /Timeline/.test(document.body.innerText),
+      // All three outcomes, not just that a legend exists: early, on the day
+      // and late are the distinction the chart is for. Read from the legend
+      // itself, under the chart, in the words it uses.
+      legend: ['Plan', 'Running', 'Finished', 'On schedule', 'Ahead of schedule', 'Behind schedule']
+        .every((w) => legend.includes(w)),
+      warning: /never edited to match reality/i.test(help),
+      bars: document.querySelectorAll('[class*="MuiPaper"] div').length,
+      rows: (document.body.innerText.match(/(\d+) projects? on the chart/) || [])[1],
+    }
+  })
+  await page.keyboard.press('Escape')
   check('THERE IS A TIMELINE TAB', seen.tab)
   check('it renders', seen.heading && seen.bars > 50, JSON.stringify({ bars: seen.bars }))
   check('it says how to read it', seen.legend)
@@ -398,7 +409,7 @@ if (!exe) {
     const labels = [...document.querySelectorAll('*')]
       .filter((el) => el.children.length === 0)
       .map((el) => el.textContent.trim())
-      .filter((t) => t.startsWith(`${key} ·`) || t === key)
+      .filter((t) => t.startsWith(`${key},`) || t === key)
     return {
       key,
       count: labels.length,
@@ -440,8 +451,8 @@ if (!exe) {
 
   const seedBars = await labels()
   check('NOTHING SAYS "Actually ran — to —"',
-    !seedBars.some((t) => /Actually ran — to —/.test(t)),
-    seedBars.filter((t) => /— to —/.test(t)).slice(0, 2).join(' | ') || `${seedBars.length} actual bars`)
+    !seedBars.some((t) => /Actually ran [—–] to [—–]/.test(t)),
+    seedBars.filter((t) => /[—–] to [—–]/.test(t)).slice(0, 2).join(' | ') || `${seedBars.length} actual bars`)
   check('a register with no outcomes draws no actual bars at all',
     seedBars.length === 0, `${seedBars.length} drawn`)
 
@@ -467,15 +478,16 @@ if (!exe) {
 
   const after = await labels()
   check('a finished project DOES draw one',
-    after.some((t) => /Actually ran \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/.test(t)),
+    // Dates as the page writes them: "2 Nov 2026".
+    after.some((t) => /Actually ran \d{1,2} [A-Z][a-z]{2} \d{4} to \d{1,2} [A-Z][a-z]{2} \d{4}/.test(t)),
     after.slice(0, 1).join('') || 'none')
   check('and one under way draws one, running to today',
-    after.some((t) => /Actually ran \d{4}-\d{2}-\d{2} to still running/.test(t)),
+    after.some((t) => /Actually ran \d{1,2} [A-Z][a-z]{2} \d{4} to still running/.test(t)),
     after.find((t) => /still running/.test(t)) || 'none')
   check('and the untouched one still draws nothing',
     after.length === 2, `${after.length} actual bars for 2 projects with outcomes`)
-  check('STILL nothing says "— to —"', !after.some((t) => /— to —/.test(t)),
-    after.filter((t) => /— to —/.test(t)).join(' | '))
+  check('STILL nothing says "— to —"', !after.some((t) => /[—–] to [—–]/.test(t)),
+    after.filter((t) => /[—–] to [—–]/.test(t)).join(' | '))
 
   // Put the register back before the rest of the suite reads it.
   await page.evaluate(() => localStorage.clear())
@@ -510,7 +522,8 @@ if (!exe) {
       // the box between them.
       const rows = [...document.querySelectorAll('div')].filter((d) => {
         const t = d.innerText || ''
-        return t.includes('PROJECT') && t.includes('SLIP') && d.children.length === 3
+        // Sentence case now: "Project" and "Slip".
+        return t.includes('Project') && t.includes('Slip') && d.children.length === 3
       })
       const head = rows[rows.length - 1]
       const track = head && head.children[1]
