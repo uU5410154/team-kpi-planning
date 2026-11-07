@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box,
   Typography, List, ListItem, ListItemButton, ListItemText, IconButton, Alert,
-  CircularProgress, Chip, Divider, Tooltip,
+  Chip, Divider, Tooltip,
 } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import CloudDoneIcon from '@mui/icons-material/CloudDone'
 import CloudOffIcon from '@mui/icons-material/CloudOff'
 import * as api from '../lib/api.js'
+import Loading from './Loading.jsx'
 
 const when = (iso) => {
   if (!iso) return ''
@@ -147,7 +148,7 @@ export default function ScenarioDialog({ open, mode, onClose, state, onLoad, onT
         )}
 
         {busy && !rows.length ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={24} /></Box>
+          <Loading variant="block" label="Loading scenarios…" />
         ) : rows.length ? (
           <>
             {mode === 'save' && <Divider sx={{ mb: 1 }} />}

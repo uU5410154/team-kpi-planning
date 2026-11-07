@@ -6,6 +6,7 @@ import {
 import SendIcon from '@mui/icons-material/SendOutlined'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import * as api from '../lib/api.js'
+import Loading from './Loading.jsx'
 import { Pill } from './Brand.jsx'
 
 /*
@@ -86,6 +87,7 @@ export default function MailSettings({ weekly, onWeekly }) {
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {note && <Alert severity="success" onClose={() => setNote(null)}>{note}</Alert>}
 
+      {!mail && !error && <Loading label="Checking the email set-up…" />}
       {st && (st.configured ? (
         <Alert severity="success" sx={{ py: 0.25 }}>
           Sending as <strong>{st.from}</strong>{st.mode !== 'gmail' ? ` (${st.mode})` : ''}.
@@ -126,7 +128,8 @@ export default function MailSettings({ weekly, onWeekly }) {
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 1 }}>Who gets the 23:00 list</Typography>
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          {!list && <Chip label="Every administrator (nobody has set a list)" variant="outlined" />}
+          {weekly === undefined && <Loading label="Loading…" />}
+          {weekly !== undefined && !list && <Chip label="Every administrator (nobody has set a list)" variant="outlined" />}
           {(list || []).map((e) => (
             <Chip
               key={e}
@@ -155,6 +158,7 @@ export default function MailSettings({ weekly, onWeekly }) {
           <Typography variant="subtitle2">Sent lately</Typography>
           <Button size="small" startIcon={<RefreshIcon />} onClick={load}>Refresh</Button>
         </Box>
+        {!mail && !error && <Loading label="Loading sent emails…" />}
         {mail && mail.recent.length === 0 && (
           <Typography variant="body2" sx={{ color: 'text.disabled' }}>Nothing yet.</Typography>
         )}

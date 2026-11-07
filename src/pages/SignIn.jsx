@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Box, Paper, Typography, TextField, Button, Alert, Tabs, Tab, InputAdornment, IconButton, Divider,
+  Box, Paper, Typography, TextField, Button, Alert, Tabs, Tab, InputAdornment, IconButton, Divider, CircularProgress,
 } from '@mui/material'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -144,8 +144,16 @@ export default function SignIn({ config, onSignedIn }) {
 
           {note && <Alert severity={note.severity} sx={{ mb: 2 }}>{note.text}</Alert>}
 
-          <Button type="submit" fullWidth variant="contained" disabled={!ready} sx={{ mt: 1 }}>
-            {busy ? 'Working…' : (mode === 'in' ? 'Sign in' : 'Create account')}
+          <Button
+            type="submit"
+            fullWidth
+            variant="contained"
+            disabled={!ready}
+            aria-busy={busy || undefined}
+            startIcon={busy ? <CircularProgress size={14} thickness={5} color="inherit" data-loading /> : null}
+            sx={{ mt: 1 }}
+          >
+            {busy ? (mode === 'in' ? 'Signing in…' : 'Creating account…') : (mode === 'in' ? 'Sign in' : 'Create account')}
           </Button>
         </Box>
 

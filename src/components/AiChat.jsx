@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Drawer, Box, Typography, IconButton, TextField, Button, Select, MenuItem, CircularProgress, Tooltip, Alert,
+  Drawer, Box, Typography, IconButton, TextField, Button, Select, MenuItem, Tooltip, Alert,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import CloseIcon from '@mui/icons-material/Close'
@@ -9,6 +9,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import * as api from '../lib/api.js'
+import Loading from './Loading.jsx'
 import Markdown from './Markdown.jsx'
 
 /*
@@ -40,6 +41,8 @@ export default function AiChat({
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  // An earlier conversation on its way from the server.
+  const [opening, setOpening] = useState(false)
   const end = useRef(null)
 
   const loadList = useCallback(async () => {
@@ -51,7 +54,8 @@ export default function AiChat({
   const pick = async (id) => {
     setError(null)
     if (!id) { setChat(null); return }
-    try { setChat((await api.aiChat(id)).chat) } catch (e) { setError(e.message) }
+    setOpening(true)
+    try { setChat((await api.aiChat(id)).chat) } catch (e) { setError(e.message) } finally { setOpening(false) }
   }
 
   const send = async (q, fresh = false) => {
@@ -145,7 +149,8 @@ export default function AiChat({
       )}
 
       <Box sx={{ flex: 1, overflowY: 'auto', px: 2, py: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-        {messages.length === 0 && (
+        {opening && <Loading variant="block" label="Opening the conversation…" />}
+        {!opening && messages.length === 0 && (
           <Box>
             <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1.5 }}>
               Ask anything about the register, the timeline, the money or the weekly check-ins — in English or Thai.
@@ -165,7 +170,7 @@ export default function AiChat({
             </Box>
           </Box>
         )}
-        {messages.map((m, i) => (m.role === 'user' ? (
+        {!opening && messages.map((m, i) => (m.role === 'user' ? (
           <Box
             key={i}
             sx={{
@@ -180,12 +185,7 @@ export default function AiChat({
             <Markdown text={m.content} dense />
           </Box>
         )))}
-        {busy && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
-            <CircularProgress size={14} />
-            <Typography variant="caption">Reading the plan…</Typography>
-          </Box>
-        )}
+        {busy && <Loading label="Reading the plan…" />}
         {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
         <div ref={end} />
       </Box>

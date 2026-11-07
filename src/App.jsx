@@ -17,6 +17,7 @@ import AppsIcon from '@mui/icons-material/AppsOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
 import AdminIcon from '@mui/icons-material/AdminPanelSettingsOutlined'
 import Sidebar, { NAV_W, NAV_W_MINI } from './components/Sidebar.jsx'
+import Loading from './components/Loading.jsx'
 import GlobalSearch from './components/GlobalSearch.jsx'
 import AiChat from './components/AiChat.jsx'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
@@ -167,7 +168,8 @@ export default function App() {
   const [jump, setJump] = useState(null)
   // The administrators' chatbot, and whether the AI is there at all.
   const [chatOpen, setChatOpen] = useState(false)
-  const [aiOn, setAiOn] = useState(false)
+  // undefined until the server says; the dashboard's AI cards wait for it.
+  const [aiOn, setAiOn] = useState(undefined)
   // A question asked from the Dashboard: opens the chat with it already sent.
   const [chatSeed, setChatSeed] = useState(null)
   const askAi = (q) => {
@@ -312,11 +314,13 @@ export default function App() {
    * arranged on, before any of this synced, and its copy is the only one there
    * is. It goes up rather than being wiped.
    */
+  // The home screen's icons are on their way: the Apps page waits for them.
+  const [appsLoading, setAppsLoading] = useState(true)
   useEffect(() => {
     let stop = false
     if (!signedInAs) return undefined
     const name = (state.scenarioName || '').trim()
-    if (!name) return undefined
+    if (!name) { setAppsLoading(false); return undefined }
     api.loadApps(name).then((r) => {
       if (stop || !r || !Array.isArray(r.apps)) return
       const mine = stateRef.current?.apps || []
@@ -327,7 +331,7 @@ export default function App() {
       setState((s) => (JSON.stringify(s.apps || []) === JSON.stringify(r.apps)
         ? s
         : { ...s, apps: r.apps }))
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => { if (!stop) setAppsLoading(false) })
     return () => { stop = true }
     // Once per sign-in: the name does not change without a reload.
   }, [signedInAs])
@@ -369,6 +373,12 @@ export default function App() {
    * plan has something true to show immediately.
    */
   const [bootstrapping, setBootstrapping] = useState(startedBlank.current)
+  /*
+   * Past the loading screen's cap, a blank browser is showing the bundled seed
+   * while the shared plan is still on its way: said in the header, so zeros on
+   * screen are not taken for the real numbers.
+   */
+  const [sharedLoading, setSharedLoading] = useState(startedBlank.current)
   /*
    * Take the shared plan. One path, so the automatic case and the button can
    * never end up doing subtly different things.
@@ -416,7 +426,7 @@ export default function App() {
         // deployment that has no store configured, which is every local run.
         const store = await api.storeStatus()
         if (cancelled) return
-        if (!store.connected) { setBootstrapping(false); return }
+        if (!store.connected) { setBootstrapping(false); setSharedLoading(false); return }
 
         const list = await api.listScenarios()
         if (cancelled || !Array.isArray(list) || !list.length) return
@@ -462,7 +472,7 @@ export default function App() {
         // keeping one.
       } finally {
         clearTimeout(cap)
-        if (!cancelled) setBootstrapping(false)
+        if (!cancelled) { setBootstrapping(false); setSharedLoading(false) }
       }
     })()
     return () => { cancelled = true; clearTimeout(cap) }
@@ -1093,7 +1103,7 @@ export default function App() {
           minHeight: '100vh', display: 'grid', placeItems: 'center',
         }}
         >
-          <CircularProgress size={28} />
+          <Loading variant="block" label="Loading…" />
         </Box>
       </ThemeProvider>
     )
@@ -1118,13 +1128,9 @@ export default function App() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 2,
         }}>
-          <CircularProgress size={28} />
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Loading the shared plan…
-          </Typography>
-          <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+          <Loading variant="block" label="Loading the shared plan…" />
+          <Typography variant="caption" sx={{ color: 'text.disabled', mt: -3 }}>
             first open of the day can take a moment while the server wakes
           </Typography>
         </Box>
@@ -1240,6 +1246,8 @@ export default function App() {
                   />
                 </Tooltip>
               )}
+
+              {sharedLoading && !phone && <Loading label="Loading the shared plan…" />}
 
               <Box sx={{ flex: 1 }} />
 
@@ -1400,7 +1408,7 @@ export default function App() {
             />
           )}
           {allowed && tab === 'team' && <Team plan={shown} own={member} />}
-          {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} />}
+          {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} loading={appsLoading || sharedLoading} />}
           {allowed && tab === 'timeline' && (
             <Timeline
               plan={shown}

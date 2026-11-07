@@ -180,7 +180,7 @@ function TaskCard({
           <TextField size="small" type="date" label="Start" value={dates.start} onChange={(e) => setDates((d) => ({ ...d, start: e.target.value }))} InputLabelProps={{ shrink: true }} disabled={!canWrite} />
           <TextField size="small" type="date" label="Due" value={dates.due} onChange={(e) => setDates((d) => ({ ...d, due: e.target.value }))} InputLabelProps={{ shrink: true }} disabled={!canWrite} />
           {canWrite && (
-            <Button size="small" variant="outlined" onClick={saveDates} disabled={busy || !writable || (dates.start === (task.start || '') && dates.due === (task.due || ''))}>
+            <Button size="small" variant="outlined" onClick={saveDates} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy || !writable || (dates.start === (task.start || '') && dates.due === (task.due || ''))}>
               Save dates
             </Button>
           )}
@@ -335,7 +335,7 @@ function NewTask({
       </Box>
       {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Button variant="contained" onClick={create} disabled={busy || !writable || !project || summary.trim().length < 3}>
+        <Button variant="contained" onClick={create} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy || !writable || !project || summary.trim().length < 3}>
           {busy ? 'Creating…' : 'Create in Jira'}
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
@@ -387,7 +387,7 @@ function NewProject({ week, onDone, onCancel, writable }) {
       </Box>
       {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
       <Box sx={{ display: 'flex', gap: 1 }}>
-        <Button variant="contained" onClick={create} disabled={busy || !writable || summary.trim().length < 3}>
+        <Button variant="contained" onClick={create} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy || !writable || summary.trim().length < 3}>
           {busy ? 'Creating…' : 'Create project'}
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
@@ -561,7 +561,7 @@ export default function JiraWeek({
           {canWrite && (planIn
             ? <Typography variant="caption" sx={{ color: 'text.secondary' }}>Plan for week {weekNo(week)} recorded {planInAt ? ago(planInAt) : ''}.</Typography>
             : (
-              <Button size="small" variant={planning ? 'contained' : 'outlined'} onClick={confirm} disabled={busy} sx={[{ alignSelf: 'flex-start' }, planning && pulseSx]}>
+              <Button size="small" variant={planning ? 'contained' : 'outlined'} onClick={confirm} startIcon={busy ? <CircularProgress size={14} color="inherit" /> : null} disabled={busy} sx={[{ alignSelf: 'flex-start' }, planning && pulseSx]}>
                 My plan for week {weekNo(week)} is set
               </Button>
             ))}

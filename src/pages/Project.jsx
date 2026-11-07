@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Box, Paper, Typography, Button, Grid, Link, Skeleton, Alert, Divider,
+  Box, Paper, Typography, Button, Grid, Link, Alert, Divider,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
@@ -17,6 +17,7 @@ import {
   Pill, IconTile, PAGE_COLOR, personColor, statusTone,
 } from '../components/Brand.jsx'
 import FollowUp, { ago } from '../components/FollowUp.jsx'
+import Loading from '../components/Loading.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
 import { activeInWeek } from '../lib/manager.js'
 
@@ -213,12 +214,11 @@ export default function Project({
             <Grid item xs={6} sm={4} md={2}><Fact label="Due">{fmtDay(p.due)}</Fact></Grid>
             <Grid item xs={6} sm={4} md={2}><Fact label="Saving hours / month">{fmtHours(hours)}</Fact></Grid>
             <Grid item xs={6} sm={4} md={2}><Fact label="Objective">{OBJ_BY_ID[p.objective]?.short || '—'}</Fact></Grid>
-            <Grid item xs={6} sm={4} md={2}><Fact label="Latest weekly update">{latest ? ago(latest) : 'none yet'}</Fact></Grid>
+            <Grid item xs={6} sm={4} md={2}><Fact label="Latest weekly update">{weekly === undefined ? <Loading label="Loading…" /> : latest ? ago(latest) : 'none yet'}</Fact></Grid>
           </Grid>
         </Paper>
       </Box>
 
-      {weekly === undefined && <Skeleton variant="rounded" height={160} />}
       {weekly === null && (
         <Alert severity="info" variant="outlined">The weekly check-ins could not be read just now, so only the register is shown.</Alert>
       )}
@@ -247,13 +247,14 @@ export default function Project({
         </Paper>
       )}
 
-      {weekly && (
+      {weekly !== null && (
         <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 } }} component="section" aria-label="week by week">
           <Typography variant="h4">Week by week</Typography>
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
             Every task linked to this project in the weekly check-ins, the last eight weeks.
           </Typography>
-          {weeks.length === 0 && (
+          {weekly === undefined && <Loading variant="block" label="Loading check-ins…" />}
+          {weekly && weeks.length === 0 && (
             <Typography variant="body2" sx={{ color: 'text.disabled' }}>Nobody has reported on this project in the last eight weeks.</Typography>
           )}
           {weeks.map((w) => (

@@ -387,6 +387,8 @@ function TaskDecision({ d, onDecide }) {
 export function DecisionsCard({ ctx, f }) {
   const pending = ctx.pending || []
   const asked = ctx.decisions || []
+  const loading = ctx.pending === undefined || ctx.decisions === undefined
+  const unread = ctx.pending === null && ctx.decisions === null
   const parts = [
     pending.length ? `${pending.length} request${pending.length === 1 ? '' : 's'} to move a project's date` : null,
     asked.length ? `${asked.length} decision${asked.length === 1 ? '' : 's'} asked for on tasks` : null,
@@ -396,9 +398,11 @@ export function DecisionsCard({ ctx, f }) {
       {...f}
       label="waiting for your decision"
       title="Waiting for your decision"
-      sub={parts.length ? parts.join(' · ') : 'No date changes or decisions are waiting.'}
+      sub={loading ? undefined : unread ? 'The waiting decisions could not be read just now.'
+        : parts.length ? parts.join(' · ') : 'No date changes or decisions are waiting.'}
       action={pending.length > 0 && <Button size="small" onClick={() => ctx.onGoTo?.('weekly')}>Decide</Button>}
     >
+      {loading && <Loading variant="block" label="Loading decisions…" />}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
         {asked.map((d) => <TaskDecision key={d.id} d={d} onDecide={ctx.onDecide} />)}
         {pending.map((p) => (
@@ -438,6 +442,8 @@ export function SummaryCard({ ctx, f }) {
   const own = ctx.summary?.summaries?.[0] || null
   const older = !own ? ctx.prevSummary?.summaries?.[0] || null : null
   const latest = own || older
+  // Still asking: whether the AI is on, this week's summary, or — with none — last week's.
+  const loading = ctx.aiOn === undefined || (ctx.aiOn && (ctx.summary === undefined || (ctx.summary && !own && ctx.prevSummary === undefined)))
   const when = (x) => new Date(x.writtenAt).toLocaleString('en-GB', {
     timeZone: 'Asia/Bangkok', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   })
@@ -447,19 +453,18 @@ export function SummaryCard({ ctx, f }) {
   else if (ctx.aiOn && older) sub = `Last week’s, written ${when(older)} · this week’s is written after ${next}`
   else if (ctx.aiOn) sub = 'Written by itself after Monday 08:00, Friday 15:00 and Sunday 15:00.'
   return (
-    <CardFrame {...f} label="the week, summarised" title="The week, summarised" sub={sub}>
-      {!ctx.aiOn && (
+    <CardFrame {...f} label="the week, summarised" title="The week, summarised" sub={loading ? undefined : sub}>
+      {loading && <Loading variant="block" label="Loading the summary…" />}
+      {!loading && ctx.aiOn === false && (
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
           The AI is not switched on, so there is no summary. Add LOTUS_API_KEY on Render, then press Test the AI on
           the Access tab.
         </Typography>
       )}
-      {ctx.aiOn && latest && <Markdown text={latest.text} dense />}
-      {ctx.aiOn && !latest && (
+      {!loading && ctx.aiOn && latest && <Markdown text={latest.text} dense />}
+      {!loading && ctx.aiOn && !latest && (
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-          {ctx.summary === undefined
-            ? 'Loading the summary…'
-            : ctx.summary === null
+          {ctx.summary === null
               ? 'The summary could not be read just now.'
               : `No summary yet${ctx.now ? ` for ${weekTitle(ctx.now.week)}` : ''}. The AI writes one by itself after each deadline — the next after ${next || 'Monday 08:00'} — and emails it to the administrators.`}
         </Typography>
@@ -471,7 +476,7 @@ export function SummaryCard({ ctx, f }) {
 export function AskCard({ ctx, f }) {
   return (
     <CardFrame {...f} label="ask about the plan" title="Ask about the plan" sub="In English or Thai — answered from the register, the money and the check-ins.">
-      {!ctx.aiOn ? (
+      {ctx.aiOn === undefined ? <Loading variant="block" label="Loading…" /> : !ctx.aiOn ? (
         <Typography variant="body2" sx={{ color: 'text.disabled' }}>The AI is not switched on.</Typography>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
@@ -499,7 +504,8 @@ export function AskCard({ ctx, f }) {
 /* ---------------------------------------------------------- the extras */
 
 export function BlockersCard({ ctx, f }) {
-  const week = reportedWeek(ctx.now, ctx.prev)
+  // Which week is "reported" depends on last week too: wait for both.
+  const week = ctx.prev === undefined ? null : reportedWeek(ctx.now, ctx.prev)
   const by = blockersByType(week)
   const total = Object.values(by).reduce((a, l) => a + l.length, 0)
   const projectName = Object.fromEntries(ctx.plan.projects.map((p) => [p.key, p.summary || p.key]))
@@ -543,11 +549,14 @@ export function SlippingCard({ ctx, f }) {
     projects: ctx.plan.projects, asOf: ctx.plan.settings.asOfDate, weeks: [ctx.now, ctx.prev].filter(Boolean), pending: ctx.pending || [],
   })
   const nick = Object.fromEntries((ctx.plan.assignees || ctx.plan.people).map((p) => [p.id, p.nick]))
+  // The weeks and the requests to move a date both feed it: wait for them.
+  const slipLoading = ctx.now === undefined || ctx.prev === undefined || ctx.pending === undefined
   return (
-    <CardFrame {...f} label="slipping projects" title="Slipping projects" sub={`${list.length} active project${list.length === 1 ? '' : 's'} past due, landing late, or asking to move`}>
-      {list.length === 0 && <Typography variant="body2" sx={{ color: 'text.secondary' }}>No active project is slipping.</Typography>}
+    <CardFrame {...f} label="slipping projects" title="Slipping projects" sub={slipLoading ? undefined : `${list.length} active project${list.length === 1 ? '' : 's'} past due, landing late, or asking to move`}>
+      {slipLoading && <Loading variant="block" label="Loading…" />}
+      {!slipLoading && list.length === 0 && <Typography variant="body2" sx={{ color: 'text.secondary' }}>No active project is slipping.</Typography>}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {list.map((p) => (
+        {!slipLoading && list.map((p) => (
           <Box key={p.key} sx={{ borderBottom: 1, borderColor: 'divider', pb: 0.75 }}>
             <ProjectLink p={p} onOpen={ctx.onOpenProject} />
             <Box sx={{

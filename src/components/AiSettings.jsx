@@ -4,6 +4,7 @@ import {
 } from '@mui/material'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import * as api from '../lib/api.js'
+import Loading from './Loading.jsx'
 
 /*
  * THE AI, for an administrator: whether the Lotus LLM is reachable with the
@@ -39,6 +40,7 @@ export default function AiSettings() {
           administrators&rsquo; questions. Called from the server only; the key never reaches a browser.
         </Typography>
       </Box>
+      {!st && <Loading label="Checking the AI…" />}
       {st && (st.configured
         ? <Alert severity="success" sx={{ py: 0.25 }}>Connected — model “{st.model}”.</Alert>
         : (

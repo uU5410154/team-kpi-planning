@@ -2,7 +2,7 @@ import { projectOnHold } from '../lib/hold.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, IconButton, Tooltip, Chip, Alert, TextField, MenuItem, Autocomplete,
-  ToggleButton, ToggleButtonGroup, Divider, CircularProgress, Collapse, Stack, useMediaQuery,
+  ToggleButton, ToggleButtonGroup, Divider, Collapse, Stack, useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
@@ -17,6 +17,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import AiAssist from '../components/AiAssist.jsx'
 import JiraWeek from '../components/JiraWeek.jsx'
+import Loading from '../components/Loading.jsx'
 import { activeInWeek } from '../lib/manager.js'
 import Markdown from '../components/Markdown.jsx'
 import { STATUS } from '../lib/palette.js'
@@ -69,7 +70,9 @@ function NextStep({ next }) {
         <Typography variant="overline" sx={{ color: todo ? 'primary.light' : 'text.secondary', lineHeight: 1.4, display: 'block' }}>
           Next step
         </Typography>
-        <Typography variant="h4" sx={{ fontWeight: 700 }}>{next.label}</Typography>
+        {next.loading
+          ? <Box sx={{ mt: 0.5 }}><Loading label="Working out your next step…" /></Box>
+          : <Typography variant="h4" sx={{ fontWeight: 700 }}>{next.label}</Typography>}
         {next.sub && <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>{next.sub}</Typography>}
       </Box>
       {todo && (
@@ -757,14 +760,20 @@ export default function Weekly({
    * not — Jira off, account not linked, name not matched — the Monday form
    * below is still there.
    */
-  const [jw, setJw] = useState(null)
+  // undefined while it is being asked for; null when there is no week to ask about.
+  const [jw, setJw] = useState(undefined)
   const [preset, setPreset] = useState(null)
   const loadJira = useCallback(async (w) => {
     if (!w || w === 'current') return
     try { setJw(await api.jiraWeek(w)) } catch (e) { setJw({ jira: 'error', error: e.message }) }
   }, [])
-  useEffect(() => { if (data?.week && data.person) loadJira(data.week); else setJw(null) }, [data?.week, data?.person, loadJira])
+  useEffect(() => {
+    if (data?.week && data.person) { setJw(undefined); loadJira(data.week) } else if (data) setJw(null)
+  }, [data?.week, data?.person, loadJira])
   const jiraMode = jw?.jira === 'on'
+  // Not yet known whether this week runs from Jira or from the form: a spinner,
+  // rather than a flash of the Monday form that Jira then replaces.
+  const jwLoading = !!data?.person && jw === undefined
 
   const load = useCallback(async (w) => {
     setError(null)
@@ -919,8 +928,10 @@ export default function Weekly({
   }
 
   if (!data && !error) {
-    return <Box sx={{ display: 'grid', placeItems: 'center', py: 8 }}><CircularProgress size={28} /></Box>
+    return <Loading variant="block" label="Loading your week…" />
   }
+  // The arrows moved to a week that has not arrived yet.
+  const switching = !!data && !error && week !== 'current' && week !== data.week
 
   const d = data?.deadlines
   const mine = data?.mine
@@ -972,6 +983,8 @@ export default function Weekly({
         ? { label: `${plansIn} of ${required.length} plans in`, sub: 'Open anybody below to read their week.' }
         : { label: 'Your account is not linked yet', sub: 'Ask an administrator to link it to your name on the Access tab.' }
     }
+    // Whether the week is Jira's or the form's decides the step: wait for it.
+    if (jwLoading || (jiraMode && !jwReady)) return { loading: true }
     if (jwReady) {
       const n = weekNo(data.week)
       if (data.week > data.current) {
@@ -1036,6 +1049,7 @@ export default function Weekly({
                 This week
               </Button>
             )}
+            {switching && <Box sx={{ ml: 1 }}><Loading label={`Loading week ${weekNo(week)}…`} /></Box>}
           </Box>
         )}
       </Box>
@@ -1127,7 +1141,7 @@ export default function Weekly({
             Plan due {bangkokTime(d.planDue)} · report due {bangkokTime(d.reportDue)} · locks {bangkokTime(d.locksAt)}
           </Typography>
 
-          {!jiraMode && mine?.draft && draft.tasks.length > 0 && (
+          {!jiraMode && !jwLoading && mine?.draft && draft.tasks.length > 0 && (
             <Alert severity="info" sx={{ py: 0 }}>
               {draft.tasks.length} unfinished task{draft.tasks.length === 1 ? '' : 's'} carried over from last week.
               Edit, remove or add to them — nothing is saved until you save.
@@ -1151,11 +1165,8 @@ export default function Weekly({
               They are told when you do.
             </Alert>
           )}
-          {jiraMode && jw.week !== data.week && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
-              <CircularProgress size={16} />
-              <Typography variant="body2">Reading your Jira tasks for {weekTitle(data.week)}…</Typography>
-            </Box>
+          {(jwLoading || (jiraMode && jw.week !== data.week)) && (
+            <Loading variant="block" label={`Reading your Jira tasks for ${weekTitle(data.week)}…`} />
           )}
           {jiraMode && jw.week === data.week && (
             <JiraWeek
@@ -1185,7 +1196,7 @@ export default function Weekly({
             />
           )}
 
-          {!jiraMode && (<>
+          {!jiraMode && !jwLoading && (<>
           <TextField
             label="This week I'm focused on…"
             value={draft.focus}
@@ -1254,7 +1265,7 @@ export default function Weekly({
           </Box>
           </>)}
 
-          {(showReport || (jiraMode && data.week <= data.current)) && (
+          {!jwLoading && (showReport || (jiraMode && data.week <= data.current)) && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="h4">{jiraMode ? 'Adhoc work' : 'Unplanned work'}</Typography>
               <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>
@@ -1334,7 +1345,7 @@ export default function Weekly({
               {busy === 'save' ? 'Saving…' : 'Save adhoc work'}
             </Button>
           )}
-          {!readOnly && !jiraMode && (
+          {!readOnly && !jiraMode && !jwLoading && (
             <Stack direction={phone ? 'column' : 'row'} spacing={1} sx={{ alignItems: phone ? 'stretch' : 'center' }}>
               <Button variant="outlined" onClick={() => save(null)} disabled={!!busy || !dirty}>
                 {busy === 'save' ? 'Saving…' : dirty ? 'Save draft' : 'Saved'}

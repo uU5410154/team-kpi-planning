@@ -45,6 +45,7 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
 import ImportDialog from '../components/ImportDialog.jsx'
+import Loading from '../components/Loading.jsx'
 import { exportFiltered, readProjectsFile, planImport } from '../lib/projectIO.js'
 import { useTheme, alpha } from '@mui/material/styles'
 
@@ -527,11 +528,13 @@ export default function Projects({
   const [hidden, setHidden] = useState(() => new Set())
   const [colsNote, setColsNote] = useState(null)
   const [colsEl, setColsEl] = useState(null)
+  const [colsRead, setColsRead] = useState(false)
   useEffect(() => {
     let stop = false
     api.projectColumns()
       .then((r) => { if (!stop) { setHidden(new Set(r.hidden || [])); setColsNote(null) } })
       .catch(() => { if (!stop) setColsNote('Column choices are kept in the shared database, which is not reachable — every column is shown.') })
+      .finally(() => { if (!stop) setColsRead(true) })
     return () => { stop = true }
   }, [])
   const show = (id) => !hidden.has(id)
@@ -567,6 +570,16 @@ export default function Projects({
   const [layoutDraft, setLayoutDraft] = useState(null)
   const [layoutBusy, setLayoutBusy] = useState(false)
   const [layoutError, setLayoutError] = useState(null)
+  /*
+   * A spinner until the shared columns and layout are read, rather than every
+   * column and block drawn and then half of them hidden a moment later. Never
+   * longer than a few seconds: a slow database still gets the default view.
+   */
+  const [layoutWait, setLayoutWait] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setLayoutWait(false), 3000)
+    return () => clearTimeout(t)
+  }, [])
   useEffect(() => {
     let stop = false
     api.projectLayout()
@@ -614,6 +627,8 @@ export default function Projects({
    * numbers with no name. Their offsets are measured, not guessed: the cells
    * are as wide as their content and padding make them.
    */
+  // The shared columns and layout are in (or the wait for them is over).
+  const ready = !layoutWait || (colsRead && layoutSaved !== undefined)
   const stickyIds = ['select', 'cost', ...(show('jiraKey') ? ['jiraKey'] : []), ...(wide ? ['summary'] : [])]
   const headRefs = useRef({})
   const [lefts, setLefts] = useState({})
@@ -634,7 +649,7 @@ export default function Projects({
     const ro = new ResizeObserver(measure)
     ids.forEach((id) => headRefs.current[id] && ro.observe(headRefs.current[id]))
     return () => ro.disconnect()
-  }, [stickyKey, phone])
+  }, [stickyKey, phone, ready])
   const lastSticky = stickyIds[stickyIds.length - 1]
   const stick = (id, head = false) => (stickyIds.includes(id) ? {
     className: 'held',
@@ -662,7 +677,7 @@ export default function Projects({
     const ro = new ResizeObserver(checkScroll)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [checkScroll, phone, hidden])
+  }, [checkScroll, phone, hidden, ready])
 
   // Mid-edit, a click elsewhere on the row is how the edit is finished — it
   // must not also throw a popup over the page.
@@ -964,6 +979,10 @@ export default function Projects({
         help: `Return over ${horizon} months on the whole investment — build cost plus CAPEX — against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are in EITHER side, so this is never a whole-book benefit divided by a partial cost.`,
       },
   ].map((t) => [t.id, t]))
+
+  if (!ready) {
+    return <Loading variant="block" label="Loading the register…" />
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

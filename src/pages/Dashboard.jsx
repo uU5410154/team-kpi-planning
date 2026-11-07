@@ -13,6 +13,7 @@ import { addWeeks } from '../lib/weekly.js'
 import { CARDS, DEFAULT_LAYOUT, GROUPS } from '../dashboard/cards.js'
 import { DRAG } from '../dashboard/CardFrame.jsx'
 import { ago } from '../components/FollowUp.jsx'
+import Loading from '../components/Loading.jsx'
 
 const Grid = WidthProvider(GridLayout)
 
@@ -47,13 +48,15 @@ export default function Dashboard({
   const [prevJira, setPrevJira] = useState(undefined)
   // Why it could not, said on the card rather than quietly showing nothing.
   const [prevJiraError, setPrevJiraError] = useState(null)
-  const [pending, setPending] = useState([])
+  // Both undefined while they load, null when they could not be read.
+  const [pending, setPending] = useState(undefined)
   // "A decision is needed" raised on a Jira task in somebody's weekly update.
-  const [decisions, setDecisions] = useState([])
+  const [decisions, setDecisions] = useState(undefined)
   const [followups, setFollowups] = useState([])
   // undefined: still loading; null: could not be read.
   const [summary, setSummary] = useState(undefined)
-  const [prevSummary, setPrevSummary] = useState(null)
+  // Last week's, asked for only when this week has none: undefined while that is pending.
+  const [prevSummary, setPrevSummary] = useState(undefined)
   const [trend, setTrend] = useState(null)
 
   // The week in the top bar: everything below is about it and the one before.
@@ -65,7 +68,7 @@ export default function Dashboard({
     setPrevJiraError(null)
     setTrend(null)
     setSummary(undefined)
-    setPrevSummary(null)
+    setPrevSummary(undefined)
     api.loadWeek(week || 'current')
       .then(async (w) => {
         if (stop) return
@@ -88,8 +91,8 @@ export default function Dashboard({
   }, [week])
   useEffect(() => {
     let stop = false
-    api.proposals('pending').then((r) => { if (!stop) setPending(r.proposals || []) }).catch(() => {})
-    api.decisions('open').then((r) => { if (!stop) setDecisions(r.decisions || []) }).catch(() => {})
+    api.proposals('pending').then((r) => { if (!stop) setPending(r.proposals || []) }).catch(() => { if (!stop) setPending(null) })
+    api.decisions('open').then((r) => { if (!stop) setDecisions(r.decisions || []) }).catch(() => { if (!stop) setDecisions(null) })
     return () => { stop = true }
   }, [])
   useEffect(() => {
@@ -103,9 +106,9 @@ export default function Dashboard({
         if (!r?.summaries?.length) {
           const p = await api.aiSummary(addWeeks(now.week, -1)).catch(() => null)
           if (!stop) setPrevSummary(p)
-        }
+        } else setPrevSummary(null)
       })
-      .catch(() => { if (!stop) setSummary(null) })
+      .catch(() => { if (!stop) { setSummary(null); setPrevSummary(null) } })
     return () => { stop = true }
   }, [aiOn, now?.week])
 
@@ -118,6 +121,16 @@ export default function Dashboard({
   const [addAt, setAddAt] = useState(null)
   useEffect(() => {
     api.dashboardLayout().then(setSaved).catch(() => setSaved(null))
+  }, [])
+  /*
+   * The board waits for the shared layout rather than drawing the default and
+   * rearranging itself a moment later — but only for a few seconds, so a slow
+   * database still gets the default board.
+   */
+  const [layoutWait, setLayoutWait] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setLayoutWait(false), 3000)
+    return () => clearTimeout(t)
   }, [])
   const items = useMemo(
     () => known(editing ? draft : (saved?.items || DEFAULT_LAYOUT)),
@@ -180,7 +193,7 @@ export default function Dashboard({
     decisions,
     onDecide: async (id, note) => {
       await api.decide(id, note)
-      setDecisions((list) => list.filter((d) => d.id !== id))
+      setDecisions((list) => (list || []).filter((d) => d.id !== id))
     },
     followups,
     summary,
@@ -192,6 +205,7 @@ export default function Dashboard({
     onOpenProject,
     onFollowSent: (f) => setFollowups((list) => [f, ...list]),
   }
+  if (saved === undefined && layoutWait) return <Loading variant="block" label="Loading the dashboard…" />
   const card = (type) => {
     const { C } = CARDS[type]
     return <C ctx={ctx} f={{ editing, onRemove: () => remove(type), fill: !stacked }} />

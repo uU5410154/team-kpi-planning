@@ -11,6 +11,7 @@ import {
   isFolder, newApp, moveTo, dropOnto, patchItem, removeItem,
   safeUrl, tintOf, initialsOf,
 } from '../lib/homeScreen.js'
+import Loading from '../components/Loading.jsx'
 
 /*
  * The grid. One set of numbers, used by the layout, the hit-testing and the
@@ -39,7 +40,7 @@ const slotOf = (index, cols) => ({
  * drag events give a ghost image and a drop target, which is a different and
  * much worse thing.
  */
-export default function Apps({ apps, onChange }) {
+export default function Apps({ apps, onChange, loading = false }) {
   const [editing, setEditing] = useState(false)
   const [openFolder, setOpenFolder] = useState(null)
   const [dialog, setDialog] = useState(null)
@@ -300,9 +301,13 @@ export default function Apps({ apps, onChange }) {
         <Box ref={surface} sx={{ position: 'relative', height: rows * ROW + 8 }}>
           {shown.length === 0 && (
             <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-              <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                Nothing here yet — add the first app.
-              </Typography>
+              {loading && !folder
+                ? <Loading label="Loading your apps…" />
+                : (
+                  <Typography variant="body2" sx={{ color: 'text.disabled' }}>
+                    Nothing here yet — add the first app.
+                  </Typography>
+                )}
             </Box>
           )}
 

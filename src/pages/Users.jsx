@@ -10,6 +10,7 @@ import RefreshIcon from '@mui/icons-material/Refresh'
 import { STATUS } from '../lib/palette.js'
 import * as auth from '../lib/authApi.js'
 import * as api from '../lib/api.js'
+import Loading from '../components/Loading.jsx'
 import { defaultSubmitters } from '../lib/weekly.js'
 import MailSettings from '../components/MailSettings.jsx'
 import AiSettings from '../components/AiSettings.jsx'
@@ -39,7 +40,8 @@ export default function Users({ me, people = [] }) {
    * are not anybody's login.
    */
   const team = people.filter((p) => defaultSubmitters([p]).length)
-  const [weekly, setWeekly] = useState(null)
+  // undefined while it loads, null when it could not be read.
+  const [weekly, setWeekly] = useState(undefined)
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +51,7 @@ export default function Users({ me, people = [] }) {
       setError(null)
     } catch (e) {
       setError(e.message)
+      setWeekly((w) => (w === undefined ? null : w))
     }
   }, [])
 
@@ -253,6 +256,13 @@ export default function Users({ me, people = [] }) {
                 </TableRow>
               )
             })}
+            {rows === null && !error && (
+              <TableRow>
+                <TableCell colSpan={8} sx={{ py: 2 }}>
+                  <Loading variant="block" label="Loading accounts…" />
+                </TableCell>
+              </TableRow>
+            )}
             {rows && rows.length === 0 && (
               <TableRow>
                 <TableCell colSpan={8} sx={{ textAlign: 'center', color: 'text.disabled', py: 4 }}>
@@ -270,7 +280,8 @@ export default function Users({ me, people = [] }) {
           Ticked people are expected to send a plan every Monday and a report every Friday, and will be the ones
           reminded. {weekly?.isDefault ? 'Nobody has changed this yet, so it is everybody with a scorecard.' : ''}
         </Typography>
-        {!weekly && <Typography variant="body2" sx={{ color: 'text.disabled' }}>Could not load the list.</Typography>}
+        {weekly === undefined && <Loading label="Loading the submit list…" />}
+        {weekly === null && <Typography variant="body2" sx={{ color: 'text.disabled' }}>Could not load the list.</Typography>}
         {weekly && (
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {team.map((p) => {
