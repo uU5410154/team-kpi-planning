@@ -110,6 +110,8 @@ const fake = createServer(async (req, res) => {
     const dueFrom = (jql.match(/duedate >= "([^"]+)"/) || [])[1]
     const under = (jql.match(/parent IN \(([^)]*)\)/) || [])[1]?.split(',')
     if (acc) taskJql.push(jql)
+    // As Jira does: a key it does not know fails the whole query.
+    if (under?.some((k) => /^ZZZ-/.test(k))) return send(400, { errorMessages: [`An issue with key '${under.find((k) => /^ZZZ-/.test(k))}' does not exist for field 'key'.`] })
     const list = [...issues.values()].filter((i) => (acc ? i.assignee === acc : true) && (!noEpics || i.type !== 'Epic')
       && (!under || under.includes(i.key) || under.includes(i.parent))
       && (!dueFrom || !i.due || i.due >= dueFrom))
@@ -358,6 +360,16 @@ try {
     check('LAST WEEK IS THE JIRA WORK WHOSE TIMELINE COVERED LAST WEEK, BY PROJECT', cov.status === 200 && cov.body.jira === 'on'
       && on877.some((t) => t.key === 'FNP-2002') && !every.includes('FNP-2004') && !every.includes('FNP-2001'), JSON.stringify(cov.body).slice(0, 240))
     check('  only an administrator asks for it', (await call('GET', `/api/jira/coverage/${LAST}`, undefined, james)).status === 403)
+    // A register key Jira does not know must not blank out every project.
+    const stray = seed.projects.find((p) => p.jiraKey && !['FNP-877', 'FNP-379'].includes(p.jiraKey))
+    const was = stray.jiraKey
+    stray.jiraKey = 'ZZZ-1'
+    await call('PUT', '/api/scenarios/Baseline', { payload: seed, updatedBy: 'test' }, 'service')
+    const cov2 = await call('GET', `/api/jira/coverage/${LAST}`, undefined, boss)
+    check('A KEY JIRA DOES NOT KNOW IS LEFT OUT; EVERY OTHER PROJECT STILL SHOWS', cov2.body.jira === 'on'
+      && ((cov2.body.byProject || {})[row877.key] || []).some((t) => t.key === 'FNP-2002') && (cov2.body.skipped || []).includes('ZZZ-1'), JSON.stringify(cov2.body).slice(0, 200))
+    stray.jiraKey = was
+    await call('PUT', '/api/scenarios/Baseline', { payload: seed, updatedBy: 'test' }, 'service')
     const lw = lastWeekFromJira({ P1: [
       { key: 'FNP-1', summary: 'Done one', done: true, assignee: 'A', status: 'Done', update: null },
       { key: 'FNP-2', summary: 'Said not done', done: false, assignee: 'B', status: 'In Progress', update: { nick: 'Bee', done: false, reason: 'Waiting on IT', submittedAt: 'x' } },

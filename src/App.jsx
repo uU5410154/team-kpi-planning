@@ -1,3 +1,4 @@
+import WeekSwitcher from './components/WeekSwitcher.jsx'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, Typography,
@@ -135,6 +136,8 @@ export default function App() {
   // here is still honoured — the toggle would be pointless if a reload undid it.
   const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode') || 'dark')
   const [tab, setTab] = useState(tabFromHash)
+  // The week the Dashboard shows, chosen in the top bar; null is this week.
+  const [dashWeek, setDashWeek] = useState(null)
   // What the hash names on the page: a project key, numbered so the same link
   // followed twice still acts.
   // The page is kept with it: a key is only ever used on the page its link
@@ -1240,6 +1243,11 @@ export default function App() {
 
               <Box sx={{ flex: 1 }} />
 
+              {/* The manager can look at any week from the top bar. */}
+              {allowed && tab === 'dashboard' && canWrite && (
+                <WeekSwitcher week={dashWeek} onChange={setDashWeek} compact={narrow} />
+              )}
+
               <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone={narrow} />
 
               {/* The chatbot: an administrator's, and only when the AI is there. */}
@@ -1340,6 +1348,7 @@ export default function App() {
           {allowed && tab === 'users' && <Users me={me} people={state.people} />}
           {allowed && tab === 'dashboard' && (
             <Dashboard
+              week={dashWeek}
               plan={plan}
               onGoTo={setTab}
               hello={hello}

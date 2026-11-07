@@ -362,7 +362,13 @@ export async function coverage(week) {
   const roster = await weekly.roster()
   if (roster === UNAVAILABLE) return UNAVAILABLE
   const rows = roster.projects.filter((p) => p.jiraKey && !markedDeleted(p.summary))
-  const list = await jira.coveringWeek(rows.map((p) => p.jiraKey), week)
+  let list
+  try {
+    list = await jira.coveringWeek(rows.map((p) => p.jiraKey), week)
+  } catch (e) {
+    console.warn(`[coverage] ${week}: ${e.message}`)
+    return { jira: 'error', week, byProject: {}, error: e.message }
+  }
   if (list === UNAVAILABLE) return { jira: 'off', week, byProject: {} }
   const updates = await k.updates.find({ week }).toArray()
   const upd = Object.fromEntries(updates.map((u) => [u.jiraKey, u]))
@@ -391,7 +397,7 @@ export async function coverage(week) {
     for (const pk of linesOf[epicKey] || []) (byProject[pk] = byProject[pk] || []).push(item)
   }
   for (const v of Object.values(byProject)) v.sort((a, b) => Number(b.epic) - Number(a.epic))
-  return { jira: 'on', week, byProject }
+  return { jira: 'on', week, byProject, skipped: list.skipped || [] }
 }
 
 /* ---------------------------------------------------------- decisions */

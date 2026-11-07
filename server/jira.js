@@ -781,10 +781,12 @@ export async function coveringWeek(epicKeys, week) {
   const epicType = c.epicType.replace(/"/g, '')
   const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', 'parent', c.startField, c.sprintField]
   const all = []
-  for (let i = 0; i < keys.length; i += 40) {
-    const batch = keys.slice(i, i + 40).join(',')
-    const jql = `(key IN (${batch}) OR parent IN (${batch})) AND (duedate >= "${week}" OR duedate IS EMPTY) `
+  const skipped = []
+  const search = async (batch) => {
+    const list = batch.join(',')
+    const jql = `(key IN (${list}) OR parent IN (${list})) AND (duedate >= "${week}" OR duedate IS EMPTY) `
       + `AND (statusCategory != Done OR resolutiondate >= "${week}") ORDER BY duedate ASC`
+    const out = []
     let token = null
     for (let page = 0; page < 5; page++) {
       const data = await call('/rest/api/3/search/jql', {
@@ -793,7 +795,7 @@ export async function coveringWeek(epicKeys, week) {
       })
       for (const raw of data?.issues || []) {
         const f = raw.fields || {}
-        all.push({
+        out.push({
           ...shape(raw, c),
           accountId: f.assignee?.accountId || null,
           epic: (f.issuetype?.name || '').toLowerCase() === epicType.toLowerCase(),
@@ -803,8 +805,30 @@ export async function coveringWeek(epicKeys, week) {
       token = data?.nextPageToken || null
       if (!token) break
     }
+    return out
   }
-  return all.filter((t) => coversWeek(t, week))
+  /*
+   * One key Jira does not know — a deleted epic, a typo in the register, a
+   * project this account cannot see — fails the whole query with a 400. So a
+   * batch that fails is split in two and tried again, down to the one bad
+   * key, which is left out and reported.
+   */
+  const run = async (batch) => {
+    try {
+      all.push(...await search(batch))
+    } catch (e) {
+      if (e.statusCode !== 400) throw e
+      if (batch.length === 1) { skipped.push(batch[0]); return }
+      const mid = Math.ceil(batch.length / 2)
+      await run(batch.slice(0, mid))
+      await run(batch.slice(mid))
+    }
+  }
+  for (let i = 0; i < keys.length; i += 40) await run(keys.slice(i, i + 40))
+  if (skipped.length) console.warn(`[coverage] Jira does not know ${skipped.length} register key(s): ${skipped.slice(0, 10).join(', ')}`)
+  const items = all.filter((t) => coversWeek(t, week))
+  items.skipped = skipped
+  return items
 }
 
 /** One issue, with who it is assigned to by account id — for checking ownership. */

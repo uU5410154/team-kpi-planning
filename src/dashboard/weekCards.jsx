@@ -164,6 +164,11 @@ export function OwnersCard({ ctx, f }) {
               <Button size="small" variant="outlined" onClick={() => ctx.onGoTo?.('timeline')}>Open the Timeline</Button>
             </Box>
           )}
+          {ctx.prevJiraError && (
+            <Typography variant="caption" sx={{ color: 'warning.light', display: 'block', mb: 1 }} data-coverage-error>
+              Week {ctx.prev ? weekNo(ctx.prev.week) : ''} could not be read from Jira, so only what people typed in shows: {ctx.prevJiraError}
+            </Typography>
+          )}
           {count > 0 && shown.length === 0 && (
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>Every active project has an update this week.</Typography>
           )}
@@ -173,8 +178,8 @@ export function OwnersCard({ ctx, f }) {
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ width: '24%' }}>Project</TableCell>
-                    <TableCell sx={{ width: '28%' }}>Last week{ctx.prev ? ` · week ${weekNo(ctx.prev.week)}` : ''}</TableCell>
-                    <TableCell sx={{ width: '26%' }}>This week · week {weekNo(ctx.now.week)}</TableCell>
+                    <TableCell sx={{ width: '28%' }}>{ctx.isCurrent === false ? 'Week before' : 'Last week'}{ctx.prev ? ` · week ${weekNo(ctx.prev.week)}` : ''}</TableCell>
+                    <TableCell sx={{ width: '26%' }}>{ctx.isCurrent === false ? 'Week' : 'This week · week'} {weekNo(ctx.now.week)}</TableCell>
                     <TableCell sx={{ width: '9%' }}>Latest update</TableCell>
                     <TableCell align="right" sx={{ width: '13%' }} />
                   </TableRow>

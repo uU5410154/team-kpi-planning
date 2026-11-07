@@ -32,7 +32,7 @@ const Grid = WidthProvider(GridLayout)
 const known = (items) => (items || []).filter((it) => CARDS[it.type])
 
 export default function Dashboard({
-  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject,
+  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -44,6 +44,8 @@ export default function Dashboard({
   const [prev, setPrev] = useState(undefined)
   // Each project's Jira work whose timeline covers last week; null when Jira cannot say.
   const [prevJira, setPrevJira] = useState(null)
+  // Why it could not, said on the card rather than quietly showing nothing.
+  const [prevJiraError, setPrevJiraError] = useState(null)
   const [pending, setPending] = useState([])
   // "A decision is needed" raised on a Jira task in somebody's weekly update.
   const [decisions, setDecisions] = useState([])
@@ -53,21 +55,37 @@ export default function Dashboard({
   const [prevSummary, setPrevSummary] = useState(null)
   const [trend, setTrend] = useState(null)
 
+  // The week in the top bar: everything below is about it and the one before.
   useEffect(() => {
     let stop = false
-    api.loadWeek('current')
+    setNow(undefined)
+    setPrev(undefined)
+    setPrevJira(null)
+    setPrevJiraError(null)
+    setTrend(null)
+    setSummary(undefined)
+    setPrevSummary(null)
+    api.loadWeek(week || 'current')
       .then(async (w) => {
         if (stop) return
         setNow(w)
         try { const p = await api.loadWeek(addWeeks(w.week, -1)); if (!stop) setPrev(p) } catch { if (!stop) setPrev(null) }
         api.jiraCoverage(addWeeks(w.week, -1))
-          .then((r) => { if (!stop && r?.jira === 'on') setPrevJira(r.byProject || {}) })
-          .catch(() => {})
+          .then((r) => {
+            if (stop) return
+            if (r?.jira === 'on') setPrevJira(r.byProject || {})
+            else if (r?.jira === 'error') setPrevJiraError(r.error || 'Jira could not be read.')
+          })
+          .catch((e) => { if (!stop) setPrevJiraError(e.message) })
       })
       .catch(() => { if (!stop) { setNow(null); setPrev(null) } })
+    api.followups(week || 'current').then((r) => { if (!stop) setFollowups(r.followups || []) }).catch(() => {})
+    return () => { stop = true }
+  }, [week])
+  useEffect(() => {
+    let stop = false
     api.proposals('pending').then((r) => { if (!stop) setPending(r.proposals || []) }).catch(() => {})
     api.decisions('open').then((r) => { if (!stop) setDecisions(r.decisions || []) }).catch(() => {})
-    api.followups('current').then((r) => { if (!stop) setFollowups(r.followups || []) }).catch(() => {})
     return () => { stop = true }
   }, [])
   useEffect(() => {
@@ -152,6 +170,8 @@ export default function Dashboard({
     now,
     prev,
     prevJira,
+    prevJiraError,
+    isCurrent: !week,
     pending,
     decisions,
     onDecide: async (id, note) => {

@@ -311,7 +311,27 @@ try {
       && own.includes('Validate the forecast with FP&A'), own.slice(0, 400).replace(/\n/g, ' | '))
     check('  THE ANSWERED FOLLOW-UP SAYS SO', /UPDATED .*AGO|UPDATED JUST NOW/i.test(own))
     check('  a project with no owner cannot be followed up', own.includes('No owner to ask'))
+    // The week switcher in the top bar: any week, and straight back.
+    const shownWeek = () => a.evaluate(() => document.querySelector('[data-week-shown]')?.getAttribute('data-week-shown'))
+    check('THE TOP BAR HAS A WEEK SWITCHER, ON THIS WEEK', (await shownWeek()) === WEEK, String(await shownWeek()))
+    await a.click('[aria-label="previous week"]')
+    await a.waitForFunction(() => /Week before/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
+    const back = await sect(a, 'who holds what')
+    check('  A WEEK BACK: the dashboard is about that week and the one before', (await shownWeek()) === addWeeks(WEEK, -1)
+      && /Week before/i.test(back) && !/This week · week/i.test(back), back.slice(0, 200).replace(/\n/g, ' | '))
+    await a.click('[data-week-today]')
+    await a.waitForFunction(() => /This week · week/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
+    check('  "This week" brings it back', (await shownWeek()) === WEEK && /This week · week/i.test(await sect(a, 'who holds what')))
     // Kade has no account: the button says why.
+
+    for (const width of [390, 768]) {
+      const n = await as(boss, { width, height: 860 })
+      await n.goto(`${base}/`, { waitUntil: 'networkidle0' })
+      await sleep(700)
+      const r = await n.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, sw2: !!document.querySelector('[data-week-switcher]') }))
+      check(`  @${width}px the switcher fits, with no sideways scroll`, r.sw2 && r.sw <= r.cw + 1, JSON.stringify(r))
+      await n.browserContext().close()
+    }
     await a.evaluate(() => document.querySelector('button[aria-label="follow up FNP-267"]')?.click())
     await a.waitForFunction(() => document.body.innerText.includes('Link one on the Access tab'), { timeout: 8000 }).catch(() => {})
     check('FOLLOW UP SAYS WHY IT CANNOT', (await text(a)).includes('Link one on the Access tab'))
