@@ -69,12 +69,24 @@ export const markedDeleted = (name) => /\[\s*deleted\s*\]/i.test(name || '')
  * — the item itself, its epic, or its row in the register. Tasks with no dates
  * yet are offered for planning, only under epics they are PIC of. The page,
  * the plan and the "report is in" count all use this one list.
+ *
+ * Nothing ON HOLD either (2026-11-07): an item in a Hold status in Jira, a task
+ * whose epic is, or a project put on hold in the register. Work stopped on
+ * purpose needs no weekly update. An item they already updated this week
+ * (`keep`) stays, so the update they just sent does not vanish from the page.
  */
-async function myTasks(who, person, week) {
+async function myTasks(who, person, week, keep = new Set()) {
   const list = await jira.tasksForWeek(who.account.accountId, week, { withEpics: true })
   if (list === UNAVAILABLE) return UNAVAILABLE
-  const live = (t) => !markedDeleted(t.summary) && !markedDeleted(t.parent?.summary)
-    && !markedDeleted(projectFor(who.roster, t.epic ? t.key : t.parent?.key)?.summary)
+  const live = (t) => {
+    const row = projectFor(who.roster, t.epic ? t.key : t.parent?.key)
+    if (markedDeleted(t.summary) || markedDeleted(t.parent?.summary) || markedDeleted(row?.summary)) return false
+    if (keep.has(t.key) || t.done) return true
+    // The live Jira status first; the register's copy of it can be a day old.
+    const held = isHoldStatus(t.status) || isHoldStatus(t.parent?.status)
+      || (!!row && (!!row.onHold || isHoldStatus(row.status) || isHoldStatus(row.srcStatus)))
+    return !held
+  }
   const picOf = new Set(who.roster.projects.filter((p) => p.pic === person && p.jiraKey).map((p) => p.jiraKey.toUpperCase()))
   return {
     week: list.week.filter(live),
@@ -97,9 +109,9 @@ export async function weekFor(person, email, week) {
   if (who === UNAVAILABLE) return UNAVAILABLE
   if (!who.person) return { jira: 'unlinked' }
   if (!who.account) return { jira: 'unmatched', names: who.person.jiraNames || [] }
-  const list = await myTasks(who, person, week)
-  if (list === UNAVAILABLE) return { jira: 'off' }
   const updates = await k.updates.find({ week, person }).toArray()
+  const list = await myTasks(who, person, week, new Set(updates.map((u) => u.jiraKey)))
+  if (list === UNAVAILABLE) return { jira: 'off' }
   const upd = Object.fromEntries(updates.map((u) => [u.jiraKey, u]))
   const decorate = (t) => {
     // An epic is its own project; a task is under its epic's.
@@ -285,6 +297,12 @@ export async function submit(week, me, body, now = Date.now()) {
     result.state = e.writesOff ? 'off' : 'failed'
     result.error = e.message
   }
+  // A project epic put on hold: the register says so at once, for the project page.
+  const ownRow = projectFor(who.roster, key)
+  if (u.hold && ownRow) {
+    const moved = result.hold && !String(result.hold).startsWith('not moved')
+    result.register = await holdInRegister(ownRow.key, moved ? { jiraStatus: result.hold } : { onHold: { at, by: me.email } }, me.email)
+  }
   await k.updates.updateOne({ _id: id }, { $set: { jira: result } })
 
   // Into the week, so the dashboard and the reminders count it.
@@ -312,6 +330,68 @@ export async function submit(week, me, body, now = Date.now()) {
 
   if (u.decision) await raiseDecision(k, { ...doc, jira: result }, now)
   return { update: { ...doc, jira: result }, reportIn: allIn }
+}
+
+/**
+ * Mark a register project as on hold: with its Jira status when Jira moved the
+ * epic, or with `onHold` when Jira had no Hold status (the project page offers
+ * Resume to clear it). Returns 'updated', or why not.
+ */
+async function holdInRegister(projectKey, patch, by) {
+  try {
+    const name = cfg().scenario
+    const doc = await store.getScenario(name)
+    if (doc === store.UNAVAILABLE || !doc?.payload?.projects) return 'not updated: no register'
+    const projects = doc.payload.projects.map((p) => (p.key === projectKey ? { ...p, ...patch } : p))
+    const saved = await store.saveScenario(name, { ...doc.payload, projects }, `${by} (on hold)`)
+    return saved === store.UNAVAILABLE ? 'not updated: the database is unavailable' : 'updated'
+  } catch (e) {
+    return `not updated: ${e.message}`
+  }
+}
+
+/*
+ * EACH PROJECT'S JIRA WORK IN A WEEK, for the manager's "Who holds what": the
+ * epic and the tasks under it whose timeline covers the week, whoever holds
+ * them, each with the update its holder submitted for that week, if any.
+ */
+export async function coverage(week) {
+  if (!jira.status().configured) return { jira: 'off', week, byProject: {} }
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const roster = await weekly.roster()
+  if (roster === UNAVAILABLE) return UNAVAILABLE
+  const rows = roster.projects.filter((p) => p.jiraKey && !markedDeleted(p.summary))
+  const list = await jira.coveringWeek(rows.map((p) => p.jiraKey), week)
+  if (list === UNAVAILABLE) return { jira: 'off', week, byProject: {} }
+  const updates = await k.updates.find({ week }).toArray()
+  const upd = Object.fromEntries(updates.map((u) => [u.jiraKey, u]))
+  const linesOf = {}
+  for (const p of rows) (linesOf[p.jiraKey.toUpperCase()] = linesOf[p.jiraKey.toUpperCase()] || []).push(p.key)
+  const nickOf = (name) => (name ? roster.people.find((p) => p.name === name || (p.jiraNames || []).includes(name))?.nick || name : null)
+  const byProject = {}
+  for (const t of list) {
+    if (markedDeleted(t.summary) || markedDeleted(t.parent?.summary)) continue
+    const epicKey = (t.epic ? t.key : t.parent?.key || '').toUpperCase()
+    const u = upd[t.key]
+    const item = {
+      key: t.key,
+      summary: t.summary,
+      epic: !!t.epic,
+      assignee: t.assignee || null,
+      holder: nickOf(t.assignee),
+      status: t.status,
+      done: t.done,
+      start: t.start,
+      due: t.due,
+      update: u ? {
+        nick: u.nick, done: u.done, hold: !!u.hold, reason: u.reason || '', blocker: u.blocker || '', submittedAt: u.submittedAt,
+      } : null,
+    }
+    for (const pk of linesOf[epicKey] || []) (byProject[pk] = byProject[pk] || []).push(item)
+  }
+  for (const v of Object.values(byProject)) v.sort((a, b) => Number(b.epic) - Number(a.epic))
+  return { jira: 'on', week, byProject }
 }
 
 /* ---------------------------------------------------------- decisions */

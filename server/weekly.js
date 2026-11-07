@@ -62,6 +62,7 @@ export async function roster() {
     projects: (doc?.payload?.projects || []).filter((p) => !p.deleted).map((p) => ({
       key: p.key, jiraKey: p.jiraKey || null, summary: p.summary || '', due: p.due || null, pic: p.pic || null,
       active: p.active === true, status: p.status || null,
+      srcStatus: p.srcStatus || null, jiraStatus: p.jiraStatus || null, onHold: p.onHold || null,
     })),
   }
 }

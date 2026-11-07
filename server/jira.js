@@ -750,7 +750,7 @@ export async function tasksForWeek(accountId, week, { withEpics = false } = {}) 
         ...shape(raw, c),
         type: f.issuetype?.name || '',
         epic: (f.issuetype?.name || '').toLowerCase() === epicType.toLowerCase(),
-        parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '' } : null,
+        parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '', status: f.parent.fields?.status?.name || '' } : null,
         url: `${c.base}/browse/${raw.key}`,
       })
     }
@@ -765,6 +765,46 @@ export async function tasksForWeek(accountId, week, { withEpics = false } = {}) 
     else if (!t.done && !start) out.undated.push(t)
   }
   return out
+}
+
+/*
+ * WHAT WAS ON EACH PROJECT IN A WEEK: the epics given, and every task under
+ * them, whose timeline covers that week — whoever holds them. For the
+ * manager's "last week" column. Finished ones count when they finished in or
+ * after that week.
+ */
+export async function coveringWeek(epicKeys, week) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+  if (!isWeekDate(week)) return []
+  const keys = [...new Set((epicKeys || []).map((k) => String(k || '').trim().toUpperCase()).filter((k) => /^[A-Z][A-Z0-9_]+-\d+$/.test(k)))]
+  const epicType = c.epicType.replace(/"/g, '')
+  const fields = ['summary', 'status', 'created', 'updated', 'duedate', 'resolutiondate', 'assignee', 'issuetype', 'parent', c.startField, c.sprintField]
+  const all = []
+  for (let i = 0; i < keys.length; i += 40) {
+    const batch = keys.slice(i, i + 40).join(',')
+    const jql = `(key IN (${batch}) OR parent IN (${batch})) AND (duedate >= "${week}" OR duedate IS EMPTY) `
+      + `AND (statusCategory != Done OR resolutiondate >= "${week}") ORDER BY duedate ASC`
+    let token = null
+    for (let page = 0; page < 5; page++) {
+      const data = await call('/rest/api/3/search/jql', {
+        method: 'POST',
+        body: { jql, fields, maxResults: 100, ...(token ? { nextPageToken: token } : {}) },
+      })
+      for (const raw of data?.issues || []) {
+        const f = raw.fields || {}
+        all.push({
+          ...shape(raw, c),
+          accountId: f.assignee?.accountId || null,
+          epic: (f.issuetype?.name || '').toLowerCase() === epicType.toLowerCase(),
+          parent: f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary || '' } : null,
+        })
+      }
+      token = data?.nextPageToken || null
+      if (!token) break
+    }
+  }
+  return all.filter((t) => coversWeek(t, week))
 }
 
 /** One issue, with who it is assigned to by account id — for checking ownership. */

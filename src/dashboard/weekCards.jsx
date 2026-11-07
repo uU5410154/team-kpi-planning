@@ -112,9 +112,10 @@ function TaskList({ tasks, empty, kind }) {
             display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap', mt: 0.25,
           }}
           >
-            {kind === 'last' && t.done === true && <Pill label="Done" tone="good" />}
-            {kind === 'last' && t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
-            {kind === 'last' && t.done == null && <Pill label="No answer" tone="neutral" />}
+            {kind === 'last' && t.hold && <Pill label="On hold" tone="warn" />}
+            {kind === 'last' && !t.hold && t.done === true && <Pill label="Done" tone="good" />}
+            {kind === 'last' && !t.hold && t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
+            {kind === 'last' && !t.hold && t.done == null && <Pill label="No answer" tone="neutral" />}
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {t.nick}
               {kind === 'this' && t.expected ? ` · expected ${fmtDay(t.expected)}` : ''}
@@ -133,7 +134,7 @@ function TaskList({ tasks, empty, kind }) {
 export function OwnersCard({ ctx, f }) {
   const [only, setOnly] = useState('all')
   const groups = ownerRows({
-    projects: ctx.plan.projects, people: ctx.plan.assignees || ctx.plan.people, now: ctx.now, prev: ctx.prev, followups: ctx.followups,
+    projects: ctx.plan.projects, people: ctx.plan.assignees || ctx.plan.people, now: ctx.now, prev: ctx.prev, followups: ctx.followups, prevJira: ctx.prevJira,
   })
   const shown = groups
     .map((g) => ({ ...g, projects: only === 'stale' ? g.projects.filter((p) => !p.thisWeek.length) : g.projects }))
@@ -199,7 +200,7 @@ export function OwnersCard({ ctx, f }) {
                             {p.jiraKey || p.key} · due {fmtDay(p.due)}
                           </Typography>
                         </TableCell>
-                        <TableCell><TaskList tasks={p.lastWeek} kind="last" empty="No task last week" /></TableCell>
+                        <TableCell><TaskList tasks={p.lastWeek} kind="last" empty={ctx.prevJira ? 'Nothing in Jira covered last week' : 'No task last week'} /></TableCell>
                         <TableCell><TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" /></TableCell>
                         <TableCell>
                           <Typography variant="caption" sx={{ color: p.latest ? 'text.primary' : 'text.disabled' }}>

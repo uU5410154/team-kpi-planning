@@ -447,7 +447,7 @@ console.log(String.fromCharCode(10) + '--- a board that changes shape ---')
 
   // Only three fields may ever move.
   // What a sync owns: the ticket's own facts, and the start it maintains.
-  const allowed = new Set(['summary', 'start', 'actualStart', 'actualEnd'])
+  const allowed = new Set(['summary', 'start', 'actualStart', 'actualEnd', 'jiraStatus'])
   const moved = new Set()
   plan.projects.forEach((was) => {
     const now = r.projects.find((x) => x.key === was.key)
@@ -900,7 +900,7 @@ if (!exe) {
        * without being named must fail it.
        */
       if (['start', 'due', 'baselineDue', 'replanCount',
-        'actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone']
+        'actualStart', 'actualEnd', 'summary', 'adjustedDue', 'adjustedCause', 'tasksTotal', 'tasksDone', 'jiraStatus']
         .includes(field)) continue
       if (JSON.stringify(was[field]) !== JSON.stringify(now[field])) {
         drifted.push(`${was.jiraKey}.${field}: ${JSON.stringify(was[field])} -> ${JSON.stringify(now[field])}`)

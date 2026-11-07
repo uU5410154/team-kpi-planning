@@ -1,3 +1,4 @@
+import { projectOnHold } from '../lib/hold.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, IconButton, Tooltip, Chip, Alert, TextField, MenuItem, Autocomplete,
@@ -737,7 +738,7 @@ export default function Weekly({
     if (!myId) return []
     return (plan?.projects || [])
       .filter((p) => !p.deleted && !/\[\s*deleted\s*\]/i.test(p.summary || '') && p.pic === myId && p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded'
-        && p.timeline?.state !== 'finished')
+        && p.timeline?.state !== 'finished' && !projectOnHold(p))
       .map((p) => ({
         key: p.key,
         jiraKey: p.jiraKey || null,

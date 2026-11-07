@@ -42,6 +42,8 @@ export default function Dashboard({
   // undefined: still loading; null: not available.
   const [now, setNow] = useState(undefined)
   const [prev, setPrev] = useState(undefined)
+  // Each project's Jira work whose timeline covers last week; null when Jira cannot say.
+  const [prevJira, setPrevJira] = useState(null)
   const [pending, setPending] = useState([])
   // "A decision is needed" raised on a Jira task in somebody's weekly update.
   const [decisions, setDecisions] = useState([])
@@ -58,6 +60,9 @@ export default function Dashboard({
         if (stop) return
         setNow(w)
         try { const p = await api.loadWeek(addWeeks(w.week, -1)); if (!stop) setPrev(p) } catch { if (!stop) setPrev(null) }
+        api.jiraCoverage(addWeeks(w.week, -1))
+          .then((r) => { if (!stop && r?.jira === 'on') setPrevJira(r.byProject || {}) })
+          .catch(() => {})
       })
       .catch(() => { if (!stop) { setNow(null); setPrev(null) } })
     api.proposals('pending').then((r) => { if (!stop) setPending(r.proposals || []) }).catch(() => {})
@@ -146,6 +151,7 @@ export default function Dashboard({
     hello,
     now,
     prev,
+    prevJira,
     pending,
     decisions,
     onDecide: async (id, note) => {

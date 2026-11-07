@@ -62,6 +62,7 @@ export function projectFromEpic(epic, seq, people = []) {
     actualStart: epic.started ? (epic.start || epic.created || null) : null,
     actualEnd: epic.done ? (epic.resolved || null) : null,
     status: epic.done ? 'Done' : (/progress/i.test(epic.status || '') ? 'In Progress' : 'Not Start'),
+    jiraStatus: epic.status || null,
     /*
      * WATCH. An epic somebody raised in Jira has not been costed, sized or
      * agreed as part of this team's year, and letting it into the committed
@@ -266,6 +267,8 @@ export function mergeJira(state, { issues = [], epics = [], rollups = {} } = {},
       patch.actualEnd = actualEnd
     }
     if (adjustedDue !== (p.adjustedDue || null)) patch.adjustedDue = adjustedDue
+    // Jira's own status name, so the project page can say when the epic is on hold.
+    if (issue.status && issue.status !== (p.jiraStatus || null)) patch.jiraStatus = issue.status
     if (tasks) {
       if ((tasks.total || 0) !== (p.tasksTotal || 0)) patch.tasksTotal = tasks.total || 0
       if ((tasks.done || 0) !== (p.tasksDone || 0)) patch.tasksDone = tasks.done || 0

@@ -18,7 +18,8 @@ import puppeteer from 'puppeteer-core'
 import { weekOf, addWeeks } from '../src/lib/weekly.js'
 import { coversWeek, taskSpan, appendWeeklyEntry, ddmmyyyy } from '../server/jira.js'
 import { commentText } from '../server/jiraWeek.js'
-import { mentionsHold } from '../src/lib/hold.js'
+import { mentionsHold, projectOnHold } from '../src/lib/hold.js'
+import { lastWeekFromJira } from '../src/lib/manager.js'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -81,7 +82,7 @@ const asRaw = (i) => ({
     customfield_10015: i.start || null,
     assignee: i.assignee ? { accountId: i.assignee, displayName: i.assignee === ACC.james ? 'Pipat Singhasiri' : 'Jarinya Phosri' } : null,
     issuetype: { name: i.type || 'Task' },
-    parent: i.parent ? { key: i.parent, fields: { summary: issues.get(i.parent)?.summary || `Epic ${i.parent}` } } : null,
+    parent: i.parent ? { key: i.parent, fields: { summary: issues.get(i.parent)?.summary || `Epic ${i.parent}`, status: { name: issues.get(i.parent)?.status || 'To Do' } } } : null,
     created: '2026-01-01T00:00:00.000+0700',
     updated: '2026-01-01T00:00:00.000+0700',
     resolutiondate: null,
@@ -107,8 +108,10 @@ const fake = createServer(async (req, res) => {
     const acc = (jql.match(/assignee = "([^"]+)"/) || [])[1]
     const noEpics = /issuetype != /.test(jql)
     const dueFrom = (jql.match(/duedate >= "([^"]+)"/) || [])[1]
+    const under = (jql.match(/parent IN \(([^)]*)\)/) || [])[1]?.split(',')
     if (acc) taskJql.push(jql)
     const list = [...issues.values()].filter((i) => (acc ? i.assignee === acc : true) && (!noEpics || i.type !== 'Epic')
+      && (!under || under.includes(i.key) || under.includes(i.parent))
       && (!dueFrom || !i.due || i.due >= dueFrom))
     return send(200, { issues: list.map(asRaw) })
   }
@@ -314,6 +317,56 @@ try {
   check('  and the comment says On hold', writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2012' && /On hold/.test(JSON.stringify(x.body))))
   issues.delete('FNP-2012')
   await D.collection('kpi_task_updates').deleteOne({ _id: `${WEEK}.james.FNP-2012` })
+
+  // NOTHING ON HOLD IN THE WEEK: the item itself, its epic, or its register project.
+  {
+    const taken = ['FNP-379', 'FNP-877', 'FNP-267', 'FNP-868', 'FNP-935']
+    const [paused, heldEpic] = seed.projects.filter((p) => p.jiraKey && !taken.includes(p.jiraKey) && !/deleted/i.test(p.summary)).slice(0, 2)
+    paused.onHold = { at: 'test', by: 'test' }
+    await call('PUT', '/api/scenarios/Baseline', { payload: seed, updatedBy: 'test' }, 'service')
+    const HOLDS = ['FNP-2013', 'FNP-2014', 'FNP-7000', 'FNP-2015', heldEpic.jiraKey]
+    put('FNP-2013', { summary: 'On hold in Jira itself', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'On Hold', cat: 'indeterminate' })
+    put('FNP-7000', { summary: 'An epic on hold', type: 'Epic', assignee: ACC.kade, start: day(WEEK, 0), due: day(NEXT, 4), status: 'On Hold', cat: 'indeterminate' })
+    put('FNP-2014', { summary: 'Under an epic on hold', assignee: ACC.james, parent: 'FNP-7000', start: day(WEEK, 0), due: day(WEEK, 4), status: 'To Do', cat: 'new' })
+    put('FNP-2015', { summary: 'Under a project on hold in the register', assignee: ACC.james, parent: paused.jiraKey, start: day(WEEK, 0), due: day(WEEK, 4), status: 'To Do', cat: 'new' })
+    put(heldEpic.jiraKey, { summary: heldEpic.summary, type: 'Epic', assignee: ACC.james, start: day(WEEK, 0), due: day(NEXT, 4), status: 'In Progress', cat: 'indeterminate' })
+    const hw = (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, james)).body
+    const seen = (hw.tasks || []).map((t) => t.key)
+    check('NOTHING ON HOLD IS ASKED FOR: in Hold in Jira, under an epic on hold, under a project on hold here',
+      !seen.some((k) => ['FNP-2013', 'FNP-2014', 'FNP-2015'].includes(k)) && seen.includes(heldEpic.jiraKey), seen.join())
+    const pe = await call('POST', `/api/weekly/${WEEK}/jira/${heldEpic.jiraKey}/update`, { progress: 'Project on hold until budget is approved', hold: true }, james)
+    const row = (await D.collection('kpi_scenarios').findOne({ name: 'Baseline' }))?.payload?.projects?.find((p) => p.key === heldEpic.key)
+    check('A PROJECT EPIC PUT ON HOLD: HOLD IN JIRA, AND THE REGISTER SAYS SO FOR THE PROJECT PAGE',
+      pe.body.update?.jira?.hold === 'On Hold' && pe.body.update.jira.register === 'updated' && row?.jiraStatus === 'On Hold' && projectOnHold(row), JSON.stringify(pe.body.update?.jira))
+    const hw2 = (await call('GET', `/api/weekly/${WEEK}/jira`, undefined, james)).body
+    check('  the update they just sent stays on their page this week', (hw2.tasks || []).some((t) => t.key === heldEpic.jiraKey && t.update?.hold))
+    const nw = (await call('GET', `/api/weekly/${NEXT}/jira`, undefined, james)).body
+    check('  and next week it is not asked for', !(nw.tasks || []).some((t) => t.key === heldEpic.jiraKey), (nw.tasks || []).map((t) => t.key).join())
+    check('  a project put on hold here reads as on hold; Resume clears it', projectOnHold(paused) && !projectOnHold({ ...paused, onHold: null }))
+    for (const k of HOLDS) issues.delete(k)
+    await D.collection('kpi_task_updates').deleteOne({ _id: `${WEEK}.james.${heldEpic.jiraKey}` })
+    delete paused.onHold
+    await call('PUT', '/api/scenarios/Baseline', { payload: seed, updatedBy: 'test' }, 'service')
+  }
+
+  // THE MANAGER'S "LAST WEEK": each project's Jira work whose timeline covered it.
+  {
+    const cov = await call('GET', `/api/jira/coverage/${LAST}`, undefined, boss)
+    const row877 = seed.projects.find((p) => p.jiraKey === 'FNP-877')
+    const on877 = (cov.body.byProject || {})[row877.key] || []
+    const every = Object.values(cov.body.byProject || {}).flat().map((t) => t.key)
+    check('LAST WEEK IS THE JIRA WORK WHOSE TIMELINE COVERED LAST WEEK, BY PROJECT', cov.status === 200 && cov.body.jira === 'on'
+      && on877.some((t) => t.key === 'FNP-2002') && !every.includes('FNP-2004') && !every.includes('FNP-2001'), JSON.stringify(cov.body).slice(0, 240))
+    check('  only an administrator asks for it', (await call('GET', `/api/jira/coverage/${LAST}`, undefined, james)).status === 403)
+    const lw = lastWeekFromJira({ P1: [
+      { key: 'FNP-1', summary: 'Done one', done: true, assignee: 'A', status: 'Done', update: null },
+      { key: 'FNP-2', summary: 'Said not done', done: false, assignee: 'B', status: 'In Progress', update: { nick: 'Bee', done: false, reason: 'Waiting on IT', submittedAt: 'x' } },
+      { key: 'FNP-3', summary: 'Silent', done: false, assignee: 'C', status: 'To Do', update: null },
+      { key: 'FNP-4', summary: 'Paused', done: false, assignee: 'D', status: 'On Hold', update: null },
+    ] })
+    check('  each reads Done, Not done (with why), no answer, or On hold', lw.P1[0].done === true && lw.P1[1].done === false && lw.P1[1].blocker === 'Waiting on IT'
+      && lw.P1[1].nick === 'Bee' && lw.P1[2].done === null && lw.P1[3].hold === true, JSON.stringify(lw.P1))
+  }
   const adhoc = await call('PUT', `/api/weekly/${WEEK}/mine`, { mode: 'jira', focus: '', tasks: entry2.tasks, unplanned: [{ title: 'Audit request', effort: 0.5 }] }, james)
   const entry3 = await D.collection('kpi_weekly').findOne({ week: WEEK, person: 'james' })
   check('ADHOC WORK SAVES BESIDE THE JIRA TASKS, KEEPING THEM', adhoc.status === 200 && entry3.unplanned?.[0]?.title === 'Audit request'

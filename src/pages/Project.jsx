@@ -7,6 +7,7 @@ import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import FolderIcon from '@mui/icons-material/FolderOutlined'
 import * as api from '../lib/api.js'
+import { projectOnHold } from '../lib/hold.js'
 import { fmtHours } from '../lib/model.js'
 import { OBJ_BY_ID } from '../lib/palette.js'
 import {
@@ -86,6 +87,8 @@ export default function Project({
     const k = String(p.jiraKey || '').trim().toUpperCase()
     return k ? plan.projects.filter((x) => !x.deleted && String(x.jiraKey || '').trim().toUpperCase() === k) : [p]
   }, [plan.projects, p])
+  const held = lines.some(projectOnHold)
+  const heldInJira = lines.map((l) => l.jiraStatus).find((x) => x && projectOnHold({ jiraStatus: x })) || null
   const keys = lines.map((x) => x.key)
 
   const [weekly, setWeekly] = useState(undefined)
@@ -153,7 +156,15 @@ export default function Project({
                     </Link>
                   )
                   : <Typography variant="body2" sx={{ fontWeight: 600 }}>{jiraKey}</Typography>)}
-                {(p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
+                {held
+                  ? (
+                    <Pill
+                      label="On Hold"
+                      tone="warn"
+                      title={heldInJira ? `On hold in Jira (${heldInJira}). Its tasks are left out of the weekly update.` : 'Put on hold from a weekly update. Its tasks are left out of the weekly update.'}
+                    />
+                  )
+                  : (p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
                 <Pill label={active ? 'Active' : 'Not active'} tone={active ? 'info' : 'neutral'} title={`This week, ${forced}`} />
                 {lines.length > 1 && <Typography variant="caption" sx={{ color: 'text.secondary' }}>{lines.length} register lines on this epic</Typography>}
               </Box>
@@ -162,6 +173,11 @@ export default function Project({
               display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap',
             }}
             >
+              {canWrite && lines.some((l) => l.onHold) && (
+                <Button size="small" variant="outlined" data-resume onClick={() => keys.forEach((k) => onUpdate(k, { onHold: null }))}>
+                  Resume
+                </Button>
+              )}
               {canWrite && (
                 <ActiveControl
                   projects={lines}

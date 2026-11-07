@@ -110,6 +110,36 @@ export function updatedCount(projects, week) {
   return { updated: active.filter((p) => by[p.key]?.length).length, active: active.length }
 }
 
+/**
+ * LAST WEEK, FROM JIRA: every epic and task under each project whose timeline
+ * covered last week, whoever holds it — with what its holder said about it, if
+ * they said anything. Work typed in by hand that week (no Jira key) still shows.
+ */
+export function lastWeekFromJira(byProject = {}, prev = null) {
+  const out = {}
+  for (const [pk, items] of Object.entries(byProject)) {
+    out[pk] = items.map((t) => ({
+      id: t.key,
+      jiraKey: t.key,
+      title: `${t.key} ${t.summary}`.trim(),
+      person: t.assignee || '',
+      nick: t.update?.nick || t.holder || t.assignee || 'Nobody assigned',
+      // Done in Jira, or what they said; nothing said reads as no answer.
+      done: t.done ? true : t.update ? t.update.done === true : null,
+      hold: !t.done && (!!t.update?.hold || /hold/i.test(t.status || '')),
+      blocker: t.update?.blocker || t.update?.reason || '',
+      status: t.status,
+      updatedAt: t.update?.submittedAt || null,
+    }))
+  }
+  const typed = tasksByProject(prev)
+  for (const [pk, list] of Object.entries(typed)) {
+    const extra = list.filter((t) => !t.jiraKey)
+    if (extra.length) out[pk] = [...(out[pk] || []), ...extra]
+  }
+  return out
+}
+
 const latestOf = (tasks) => tasks.map((t) => t.updatedAt).filter(Boolean).sort().pop() || null
 
 /**
@@ -118,11 +148,11 @@ const latestOf = (tasks) => tasks.map((t) => t.updatedAt).filter(Boolean).sort()
  * newest follow-up sent about it.
  */
 export function ownerRows({
-  projects = [], people = [], now = null, prev = null, followups = [],
+  projects = [], people = [], now = null, prev = null, followups = [], prevJira = null,
 }) {
   const nick = Object.fromEntries(people.map((p) => [p.id, p.nick || p.name || p.id]))
   const thisWeek = tasksByProject(now)
-  const lastWeek = tasksByProject(prev)
+  const lastWeek = prevJira ? lastWeekFromJira(prevJira, prev) : tasksByProject(prev)
   const asked = {}
   for (const f of followups) if (!asked[f.projectKey] || f.sentAt > asked[f.projectKey].sentAt) asked[f.projectKey] = f
   const groups = {}

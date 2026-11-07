@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { Pill, statusTone } from '../components/Brand.jsx'
+import { projectOnHold } from '../lib/hold.js'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
@@ -1267,7 +1268,9 @@ export default function Projects({
                   <TableCell>
                     {/* A pill, coloured by where the work is; the word is on it
                         too. Whatever Jira calls it is shown as it is. */}
-                    {(p.srcStatus || p.status)
+                    {projectOnHold(p)
+                      ? <Pill label="On Hold" tone="warn" />
+                      : (p.srcStatus || p.status)
                       ? <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />
                       : <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>}
                     {p.pastDue && (

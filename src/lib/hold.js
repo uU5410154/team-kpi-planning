@@ -17,3 +17,10 @@ export const mentionsHold = (text) => {
 
 /** A Jira status, or the name of one, that means "on hold". */
 export const isHoldStatus = (name) => /\b(on[\s-]*hold|hold|paused?|suspended|parked)\b/i.test(String(name || ''))
+
+/**
+ * A REGISTER PROJECT ON HOLD: its epic sits in a Hold status in Jira (as the
+ * last sync or submit saw it), or its PIC put it on hold here when Jira had no
+ * Hold status to move it to, or the register's own status says so.
+ */
+export const projectOnHold = (p) => !!p && (!!p.onHold || isHoldStatus(p.jiraStatus) || isHoldStatus(p.status) || isHoldStatus(p.srcStatus))

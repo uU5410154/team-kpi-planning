@@ -310,4 +310,5 @@ export const planJiraTask = async (key, body) => send('PUT', `/api/jira/tasks/${
 export const newJiraProject = async (body) => send('POST', '/api/jira/projects', body)
 /** Decisions asked for on tasks: open ones by default. */
 export const decisions = async (status = 'open') => jp(await fetch(vq(`/api/decisions?status=${encodeURIComponent(status)}`)))
+export const jiraCoverage = async (week) => jp(await fetch(`/api/jira/coverage/${encodeURIComponent(week)}`))
 export const decide = async (id, note) => send('POST', `/api/decisions/${encodeURIComponent(id)}/decide`, { note })

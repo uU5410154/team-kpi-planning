@@ -513,6 +513,12 @@ app.get('/api/decisions', jiraWrap(async (req) => {
   const rows = await jiraWeek.listDecisions({ status: req.query.status || 'open', person: admin ? undefined : req.me.person })
   return rows === store.UNAVAILABLE ? rows : { decisions: rows }
 }))
+// Each project's Jira work whose timeline covers a week, for the manager's dashboard.
+app.get('/api/jira/coverage/:week', adminOnly, jiraWrap(async (req) => {
+  const week = req.params.week
+  if (!isWeek(week)) return { status: 400, error: 'A week is named by its Monday, as YYYY-MM-DD.' }
+  return jiraWeek.coverage(week)
+}))
 app.post('/api/decisions/:id/decide', adminOnly, jiraWrap((req) => jiraWeek.resolveDecision(req.params.id, req.body?.note, req.me.email)))
 
 /* The weekly story of every project, for the Timeline: one's own, or everybody's for an administrator. */
