@@ -30,7 +30,7 @@ Remove the violet/indigo navy (#070818, #0d0f26, rgba violet glows) and replace 
 | border.strong | #344050 | #CBD1D9 | input outline, outlined button, focused containers |
 | text.primary | #E6E9EE | #161B22 | body, values |
 | text.secondary | #A2AAB7 | #4F5866 | labels, meta, descriptions |
-| text.tertiary | #78828F | #6B7482 | placeholder, hints, disabled-ish (must stay ≥4.5:1 on surface for text ≥12px: use only for non-essential text) |
+| text.tertiary | #7A8491 | #6B7482 | placeholder, hints, disabled-ish (must stay ≥4.5:1 on surface for text ≥12px: use only for non-essential text) |
 | text.disabled | #555E6B | #A3AAB5 | disabled controls only |
 | primary.main | #3D6FD9 | #2F5FC4 | primary button fill, selected tab indicator, focus ring, checkbox |
 | primary.hover | #3563C4 | #284FA6 | hover of primary fill |

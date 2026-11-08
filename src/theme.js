@@ -37,7 +37,7 @@ export const TOKENS = {
     },
     border: { subtle: '#252D38', strong: '#344050' },
     text: {
-      primary: '#E6E9EE', secondary: '#A2AAB7', tertiary: '#78828F', disabled: '#555E6B',
+      primary: '#E6E9EE', secondary: '#A2AAB7', tertiary: '#7A8491', disabled: '#555E6B',
     },
     primary: {
       main: '#3D6FD9', hover: '#3563C4', text: '#82A7F2', tint: 'rgba(61,111,217,0.14)',
@@ -479,6 +479,7 @@ const shared = (mode) => {
             fontSize: '0.875rem',
             '&.Mui-selected': { backgroundColor: t.primary.tint },
             '&.Mui-selected:hover': { backgroundColor: t.primary.tint },
+            '&.Mui-selected.Mui-focusVisible': { backgroundColor: t.primary.tint },
             '& .MuiListItemIcon-root': { color: t.text.secondary, minWidth: 32 },
             '& + .MuiDivider-root': { marginTop: 4, marginBottom: 4 },
           },

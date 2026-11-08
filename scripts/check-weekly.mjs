@@ -111,7 +111,7 @@ check('THE DEFAULT SUBMIT LIST IS ALL SIX, GUN INCLUDED, AND NOT IT',
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = 5361
+const PORT = Number(process.env.CHECK_PORT) || 5361
 const base = `http://127.0.0.1:${PORT}`
 const SERVICE = `Bearer ${'weekly-service-token-'.padEnd(48, '3')}`
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -351,11 +351,14 @@ try {
     // Only a hash away from where it is: reload so the page reads the switch afresh.
     await admin.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await admin.reload({ waitUntil: 'networkidle0' })
-    await admin.waitForSelector('[data-next-step]', { timeout: 15000 }).catch(() => {})
-    const ptext = await admin.evaluate(() => document.querySelector('[data-next-step]')?.innerText || '')
+    // With nobody picked the app shows its own "Choose a team member" state in
+    // place of the Weekly page (App.jsx ViewAsChoose), never "not linked".
+    await admin.waitForSelector('[data-view-as-empty]', { timeout: 15000 }).catch(() => {})
+    const ptext = await admin.evaluate(() => document.querySelector('[data-view-as-empty]')?.innerText || '')
+    const main = await admin.evaluate(() => (document.querySelector('main') || document.body).innerText)
     check('VIEWING AS A MEMBER WITH NOBODY PICKED ASKS TO CHOOSE ONE', /Choose a team member/.test(ptext)
-      && /Pick someone in the bar above to see their week/.test(ptext) && !/not linked/i.test(ptext)
-      && await admin.evaluate(() => !!document.querySelector('[data-view-as-pick]')), ptext.replace(/\n/g, ' | '))
+      && /Pick someone to see their week/.test(ptext) && /Choose a person/.test(ptext) && !/not linked/i.test(main)
+      && await admin.evaluate(() => !document.querySelector('[data-next-step]')), ptext.replace(/\n/g, ' | '))
     await admin.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'admin') })
     await call('PUT', '/api/auth/users/boss@lotuss.com', { person: 'gun' }, boss)
   }

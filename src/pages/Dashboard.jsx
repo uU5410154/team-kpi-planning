@@ -237,7 +237,19 @@ export default function Dashboard({
     return () => { stop = true }
   }, [wantsTrend, now, prev, trend])
 
-  const startEdit = () => { setDraft(known(saved?.items || DEFAULT_LAYOUT)); setEditing(true); setError(null) }
+  /*
+   * Arranging starts from the board as it reads: each card at the rows its
+   * content took (measured below), up to GROW_TO, so none opens half empty.
+   * It can then be dragged taller or shorter as before; a card whose content
+   * is shorter than its usual minimum is not made to stand taller than that.
+   */
+  const fitted = (list) => known(list).map((it) => {
+    const px = fit[it.type]
+    if (!px) return it
+    const rows = Math.ceil(Math.min(Math.max(it.h, GROW_TO) * UNIT, px) / UNIT)
+    return { ...it, h: Math.max(2, rows) }
+  })
+  const startEdit = () => { setDraft(fitted(saved?.items || DEFAULT_LAYOUT)); setEditing(true); setError(null) }
   const cancel = () => { setEditing(false); setDraft(null); setError(null) }
   const save = async () => {
     setBusy(true)
@@ -410,7 +422,7 @@ export default function Dashboard({
           ] : []
         })}
       </Menu>
-      <Button variant="text" onClick={() => setDraft(known(DEFAULT_LAYOUT))}>Reset to default</Button>
+      <Button variant="text" onClick={() => setDraft(fitted(DEFAULT_LAYOUT))}>Reset to default</Button>
       <Button variant="text" onClick={cancel} disabled={busy}>Cancel</Button>
       <Button
         variant="contained"
@@ -431,7 +443,7 @@ export default function Dashboard({
     <PageHeader
       title="Dashboard"
       description={editing
-        ? `Drag a card by its title bar, resize it from its corner, remove it with ×. A card never shows taller than its content. ${arranged}`
+        ? `Drag a card to move it, resize it from its corner, or remove it with ×. ${arranged}`
         : weekLine}
       actions={editing ? editActions : viewActions}
     />
@@ -509,7 +521,7 @@ export default function Dashboard({
     types.forEach((t) => { if (natural[t] >= tallest * 0.7) level[t] = tallest })
   })
   const rgl = items.map((it) => (editing ? {
-    i: it.type, x: it.x, y: it.y, w: it.w, h: it.h, minW: CARDS[it.type].minW, minH: CARDS[it.type].minH,
+    i: it.type, x: it.x, y: it.y, w: it.w, h: it.h, minW: CARDS[it.type].minW, minH: Math.min(CARDS[it.type].minH, it.h),
   } : {
     i: it.type,
     x: it.x,

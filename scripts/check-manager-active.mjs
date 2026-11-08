@@ -152,14 +152,14 @@ const fake = createServer((req, res) => {
     return send(404, { errorMessages: [`fake Jira has no ${req.method} ${u.pathname}`] })
   })
 })
-const JPORT = 5392
+const JPORT = Number(process.env.CHECK_PORT) + 1 || 5392
 await new Promise((r) => fake.listen(JPORT, r))
 
 /* --------------------------------------------------------------- server */
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = 5391
+const PORT = Number(process.env.CHECK_PORT) || 5391
 const base = `http://127.0.0.1:${PORT}`
 const TOKEN = 'active-service-token-'.padEnd(48, '5')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')

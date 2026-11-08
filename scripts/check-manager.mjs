@@ -73,7 +73,7 @@ console.log('\n--- the layout, cleaned ---')
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = 5366
+const PORT = Number(process.env.CHECK_PORT) || 5366
 const base = `http://127.0.0.1:${PORT}`
 const TOKEN = 'manager-service-token-'.padEnd(48, '6')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')

@@ -450,7 +450,7 @@ async function raiseDecision(k, d, now) {
     foot: `Raised in the weekly update for ${weekTitle(d.week)}.`,
   })
   await mail.sendOnce(`decision:${id}:${Date.parse(doc.createdAt)}`, {
-    to, kind: 'decision', subject: `Decision needed: ${d.jiraKey}${d.summary ? ` — ${d.summary}` : ''}`, html, text, meta: { decision: id },
+    to, kind: 'decision', subject: `Decision needed: ${d.jiraKey}${d.summary ? `, ${d.summary}` : ''}`, html, text, meta: { decision: id },
   })
 }
 

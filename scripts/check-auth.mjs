@@ -22,7 +22,7 @@ const check = (name, ok, detail = '') => {
 
 console.log('starting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = 5341
+const PORT = Number(process.env.CHECK_PORT) || 5341
 const base = `http://127.0.0.1:${PORT}`
 const SERVICE_TOKEN = 'test-service-token-'.padEnd(48, '7')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')

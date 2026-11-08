@@ -174,7 +174,7 @@ await new Promise((r) => fake.listen(5415, r))
 /* --------------------------------------------------------------- server */
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = 5367
+const PORT = Number(process.env.CHECK_PORT) || 5367
 const base = `http://127.0.0.1:${PORT}`
 const TOKEN = 'jiraweek-service-token-'.padEnd(48, '7')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
