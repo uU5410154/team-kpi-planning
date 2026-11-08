@@ -15,6 +15,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import AppsOutlinedIcon from '@mui/icons-material/AppsOutlined'
 import FilterListOffIcon from '@mui/icons-material/FilterListOff'
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
 import {
   isFolder, newApp, moveTo, dropOnto, patchItem, removeItem,
   safeUrl, linkOf, initialsOf,
@@ -417,10 +418,12 @@ export default function Apps({ apps, onChange, loading = false }) {
               />
             ))}
           </Tabs>
-          {departments.length > 0 && (
+          {/* Drawn while loading too (disabled), so the row does not jump when the apps arrive. */}
+          {(departments.length > 0 || firstLoad) && (
             <FormControl size="small" sx={{ minWidth: 168, flexShrink: 0, mb: { sm: 1 } }}>
               <Select
                 value={dept}
+                disabled={firstLoad}
                 onChange={(e) => { setDept(e.target.value); setEditing(false) }}
                 inputProps={{ 'aria-label': 'Department' }}
                 data-dept-filter
@@ -630,7 +633,6 @@ function AppTile({
         border: 1,
         borderColor: 'border.subtle',
         borderRadius: '6px',
-        ...(!phone && { position: 'absolute', top: 8, right: 8 }),
         '& .MuiIconButton-root': {
           width: phone ? 36 : 24, height: phone ? 36 : 24, borderRadius: '5px', color: 'text.secondary',
         },
@@ -678,7 +680,7 @@ function AppTile({
         lineHeight: '20px',
         overflow: 'hidden',
         display: '-webkit-box',
-        WebkitLineClamp: phone || (!href && !folderish) ? 1 : 2,
+        WebkitLineClamp: phone ? 1 : 2,
         WebkitBoxOrient: 'vertical',
         overflowWrap: 'anywhere',
         color: 'text.primary',
@@ -688,8 +690,9 @@ function AppTile({
     </Typography>
   )
 
+  // No address yet: said beside the department, so the name keeps its two lines.
   const linkComing = !folderish && !href && (
-    <Typography variant="caption" component="div" sx={{ color: 'text.tertiary' }}>Link coming</Typography>
+    <Box component="span" sx={{ color: 'text.tertiary' }}>{sub ? ', link coming' : 'Link coming'}</Box>
   )
 
   const body = phone ? (
@@ -702,9 +705,7 @@ function AppTile({
         {name}
         <Typography variant="body2" noWrap sx={{ color: 'text.secondary' }}>
           {sub}
-          {!folderish && !href && (
-            <Box component="span" sx={{ color: 'text.tertiary' }}>{sub ? ', link coming' : 'Link coming'}</Box>
-          )}
+          {linkComing}
         </Typography>
       </Box>
       {editing ? controls : pill}
@@ -716,9 +717,8 @@ function AppTile({
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, minHeight: 40 }}>
         <AppIcon item={item} merging={merging} />
-        <Box sx={{ flex: 1, minWidth: 0, pr: editing ? (folderish ? 12 : 18) : 0 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           {name}
-          {linkComing}
         </Box>
         {asLink && <OpenInNewIcon aria-hidden sx={{ fontSize: 16, color: 'text.tertiary', alignSelf: 'flex-start', mt: 0.5 }} />}
       </Box>
@@ -728,10 +728,14 @@ function AppTile({
       >
         <Typography variant="body2" noWrap sx={{ color: item.department || folderish ? 'text.secondary' : 'text.tertiary', minWidth: 0 }}>
           {sub}
+          {linkComing}
         </Typography>
-        {pill}
+        {/*
+          While arranging, the controls take the pill's corner: up top they
+          would squeeze a 1280px card's name down to "PO Informati…".
+        */}
+        {editing ? controls : pill}
       </Box>
-      {controls}
     </Box>
   )
 
@@ -774,10 +778,10 @@ function AppTile({
           outlineOffset: merging ? 1 : undefined,
           ...(phone ? {
             bgcolor: dragging ? 'bg.raised' : (merging ? 'primary.tint' : 'transparent'),
-            borderTop: first && !dragging ? 0 : 1,
-            borderColor: 'border.subtle',
+            // The colour after the width: `border: 1` alone resets it to the text colour.
+            ...(dragging ? { border: 1 } : { borderTop: first ? 0 : 1 }),
+            borderColor: dragging ? 'border.strong' : 'border.subtle',
             borderRadius: dragging ? '8px' : `${first ? 8 : 0}px ${first ? 8 : 0}px ${last ? 8 : 0}px ${last ? 8 : 0}px`,
-            ...(dragging && { border: 1, borderColor: 'border.strong' }),
           } : {
             bgcolor: dragging ? 'bg.raised' : (merging ? 'primary.tint' : 'bg.surface'),
             border: 1,
@@ -852,10 +856,13 @@ function AppIcon({ item, merging, size = 40 }) {
         </Box>
       ) : item.icon ? (
         <Box component="img" src={item.icon} alt="" draggable={false} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      ) : (
+      ) : item.name ? (
         <Typography component="span" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: Math.round(size * 0.34), lineHeight: 1 }}>
           {initialsOf(item.name)}
         </Typography>
+      ) : (
+        // Nothing typed yet: a plain picture mark rather than made-up initials.
+        <ImageOutlinedIcon sx={{ fontSize: Math.round(size * 0.42), color: 'text.tertiary' }} />
       )}
     </Box>
   )
@@ -1091,10 +1098,10 @@ function AppDialog({
           component="form"
           noValidate
           onSubmit={(e) => { e.preventDefault(); submit() }}
-          sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}
+          sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 2 }}
         >
           <Box sx={{ display: 'flex', gap: 4, alignItems: 'center', mb: 2 }}>
-            <AppIcon item={{ name: draft.name || 'App', icon: draft.icon }} size={56} />
+            <AppIcon item={{ name: draft.name.trim(), icon: draft.icon }} size={56} />
             <Box sx={{ minWidth: 0 }}>
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                 <Button component="label" size="small" variant="outlined">
