@@ -191,7 +191,7 @@ if (!exe) {
 }
 
 console.log('\n— the gestures, in a real browser —')
-const PORT = 5327
+const PORT = Number(process.env.CHECK_PORT) || 5327
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const server = spawn(process.execPath, ['server/index.js'], {
   cwd: root,

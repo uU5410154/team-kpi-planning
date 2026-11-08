@@ -45,9 +45,9 @@ export function plainError(e) {
   return raw.length > 400 ? `${raw.slice(0, 400)}…` : raw
 }
 
-/** "Jira does not know FNP-1446 — check the key on the Projects page.", or null. */
+/** "Jira does not know FNP-1446. Check the key on the Projects page.", or null. */
 export const unknownNote = (keys = []) => (keys?.length
-  ? `Jira does not know ${keys.slice(0, 5).join(', ')}${keys.length > 5 ? ` and ${keys.length - 5} more` : ''} — check ${keys.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
+  ? `Jira does not know ${keys.slice(0, 5).join(', ')}${keys.length > 5 ? ` and ${keys.length - 5} more` : ''}. Check ${keys.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
   : null)
 
 export async function storeStatus() {

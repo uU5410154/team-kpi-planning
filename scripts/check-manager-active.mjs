@@ -218,7 +218,7 @@ try {
   console.log('\n--- one key Jira does not know ---')
   const sync = await call('POST', '/api/jira/sync', undefined, boss)
   check('THE SYNC RUNS WITH FNP-1446 ON THE REGISTER', sync.status === 200 && sync.body.ok === true, JSON.stringify(sync.body).slice(0, 200))
-  check('  AND NAMES IT', (sync.body.missingInJira || []).includes(UNKNOWN) && /Jira does not know FNP-1446 — check the key on the Projects page/.test(sync.body.missingNote || ''), sync.body.missingNote)
+  check('  AND NAMES IT', (sync.body.missingInJira || []).includes(UNKNOWN) && /Jira does not know FNP-1446\. Check the key on the Projects page/.test(sync.body.missingNote || ''), sync.body.missingNote)
   const iss = await call('POST', '/api/jira/issues', { keys: [UNKNOWN, P_JIRA.jiraKey] }, boss)
   check('ISSUES: the rest still come back, the unknown one is listed', iss.status === 200 && iss.body.issues?.some((i) => i.key === P_JIRA.jiraKey) && iss.body.skipped?.includes(UNKNOWN))
   const ro = await call('POST', '/api/jira/rollup', { keys: [UNKNOWN, P_JIRA.jiraKey] }, boss)

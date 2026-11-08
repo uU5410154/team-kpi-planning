@@ -114,7 +114,7 @@ async function eachBatch(keys, size, ask, skipped) {
 
 /** What to tell a person about keys Jira does not know, or null. */
 export const skippedNote = (skipped = []) => (skipped.length
-  ? `Jira does not know ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? ` and ${skipped.length - 5} more` : ''} — check ${skipped.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
+  ? `Jira does not know ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? ` and ${skipped.length - 5} more` : ''}. Check ${skipped.length === 1 ? 'the key' : 'those keys'} on the Projects page.`
   : null)
 
 /*

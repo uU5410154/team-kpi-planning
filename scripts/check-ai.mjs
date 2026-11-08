@@ -343,9 +343,9 @@ try {
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/ai-chat.png` })
     await a.goto(`${base}/#users`, { waitUntil: 'networkidle0' })
     await a.waitForFunction(() => document.body.innerText.includes('AI (Lotus LLM)'), { timeout: 15000 }).catch(() => {})
-    await a.waitForFunction(() => /Connected — model|The AI is off/.test(document.body.innerText), { timeout: 8000 }).catch(() => {})
+    await a.waitForFunction(() => /Connected (to|—) model|The AI is off/.test(document.body.innerText), { timeout: 8000 }).catch(() => {})
     const at = await a.evaluate(() => document.body.innerText)
-    check('THE ACCESS TAB SAYS THE AI IS CONNECTED', /Connected — model/.test(at), at.slice(at.indexOf('AI (Lotus'), at.indexOf('AI (Lotus') + 300).replace(/\n/g, ' | '))
+    check('THE ACCESS TAB SAYS THE AI IS CONNECTED', /Connected (to|—) model/.test(at), at.slice(at.indexOf('AI (Lotus'), at.indexOf('AI (Lotus') + 300).replace(/\n/g, ' | '))
 
     console.log('\n--- the Dashboard ---')
     const d = await as(boss, { width: 1440, height: 900 })

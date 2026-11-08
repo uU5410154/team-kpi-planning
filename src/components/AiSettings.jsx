@@ -64,7 +64,7 @@ export default function AiSettings({ reloadKey = 0 }) {
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Dot tone="success" />
           <Typography variant="body1">
-            Connected — model
+            Connected to model
             {' '}
             <Box component="span" sx={{ fontWeight: 500 }}>{`“${st.model}”`}</Box>
             .

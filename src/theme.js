@@ -289,7 +289,7 @@ const shared = (mode) => {
             borderRadius: 6,
             backgroundColor: dark ? 'transparent' : '#FFFFFF',
             '&:hover:not(.Mui-disabled):not(.Mui-focused):not(.Mui-error) .MuiOutlinedInput-notchedOutline': { borderColor: t.text.tertiary },
-            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderWidth: 1, borderColor: t.primary.main, boxShadow: `0 0 0 1px ${t.primary.main}` },
+            '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderWidth: 2, borderColor: t.primary.main },
           },
           notchedOutline: { borderColor: t.border.strong },
           inputSizeSmall: { paddingTop: 8, paddingBottom: 8 },
