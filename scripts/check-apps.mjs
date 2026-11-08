@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process'
 import puppeteer from 'puppeteer-core'
 import {
   newApp, newFolder, isFolder, flatten, locate, pluck, moveTo, dropOnto, dropIntoFolder,
-  patchItem, removeItem, safeUrl, suggestFolderName, initialsOf, tintOf, newId,
+  patchItem, removeItem, safeUrl, linkOf, suggestFolderName, initialsOf, tintOf, newId,
 } from '../src/lib/homeScreen.js'
 import { repairState } from '../src/lib/model.js'
 import { mergeCatalog, APP_CATALOG, statusOf } from '../src/data/appCatalog.js'
@@ -40,6 +40,12 @@ console.log('\n--- the F&A app catalog ---')
   check('THE CATALOG GIVES 18 APPS, EACH WITH A DEPARTMENT, A STATUS AND AN ICON', all.length === 18
     && all.every((a) => a.department && statusOf(a.status) && /^\/app-icons\/[a-z0-9-]+\.svg$/.test(a.icon)))
   check('  every icon file exists', APP_CATALOG.every((a) => existsSync(new URL(`../public${a.icon}`, import.meta.url))))
+  const svgs = APP_CATALOG.map((a) => readFileSync(new URL(`../public${a.icon}`, import.meta.url), 'utf8'))
+  check('  the icons are flat: no gradient, one muted colour per department',
+    svgs.every((x) => !/Gradient/.test(x))
+      && APP_CATALOG.every((a, i) => svgs[i].includes(`fill="${a.department === 'Finance' ? '#2E3B57' : '#2B4A4F'}"`)))
+  check('  each app has its own glyph', new Set(APP_CATALOG.map((a) => a.glyph)).size === APP_CATALOG.length)
+  check('  the statuses read Live, UAT, POC, In development', ['GO-LIVE', 'UAT', 'POC', 'Under Development'].map((st) => statusOf(st).label).join() === 'Live,UAT,POC,In development')
   check('  the statuses: 7 live, 1 UAT, 7 POC, 3 in development', ['GO-LIVE', 'UAT', 'POC', 'Under Development'].map((st) => all.filter((a) => a.status === st).length).join() === '7,1,7,3')
   const mine = [
     { id: 'a1', type: 'app', name: 'Jira', url: 'https://jira.example' },
@@ -139,6 +145,15 @@ check('file: is refused', safeUrl('file:///c:/windows') === null)
 check('vbscript: is refused', safeUrl('vbscript:msgbox') === null)
 check('empty is refused', safeUrl('   ') === null && safeUrl(null) === null)
 
+/* What a tile opens: a link, or "Link coming" when what was typed is not one. */
+check('a bare word is not a link yet', linkOf('upcoming') === null && linkOf('TBC') === null)
+check('an address with a note after it is not a link', linkOf('https://THHOPVAPFAW02:5014 (API :8001)') === null)
+check('an intranet host with a port is a link', linkOf('https://THHOPVAPFAW02:5001') === 'https://thhopvapfaw02:5001/')
+check('a bare host still gets https', linkOf('lotusretails.atlassian.net') === 'https://lotusretails.atlassian.net/')
+check('linkOf refuses what safeUrl refuses', linkOf('javascript:alert(1)') === null && linkOf('') === null)
+check('a new app keeps its department, status and note',
+  (({ department, status, note }) => department === 'Finance' && status === 'POC' && note === 'n')(newApp({ name: 'x', department: 'Finance', status: 'POC', note: 'n' })))
+
 /* Icon fallbacks. */
 check('initials of two words', initialsOf('Power BI') === 'PB')
 check('initials of one word', initialsOf('Jira') === 'JI')
@@ -221,8 +236,8 @@ const addApp = async (name, url) => {
   await page.waitForSelector('input[name="app-name"]', { timeout: 5000 })
   await page.type('input[name="app-name"]', name)
   await page.type('input[name="app-url"]', url)
-  await page.evaluate(() => [...document.querySelectorAll('button')]
-    .find((b) => b.textContent.trim() === 'Add')?.click())
+  await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')]
+    .find((b) => b.textContent.trim() === 'Add app')?.click())
   await new Promise((r) => setTimeout(r, 350))
 }
 
@@ -242,7 +257,7 @@ await new Promise((r) => setTimeout(r, 900))
 
 await openTab('Apps')
 check('the Apps tab opens',
-  await page.evaluate(() => !!document.body.textContent.includes('Nothing here yet')))
+  await page.evaluate(() => !!document.body.textContent.includes('No apps yet')))
 
 await addApp('Power BI Sales', 'https://bi.test/sales')
 await addApp('Power BI Margin', 'bi.test/margin')

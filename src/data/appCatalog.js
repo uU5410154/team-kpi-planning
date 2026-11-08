@@ -8,13 +8,20 @@
  * scripts/make-app-icons.mjs turns this list into the SVG files.
  */
 
-/** Where an app stands, in the order it moves through. */
+/**
+ * Where an app stands. `id` is what is stored (and what the team's sheet
+ * says); `label` is what the page shows; `tone` is a status tone of the design
+ * system (success, info, neutral), drawn as a small pill or dot.
+ */
 export const APP_STATUSES = [
-  { id: 'GO-LIVE', label: 'Live', tone: 'good' },
+  { id: 'GO-LIVE', label: 'Live', tone: 'success' },
   { id: 'UAT', label: 'UAT', tone: 'info' },
-  { id: 'POC', label: 'POC', tone: 'violet' },
+  { id: 'POC', label: 'POC', tone: 'info' },
   { id: 'Under Development', label: 'In development', tone: 'neutral' },
 ]
+
+/** The departments the catalog knows, offered first when adding an app. */
+export const APP_DEPARTMENTS = ['Accounting', 'Finance']
 
 export const statusOf = (id) => APP_STATUSES.find((s) => s.id === id) || null
 

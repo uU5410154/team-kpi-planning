@@ -1,74 +1,103 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Box, Paper, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, IconButton, Tooltip, ToggleButton, ToggleButtonGroup, MenuItem, Select, FormControl,
-  InputLabel, Autocomplete,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+} from 'react'
+import {
+  Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, IconButton, Tooltip, MenuItem, Select, FormControl, InputLabel,
+  Autocomplete, Tabs, Tab, Skeleton, useMediaQuery,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
 import DoneIcon from '@mui/icons-material/Done'
-import EditIcon from '@mui/icons-material/Edit'
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import AppsOutlinedIcon from '@mui/icons-material/AppsOutlined'
+import FilterListOffIcon from '@mui/icons-material/FilterListOff'
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
 import {
   isFolder, newApp, moveTo, dropOnto, patchItem, removeItem,
-  safeUrl, tintOf, initialsOf,
+  safeUrl, linkOf, initialsOf,
 } from '../lib/homeScreen.js'
-import Loading from '../components/Loading.jsx'
-import { PILL } from '../components/Brand.jsx'
-import { APP_STATUSES, statusOf } from '../data/appCatalog.js'
+import {
+  PageHeader, StatusPill, EmptyState,
+} from '../components/ui.jsx'
+import { APP_STATUSES, APP_DEPARTMENTS, statusOf } from '../data/appCatalog.js'
 
 /*
  * The grid. One set of numbers, used by the layout, the hit-testing and the
- * animation alike — three copies of "how wide is a tile" is how an icon ends
- * up landing one slot away from where it was dropped.
+ * animation alike: three copies of "how wide is a tile" is how a card ends up
+ * landing one slot away from where it was dropped.
+ *
+ * Desktop: as many 220px-or-wider cards as fit. Tablet: two. Phone: one list.
  */
-const TILE = 92
-const ICON = 64
-const LABEL = 30
-const ROW = ICON + LABEL + 18
+const MIN_TILE = 220
+const GAP = 16
+const CARD_H = 96
+const ROW_H = 64
 const HOLD_MS = 450
 const MERGE_MS = 420
 
-/** Where slot n sits, given how many fit across. */
-const slotOf = (index, cols) => ({
-  x: (index % cols) * TILE,
-  y: Math.floor(index / cols) * ROW,
-})
+/** The tone a status draws in, for the pill and the dot. */
+const toneOf = (id) => statusOf(id)?.tone || 'neutral'
+
+/** "No apps in POC for Finance", worded for whichever filters are set. */
+const emptyTitle = (status, dept) => {
+  const label = statusOf(status)?.label
+  if (label && dept !== 'all') return `No apps in ${label} for ${dept}`
+  if (label) return `No apps in ${label}`
+  return `No apps for ${dept}`
+}
 
 /**
- * A home screen for the links this team keeps reaching for.
+ * The F&A team's apps: a launcher card for each, by status and department.
  *
- * Built with pointer events rather than HTML5 drag-and-drop, because the whole
- * point is the feel: the dragged icon follows your finger, the others slide out
- * of its way, and holding one over another for a moment makes a folder. Native
- * drag events give a ghost image and a drop target, which is a different and
- * much worse thing.
+ * Arranging is built with pointer events rather than HTML5 drag-and-drop,
+ * because the point is the feel: the dragged card follows the pointer, the
+ * others slide out of its way, and holding one over another for a moment
+ * makes a folder. The screen is shared: what one person arranges, everyone
+ * sees.
  */
 export default function Apps({ apps, onChange, loading = false }) {
+  const theme = useTheme()
+  const phone = useMediaQuery(theme.breakpoints.down('sm'), { noSsr: true })
+  const tablet = useMediaQuery(theme.breakpoints.between('sm', 'md'), { noSsr: true })
+
   const [editing, setEditing] = useState(false)
   const [openFolder, setOpenFolder] = useState(null)
   const [dialog, setDialog] = useState(null)
+  const [confirm, setConfirm] = useState(null)
   const [drag, setDrag] = useState(null)
   const [mergeInto, setMergeInto] = useState(null)
 
-  const surface = useRef(null)
+  const [surface, setSurface] = useState(null)
   const holdTimer = useRef(null)
   const mergeTimer = useRef(null)
   const dragRef = useRef(null)
   const justDragged = useRef(false)
-  const [cols, setCols] = useState(6)
+  const [width, setWidth] = useState(0)
 
-  /* How many tiles fit across, measured rather than guessed. */
-  useEffect(() => {
-    const el = surface.current
-    if (!el || typeof ResizeObserver === 'undefined') return undefined
-    const measure = () => setCols(Math.max(2, Math.floor((el.clientWidth - 16) / TILE)))
+  /* How wide the grid is, measured rather than guessed. */
+  useLayoutEffect(() => {
+    if (!surface) return undefined
+    const measure = () => setWidth(surface.clientWidth)
     measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
     const ro = new ResizeObserver(measure)
-    ro.observe(el)
+    ro.observe(surface)
     return () => ro.disconnect()
-  }, [])
+  }, [surface])
 
-  const items = apps || []
+  const gap = phone ? 0 : GAP
+  const cols = phone ? 1 : tablet ? 2 : Math.max(1, Math.floor((width + GAP) / (MIN_TILE + GAP)))
+  const tileW = Math.max(0, (width - gap * (cols - 1)) / cols)
+  const tileH = phone ? ROW_H : CARD_H
+  const pitchX = tileW + gap
+  const pitchY = tileH + gap
+  const slotOf = (index) => ({ x: (index % cols) * pitchX, y: Math.floor(index / cols) * pitchY })
+
+  const items = useMemo(() => apps || [], [apps])
 
   /*
    * WHERE EACH APP STANDS, AND WHOSE IT IS: the status tabs and the department
@@ -83,90 +112,112 @@ export default function Apps({ apps, onChange, loading = false }) {
   const countOf = (id) => inDept.filter((a) => a.status === id).length
   const filtering = status !== 'all' || dept !== 'all'
   const filtered = filtering ? inDept.filter((a) => status === 'all' || a.status === status) : null
+  const clearFilters = () => { setStatus('all'); setDept('all') }
 
   const folder = !filtering && openFolder ? items.find((it) => it.id === openFolder) : null
+  const firstLoad = loading && items.length === 0
 
-  /* The list on screen: the filtered apps, the screen, or the inside of an open folder. */
-  const shown = filtered || (folder ? (folder.items || []) : items)
+  /* The cards on screen: the filtered apps, or the screen itself. */
+  const shown = filtered || items
 
   const stop = useCallback(() => {
     clearTimeout(holdTimer.current)
     clearTimeout(mergeTimer.current)
     setMergeInto(null)
   }, [])
+  useEffect(() => stop, [stop])
 
   /**
-   * The slot a pointer is over.
+   * The slot the dragged card's centre is over.
    *
-   * Rounded to the NEAREST gap rather than the tile it is inside, so an icon
-   * dropped just left of centre goes before its neighbour rather than after —
-   * which is what the gap opening up in front of you promised it would do.
+   * Rounded to the NEAREST gap rather than the card it is inside, so a card
+   * dropped just left of centre goes before its neighbour rather than after:
+   * which is what the gap opening up in front of it promised.
    */
-  const slotAt = (px, py) => {
-    const col = Math.max(0, Math.min(cols - 1, Math.round(px / TILE)))
-    const row = Math.max(0, Math.floor(py / ROW))
-    return Math.max(0, Math.min(shown.length, row * cols + col))
+  const slotAt = (cx, cy) => {
+    if (cols === 1) return Math.max(0, Math.min(shown.length - 1, Math.round((cy - tileH / 2) / pitchY)))
+    const col = Math.max(0, Math.min(cols, Math.round(cx / pitchX)))
+    const row = Math.max(0, Math.floor(cy / pitchY))
+    return Math.max(0, Math.min(shown.length - 1, row * cols + col))
   }
 
-  /** The item a pointer is sitting ON, for folder-making. */
-  const itemAt = (px, py) => {
-    const col = Math.floor(px / TILE)
-    const row = Math.floor(py / ROW)
+  /** The card (other than the dragged one) whose middle the dragged card's centre is over. */
+  const itemAt = (cx, cy, dragId) => {
+    const col = Math.floor(cx / pitchX)
+    const row = Math.floor(cy / pitchY)
     if (col < 0 || col >= cols || row < 0) return null
-    const index = row * cols + col
-    const it = shown[index]
+    const it = shown.find((x) => x.id !== dragId && positions.get(x.id) === row * cols + col)
     if (!it) return null
-    // Only the middle of a tile merges; the edges are for slipping between.
-    const cx = col * TILE + TILE / 2
-    const cy = row * ROW + ICON / 2 + 8
-    const near = Math.abs(px - cx) < ICON * 0.36 && Math.abs(py - cy) < ICON * 0.42
-    return near ? it : null
+    // Only the middle of a card merges; the edges are for slipping between.
+    const mx = col * pitchX + tileW / 2
+    const my = row * pitchY + tileH / 2
+    return Math.abs(cx - mx) < tileW * 0.3 && Math.abs(cy - my) < tileH * 0.36 ? it : null
   }
 
   const onPointerDown = (e, item) => {
     if (e.button != null && e.button !== 0) return
-    if (filtering) return
-    const rect = surface.current.getBoundingClientRect()
-    const startX = e.clientX
-    const startY = e.clientY
-    // A long press with no movement is the way into edit mode, exactly as on a
+    if (filtering || !surface) return
+    const rect = surface.getBoundingClientRect()
+    const at = slotOf(positions.get(item.id) ?? 0)
+    const px = e.clientX - rect.left
+    const py = e.clientY - rect.top
+    // A long press with no movement is the way into arranging, exactly as on a
     // phone; a short one is a tap and opens the link.
-    holdTimer.current = setTimeout(() => setEditing(true), HOLD_MS)
+    holdTimer.current = setTimeout(() => {
+      setEditing(true)
+      if (dragRef.current) dragRef.current.held = true
+    }, HOLD_MS)
     dragRef.current = {
       id: item.id,
-      startX,
-      startY,
+      startX: e.clientX,
+      startY: e.clientY,
+      grabX: px - at.x,
+      grabY: py - at.y,
       moved: false,
-      from: folder ? 'folder' : 'screen',
-      x: startX - rect.left,
-      y: startY - rect.top,
+      held: false,
+      // On a touch screen only the handle drags; anywhere else a finger scrolls.
+      handle: !!e.target.closest?.('[data-drag-handle]'),
+      x: px,
+      y: py,
     }
-    e.currentTarget.setPointerCapture?.(e.pointerId)
+    if (e.pointerType === 'mouse' || dragRef.current.handle) e.currentTarget.setPointerCapture?.(e.pointerId)
   }
+
+  const centreOf = (d) => ({ cx: d.x - d.grabX + tileW / 2, cy: d.y - d.grabY + tileH / 2 })
 
   const onPointerMove = (e) => {
     const d = dragRef.current
-    if (!d) return
+    if (!d || !surface) return
     const dx = e.clientX - d.startX
     const dy = e.clientY - d.startY
     if (!d.moved && Math.hypot(dx, dy) < 6) return
     if (!d.moved) {
+      if (e.pointerType !== 'mouse' && !d.handle && !d.held) {
+        // A finger moving anywhere but the handle is a scroll, not a drag.
+        clearTimeout(holdTimer.current)
+        dragRef.current = null
+        return
+      }
       d.moved = true
       clearTimeout(holdTimer.current)
       setEditing(true)
     }
-    const rect = surface.current.getBoundingClientRect()
-    const px = e.clientX - rect.left
-    const py = e.clientY - rect.top
-    d.x = px
-    d.y = py
-    const over = itemAt(px, py)
-    const canMerge = over && over.id !== d.id && !isFolder(shown.find((x) => x.id === d.id))
-    setDrag({ id: d.id, x: px, y: py, slot: slotAt(px, py) })
+    const rect = surface.getBoundingClientRect()
+    d.x = e.clientX - rect.left
+    d.y = e.clientY - rect.top
+    const { cx, cy } = centreOf(d)
+    const over = itemAt(cx, cy, d.id)
+    const canMerge = over && !isFolder(shown.find((x) => x.id === d.id))
+    // Over another card's middle, the gap stays where it was: the card being
+    // aimed at holds still instead of sliding out from under the pointer.
+    const slot = canMerge ? (drag && drag.id === d.id ? drag.slot : (positions.get(d.id) ?? 0)) : slotAt(cx, cy)
+    setDrag({
+      id: d.id, x: d.x - d.grabX, y: d.y - d.grabY, slot,
+    })
 
     /*
      * A folder needs a MOMENT of hovering, not a passing brush. Without the
-     * pause, dragging an icon across a full screen would swallow every icon it
+     * pause, dragging a card across a full screen would swallow every card it
      * crossed on the way.
      */
     if (canMerge && mergeInto !== over.id) {
@@ -179,7 +230,7 @@ export default function Apps({ apps, onChange, loading = false }) {
     }
   }
 
-  const onPointerUp = (item) => {
+  const onPointerUp = () => {
     const d = dragRef.current
     dragRef.current = null
     clearTimeout(holdTimer.current)
@@ -187,43 +238,40 @@ export default function Apps({ apps, onChange, loading = false }) {
 
     if (!d) return
     if (!d.moved) {
-      // Not a drag — the click handler below decides what a tap means.
       setDrag(null)
       setMergeInto(null)
+      // A long press started arranging; the click that follows is not a tap.
+      if (d.held) {
+        justDragged.current = true
+        setTimeout(() => { justDragged.current = false }, 60)
+      }
       return
     }
-    // Suppress the click the browser sends after the drag we just finished.
+    // Suppress the click the browser sends after the drag just finished.
     justDragged.current = true
     setTimeout(() => { justDragged.current = false }, 60)
 
     const target = mergeInto
+    const { cx, cy } = centreOf(d)
     setDrag(null)
     setMergeInto(null)
-
-    if (folder) {
-      // Rearranging inside an open folder.
-      const order = [...(folder.items || [])]
-      const at = order.findIndex((x) => x.id === d.id)
-      const to = Math.max(0, Math.min(order.length - 1, slotAt(d.x, d.y)))
-      if (at >= 0 && at !== to) {
-        const [moved] = order.splice(at, 1)
-        order.splice(to, 0, moved)
-        onChange(items.map((it) => (it.id === folder.id ? { ...it, items: order } : it)))
-      }
-      return
-    }
 
     if (target) {
       onChange(dropOnto(items, d.id, target))
       return
     }
-    onChange(moveTo(items, d.id, slotAt(d.x, d.y)))
+    onChange(moveTo(items, d.id, slotAt(cx, cy)))
+  }
+
+  const cancelDrag = () => {
+    dragRef.current = null
+    setDrag(null)
+    stop()
   }
 
   /*
-   * What a tap means. In edit mode a folder still opens — that is how you
-   * rearrange what is inside one — while an app does not, because its own
-   * remove and edit buttons are sitting on it.
+   * What a tap means. While arranging, a folder still opens and an app opens
+   * its editor; otherwise a folder opens and an app opens its link.
    */
   const tap = (item) => {
     if (justDragged.current || !item) return
@@ -233,11 +281,8 @@ export default function Apps({ apps, onChange, loading = false }) {
   }
 
   const openApp = (item) => {
-    const href = safeUrl(item.url)
-    if (!href) {
-      setDialog({ mode: 'edit', item })
-      return
-    }
+    const href = linkOf(item.url)
+    if (!href) return
     window.open(href, '_blank', 'noopener,noreferrer')
   }
 
@@ -264,13 +309,12 @@ export default function Apps({ apps, onChange, loading = false }) {
   }
 
   const remove = (id) => {
-    onChange(removeItem(items, id))
-    if (openFolder && !items.some((it) => it.id === openFolder)) setOpenFolder(null)
+    const next = removeItem(items, id)
+    onChange(next)
+    if (openFolder && !next.some((it) => it.id === openFolder)) setOpenFolder(null)
   }
 
-  const rows = Math.max(1, Math.ceil((shown.length + (editing ? 1 : 0)) / cols))
-
-  /* Where each tile sits, with the dragged one's slot left open. */
+  /* Where each card sits, with the dragged one's slot left open. */
   const positions = useMemo(() => {
     const map = new Map()
     let cursor = 0
@@ -281,230 +325,240 @@ export default function Apps({ apps, onChange, loading = false }) {
       map.set(it.id, cursor)
       cursor += 1
     })
+    if (drag) map.set(drag.id, drag.slot)
     return map
   }, [shown, drag])
 
+  const rows = Math.max(1, Math.ceil(shown.length / cols))
+  const gridHeight = rows * pitchY - gap
+
+  const about = (
+    <>
+      <p>Click a card to open the app in a new tab. Cards that say Link coming have no address yet.</p>
+      <p>
+        To arrange, press Arrange or press and hold any card. Drag a card to reorder it. Hold it over another
+        app for a moment and the two become a folder. Take apps out of a folder from inside it; a folder left
+        with one app turns back into that app.
+      </p>
+      <p>This page is shared: what you add or arrange, everyone on the team sees.</p>
+      <p>Only http and https links open. Pictures are stored at 128 pixels.</p>
+    </>
+  )
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: 1, minWidth: 300 }}>
-          <Typography variant="h2">Apps</Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-            The links this team keeps reaching for. Drag to rearrange, hold one over another to make a folder, and
-            press and hold anywhere to start editing — the same gestures as a phone, and shared with everyone on the
-            plan rather than kept in one browser.
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          {editing ? (
-            <Button variant="contained" startIcon={<DoneIcon />} onClick={() => setEditing(false)}>Done</Button>
-          ) : (
-            <Button variant="outlined" startIcon={<EditIcon />} onClick={() => { setStatus('all'); setDept('all'); setEditing(true) }}>Arrange</Button>
-          )}
-          <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setDialog({ mode: 'new' })}>
-            Add app
-          </Button>
-        </Box>
-      </Box>
-
-      {/* Status tabs, and the department filter beside them. */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }} data-app-filters>
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={status}
-          onChange={(_e, v) => { if (v) { setStatus(v); setEditing(false) } }}
-          aria-label="app status"
-          sx={{ flexWrap: 'wrap', '& .MuiToggleButton-root': { textTransform: 'none', px: 1.5, gap: 0.75 } }}
-        >
-          <ToggleButton value="all" data-status-tab="all">
-            All <Box component="span" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{inDept.length}</Box>
-          </ToggleButton>
-          {APP_STATUSES.filter((s) => countOf(s.id) > 0 || status === s.id).map((s) => (
-            <ToggleButton key={s.id} value={s.id} data-status-tab={s.id}>
-              <Box component="span" sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: PILL[s.tone] }} />
-              {s.label}
-              <Box component="span" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{countOf(s.id)}</Box>
-            </ToggleButton>
-          ))}
-        </ToggleButtonGroup>
-        {departments.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 190, ml: { sm: 'auto' } }}>
-            <InputLabel id="app-dept">Department</InputLabel>
-            <Select
-              labelId="app-dept"
-              label="Department"
-              value={dept}
-              onChange={(e) => { setDept(e.target.value); setEditing(false) }}
-              data-dept-filter
-            >
-              <MenuItem value="all">All departments</MenuItem>
-              {departments.map((d) => (
-                <MenuItem key={d} value={d}>{d} ({flat.filter((a) => a.department === d).length})</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
-      </Box>
-
-      <Paper
-        variant="outlined"
-        sx={{
-          p: 2,
-          minHeight: 320,
-          position: 'relative',
-          borderRadius: 3,
-          background: (t) => (t.palette.mode === 'dark'
-            ? 'radial-gradient(1200px 400px at 20% -10%, rgba(80,120,220,0.18), transparent 60%)'
-            : 'radial-gradient(1200px 400px at 20% -10%, rgba(80,120,220,0.10), transparent 60%)'),
-          userSelect: 'none',
-          touchAction: 'none',
-        }}
-        onPointerMove={onPointerMove}
-        onPointerUp={() => onPointerUp(null)}
-        onPointerLeave={() => { dragRef.current = null; setDrag(null); stop() }}
-      >
-        <Box ref={surface} sx={{ position: 'relative', height: rows * ROW + 8 }}>
-          {shown.length === 0 && (
-            <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-              {loading && !folder
-                ? <Loading label="Loading your apps…" />
-                : (
-                  <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                    {filtering ? 'No app matches this status and department.' : 'Nothing here yet — add the first app.'}
-                  </Typography>
-                )}
-            </Box>
-          )}
-
-          {shown.map((item) => {
-            const dragging = drag && drag.id === item.id
-            const at = slotOf(positions.get(item.id) ?? 0, cols)
-            const pos = dragging
-              ? { x: drag.x - ICON / 2, y: drag.y - ICON / 2 - 4 }
-              : { x: at.x + (TILE - ICON) / 2, y: at.y }
-            return (
-              <Box
-                key={item.id}
-                data-app-id={item.id}
-                data-app-kind={isFolder(item) ? 'folder' : 'app'}
-                data-app-name={item.name}
-                role="button"
-                tabIndex={0}
-                aria-label={item.name}
-                onPointerDown={(e) => onPointerDown(e, item)}
-                onPointerUp={() => onPointerUp(item)}
-                onClick={() => tap(item)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tap(item) } }}
-                sx={{
-                  position: 'absolute',
-                  width: ICON,
-                  transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${dragging ? 1.18 : 1})`,
-                  transition: dragging ? 'none' : 'transform 240ms cubic-bezier(.2,.8,.3,1)',
-                  zIndex: dragging ? 20 : 1,
-                  cursor: 'pointer',
-                  filter: dragging ? 'drop-shadow(0 12px 22px rgba(0,0,0,.45))' : 'none',
-                  animation: editing && !dragging ? 'wiggle 320ms ease-in-out infinite alternate' : 'none',
-                  '@keyframes wiggle': {
-                    from: { rotate: '-1.6deg' },
-                    to: { rotate: '1.6deg' },
-                  },
-                }}
+    <Box>
+      <PageHeader
+        title="Apps"
+        description="Tools the F&A team uses, by status and department."
+        help={about}
+        actions={(
+          <>
+            {editing ? (
+              <Button variant="contained" startIcon={<DoneIcon />} onClick={() => setEditing(false)}>Done</Button>
+            ) : (
+              <Button
+                variant="outlined"
+                startIcon={<DragIndicatorIcon />}
+                onClick={() => { clearFilters(); setEditing(true) }}
+                disabled={firstLoad}
               >
-                <Box sx={{ position: 'relative' }}>
-                  <Tooltip
-                    placement="bottom"
-                    disableInteractive
-                    title={isFolder(item) ? '' : [item.department, statusOf(item.status)?.label, item.note, !safeUrl(item.url) ? 'No link yet' : null].filter(Boolean).join(' · ')}
-                  >
-                    <Box><AppIcon item={item} merging={mergeInto === item.id} /></Box>
-                  </Tooltip>
-                  {!isFolder(item) && statusOf(item.status) && (
-                    <Box
-                      aria-label={statusOf(item.status).label}
-                      data-app-status={item.status}
-                      sx={{
-                        position: 'absolute', right: -3, bottom: -3, width: 14, height: 14, borderRadius: '50%',
-                        bgcolor: PILL[statusOf(item.status).tone], border: 2, borderColor: 'background.paper',
-                      }}
-                    />
-                  )}
-                  {editing && (
-                    <IconButton
-                      size="small"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); remove(item.id) }}
-                      sx={{
-                        position: 'absolute',
-                        top: -8,
-                        left: -8,
-                        width: 20,
-                        height: 20,
-                        bgcolor: 'background.paper',
-                        border: 1,
-                        borderColor: 'divider',
-                        '&:hover': { bgcolor: 'error.main', color: '#fff' },
-                      }}
-                      aria-label={`remove ${item.name}`}
-                    >
-                      <CloseIcon sx={{ fontSize: 13 }} />
-                    </IconButton>
-                  )}
-                  {editing && !isFolder(item) && (
-                    <IconButton
-                      size="small"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => { e.stopPropagation(); setDialog({ mode: 'edit', item }) }}
-                      sx={{
-                        position: 'absolute',
-                        top: -8,
-                        right: -8,
-                        width: 20,
-                        height: 20,
-                        bgcolor: 'background.paper',
-                        border: 1,
-                        borderColor: 'divider',
-                      }}
-                      aria-label={`edit ${item.name}`}
-                    >
-                      <EditIcon sx={{ fontSize: 12 }} />
-                    </IconButton>
-                  )}
-                </Box>
-                <Typography
-                  variant="caption"
-                  align="center"
-                  sx={{
-                    // Two lines, a little wider than the icon: "LOI Autocheck" reads
-                    // whole instead of "LOI Autoc…".
-                    width: TILE - 6,
-                    ml: `${-(TILE - 6 - ICON) / 2}px`,
-                    mt: 0.5,
-                    fontSize: '0.68rem',
-                    lineHeight: 1.15,
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    wordBreak: 'break-word',
-                    color: 'text.primary',
-                  }}
-                >
-                  {item.name}
-                </Typography>
-              </Box>
+                Arrange
+              </Button>
+            )}
+            <Button
+              variant={editing ? 'outlined' : 'contained'}
+              startIcon={<AddIcon />}
+              onClick={() => setDialog({ mode: 'new' })}
+              disabled={firstLoad}
+            >
+              Add app
+            </Button>
+          </>
+        )}
+      >
+        {/* Status tabs, and the department filter at the right end of the row. */}
+        <Box
+          data-app-filters
+          sx={{
+            display: 'flex',
+            alignItems: { xs: 'stretch', sm: 'center' },
+            flexDirection: { xs: 'column', sm: 'row' },
+            gap: { xs: 3, sm: 4 },
+            borderBottom: { sm: 1 },
+            borderColor: { sm: 'border.subtle' },
+          }}
+        >
+          <Tabs
+            value={status}
+            onChange={(_e, v) => { setStatus(v); setEditing(false) }}
+            variant="scrollable"
+            scrollButtons={false}
+            aria-label="App status"
+            sx={{
+              flex: '1 1 auto',
+              minWidth: 0,
+              borderBottom: { xs: 1, sm: 0 },
+              borderColor: { xs: 'border.subtle' },
+              // The underline sits exactly under each label, and "All" lines up with the title.
+              '& .MuiTab-root': { px: 0, mr: 6, flexShrink: 0 },
+              '& .MuiTab-root:last-of-type': { mr: 0 },
+            }}
+          >
+            <Tab
+              value="all"
+              data-status-tab="all"
+              label={<TabLabel label="All" count={firstLoad ? null : inDept.length} />}
+            />
+            {APP_STATUSES.map((s) => (
+              <Tab
+                key={s.id}
+                value={s.id}
+                data-status-tab={s.id}
+                label={<TabLabel label={s.label} tone={s.tone} count={firstLoad ? null : countOf(s.id)} />}
+              />
+            ))}
+          </Tabs>
+          {/* Drawn while loading too (disabled), so the row does not jump when the apps arrive. */}
+          {(departments.length > 0 || firstLoad) && (
+            <FormControl size="small" sx={{ minWidth: 168, flexShrink: 0, mb: { sm: 1 } }}>
+              <Select
+                value={dept}
+                disabled={firstLoad}
+                onChange={(e) => { setDept(e.target.value); setEditing(false) }}
+                inputProps={{ 'aria-label': 'Department' }}
+                data-dept-filter
+                sx={{ height: { xs: 40, sm: 32 } }}
+                renderValue={(v) => (v === 'all' ? 'All departments' : v)}
+              >
+                <MenuItem value="all">All departments</MenuItem>
+                {departments.map((d) => (
+                  <MenuItem key={d} value={d} sx={{ display: 'flex', gap: 4 }}>
+                    <Box component="span" sx={{ flex: 1 }}>{d}</Box>
+                    <Box component="span" sx={{ color: 'text.tertiary' }}>{flat.filter((a) => a.department === d).length}</Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+        </Box>
+      </PageHeader>
+
+      {firstLoad && <AppsSkeleton phone={phone} tablet={tablet} />}
+
+      {!firstLoad && shown.length === 0 && (
+        <Box sx={{ border: 1, borderColor: 'border.subtle', borderRadius: '8px', bgcolor: 'bg.surface' }}>
+          {filtering ? (
+            <EmptyState
+              icon={FilterListOffIcon}
+              title={emptyTitle(status, dept)}
+              body="Pick another status or department to see more."
+              action={<Button variant="text" onClick={clearFilters}>Show all</Button>}
+            />
+          ) : (
+            <EmptyState
+              icon={AppsOutlinedIcon}
+              title="No apps yet"
+              body="Add the tools the team opens most. Everyone sees the same page."
+            />
+          )}
+        </Box>
+      )}
+
+      {!firstLoad && shown.length > 0 && (
+        <Box
+          ref={setSurface}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={cancelDrag}
+          sx={{
+            position: 'relative',
+            height: gridHeight,
+            userSelect: 'none',
+            WebkitTouchCallout: 'none',
+            touchAction: 'pan-y',
+            ...(phone && {
+              border: 1, borderColor: 'border.subtle', borderRadius: '8px', bgcolor: 'bg.surface', height: gridHeight + 2,
+            }),
+          }}
+        >
+          {width > 0 && shown.map((item) => {
+            const dragging = drag && drag.id === item.id
+            const slot = positions.get(item.id) ?? 0
+            const at = slotOf(slot)
+            const pos = dragging ? { x: drag.x, y: drag.y } : at
+            return (
+              <AppTile
+                key={item.id}
+                item={item}
+                phone={phone}
+                width={tileW}
+                height={tileH}
+                x={pos.x}
+                y={pos.y}
+                first={slot === 0}
+                last={slot === shown.length - 1}
+                dragging={!!dragging}
+                merging={mergeInto === item.id}
+                editing={editing}
+                onPointerDown={(e) => onPointerDown(e, item)}
+                onTap={(e) => {
+                  const href = !editing && !isFolder(item) ? linkOf(item.url) : null
+                  // Ctrl/Cmd-click or a middle click: let the browser open it its own way.
+                  if (href && !justDragged.current && (e.metaKey || e.ctrlKey || e.shiftKey)) return
+                  e.preventDefault()
+                  tap(item)
+                }}
+                onEdit={() => setDialog({ mode: 'edit', item })}
+                onRemove={() => setConfirm(item)}
+              />
             )
           })}
         </Box>
-      </Paper>
+      )}
+
+      {/*
+        The hint while arranging floats at the bottom rather than above the
+        grid: pushing the cards down mid-drag would move the very card the
+        pointer is aiming at.
+      */}
+      {editing && !filtering && !firstLoad && (
+        <Box
+          role="note"
+          sx={{
+            position: 'sticky',
+            bottom: { xs: 12, sm: 16 },
+            zIndex: 30,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            width: 'fit-content',
+            maxWidth: '100%',
+            mx: 'auto',
+            mt: 5,
+            px: 4,
+            py: 2,
+            borderRadius: '8px',
+            bgcolor: 'bg.raised',
+            border: 1,
+            borderColor: 'border.subtle',
+            boxShadow: (t) => (t.palette.mode === 'dark' ? '0 8px 24px rgba(0,0,0,.45)' : '0 8px 24px rgba(16,24,40,.12)'),
+          }}
+        >
+          <DragIndicatorIcon sx={{ fontSize: 18, color: 'text.tertiary', flexShrink: 0 }} />
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Drag to reorder. Drop on another app to make a folder.
+          </Typography>
+        </Box>
+      )}
 
       {folder && (
         <FolderView
           folder={folder}
+          phone={phone}
           onClose={() => setOpenFolder(null)}
           onRename={(name) => onChange(patchItem(items, folder.id, { name }))}
           onOpenApp={openApp}
-          onRemove={remove}
+          onRemove={(child) => setConfirm(child)}
           onEject={(id) => onChange(moveTo(items, id, items.length))}
           onAdd={() => setDialog({ mode: 'new' })}
           editing={editing}
@@ -516,81 +570,284 @@ export default function Apps({ apps, onChange, loading = false }) {
         onClose={() => setDialog(null)}
         onSave={save}
         departments={departments}
-        onMoveOut={folder ? null : undefined}
       />
 
-      <Paper variant="outlined" sx={{ p: 2.5 }}>
-        <Typography variant="h4" sx={{ mb: 1 }}>How it works</Typography>
-        <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
-          <strong>Drag</strong> an icon and the others move out of its way; drop it where the gap opened.{' '}
-          <strong>Hold one icon over another</strong> for a moment and the two become a folder — named after whatever
-          the two apps have in common, if anything. Dragging the second-to-last app out of a folder dissolves it, since
-          a folder holding one app is just an app with an extra tap in front of it.{' '}
-          <strong>Press and hold</strong> the screen to rearrange, which is also where the remove and edit buttons
-          appear. A tap opens the link in a new tab.
-        </Typography>
-        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 1.5 }}>
-          Only http and https links are followed. This screen is part of the shared plan, so what you arrange is what
-          everybody sees — and pictures are stored at 128 pixels so a hundred apps stay a rounding error next to the
-          register.
-        </Typography>
-      </Paper>
+      <ConfirmRemove
+        item={confirm}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => { remove(confirm.id); setConfirm(null) }}
+      />
     </Box>
   )
 }
 
-/** The rounded square itself: a picture, or the initials on a tint. */
-function AppIcon({ item, merging, size = ICON }) {
-  const folderish = isFolder(item)
-  const hue = tintOf(item.name)
+/** A tab's words: a status dot, the label, the count in the quiet colour. */
+function TabLabel({ label, tone, count }) {
   return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.5, whiteSpace: 'nowrap' }}>
+      {tone && (
+        <Box
+          component="span"
+          aria-hidden
+          sx={(t) => ({
+            width: 6, height: 6, borderRadius: '50%', bgcolor: (t.palette.tone[tone] || t.palette.tone.neutral).solid,
+          })}
+        />
+      )}
+      {label}
+      {count != null && <Box component="span" sx={{ color: 'text.tertiary', fontWeight: 400 }}>{count}</Box>}
+    </Box>
+  )
+}
+
+/**
+ * One app, or one folder, as a launcher card (a list row on a phone).
+ * The whole card is the link; while arranging it is the drag handle.
+ */
+function AppTile({
+  item, phone, width, height, x, y, first, last, dragging, merging, editing, onPointerDown, onTap, onEdit, onRemove,
+}) {
+  const folderish = isFolder(item)
+  const st = !folderish ? statusOf(item.status) : null
+  const href = !folderish ? linkOf(item.url) : null
+  const live = editing || folderish || !!href
+  const asLink = !!href && !editing
+  // An app with a link stays an <a> while arranging (without its href), so the
+  // card under a drag that starts arranging is not swapped for a new element
+  // mid-gesture, which would drop the pointer.
+  const count = folderish ? (item.items || []).length : 0
+  const tip = !editing && !dragging && item.note ? item.note : ''
+
+  const sub = folderish
+    ? `${count} apps`
+    : (item.department || (phone ? '' : 'No department'))
+
+  const keep = (e) => e.stopPropagation()
+  const controls = editing && (
     <Box
       sx={{
+        display: 'flex',
+        alignItems: 'center',
+        flexShrink: 0,
+        bgcolor: 'bg.raised',
+        border: 1,
+        borderColor: 'border.subtle',
+        borderRadius: '6px',
+        '& .MuiIconButton-root': {
+          width: phone ? 36 : 24, height: phone ? 36 : 24, borderRadius: '5px', color: 'text.secondary',
+        },
+      }}
+    >
+      <Box
+        data-drag-handle
+        aria-hidden
+        sx={{
+          width: phone ? 36 : 22, height: phone ? 36 : 24, display: 'grid', placeItems: 'center', color: 'text.tertiary', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none',
+        }}
+      >
+        <DragIndicatorIcon sx={{ fontSize: phone ? 20 : 16 }} />
+      </Box>
+      {!folderish && (
+        <Tooltip title="Edit">
+          <IconButton onPointerDown={keep} onClick={(e) => { e.stopPropagation(); onEdit() }} aria-label={`edit ${item.name}`}>
+            <EditOutlinedIcon sx={{ fontSize: 16 }} />
+          </IconButton>
+        </Tooltip>
+      )}
+      <Tooltip title="Remove">
+        <IconButton
+          onPointerDown={keep}
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          aria-label={`remove ${item.name}`}
+          sx={{ '&:hover': { color: 'error.main' } }}
+        >
+          <CloseIcon sx={{ fontSize: 16 }} />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  )
+
+  const pill = st && (
+    <StatusPill tone={st.tone} data-app-status={item.status}>{st.label}</StatusPill>
+  )
+
+  const name = (
+    <Typography
+      variant="body1"
+      component="div"
+      sx={{
+        fontWeight: 500,
+        lineHeight: '20px',
+        overflow: 'hidden',
+        display: '-webkit-box',
+        WebkitLineClamp: phone ? 1 : 2,
+        WebkitBoxOrient: 'vertical',
+        overflowWrap: 'anywhere',
+        color: 'text.primary',
+      }}
+    >
+      {item.name}
+    </Typography>
+  )
+
+  // No address yet: said beside the department, so the name keeps its two lines.
+  const linkComing = !folderish && !href && (
+    <Box component="span" sx={{ color: 'text.tertiary' }}>{sub ? ', link coming' : 'Link coming'}</Box>
+  )
+
+  const body = phone ? (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', gap: 3, height: '100%', px: 3,
+    }}
+    >
+      <AppIcon item={item} merging={merging} />
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        {name}
+        <Typography variant="body2" noWrap sx={{ color: 'text.secondary' }}>
+          {sub}
+          {linkComing}
+        </Typography>
+      </Box>
+      {editing ? controls : pill}
+    </Box>
+  ) : (
+    <Box sx={{
+      display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', p: 3,
+    }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, minHeight: 40 }}>
+        <AppIcon item={item} merging={merging} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {name}
+        </Box>
+        {asLink && <OpenInNewIcon aria-hidden sx={{ fontSize: 16, color: 'text.tertiary', alignSelf: 'flex-start', mt: 0.5 }} />}
+      </Box>
+      <Box sx={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minHeight: 20,
+      }}
+      >
+        <Typography variant="body2" noWrap sx={{ color: item.department || folderish ? 'text.secondary' : 'text.tertiary', minWidth: 0 }}>
+          {sub}
+          {linkComing}
+        </Typography>
+        {/*
+          While arranging, the controls take the pill's corner: up top they
+          would squeeze a 1280px card's name down to "PO Informati…".
+        */}
+        {editing ? controls : pill}
+      </Box>
+    </Box>
+  )
+
+  return (
+    <Tooltip title={tip} placement="bottom-start" enterDelay={500} disableInteractive>
+      <Box
+        component={href ? 'a' : 'div'}
+        href={asLink ? href : undefined}
+        target={asLink ? '_blank' : undefined}
+        rel={asLink ? 'noopener noreferrer' : undefined}
+        draggable={false}
+        data-app-id={item.id}
+        data-app-kind={folderish ? 'folder' : 'app'}
+        data-app-name={item.name}
+        role={asLink ? undefined : (live ? 'button' : undefined)}
+        tabIndex={live ? 0 : -1}
+        aria-label={folderish ? `${item.name}, folder of ${count} apps` : (editing ? `edit ${item.name}` : item.name)}
+        aria-disabled={live ? undefined : true}
+        onPointerDown={onPointerDown}
+        onClick={onTap}
+        onKeyDown={(e) => {
+          // A link already turns Enter into a click; a button-like card needs telling.
+          if (!live || asLink) return
+          if (e.key === 'Enter' || e.key === ' ') onTap(e)
+        }}
+        sx={(t) => ({
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width,
+          height,
+          display: 'block',
+          color: 'inherit',
+          textDecoration: 'none',
+          transform: `translate3d(${x}px, ${y}px, 0)`,
+          transition: dragging ? 'none' : 'transform 180ms ease-out, background-color 120ms, border-color 120ms',
+          zIndex: dragging ? 20 : 1,
+          cursor: editing ? (dragging ? 'grabbing' : 'grab') : (live ? 'pointer' : 'default'),
+          outline: merging ? `2px solid ${t.palette.primary.main}` : undefined,
+          outlineOffset: merging ? 1 : undefined,
+          ...(phone ? {
+            bgcolor: dragging ? 'bg.raised' : (merging ? 'primary.tint' : 'transparent'),
+            // The colour after the width: `border: 1` alone resets it to the text colour.
+            ...(dragging ? { border: 1 } : { borderTop: first ? 0 : 1 }),
+            borderColor: dragging ? 'border.strong' : 'border.subtle',
+            borderRadius: dragging ? '8px' : `${first ? 8 : 0}px ${first ? 8 : 0}px ${last ? 8 : 0}px ${last ? 8 : 0}px`,
+          } : {
+            bgcolor: dragging ? 'bg.raised' : (merging ? 'primary.tint' : 'bg.surface'),
+            border: 1,
+            borderColor: dragging ? 'border.strong' : 'border.subtle',
+            borderRadius: '8px',
+          }),
+          boxShadow: dragging ? (t.palette.mode === 'dark' ? '0 8px 24px rgba(0,0,0,.45)' : '0 8px 24px rgba(16,24,40,.12)') : 'none',
+          ...(live && !dragging && {
+            '&:hover': { bgcolor: merging ? 'primary.tint' : 'bg.subtle', ...(!phone && { borderColor: 'border.strong' }) },
+          }),
+          '&:focus-visible': { outlineOffset: phone ? -2 : 2 },
+          '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+        })}
+      >
+        {body}
+      </Box>
+    </Tooltip>
+  )
+}
+
+/** The square itself: a picture, a folder's first four, or neutral initials. */
+function AppIcon({ item, merging, size = 40 }) {
+  const folderish = isFolder(item)
+  const radius = size >= 56 ? 10 : size <= 32 ? 6 : 8
+  return (
+    <Box
+      aria-hidden
+      sx={(t) => ({
         width: size,
         height: size,
-        borderRadius: `${size * 0.24}px`,
+        flexShrink: 0,
+        borderRadius: `${radius}px`,
         overflow: 'hidden',
         display: 'grid',
         placeItems: 'center',
         position: 'relative',
-        // The ring iOS shows when a drop would make a folder.
-        boxShadow: merging
-          ? '0 0 0 3px rgba(255,255,255,.85), 0 0 0 6px rgba(80,140,255,.9)'
-          : '0 2px 6px rgba(0,0,0,.28)',
-        transform: merging ? 'scale(1.08)' : 'none',
-        transition: 'transform 160ms ease, box-shadow 160ms ease',
-        background: folderish
-          ? 'linear-gradient(160deg, rgba(255,255,255,.28), rgba(255,255,255,.08))'
-          : (item.icon ? '#fff' : `linear-gradient(160deg, hsl(${hue} 78% 58%), hsl(${hue + 18} 72% 44%))`),
-        backdropFilter: folderish ? 'blur(6px)' : 'none',
-        border: folderish ? '1px solid rgba(255,255,255,.25)' : 'none',
-      }}
+        bgcolor: 'bg.subtle',
+        transform: merging ? 'scale(1.06)' : 'none',
+        transition: 'transform 120ms ease-out',
+        // A hairline inside the edge, so a white picture still has a shape on a white card.
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 'inherit',
+          boxShadow: `inset 0 0 0 1px ${t.palette.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.08)'}`,
+          pointerEvents: 'none',
+        },
+      })}
     >
       {folderish ? (
         <Box sx={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '3px',
-          p: '6px',
-          width: '100%',
-          height: '100%',
+          display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '2px', p: '4px', width: '100%', height: '100%',
         }}
         >
-          {(item.items || []).slice(0, 9).map((child) => (
+          {(item.items || []).slice(0, 4).map((child) => (
             <Box
               key={child.id}
               sx={{
-                borderRadius: '4px',
-                overflow: 'hidden',
-                background: child.icon ? '#fff' : `hsl(${tintOf(child.name)} 74% 56%)`,
-                display: 'grid',
-                placeItems: 'center',
+                borderRadius: '3px', overflow: 'hidden', bgcolor: 'border.subtle', display: 'grid', placeItems: 'center',
               }}
             >
               {child.icon
-                ? <Box component="img" src={child.icon} alt="" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ? <Box component="img" src={child.icon} alt="" draggable={false} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 : (
-                  <Typography sx={{ fontSize: 7, fontWeight: 800, color: '#fff' }}>
+                  <Typography component="span" sx={{ fontSize: 8, fontWeight: 600, color: 'text.secondary', lineHeight: 1 }}>
                     {initialsOf(child.name).slice(0, 1)}
                   </Typography>
                 )}
@@ -598,84 +855,199 @@ function AppIcon({ item, merging, size = ICON }) {
           ))}
         </Box>
       ) : item.icon ? (
-        <Box component="img" src={item.icon} alt="" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      ) : (
-        <Typography sx={{ fontWeight: 800, color: '#fff', fontSize: size * 0.3, letterSpacing: '.02em' }}>
+        <Box component="img" src={item.icon} alt="" draggable={false} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : item.name ? (
+        <Typography component="span" sx={{ fontWeight: 600, color: 'text.secondary', fontSize: Math.round(size * 0.34), lineHeight: 1 }}>
           {initialsOf(item.name)}
         </Typography>
+      ) : (
+        // Nothing typed yet: a plain picture mark rather than made-up initials.
+        <ImageOutlinedIcon sx={{ fontSize: Math.round(size * 0.42), color: 'text.tertiary' }} />
       )}
     </Box>
   )
 }
 
-/** An opened folder: the iOS sheet, with its name editable in place. */
-function FolderView({ folder, onClose, onRename, onOpenApp, onRemove, onEject, onAdd, editing }) {
+/** Eight placeholder cards in the grid's own shape while the shared page loads. */
+function AppsSkeleton({ phone, tablet }) {
+  const cards = Array.from({ length: 8 }, (_, i) => i)
   return (
-    <Dialog open fullWidth maxWidth="sm" onClose={onClose} PaperProps={{ sx: { borderRadius: 3 }, 'data-folder-open': folder.id }}>
-      <DialogTitle sx={{ pb: 1 }}>
-        <TextField
-          variant="standard"
-          value={folder.name}
-          onChange={(e) => onRename(e.target.value)}
-          inputProps={{ style: { textAlign: 'center', fontSize: '1.05rem', fontWeight: 700 } }}
-          fullWidth
-        />
-      </DialogTitle>
-      <DialogContent>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'flex-start', py: 1 }}>
-          {(folder.items || []).map((child) => (
-            <Box key={child.id} sx={{ width: ICON, textAlign: 'center' }}>
-              <Box sx={{ position: 'relative' }}>
-                <Box onClick={() => onOpenApp(child)} sx={{ cursor: 'pointer' }}>
-                  <AppIcon item={child} />
-                </Box>
-                {editing && (
-                  <IconButton
-                    size="small"
-                    onClick={() => onRemove(child.id)}
-                    sx={{
-                      position: 'absolute', top: -8, left: -8, width: 20, height: 20, bgcolor: 'background.paper', border: 1, borderColor: 'divider',
-                    }}
-                    aria-label={`remove ${child.name}`}
-                  >
-                    <CloseIcon sx={{ fontSize: 13 }} />
-                  </IconButton>
-                )}
-              </Box>
-              <Typography variant="caption" noWrap sx={{ display: 'block', mt: 0.5, fontSize: '0.68rem' }}>
-                {child.name}
-              </Typography>
-              <Tooltip title="Take it out of the folder">
-                <Button size="small" data-eject={child.id} sx={{ fontSize: '0.6rem', minWidth: 0, px: 0.5 }} onClick={() => onEject(child.id)}>
-                  move out
-                </Button>
-              </Tooltip>
-            </Box>
-          ))}
+    <Box
+      role="status"
+      aria-live="polite"
+      aria-label="Loading apps"
+      data-loading
+      sx={phone ? {
+        border: 1, borderColor: 'border.subtle', borderRadius: '8px', bgcolor: 'bg.surface',
+      } : {
+        display: 'grid',
+        gap: `${GAP}px`,
+        gridTemplateColumns: tablet ? 'repeat(2, minmax(0, 1fr))' : `repeat(auto-fill, minmax(${MIN_TILE}px, 1fr))`,
+      }}
+    >
+      {cards.map((i) => (phone ? (
+        <Box
+          key={i}
+          sx={{
+            height: ROW_H, display: 'flex', alignItems: 'center', gap: 3, px: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle',
+          }}
+        >
+          <Skeleton variant="rounded" width={40} height={40} sx={{ borderRadius: '8px' }} />
+          <Box sx={{ flex: 1 }}>
+            <Skeleton variant="text" width={`${50 + ((i * 17) % 30)}%`} height={18} />
+            <Skeleton variant="text" width={80} height={16} />
+          </Box>
+          <Skeleton variant="rounded" width={52} height={20} sx={{ borderRadius: '4px' }} />
         </Box>
+      ) : (
+        <Box
+          key={i}
+          sx={{
+            height: CARD_H, p: 3, border: 1, borderColor: 'border.subtle', borderRadius: '8px', bgcolor: 'bg.surface', display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <Skeleton variant="rounded" width={40} height={40} sx={{ borderRadius: '8px', flexShrink: 0 }} />
+            <Skeleton variant="text" width={`${45 + ((i * 17) % 35)}%`} height={18} />
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Skeleton variant="text" width={80} height={16} />
+            <Skeleton variant="rounded" width={52} height={20} sx={{ borderRadius: '4px' }} />
+          </Box>
+        </Box>
+      )))}
+    </Box>
+  )
+}
+
+/** Remove an app or a folder, after saying who it disappears for. */
+function ConfirmRemove({ item, onClose, onConfirm }) {
+  if (!item) return null
+  const folderish = isFolder(item)
+  const n = folderish ? (item.items || []).length : 0
+  return (
+    <Dialog open fullWidth maxWidth="sm" onClose={onClose} aria-labelledby="remove-app-title">
+      <DialogTitle id="remove-app-title">{`Remove ${item.name}?`}</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+          {folderish
+            ? `The folder and the ${n} apps in it leave the Apps page for everyone.`
+            : 'It leaves the Apps page for everyone. You can add it again later.'}
+        </Typography>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onAdd} startIcon={<AddIcon />}>Add to this folder</Button>
-        <Box sx={{ flex: 1 }} />
+        <Button variant="text" onClick={onClose}>Cancel</Button>
+        <Button variant="outlined" color="error" onClick={onConfirm}>Remove</Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
+/** An opened folder: its name, editable in place, and its apps as rows. */
+function FolderView({
+  folder, phone, onClose, onRename, onOpenApp, onRemove, onEject, onAdd, editing,
+}) {
+  return (
+    <Dialog
+      open
+      fullWidth
+      maxWidth="sm"
+      fullScreen={phone}
+      onClose={onClose}
+      aria-label={`Folder ${folder.name}`}
+      PaperProps={{ 'data-folder-open': folder.id }}
+    >
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, pb: 2 }}>
+        <TextField
+          size="small"
+          label="Folder name"
+          value={folder.name}
+          onChange={(e) => onRename(e.target.value)}
+          sx={{ flex: 1, mt: 1 }}
+        />
+        <Tooltip title="Close">
+          <IconButton onClick={onClose} aria-label="close folder" sx={{ mt: 1 }}><CloseIcon /></IconButton>
+        </Tooltip>
+      </DialogTitle>
+      <DialogContent sx={{ px: 0 }}>
+        {(folder.items || []).map((child, i) => {
+          const st = statusOf(child.status)
+          const href = linkOf(child.url)
+          return (
+            <Box
+              key={child.id}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 3, px: 5, py: 2, borderTop: i ? 1 : 0, borderColor: 'border.subtle',
+              }}
+            >
+              <Box
+                role={href ? 'link' : undefined}
+                tabIndex={href ? 0 : -1}
+                onClick={() => onOpenApp(child)}
+                onKeyDown={(e) => { if (e.key === 'Enter') onOpenApp(child) }}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 3, flex: 1, minWidth: 0, cursor: href ? 'pointer' : 'default', borderRadius: '6px',
+                }}
+              >
+                <AppIcon item={child} size={32} />
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body1" noWrap sx={{ fontWeight: 500 }}>{child.name}</Typography>
+                  <Typography variant="body2" noWrap sx={{ color: 'text.secondary' }}>
+                    {child.department || 'No department'}
+                    {!href && <Box component="span" sx={{ color: 'text.tertiary' }}>, link coming</Box>}
+                  </Typography>
+                </Box>
+              </Box>
+              {st && !phone && <StatusPill tone={toneOf(child.status)}>{st.label}</StatusPill>}
+              <Button size="small" variant="text" data-eject={child.id} onClick={() => onEject(child.id)} sx={{ flexShrink: 0 }}>
+                Move out
+              </Button>
+              {editing && (
+                <Tooltip title="Remove">
+                  <IconButton size="small" onClick={() => onRemove(child)} aria-label={`remove ${child.name}`} sx={{ '&:hover': { color: 'error.main' } }}>
+                    <CloseIcon sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+          )
+        })}
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onAdd} startIcon={<AddIcon />} sx={{ mr: 'auto' }}>Add to this folder</Button>
         <Button variant="contained" onClick={onClose}>Done</Button>
       </DialogActions>
     </Dialog>
   )
 }
 
-/** Add or edit one app: a name, a link, and a picture. */
-function AppDialog({ state, onClose, onSave, departments = [] }) {
-  const [draft, setDraft] = useState({ name: '', url: '', icon: null, department: '', status: '', note: '' })
+const BLANK = {
+  name: '', url: '', icon: null, department: '', status: '', note: '',
+}
+
+/** Add or edit one app: a picture, a name, a link, where it stands. */
+function AppDialog({
+  state, onClose, onSave, departments = [],
+}) {
+  const theme = useTheme()
+  const phone = useMediaQuery(theme.breakpoints.down('sm'), { noSsr: true })
+  const [draft, setDraft] = useState(BLANK)
   const [error, setError] = useState(null)
+  const [pictureError, setPictureError] = useState(null)
 
   useEffect(() => {
     if (!state) return
     const it = state.item
     setDraft(it
-      ? { id: it.id, name: it.name, url: it.url || '', icon: it.icon || null, department: it.department || '', status: it.status || '', note: it.note || '' }
-      : { name: '', url: '', icon: null, department: '', status: '', note: '' })
+      ? {
+        id: it.id, name: it.name, url: it.url || '', icon: it.icon || null, department: it.department || '', status: it.status || '', note: it.note || '',
+      }
+      : BLANK)
     setError(null)
+    setPictureError(null)
   }, [state])
+
+  const deptOptions = useMemo(() => [...new Set([...APP_DEPARTMENTS, ...departments])], [departments])
 
   /*
    * The picture is squared off and shrunk to 128 before it is stored. A photo
@@ -695,96 +1067,114 @@ function AppDialog({ state, onClose, onSave, departments = [] }) {
         const ctx = canvas.getContext('2d')
         ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 128, 128)
         setDraft((d) => ({ ...d, icon: canvas.toDataURL('image/png') }))
+        setPictureError(null)
       }
-      img.onerror = () => setError('That file could not be read as an image.')
+      img.onerror = () => setPictureError('That file is not a picture. Choose a PNG or JPG.')
       img.src = reader.result
     }
     reader.readAsDataURL(file)
   }
 
+  const submit = () => {
+    if (draft.url.trim() && !safeUrl(draft.url)) {
+      setError('Enter a web address such as intranet.lotuss.org, or leave it empty.')
+      return
+    }
+    onSave(draft)
+  }
+
   if (!state) return null
+  const set = (k) => (e) => setDraft((d) => ({ ...d, [k]: e.target.value }))
   return (
-    <Dialog open fullWidth maxWidth="xs" onClose={onClose}>
-      <DialogTitle>{draft.id ? 'Edit app' : 'Add an app'}</DialogTitle>
+    <Dialog open fullWidth maxWidth="sm" fullScreen={phone} onClose={onClose} aria-labelledby="app-dialog-title">
+      <DialogTitle id="app-dialog-title" sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box component="span" sx={{ flex: 1 }}>{draft.id ? 'Edit app' : 'Add app'}</Box>
+        <Tooltip title="Close">
+          <IconButton onClick={onClose} aria-label="close" sx={{ mr: -2 }}><CloseIcon /></IconButton>
+        </Tooltip>
+      </DialogTitle>
       <DialogContent>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2, mt: 0.5 }}>
-          <AppIcon item={{ name: draft.name || 'App', icon: draft.icon }} size={72} />
-          <Box>
-            <Button component="label" size="small" variant="outlined">
-              Choose picture
-              <input hidden type="file" accept="image/*" onChange={(e) => takeImage(e.target.files?.[0])} />
-            </Button>
-            {draft.icon && (
-              <Button size="small" onClick={() => setDraft((d) => ({ ...d, icon: null }))} sx={{ ml: 1 }}>
-                Remove
-              </Button>
-            )}
-            <Typography variant="caption" sx={{ display: 'block', color: 'text.disabled', mt: 0.5 }}>
-              Squared off and stored at 128px. Without one, the initials are used.
-            </Typography>
+        <Box
+          component="form"
+          noValidate
+          onSubmit={(e) => { e.preventDefault(); submit() }}
+          sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 2 }}
+        >
+          <Box sx={{ display: 'flex', gap: 4, alignItems: 'center', mb: 2 }}>
+            <AppIcon item={{ name: draft.name.trim(), icon: draft.icon }} size={56} />
+            <Box sx={{ minWidth: 0 }}>
+              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Button component="label" size="small" variant="outlined">
+                  Choose picture
+                  <input hidden type="file" accept="image/*" onChange={(e) => takeImage(e.target.files?.[0])} />
+                </Button>
+                {draft.icon && (
+                  <Button size="small" variant="text" onClick={() => setDraft((d) => ({ ...d, icon: null }))}>
+                    Remove picture
+                  </Button>
+                )}
+              </Box>
+              <Typography variant="caption" component="div" sx={{ color: pictureError ? 'error.main' : 'text.secondary', mt: 1 }}>
+                {pictureError || 'Square pictures work best. Without one, the initials show.'}
+              </Typography>
+            </Box>
           </Box>
-        </Box>
-        <TextField
-          fullWidth
-          size="small"
-          label="Name"
-          name="app-name"
-          value={draft.name}
-          onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-          sx={{ mb: 2 }}
-          autoFocus
-        />
-        <TextField
-          fullWidth
-          size="small"
-          label="Link"
-          name="app-url"
-          placeholder="lotusretails.atlassian.net/jira/software/..."
-          value={draft.url}
-          onChange={(e) => setDraft((d) => ({ ...d, url: e.target.value }))}
-          error={!!error}
-          helperText={error || 'http and https only. Typed without one, https is assumed.'}
-        />
-        <Box sx={{ display: 'flex', gap: 1.5, mt: 2 }}>
-          <Autocomplete
-            freeSolo
-            options={departments}
-            value={draft.department}
-            onInputChange={(_e, v) => setDraft((d) => ({ ...d, department: v }))}
-            sx={{ flex: 1 }}
-            renderInput={(params) => <TextField {...params} size="small" label="Department" name="app-department" />}
+          <TextField
+            fullWidth
+            size="small"
+            label="Name"
+            name="app-name"
+            value={draft.name}
+            onChange={set('name')}
+            autoFocus
           />
-          <FormControl size="small" sx={{ flex: 1 }}>
-            <InputLabel id="app-status">Status</InputLabel>
-            <Select labelId="app-status" label="Status" value={draft.status} onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))} name="app-status">
-              <MenuItem value="">Not set</MenuItem>
-              {APP_STATUSES.map((s) => <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>)}
-            </Select>
-          </FormControl>
+          <TextField
+            fullWidth
+            size="small"
+            label="Link"
+            name="app-url"
+            placeholder="lotusretails.atlassian.net/jira"
+            value={draft.url}
+            onChange={(e) => { setError(null); set('url')(e) }}
+            error={!!error}
+            helperText={error || 'https is added if missing'}
+          />
+          <Box sx={{ display: 'flex', gap: 3, flexDirection: { xs: 'column', sm: 'row' } }}>
+            <Autocomplete
+              freeSolo
+              options={deptOptions}
+              inputValue={draft.department}
+              onInputChange={(_e, v) => setDraft((d) => ({ ...d, department: v }))}
+              sx={{ flex: 1 }}
+              renderInput={(params) => (
+                <TextField {...params} size="small" label="Department" name="app-department" helperText="Pick one or type a new one" />
+              )}
+            />
+            <FormControl size="small" sx={{ flex: 1 }}>
+              <InputLabel id="app-status">Status</InputLabel>
+              <Select labelId="app-status" label="Status" value={draft.status} onChange={set('status')} name="app-status">
+                <MenuItem value=""><Box component="span" sx={{ color: 'text.secondary' }}>Not set</Box></MenuItem>
+                {APP_STATUSES.map((s) => (
+                  <MenuItem key={s.id} value={s.id}>{s.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+          <TextField
+            fullWidth
+            size="small"
+            label="Note (optional)"
+            name="app-note"
+            value={draft.note}
+            onChange={set('note')}
+          />
+          <button type="submit" hidden aria-hidden tabIndex={-1} />
         </Box>
-        <TextField
-          fullWidth
-          size="small"
-          label="Note (optional)"
-          name="app-note"
-          value={draft.note}
-          onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
-          sx={{ mt: 2 }}
-        />
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          onClick={() => {
-            if (draft.url.trim() && !safeUrl(draft.url)) {
-              setError('That is not a link this can open.')
-              return
-            }
-            onSave(draft)
-          }}
-        >
-          {draft.id ? 'Save' : 'Add'}
+        <Button variant="text" onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={submit}>
+          {draft.id ? 'Save changes' : 'Add app'}
         </Button>
       </DialogActions>
     </Dialog>
