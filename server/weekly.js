@@ -506,7 +506,9 @@ export async function byProject({ person } = {}) {
     for (const t of e.tasks || []) {
       if (!t.projectKey) continue
       // An update sent on a Jira task (the weekly update), rather than a form row.
-      const sent = !!t.reportedAt || t.source === 'jira'
+      // A task only planned into a week ("My plan is set") has no answer yet:
+      // it is not an update, and must not hide the task's last real one.
+      const sent = !!t.reportedAt || (t.source === 'jira' && t.done != null)
       slot(t.projectKey).history.push({
         week: e.week, person: e.person, title: t.title, done: t.done, pct: t.pct, expected: t.expected,
         newDate: t.newDate, blocker: t.blocker || '', blockerCategory: t.blockerCategory, priority: t.priority,

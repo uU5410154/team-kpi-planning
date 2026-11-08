@@ -652,9 +652,12 @@ function NewProject({ week, onDone, onCancel, writable }) {
  * card that left for "Already updated" does not vanish without a word.
  */
 function ProjectGroup({
-  name, projectKey, rows, planning, writable, flashes = [], onDismiss, children,
+  name, projectKey, rows, allRows = rows, planning, writable, flashes = [], onDismiss, children,
 }) {
-  const left = rows.filter(({ t }) => needsUpdate(t, writable)).length
+  // Counted over all of the project's tasks, not just the ones the filter
+  // shows: under "Already updated" a block with tasks still to do must not
+  // say "All updated".
+  const left = allRows.filter(({ t }) => needsUpdate(t, writable)).length
   const [open, setOpen] = useState(true)
   return (
     <Box
@@ -883,6 +886,7 @@ export default function JiraWeek({
           name={g.name}
           projectKey={g.key}
           rows={g.rows}
+          allRows={rows.filter((r) => groupKeyOf(r.t) === g.key)}
           planning={planning}
           writable={writable}
           flashes={flashes.filter((f) => f.group === g.key)}
