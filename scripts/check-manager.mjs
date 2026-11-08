@@ -276,8 +276,8 @@ try {
     })
     await m.keyboard.type('Load the budget data')
     await m.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save draft')?.click())
-    await m.waitForFunction(() => document.body.innerText.includes('Saved.'), { timeout: 10000 }).catch(() => {})
-    check('  the member saves', (await text(m)).includes('Saved.'))
+    await m.waitForFunction(() => document.body.innerText.includes('Draft saved.'), { timeout: 10000 }).catch(() => {})
+    check('  the member saves', (await text(m)).includes('Draft saved.'))
   }
 
   const done = await waitMail('followup-done:')
@@ -497,7 +497,7 @@ try {
     const wk = await text(m)
     check('THEIR WEEK, AND NOBODY ELSE’S: no team list, no colleague’s focus',
       !wk.includes('KADE-ONLY') && !wk.includes('What the team is focused on') && !wk.includes('The team this week'))
-    check('  THE WEEK CARRIES ITS NUMBER', /Week \d{1,2}\n/.test(wk) && /\d{1,2} \w{3} \d{4} · this week/.test(wk))
+    check('  THE WEEK CARRIES ITS NUMBER', /Week \d{1,2}, \d{1,2} \w{3}\n/.test(wk))
     check('  no Excel export and no file menu — both are the whole plan',
       !(await m.evaluate(() => [...document.querySelectorAll('button')].some((b) => /Export Excel/.test(b.textContent) || b.getAttribute('aria-label') === 'More'))))
     check('  the side menu shows their own progress, not the team’s', wk.includes('Your projects, finished') && !wk.includes('Saving hours, committed'))
@@ -507,7 +507,7 @@ try {
     if (process.env.SHOT_DIR) { await m.evaluate(() => document.querySelector('section[aria-label="your projects"]')?.scrollIntoView({ block: 'center' })); await m.screenshot({ path: `${process.env.SHOT_DIR}/my-projects.png` }) }
     const mine = await m.evaluate(() => [...document.querySelectorAll('[data-my-project]')].map((x) => x.getAttribute('data-my-project')))
     check('THEIR PROJECTS ARE ON THE PAGE ALREADY', wk.includes('Your projects') && mine.length > 0 && !mine.includes('FNP-267'), mine.join(','))
-    check('  one already planned says so', (await m.evaluate(() => document.querySelector('[data-my-project="FNP-379"]')?.textContent || '')).includes('on this week’s plan'))
+    check('  one already planned says so', (await m.evaluate(() => document.querySelector('[data-my-project="FNP-379"]')?.textContent || '')).toLowerCase().includes('on this week’s plan'))
     const addOn = await m.evaluate(() => {
       const row = [...document.querySelectorAll('[data-my-project]')].find((x) => [...x.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Add task'))
       if (!row) return null

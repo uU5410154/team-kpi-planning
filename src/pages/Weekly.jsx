@@ -1,114 +1,100 @@
 import { projectOnHold } from '../lib/hold.js'
-import { needsUpdate } from '../lib/taskUpdate.js'
+import { needsUpdate, statusOf } from '../lib/taskUpdate.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Box, Paper, Typography, Button, IconButton, Tooltip, Chip, Alert, TextField, MenuItem, Autocomplete,
-  ToggleButton, ToggleButtonGroup, Divider, Collapse, Stack, useMediaQuery,
+  Box, Paper, Typography, Button, IconButton, Tooltip, Alert, TextField, MenuItem, Autocomplete,
+  ToggleButton, ToggleButtonGroup, Collapse, Skeleton, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions,
+  useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
+import visuallyHidden from '@mui/utils/visuallyHidden'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import AddIcon from '@mui/icons-material/Add'
+import CloseIcon from '@mui/icons-material/Close'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import ExpandLessIcon from '@mui/icons-material/ExpandLess'
-import LockIcon from '@mui/icons-material/LockOutlined'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import WorkOutlineIcon from '@mui/icons-material/WorkOutlineOutlined'
 import AiAssist from '../components/AiAssist.jsx'
-import JiraWeek from '../components/JiraWeek.jsx'
-import Loading from '../components/Loading.jsx'
+import JiraWeek, { choiceSx } from '../components/JiraWeek.jsx'
+import { Spinner } from '../components/Loading.jsx'
 import { activeInWeek } from '../lib/manager.js'
 import Markdown from '../components/Markdown.jsx'
-import { STATUS } from '../lib/palette.js'
 import {
-  Pill, IconTile, personColor,
-} from '../components/Brand.jsx'
+  EmptyState, ErrorState, PageHeader, Section, StatusPill,
+} from '../components/ui.jsx'
 import { pulseSx } from '../components/pulse.js'
 import * as api from '../lib/api.js'
 import {
-  addWeeks, weekLabel, weekNo, weekTitle, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
+  addWeeks, weekNo, bangkokTime, STATUS_LABEL, PRIORITIES, BLOCKER_CATEGORIES, newTaskId,
   planProblems, reportProblems, cleanEntry, slipImpact, PROPOSAL_LABEL,
 } from '../lib/weekly.js'
 
 /**
  * THE WEEKLY CHECK-IN.
  *
- * Two halves of one page. Monday: what this week is about and the tasks that
- * make it up. Friday: how each of those went — finished or not, and if not,
- * what is in the way, when it will land instead, and whether that moves the
- * project. Below, for an administrator only, the team: every plan, report
- * and blocker. A team member sees their own week and nobody else's.
+ * A member's page is a short to-do list: the one next thing to do at the top,
+ * then their tasks for the week under their projects — open cards for what
+ * still needs an update, single rows for what is done. Below, for an
+ * administrator only, the team: every plan, report and blocker. A team member
+ * sees their own week and nobody else's.
  *
  * The server decides who sees what (see /api/weekly in server/index.js). This
  * page only lays out what it is sent.
  */
 
-/**
- * THE NEXT STEP for the week on screen: one line saying what to do, and, when
- * there is something to do, the one button that does it, pulsing softly so it
- * is the first thing the eye lands on.
- */
-function NextStep({ next }) {
-  const todo = !!(next.action && next.onClick)
+const fmtDay = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '–')
+const fmtWeek = (w) => new Date(`${w}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+/** Bangkok wall-clock without the comma: "Fri 6 Nov 15:00". */
+const bkk = (ms) => bangkokTime(ms).replace(',', '')
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+const DUE_LINE = 'Plan due Mon 08:00, update due Fri 15:00, editable until next Mon 08:00 (Bangkok).'
+
+/* ------------------------------------------------------------ small marks */
+
+/** A person's initial on a neutral disc. */
+function Avatar({ name, size = 28 }) {
+  const letter = (String(name || '?').match(/[\p{L}]/u) || ['?'])[0].toUpperCase()
   return (
-    <Paper
-      variant="outlined"
-      data-next-step
+    <Box
+      aria-hidden
       sx={{
-        flex: 1,
-        minWidth: 260,
-        p: { xs: 1.5, sm: 2 },
-        display: 'flex',
-        alignItems: 'center',
-        gap: 2,
-        flexWrap: 'wrap',
-        borderColor: todo ? 'primary.main' : 'divider',
+        width: size,
+        height: size,
+        flexShrink: 0,
+        borderRadius: '50%',
+        display: 'grid',
+        placeItems: 'center',
+        bgcolor: 'bg.subtle',
+        color: 'text.secondary',
+        fontSize: 12,
+        fontWeight: 500,
       }}
     >
-      <Box sx={{ flex: 1, minWidth: 200 }}>
-        <Typography variant="overline" sx={{ color: todo ? 'primary.light' : 'text.secondary', lineHeight: 1.4, display: 'block' }}>
-          Next step
-        </Typography>
-        {next.loading
-          ? <Box sx={{ mt: 0.5 }}><Loading label="Working out your next step…" /></Box>
-          : <Typography variant="h4" sx={{ fontWeight: 700 }}>{next.label}</Typography>}
-        {next.sub && <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>{next.sub}</Typography>}
-      </Box>
-      {todo && (
-        <Button
-          variant="contained"
-          onClick={next.onClick}
-          endIcon={<ArrowForwardIcon />}
-          sx={[{ flexShrink: 0 }, next.pulse && pulseSx]}
-          data-next-action
-        >
-          {next.action}
-        </Button>
-      )}
-    </Paper>
+      {letter}
+    </Box>
   )
 }
 
-// Where somebody stands, as a pill colour. The word is always on the pill too.
-const PILL_TONE = {
-  open: 'neutral', missing: 'bad', ontime: 'good', late: 'warn',
+// Where somebody stands, as a pill: "Plan late", "Report missing".
+const STANDING_TONE = {
+  open: 'neutral', missing: 'danger', ontime: 'success', late: 'warning',
 }
-// Must / should / nice, as the reference's HIGH / MEDIUM / LOW.
-const PRIORITY_TONE = { must: 'high', should: 'medium', nice: 'low' }
+function StandingPill({ label, value }) {
+  if (!value || value === 'open') return null
+  return <StatusPill tone={STANDING_TONE[value]}>{`${label} ${STATUS_LABEL[value].toLowerCase()}`}</StatusPill>
+}
+
+const PRIORITY_TONE = { must: 'danger', should: 'warning', nice: 'neutral' }
 const PRIORITY_LABEL = Object.fromEntries(PRIORITIES.map((p) => [p.id, p.label]))
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
-const fmtDay = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '—')
-
-function StandingChip({ label, value }) {
-  if (!value) return null
-  return <Pill label={`${label}: ${STATUS_LABEL[value]}`} tone={PILL_TONE[value]} />
-}
-
 function PriorityPill({ priority }) {
   if (!priority) return null
-  return <Pill label={PRIORITY_LABEL[priority]} tone={PRIORITY_TONE[priority]} />
+  return <StatusPill tone={PRIORITY_TONE[priority]}>{PRIORITY_LABEL[priority]}</StatusPill>
 }
 
 const SUMMARY_WHEN = {
@@ -116,7 +102,7 @@ const SUMMARY_WHEN = {
 }
 
 const PROPOSAL_TONE = {
-  pending: 'violet', approved: 'good', rejected: 'bad', withdrawn: 'neutral', deciding: 'violet',
+  pending: 'info', approved: 'success', rejected: 'danger', withdrawn: 'neutral', deciding: 'info',
 }
 
 /*
@@ -129,34 +115,212 @@ function ProposalNote({ proposal }) {
   const text = {
     pending: p.proposedDue
       ? `Asks to move ${p.projectKey} from ${fmtDay(p.currentDue)} to ${fmtDay(p.proposedDue)}.`
-      : `Says ${p.projectKey}'s deadline (${fmtDay(p.currentDue)}) moves; the approver will pick the new date.`,
+      : `Says ${p.projectKey}'s deadline (${fmtDay(p.currentDue)}) moves; the approver picks the new date.`,
     deciding: 'Being decided now.',
     approved: `${p.projectKey} moved from ${fmtDay(p.fromDue)} to ${fmtDay(p.decidedDue)} by ${p.decidedBy || 'an administrator'}`
       + `${p.jira?.written ? `, and in Jira (${p.jira.key})` : ''}.`,
     rejected: `${p.projectKey} stays due ${fmtDay(p.currentDue)}. ${p.decidedBy || 'The approver'}: “${p.reason}”`,
   }[p.status]
   return (
-    <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
-      <Pill label={PROPOSAL_LABEL[p.status] || p.status} tone={PROPOSAL_TONE[p.status]} />
-      <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 220px' }}>{text}</Typography>
+    <Box sx={{
+      display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap',
+    }}
+    >
+      <StatusPill tone={PROPOSAL_TONE[p.status]}>{PROPOSAL_LABEL[p.status] || p.status}</StatusPill>
+      <Typography variant="body2" sx={{ color: 'text.secondary', flex: '1 1 220px' }}>{text}</Typography>
     </Box>
   )
 }
 
 /** A small link from a task to its project's bar on the Timeline. */
-function TimelineLink({ projectKey, onShow }) {
+function TimelineLink({ projectKey, onShow, icon = false }) {
   if (!projectKey || !onShow) return null
+  if (icon) {
+    return (
+      <Tooltip title={`Show ${projectKey} on the Timeline`}>
+        <IconButton size="small" onClick={() => onShow(projectKey)} aria-label={`show ${projectKey} on the Timeline`} sx={{ my: -1 }}>
+          <TimelineIcon sx={{ fontSize: 18 }} />
+        </IconButton>
+      </Tooltip>
+    )
+  }
   return (
     <Button
       size="small"
-      startIcon={<TimelineIcon sx={{ fontSize: '16px !important' }} />}
+      variant="text"
+      startIcon={<TimelineIcon />}
       onClick={() => onShow(projectKey)}
-      sx={{ py: 0, minHeight: 0, fontSize: '0.72rem' }}
+      sx={{ flexShrink: 0, minHeight: 28, px: 1.5 }}
     >
       Timeline
     </Button>
   )
 }
+
+/* ---------------------------------------------------- the week switcher */
+
+/** Back and forward a week, and straight back to this one. */
+function WeekNav({
+  data, onGo, onToday, switching, loadingWeek,
+}) {
+  const ahead = data.week > data.current
+  const arrow = {
+    width: { xs: 36, sm: 28 }, height: { xs: 36, sm: 28 }, color: 'text.secondary', '&:hover': { color: 'text.primary', bgcolor: 'bg.surface' },
+  }
+  return (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', width: { xs: '100%', sm: 'auto' }, justifyContent: { xs: 'center', sm: 'flex-end' },
+    }}
+    >
+      {switching && (
+        <Box role="status" data-loading sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Spinner size={14} />
+          <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>{`Loading week ${weekNo(loadingWeek)}…`}</Typography>
+        </Box>
+      )}
+      <Box
+        data-week-switcher
+        sx={{
+          display: 'inline-flex', alignItems: 'center', height: { xs: 40, sm: 32 }, p: '2px', borderRadius: '6px', bgcolor: 'bg.subtle',
+        }}
+      >
+        <Tooltip title="Previous week">
+          <IconButton size="small" onClick={() => onGo(-1)} aria-label="previous week" sx={arrow}><ChevronLeftIcon fontSize="small" /></IconButton>
+        </Tooltip>
+        <Typography
+          component="div"
+          data-week-shown={data.week}
+          sx={{
+            height: { xs: 36, sm: 28 },
+            lineHeight: { xs: '36px', sm: '28px' },
+            px: 3,
+            minWidth: 128,
+            textAlign: 'center',
+            whiteSpace: 'nowrap',
+            fontWeight: 500,
+            fontSize: '0.875rem',
+            borderRadius: '4px',
+            bgcolor: 'bg.surface',
+          }}
+        >
+          {`Week ${weekNo(data.week)}, ${fmtWeek(data.week)}`}
+        </Typography>
+        <Tooltip title={ahead ? 'Planning goes one week ahead' : 'Next week'}>
+          <span>
+            <IconButton size="small" onClick={() => onGo(1)} disabled={ahead} aria-label="next week" sx={arrow}><ChevronRightIcon fontSize="small" /></IconButton>
+          </span>
+        </Tooltip>
+      </Box>
+      {data.week !== data.current && (
+        <Button variant="text" size="small" onClick={onToday} sx={{ whiteSpace: 'nowrap' }} data-week-today>This week</Button>
+      )}
+    </Box>
+  )
+}
+
+/* ------------------------------------------------------------ next step */
+
+/**
+ * THE NEXT STEP for the week on screen: one line saying what to do, and, when
+ * there is something to do, the one button that does it.
+ */
+function NextStep({ next }) {
+  const todo = !!(next.action && next.onClick)
+  return (
+    <Paper
+      variant="outlined"
+      component="section"
+      aria-label="Next step"
+      data-next-step
+      sx={(t) => ({
+        px: { xs: 3, sm: 4 },
+        py: { xs: 3, sm: 3.5 },
+        display: 'flex',
+        alignItems: 'center',
+        columnGap: 4,
+        rowGap: 3,
+        flexWrap: 'wrap',
+        borderLeft: `3px solid ${todo ? t.palette.primary.main : t.palette.border.strong}`,
+      })}
+    >
+      <Box sx={{ flex: '1 1 300px', minWidth: 0 }}>
+        {(todo || next.loading) && <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', mb: 0.5 }}>Next step</Typography>}
+        {next.loading ? (
+          <Box role="status" aria-label="Working out your next step">
+            <Skeleton variant="text" width={260} height={24} sx={{ maxWidth: '90%' }} />
+            <Skeleton variant="text" width={200} height={18} sx={{ maxWidth: '70%' }} />
+          </Box>
+        ) : (
+          <Typography variant="h2" sx={{ overflowWrap: 'anywhere' }}>{next.label}</Typography>
+        )}
+        {next.sub && <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5, overflowWrap: 'anywhere' }}>{next.sub}</Typography>}
+        {next.progress != null && (
+          <LinearProgress
+            variant="determinate"
+            value={Math.round(next.progress * 100)}
+            aria-label={next.label}
+            sx={{ mt: 2.5, maxWidth: 360 }}
+          />
+        )}
+      </Box>
+      {todo && (
+        <Button
+          variant="contained"
+          onClick={next.onClick}
+          sx={[{ flexShrink: 0, minHeight: { xs: 40, sm: 36 }, width: { xs: '100%', sm: 'auto' } }, next.pulse && pulseSx]}
+          data-next-action
+        >
+          {next.action}
+        </Button>
+      )}
+    </Paper>
+  )
+}
+
+/**
+ * WHILE THE WEEK IS ON ITS WAY: the shape of what is coming — the next-step
+ * bar and three task cards — with what it is waiting for said to a screen
+ * reader (and to the checks) in words.
+ */
+function WeekSkeleton({ label, next = true, cards = 3 }) {
+  return (
+    <Box role="status" aria-live="polite" data-loading sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 3, sm: 4 } }}>
+      <Box component="span" sx={visuallyHidden}>{label}</Box>
+      {next && (
+        <Box sx={{
+          px: 4, py: 3.5, border: 1, borderColor: 'border.subtle', borderRadius: '8px', bgcolor: 'bg.surface',
+        }}
+        >
+          <Skeleton variant="text" width={72} height={16} />
+          <Skeleton variant="text" width={280} height={24} sx={{ mt: 0.5, maxWidth: '80%' }} />
+          <Skeleton variant="text" width={220} height={18} sx={{ maxWidth: '60%' }} />
+        </Box>
+      )}
+      {Array.from({ length: cards }, (_, i) => (
+        <Box
+          key={i}
+          sx={{
+            border: 1, borderColor: 'border.subtle', borderRadius: '8px', overflow: 'hidden', bgcolor: 'bg.surface',
+          }}
+        >
+          <Box sx={{
+            height: 48, px: 4, display: 'flex', alignItems: 'center', bgcolor: 'bg.subtle', borderBottom: 1, borderColor: 'border.subtle',
+          }}
+          >
+            <Skeleton variant="text" width={[240, 200, 260][i % 3]} height={18} sx={{ bgcolor: 'border.subtle', maxWidth: '70%' }} />
+          </Box>
+          <Box sx={{ p: 4 }}>
+            <Skeleton variant="text" width={[300, 260, 220][i % 3]} height={20} sx={{ maxWidth: '85%' }} />
+            <Skeleton variant="text" width={160} height={16} />
+            {i === 0 && <Skeleton variant="rounded" height={76} sx={{ mt: 3 }} />}
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+/* ------------------------------------------------- an approver's decision */
 
 /*
  * ONE PROPOSAL, AS THE APPROVER SEES IT.
@@ -167,8 +331,8 @@ function TimelineLink({ projectKey, onShow }) {
  * asked for, and changeable), Approve, and Reject — which asks for a reason,
  * because a member told "no" without one cannot do anything with it.
  */
-function DecisionCard({
-  p, people, jira, onApprove, onReject, busy, onShowTimeline,
+function DecisionRow({
+  p, jira, onApprove, onReject, busy, onShowTimeline,
 }) {
   const [due, setDue] = useState(p.proposedDue || '')
   const [rejecting, setRejecting] = useState(false)
@@ -178,86 +342,105 @@ function DecisionCard({
   const days = due && now ? Math.round((Date.parse(`${due}T00:00:00Z`) - Date.parse(`${now}T00:00:00Z`)) / 86400000) : null
   const blockedJira = p.epicKey && jira?.configured && !jira?.writable
   return (
-    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
-        <IconTile text={(p.nick || '?').slice(0, 2)} color={personColor(people, p.person)} size={32} />
-        <Box sx={{ minWidth: 0, flex: '1 1 200px' }}>
-          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-            {p.nick} · {p.taskTitle}
-          </Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-            {p.projectKey}{p.projectSummary ? ` · ${p.projectSummary}` : ''} · {weekTitle(p.week)}
+    <Box sx={{
+      px: { xs: 3, sm: 4 }, py: 3.5, display: 'flex', flexDirection: 'column', gap: 2.5,
+    }}
+    >
+      <Box sx={{
+        display: 'flex', alignItems: 'flex-start', gap: 3, flexWrap: 'wrap',
+      }}
+      >
+        <Avatar name={p.nick} />
+        <Box sx={{ minWidth: 0, flex: '1 1 220px' }}>
+          <Typography variant="h3" component="h4">{`${p.nick}: ${p.taskTitle}`}</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>
+            {`${p.projectKey}${p.projectSummary ? ` ${p.projectSummary}` : ''}, week ${weekNo(p.week)}`}
           </Typography>
         </Box>
-        {p.disagree && <Pill label="dates and member disagree" tone="warn" />}
-        <TimelineLink projectKey={p.projectKey} onShow={onShowTimeline} />
+        <Box sx={{
+          display: 'flex', alignItems: 'center', gap: 2, ml: 'auto',
+        }}
+        >
+          {p.disagree && <StatusPill tone="warning">Dates and member disagree</StatusPill>}
+          <TimelineLink projectKey={p.projectKey} onShow={onShowTimeline} />
+        </Box>
       </Box>
 
-      <Typography variant="body2">
-        Project due <strong>{fmtDay(now)}</strong>
-        {moved && <Box component="span" sx={{ color: 'text.secondary' }}> (was {fmtDay(p.currentDue)} when this was raised)</Box>}
-        {p.proposedDue
-          ? <> · task now lands <strong>{fmtDay(p.newDate)}</strong>{p.byDate ? `, ${p.byDate} day${p.byDate === 1 ? '' : 's'} late` : ''}</>
-          : <> · task now lands {fmtDay(p.newDate)}, inside the due date — but {p.nick} says the deadline moves</>}
-      </Typography>
-      {p.blocker && (
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          {p.blockerCategory && <Pill label={CATEGORY_LABEL[p.blockerCategory]} tone="neutral" />}
-          <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', flex: '1 1 220px' }}>{p.blocker}</Typography>
-        </Box>
-      )}
+      <Box sx={{ pl: { sm: 10 }, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+        <Typography variant="body1">
+          Project due <strong>{fmtDay(now)}</strong>
+          {moved && <Box component="span" sx={{ color: 'text.secondary' }}>{` (was ${fmtDay(p.currentDue)} when this was raised)`}</Box>}
+          {p.proposedDue
+            ? <>. The task now lands <strong>{fmtDay(p.newDate)}</strong>{p.byDate ? `, ${plural(p.byDate, 'day')} late.` : '.'}</>
+            : <>. The task now lands {fmtDay(p.newDate)}, inside the due date, but {p.nick} says the deadline moves.</>}
+        </Typography>
+        {p.blocker && (
+          <Box sx={{
+            display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap',
+          }}
+          >
+            {p.blockerCategory && <StatusPill tone="neutral">{CATEGORY_LABEL[p.blockerCategory]}</StatusPill>}
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', flex: '1 1 220px', color: 'text.secondary' }}>{p.blocker}</Typography>
+          </Box>
+        )}
 
-      {!rejecting ? (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <TextField
-            size="small"
-            type="date"
-            label="New project due date"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            sx={{ width: 190 }}
-            inputProps={{ 'aria-label': `new due date for ${p.projectKey}` }}
-          />
-          <Button variant="contained" disabled={!!busy || !due} onClick={() => onApprove(p, due)}>
-            {busy === `approve:${p.id}` ? 'Approving…' : 'Approve'}
-          </Button>
-          <Button color="error" disabled={!!busy} onClick={() => setRejecting(true)}>Reject</Button>
-          {days !== null && (
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {days > 0 ? `moves it ${days} day${days === 1 ? '' : 's'} later` : days < 0 ? `moves it ${-days} days EARLIER` : 'no change'}
-            </Typography>
-          )}
-        </Box>
-      ) : (
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
-          <TextField
-            size="small"
-            label="Why not? The member sees this."
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            multiline
-            minRows={1}
-            sx={{ flex: '1 1 260px' }}
-            autoFocus
-          />
-          <Button color="error" variant="contained" disabled={!!busy || reason.trim().length < 3} onClick={() => onReject(p, reason)}>
-            {busy === `reject:${p.id}` ? 'Rejecting…' : 'Reject'}
-          </Button>
-          <Button disabled={!!busy} onClick={() => setRejecting(false)}>Cancel</Button>
-        </Box>
-      )}
-      <Typography variant="caption" sx={{ color: blockedJira ? STATUS.warning : 'text.secondary' }}>
-        {p.epicKey
-          ? (blockedJira
-            ? `${p.epicKey} is in Jira and this server is not allowed to write to Jira, so approving is refused until `
-              + 'JIRA_ALLOW_WRITES=true is set in the Render dashboard — otherwise the 07:00 sync would put the old date back.'
-            : jira?.configured
-              ? `Approving also writes the new due date to ${p.epicKey} in Jira. It counts as a re-plan: the first one on a project is free.`
-              : 'Approving moves the project here. It counts as a re-plan: the first one on a project is free.')
-          : 'This project has no Jira epic, so approving moves it here only. It counts as a re-plan: the first one is free.'}
-      </Typography>
-    </Paper>
+        {!rejecting ? (
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap',
+          }}
+          >
+            <TextField
+              size="small"
+              type="date"
+              label="New project due date"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              InputLabelProps={{ shrink: true }}
+              sx={{ width: 190 }}
+              inputProps={{ 'aria-label': `new due date for ${p.projectKey}` }}
+            />
+            <Button variant="contained" disabled={!!busy || !due} onClick={() => onApprove(p, due)} startIcon={busy === `approve:${p.id}` ? <Spinner size={14} /> : null}>
+              {busy === `approve:${p.id}` ? 'Approving…' : 'Approve'}
+            </Button>
+            <Button color="error" variant="text" disabled={!!busy} onClick={() => setRejecting(true)}>Reject</Button>
+            {days !== null && (
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                {days > 0 ? `Moves it ${plural(days, 'day')} later` : days < 0 ? `Moves it ${plural(-days, 'day')} earlier` : 'No change'}
+              </Typography>
+            )}
+          </Box>
+        ) : (
+          <Box sx={{
+            display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap',
+          }}
+          >
+            <TextField
+              size="small"
+              label="Why not? The member sees this."
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              multiline
+              minRows={1}
+              sx={{ flex: '1 1 260px' }}
+              autoFocus
+            />
+            <Button disabled={!!busy} onClick={() => setRejecting(false)}>Cancel</Button>
+            <Button color="error" variant="outlined" disabled={!!busy || reason.trim().length < 3} onClick={() => onReject(p, reason)}>
+              {busy === `reject:${p.id}` ? 'Rejecting…' : 'Reject date change'}
+            </Button>
+          </Box>
+        )}
+        <Typography variant="caption" sx={{ color: blockedJira ? 'tone.warning.fg' : 'text.secondary', maxWidth: '72ch' }}>
+          {p.epicKey
+            ? (blockedJira
+              ? `${p.epicKey} is in Jira and this server may not write to Jira, so approving is refused. Set JIRA_ALLOW_WRITES=true in Render first; otherwise the 07:00 sync puts the old date back.`
+              : jira?.configured
+                ? `Approving also writes the new due date to ${p.epicKey} in Jira. It counts as a re-plan; the first one on a project is free.`
+                : 'Approving moves the project here. It counts as a re-plan; the first one on a project is free.')
+            : 'This project has no Jira epic, so approving moves it here only. It counts as a re-plan; the first one is free.'}
+        </Typography>
+      </Box>
+    </Box>
   )
 }
 
@@ -286,52 +469,79 @@ function MyProjects({
   if (!projects.length) return null
   const shown = all ? projects : projects.slice(0, OPEN_PROJECTS_SHOWN)
   return (
-    <Box
-      component="section"
+    <Section
+      title="Your projects"
+      meta={`${plural(projects.length, 'open project')} where you are PIC.${readOnly ? '' : ` Add a task to put one on ${whose}.`}`}
       aria-label="your projects"
-      sx={{ border: 1, borderColor: 'divider', borderRadius: '14px', p: { xs: 1.5, sm: 2 } }}
+      padded={false}
     >
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', mb: 1 }}>
-        <Typography variant="h4">Your projects</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          {projects.length} open, where you are PIC{readOnly ? '' : ` — add a task to put one on ${whose}`}
-        </Typography>
-      </Box>
-      {shown.map((p) => {
+      {shown.map((p, i) => {
         const planned = onPlan.has(p.key)
         return (
           <Box
             key={p.key}
             data-my-project={p.key}
             sx={{
-              display: 'flex', alignItems: 'center', gap: 1, py: 0.75, borderTop: 1, borderColor: 'divider', flexWrap: { xs: 'wrap', sm: 'nowrap' },
+              display: 'grid',
+              gridTemplateColumns: { xs: 'minmax(0,1fr) auto', md: '84px minmax(0,1fr) auto 76px 144px' },
+              gridTemplateAreas: { xs: '"name name" "meta act"', md: '"key name pill due act"' },
+              alignItems: 'center',
+              columnGap: 3,
+              rowGap: 1,
+              px: { xs: 3, sm: 4 },
+              py: { xs: 2.5, md: 0 },
+              minHeight: { md: 44 },
+              borderTop: i ? 1 : 0,
+              borderColor: 'border.subtle',
             }}
           >
-            <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{p.jiraKey || p.key}</Typography>
-            <Typography variant="body2" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.summary}>
+            <Typography variant="body1" sx={{ gridArea: 'key', display: { xs: 'none', md: 'block' }, fontWeight: 500, whiteSpace: 'nowrap' }}>{p.jiraKey || p.key}</Typography>
+            <Typography
+              variant="body1"
+              title={p.summary}
+              sx={{
+                gridArea: 'name', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: { xs: 'normal', md: 'nowrap' },
+              }}
+            >
+              <Box component="span" sx={{ display: { md: 'none' }, fontWeight: 500, mr: 1.5 }}>{p.jiraKey || p.key}</Box>
               {p.summary}
             </Typography>
-            {p.active && <Pill label="Active" tone="info" />}
-            {p.overdue && <Pill label="Past due" tone="bad" />}
-            <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', minWidth: 72, textAlign: 'right' }}>
-              {p.due ? `due ${fmtDay(p.due)}` : 'no due date'}
+            <Box sx={{
+              gridArea: { xs: 'meta', md: 'pill' }, display: 'flex', alignItems: 'center', gap: 2, minWidth: 0,
+            }}
+            >
+              {p.active && <StatusPill tone="info">Active</StatusPill>}
+              {p.overdue && <StatusPill tone="danger">Past due</StatusPill>}
+              <Typography variant="body2" sx={{ display: { md: 'none' }, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                {p.due ? `Due ${fmtDay(p.due)}` : 'No due date'}
+              </Typography>
+            </Box>
+            <Typography variant="body2" sx={{ gridArea: 'due', display: { xs: 'none', md: 'block' }, color: 'text.secondary', whiteSpace: 'nowrap', textAlign: 'right' }}>
+              {p.due ? fmtDay(p.due) : '–'}
             </Typography>
-            {planned
-              ? <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap', minWidth: 96, textAlign: 'right' }}>on {whose}</Typography>
-              : !readOnly && (
-                <Button size="small" startIcon={<AddIcon />} onClick={() => onAdd(p.key)} sx={{ whiteSpace: 'nowrap', minWidth: 96 }} aria-label={`add a task on ${p.jiraKey || p.key}`}>
-                  Add task
-                </Button>
-              )}
+            <Box sx={{ gridArea: 'act', display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>
+              {planned
+                ? <Typography variant="caption" sx={{ color: 'text.tertiary', whiteSpace: 'nowrap', py: 1 }}>{`On ${whose}`}</Typography>
+                : !readOnly && (
+                  <Button size="small" variant="text" startIcon={<AddIcon />} onClick={() => onAdd(p.key)} sx={{ whiteSpace: 'nowrap', mr: -1.5, minHeight: { xs: 40, sm: 32 } }} aria-label={`add a task on ${p.jiraKey || p.key}`}>
+                    Add task
+                  </Button>
+                )}
+            </Box>
           </Box>
         )
       })}
       {projects.length > OPEN_PROJECTS_SHOWN && (
-        <Button size="small" onClick={() => setAll((x) => !x)} sx={{ mt: 0.5 }}>
-          {all ? 'Show fewer' : `Show all ${projects.length}`}
-        </Button>
+        <Box sx={{
+          px: { xs: 3, sm: 4 }, py: 1.5, borderTop: 1, borderColor: 'border.subtle',
+        }}
+        >
+          <Button size="small" variant="text" onClick={() => setAll((x) => !x)} sx={{ ml: -1.5 }}>
+            {all ? 'Show fewer' : `Show all ${projects.length}`}
+          </Button>
+        </Box>
       )}
-    </Box>
+    </Section>
   )
 }
 
@@ -341,6 +551,7 @@ function MyProjects({
 const PROJECT_GROUP = { pic: 'Your projects (you are PIC)', helping: 'Projects you help on', other: 'Other projects' }
 const projectGroup = (p) => PROJECT_GROUP[p.mine] || PROJECT_GROUP.other
 
+/** A week planned on the form (no Jira): one task, its plan and, later, how it went. */
 function TaskEditor({
   task, index, projects, projectByKey, onChange, onRemove, readOnly, showReport, jiraTasks, onNeedJira, jiraHint,
   proposal, onShowTimeline, aiOn,
@@ -355,20 +566,22 @@ function TaskEditor({
   }, [project?.jiraKey, children, onNeedJira])
 
   return (
-    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>Task {index + 1}</Typography>
+    <Paper variant="outlined" sx={{ p: { xs: 3, sm: 4 }, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minHeight: 28 }}>
+        <Typography variant="h3" component="h3">{`Task ${index + 1}`}</Typography>
         <PriorityPill priority={task.priority} />
         {task.carriedFrom && (
           <Tooltip title="Not finished last time, so it was carried into this week">
-            <Chip size="small" label={`carried from ${fmtDay(task.carriedFrom)}`} sx={{ height: 20 }} />
+            <Typography variant="caption" sx={{ color: 'text.tertiary' }}>{`Carried from ${fmtDay(task.carriedFrom)}`}</Typography>
           </Tooltip>
         )}
         <Box sx={{ flex: 1 }} />
         {!readOnly && (
-          <IconButton size="small" onClick={onRemove} aria-label={`remove task ${index + 1}`}>
-            <DeleteOutlineIcon sx={{ fontSize: 18 }} />
-          </IconButton>
+          <Tooltip title="Remove task">
+            <IconButton size="small" onClick={onRemove} aria-label={`remove task ${index + 1}`} sx={{ mr: -1 }}>
+              <DeleteOutlineIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
         )}
       </Box>
 
@@ -384,7 +597,7 @@ function TaskEditor({
       />
 
       <Box sx={{
-        display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: 'minmax(0,2fr) minmax(0,1.4fr)' },
+        display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr', md: 'minmax(0,2fr) minmax(0,1.4fr)' },
       }}
       >
         <Autocomplete
@@ -424,7 +637,7 @@ function TaskEditor({
       </Box>
 
       <Box sx={{
-        display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, minmax(0,1fr))' },
+        display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, minmax(0,1fr))' },
       }}
       >
         <TextField
@@ -444,7 +657,9 @@ function TaskEditor({
           value={task.effort ?? ''}
           onChange={(e) => set({ effort: e.target.value === '' ? null : Number(e.target.value) })}
           disabled={readOnly}
-          inputProps={{ min: 0, max: 99, step: 0.5, inputMode: 'decimal' }}
+          inputProps={{
+            min: 0, max: 99, step: 0.5, inputMode: 'decimal',
+          }}
         />
         <TextField
           size="small"
@@ -459,12 +674,15 @@ function TaskEditor({
       </Box>
 
       {project && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            Project due {fmtDay(project.due)}
+        <Box sx={{
+          display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap',
+        }}
+        >
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            {`Project due ${fmtDay(project.due)}`}
             {task.expected && project.due && task.expected > project.due && (
-              <Box component="span" sx={{ color: STATUS.warning, fontWeight: 600 }}>
-                {' '}· this task is expected after the project&rsquo;s due date
+              <Box component="span" sx={{ color: 'tone.warning.fg' }}>
+                , but this task is expected after it
               </Box>
             )}
           </Typography>
@@ -475,11 +693,13 @@ function TaskEditor({
 
       {showReport && (
         <>
-          <Divider />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>This week</Typography>
+          <Box sx={{ borderTop: 1, borderColor: 'border.subtle', mx: { xs: -3, sm: -4 } }} />
+          <Box sx={{
+            display: 'flex', alignItems: { xs: 'flex-start', sm: 'center' }, columnGap: 4, rowGap: 1.5, flexDirection: { xs: 'column', sm: 'row' },
+          }}
+          >
+            <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', width: { sm: 64 }, flexShrink: 0 }}>This week</Typography>
             <ToggleButtonGroup
-              size="small"
               exclusive
               value={task.done === null ? null : task.done ? 'done' : 'not'}
               onChange={(_e, v) => {
@@ -489,21 +709,22 @@ function TaskEditor({
                   : { done: false, pct: task.pct === 100 ? null : task.pct })
               }}
               disabled={readOnly}
+              sx={choiceSx()}
             >
-              <ToggleButton value="done" sx={{ textTransform: 'none', px: 1.5 }}>Finished</ToggleButton>
-              <ToggleButton value="not" sx={{ textTransform: 'none', px: 1.5 }}>Not finished</ToggleButton>
+              <ToggleButton value="done">Finished</ToggleButton>
+              <ToggleButton value="not">Not finished</ToggleButton>
             </ToggleButtonGroup>
             {jiraHint && (
-              <Typography variant="caption" sx={{ color: STATUS.good }}>
+              <Typography variant="caption" sx={{ color: 'tone.success.fg' }}>
                 {jiraHint}
               </Typography>
             )}
           </Box>
 
           {task.done === false && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               <Box sx={{
-                display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, minmax(0,1fr))' },
+                display: 'grid', gap: 3, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(3, minmax(0,1fr))' },
               }}
               >
                 <TextField
@@ -513,7 +734,9 @@ function TaskEditor({
                   value={task.pct ?? ''}
                   onChange={(e) => set({ pct: e.target.value === '' ? null : Number(e.target.value) })}
                   disabled={readOnly}
-                  inputProps={{ min: 0, max: 100, step: 5, inputMode: 'numeric' }}
+                  inputProps={{
+                    min: 0, max: 100, step: 5, inputMode: 'numeric',
+                  }}
                 />
                 <TextField
                   size="small"
@@ -536,50 +759,55 @@ function TaskEditor({
                   {BLOCKER_CATEGORIES.map((c) => <MenuItem key={c.id} value={c.id}>{c.label}</MenuItem>)}
                 </TextField>
               </Box>
-              <TextField
-                size="small"
-                label="What is blocking it?"
-                value={task.blocker}
-                onChange={(e) => set({ blocker: e.target.value })}
-                disabled={readOnly}
-                multiline
-                minRows={2}
-                maxRows={8}
-                fullWidth
-              />
-              <AiAssist
-                available={aiOn}
-                disabled={readOnly}
-                field="blocker"
-                text={task.blocker}
-                onText={(t) => set({ blocker: t })}
-                task={{ title: task.title, newDate: task.newDate, projectDue: project?.due || null }}
-                onSuggest={(sg) => set({ blockerCategory: sg.category, ...(sg.affects !== null ? { affects: sg.affects } : {}) })}
-              />
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-                <Typography variant="body2">Does this push the project&rsquo;s deadline?</Typography>
-                <ToggleButtonGroup
+              <Box>
+                <TextField
                   size="small"
+                  label="What is blocking it?"
+                  value={task.blocker}
+                  onChange={(e) => set({ blocker: e.target.value })}
+                  disabled={readOnly}
+                  multiline
+                  minRows={2}
+                  maxRows={8}
+                  fullWidth
+                />
+                <Box sx={{ mt: 2 }}>
+                  <AiAssist
+                    available={aiOn}
+                    disabled={readOnly}
+                    field="blocker"
+                    text={task.blocker}
+                    onText={(t) => set({ blocker: t })}
+                    task={{ title: task.title, newDate: task.newDate, projectDue: project?.due || null }}
+                    onSuggest={(sg) => set({ blockerCategory: sg.category, ...(sg.affects !== null ? { affects: sg.affects } : {}) })}
+                  />
+                </Box>
+              </Box>
+              <Box sx={{
+                display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap',
+              }}
+              >
+                <Typography variant="body1">Does this push the project&rsquo;s deadline?</Typography>
+                <ToggleButtonGroup
                   exclusive
                   value={task.affects === null ? null : task.affects ? 'yes' : 'no'}
                   onChange={(_e, v) => { if (v !== null) set({ affects: v === 'yes' }) }}
                   disabled={readOnly}
+                  sx={choiceSx()}
                 >
-                  <ToggleButton value="yes" sx={{ textTransform: 'none', px: 1.5 }}>Yes</ToggleButton>
-                  <ToggleButton value="no" sx={{ textTransform: 'none', px: 1.5 }}>No</ToggleButton>
+                  <ToggleButton value="yes">Yes</ToggleButton>
+                  <ToggleButton value="no">No</ToggleButton>
                 </ToggleButtonGroup>
               </Box>
               {impact.byDate !== null && (
-                <Alert severity={impact.disagree ? 'warning' : 'info'} sx={{ py: 0 }}>
-                  The new date is {impact.byDate} day{impact.byDate === 1 ? '' : 's'} after the project&rsquo;s due
-                  date ({fmtDay(project?.due)}).
-                  {impact.disagree && ' You answered that it does not push the deadline — your manager will see both.'}
+                <Alert severity={impact.disagree ? 'warning' : 'info'} variant="outlined">
+                  {`The new date is ${plural(impact.byDate, 'day')} after the project's due date (${fmtDay(project?.due)}).`}
+                  {impact.disagree && ' You answered that it does not push the deadline; your manager sees both.'}
                 </Alert>
               )}
               {impact.byDate === null && impact.disagree && (
-                <Alert severity="warning" sx={{ py: 0 }}>
-                  The new date is still inside the project&rsquo;s due date ({fmtDay(project?.due)}), but you answered
-                  that it pushes the deadline — your manager will see both.
+                <Alert severity="warning" variant="outlined">
+                  {`The new date is still inside the project's due date (${fmtDay(project?.due)}), but you answered that it pushes the deadline. Your manager sees both.`}
                 </Alert>
               )}
             </Box>
@@ -592,84 +820,95 @@ function TaskEditor({
 
 /* ------------------------------------------------- one week, read only */
 
-/** An administrator's view of somebody else's week. */
+/** An administrator's view of somebody else's week: one row per task. */
 function WeekSummary({
   entry, projectByKey, proposals = {}, onShowTimeline,
 }) {
   if (!entry) {
-    return <Typography variant="body2" sx={{ color: 'text.disabled' }}>Nothing saved for this week.</Typography>
+    return <EmptyState inline title="Nothing saved for this week." />
   }
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', '& > * + *': { borderTop: 1, borderColor: 'border.subtle' } }}>
       {entry.focus && (
-        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{entry.focus}</Typography>
+        <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', py: 2.5, maxWidth: '72ch' }}>{entry.focus}</Typography>
       )}
       {entry.tasks.map((t) => {
         const p = t.projectKey ? projectByKey[t.projectKey] : null
         const impact = slipImpact(t, p?.due)
+        const st = statusOf(t)
+        const meta = [
+          t.projectKey && `${t.projectKey}${p ? ` ${p.summary}` : ''}`,
+          t.jiraKey && !String(t.title || '').startsWith(t.jiraKey) && t.jiraKey,
+          t.carriedFrom && 'carried over',
+          t.expected && `expected ${fmtDay(t.expected)}`,
+          t.effort != null && `${t.effort} d`,
+          t.reportedAt && `sent ${new Date(t.reportedAt).toLocaleString('en-GB', {
+            weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok',
+          }).replace(',', '')}`,
+        ].filter(Boolean).join(', ')
+        const notDone = !t.hold && t.done === false
         return (
-          <Box key={t.id} sx={{ borderLeft: 3, borderColor: t.hold ? 'divider' : t.done === true ? STATUS.good : t.done === false ? STATUS.warning : 'divider', pl: 1.25 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-              <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.title}</Typography>
-              <PriorityPill priority={t.priority} />
-              {t.carriedFrom && <Pill label="carried" tone="violet" />}
-              <TimelineLink projectKey={t.projectKey} onShow={onShowTimeline} />
+          <Box key={t.id} sx={{ py: 2.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{
+              display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap',
+            }}
+            >
+              <Typography variant="h3" component="h4" sx={{ flex: '1 1 240px', minWidth: 0 }}>{t.title}</Typography>
+              <Box sx={{
+                display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0,
+              }}
+              >
+                {st && <StatusPill tone={st.tone}>{st.label}</StatusPill>}
+                <PriorityPill priority={t.priority} />
+                <TimelineLink projectKey={t.projectKey} onShow={onShowTimeline} icon />
+              </Box>
             </Box>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-              {[
-                t.projectKey && `${t.projectKey}${p ? ` · ${p.summary}` : ''}`,
-                t.jiraKey && !String(t.title || '').startsWith(t.jiraKey) && t.jiraKey,
-                t.expected && `expected ${fmtDay(t.expected)}`,
-                t.effort != null && `${t.effort} d`,
-                t.reportedAt && `sent ${new Date(t.reportedAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`,
-              ].filter(Boolean).join(' · ')}
-            </Typography>
+            {meta && <Typography variant="body2" sx={{ color: 'text.secondary' }}>{meta}</Typography>}
             {/* What they wrote on it: the update itself, not just whether it finished. */}
             {t.progress && (
-              <Typography variant="body2" data-team-progress sx={{ color: 'text.secondary', whiteSpace: 'pre-wrap', wordBreak: 'break-word', mt: 0.25 }}>
+              <Typography variant="body1" data-team-progress sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxWidth: '72ch' }}>
                 {t.progress}
               </Typography>
             )}
-            {t.hold && (
-              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                On hold{t.reason && !/^on hold$/i.test(t.reason.trim()) ? ` — ${t.reason}` : ''}
-              </Typography>
+            {t.hold && t.reason && !/^on hold$/i.test(t.reason.trim()) && (
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>{`On hold: ${t.reason}`}</Typography>
             )}
-            {!t.hold && t.done === true && <Typography variant="caption" sx={{ color: STATUS.good }}>Finished</Typography>}
-            {!t.hold && t.done === false && (
-              <Box>
-                <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block' }}>
-                  Not finished{t.pct != null ? ` · ${t.pct}%` : ''}{t.newDate ? ` · new date ${fmtDay(t.newDate)}` : ''}
-                  {t.blockerCategory ? ` · ${CATEGORY_LABEL[t.blockerCategory]}` : ''}
-                  {t.affects != null ? ` · ${t.affects ? 'says it pushes the deadline' : 'says the deadline holds'}` : ''}
-                </Typography>
+            {notDone && (
+              <>
+                {[t.pct != null && `${t.pct}% done`, t.newDate && `new date ${fmtDay(t.newDate)}`, t.blockerCategory && `waiting on ${CATEGORY_LABEL[t.blockerCategory].toLowerCase()}`,
+                  t.affects != null && (t.affects ? 'says it pushes the deadline' : 'says the deadline holds')].filter(Boolean).length > 0 && (
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    {[t.pct != null && `${t.pct}% done`, t.newDate && `new date ${fmtDay(t.newDate)}`, t.blockerCategory && `waiting on ${CATEGORY_LABEL[t.blockerCategory].toLowerCase()}`,
+                      t.affects != null && (t.affects ? 'says it pushes the deadline' : 'says the deadline holds')].filter(Boolean).join(', ').replace(/^./, (c) => c.toUpperCase())}
+                  </Typography>
+                )}
                 {(t.blocker || t.reason) && (
-                  <Typography variant="caption" sx={{ display: 'block', whiteSpace: 'pre-wrap' }}>
-                    Blocker: {t.blocker || t.reason}
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                    {`Blocker: ${t.blocker || t.reason}`}
                   </Typography>
                 )}
                 {impact.byDate !== null && (
-                  <Typography variant="caption" sx={{ color: STATUS.critical, display: 'block', fontWeight: 600 }}>
-                    {impact.byDate} day{impact.byDate === 1 ? '' : 's'} past the project&rsquo;s due date ({fmtDay(p?.due)})
+                  <Typography variant="body2" sx={{ color: 'tone.danger.fg' }}>
+                    {`${plural(impact.byDate, 'day')} past the project's due date (${fmtDay(p?.due)})`}
                   </Typography>
                 )}
                 {impact.disagree && (
-                  <Typography variant="caption" sx={{ color: STATUS.critical, display: 'block', fontWeight: 600 }}>
+                  <Typography variant="body2" sx={{ color: 'tone.danger.fg' }}>
                     The dates and the member disagree on whether the deadline moves.
                   </Typography>
                 )}
-                <Box sx={{ mt: 0.5 }}><ProposalNote proposal={proposals[t.id]} /></Box>
-              </Box>
+                <ProposalNote proposal={proposals[t.id]} />
+              </>
             )}
           </Box>
         )
       })}
       {entry.unplanned?.length > 0 && (
-        <Box>
-          <Typography variant="caption" sx={{ fontWeight: 600 }}>Unplanned work</Typography>
+        <Box sx={{ py: 2.5 }}>
+          <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', mb: 1 }}>Adhoc work</Typography>
           {entry.unplanned.map((u) => (
-            <Typography key={u.id} variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
-              • {u.title}{u.projectKey ? ` (${u.projectKey})` : ''}{u.effort !== null ? ` · ${u.effort} d` : ''}
+            <Typography key={u.id} variant="body2" sx={{ color: 'text.secondary' }}>
+              {`${u.title}${u.projectKey ? ` (${u.projectKey})` : ''}${u.effort !== null && u.effort !== undefined ? `, ${u.effort} d` : ''}`}
             </Typography>
           ))}
         </Box>
@@ -678,10 +917,79 @@ function WeekSummary({
   )
 }
 
+/* ------------------------------------------------------------ adhoc work */
+
+/** Adhoc work on a Jira week: added in a dialog and saved at once. */
+function AdhocDialog({
+  open, onClose, onSave, projects, projectByKey,
+}) {
+  const theme = useTheme()
+  const phone = useMediaQuery(theme.breakpoints.down('sm'))
+  const [item, setItem] = useState({ title: '', projectKey: null, effort: null })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  useEffect(() => { if (open) { setItem({ title: '', projectKey: null, effort: null }); setError(null) } }, [open])
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await onSave({ id: newTaskId(), ...item, title: item.title.trim() })
+      onClose()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth fullScreen={phone} PaperProps={{ 'aria-label': 'add adhoc work' }}>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 2, pr: 3 }}>
+        <Box component="span" sx={{ flex: 1 }}>Add adhoc work</Box>
+        <IconButton aria-label="close" onClick={onClose} disabled={busy} size="small"><CloseIcon fontSize="small" /></IconButton>
+      </DialogTitle>
+      <DialogContent>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: -1 }}>Time spent this week on anything that is not a Jira task.</Typography>
+          <TextField size="small" label="What" value={item.title} onChange={(e) => setItem((x) => ({ ...x, title: e.target.value }))} fullWidth autoFocus />
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'minmax(0,1fr) 120px' }, gap: 3 }}>
+            <Autocomplete
+              size="small"
+              options={projects}
+              groupBy={projectGroup}
+              openOnFocus
+              autoHighlight
+              value={item.projectKey ? projectByKey[item.projectKey] || null : null}
+              onChange={(_e, v) => setItem((x) => ({ ...x, projectKey: v?.key || null }))}
+              getOptionLabel={(p) => `${p.key} · ${p.summary}`}
+              isOptionEqualToValue={(a, b) => a.key === b.key}
+              renderInput={(params) => <TextField {...params} label="Project (optional)" />}
+            />
+            <TextField
+              size="small"
+              type="number"
+              label="Days"
+              value={item.effort ?? ''}
+              inputProps={{ min: 0, step: 0.5, inputMode: 'decimal' }}
+              onChange={(e) => setItem((x) => ({ ...x, effort: e.target.value === '' ? null : Number(e.target.value) }))}
+            />
+          </Box>
+          {error && <ErrorState title="The adhoc work was not saved." body={`${error} Your text is kept; try again.`} />}
+        </Box>
+      </DialogContent>
+      <DialogActions sx={phone ? { position: 'sticky', bottom: 0, bgcolor: 'bg.raised', borderTop: 1, borderColor: 'border.subtle' } : undefined}>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="contained" onClick={save} disabled={busy || item.title.trim().length < 2} startIcon={busy ? <Spinner size={14} /> : null}>
+          {busy ? 'Saving…' : 'Save adhoc work'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
 /* ------------------------------------------------------------ the page */
 
 export default function Weekly({
-  plan, me, hello = 'there', onProjectsChanged, onProjectsAdded, onShowTimeline, focusProject = null,
+  plan, me, onProjectsChanged, onProjectsAdded, onShowTimeline, focusProject = null,
 }) {
   const theme = useTheme()
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
@@ -697,6 +1005,7 @@ export default function Weekly({
   const [open, setOpen] = useState(() => new Set())
   const [jiraTasks, setJiraTasks] = useState({})
   const [jiraDone, setJiraDone] = useState({})
+  const [adhocOpen, setAdhocOpen] = useState(false)
   const asked = useRef(new Set())
   const myWeekRef = useRef(null)
   // Arriving from a follow-up email: the project asked about, lit for a moment.
@@ -814,8 +1123,8 @@ export default function Weekly({
   // undefined while it is being asked for; null when there is no week to ask about.
   const [jw, setJw] = useState(undefined)
   const [preset, setPreset] = useState(null)
-  // Next step's "Set dates / add tasks" opens the new-task form; a date saved
-  // on a week ahead lets it move on to "My plan is set".
+  // Next step's "Add a task" opens the new-task dialog; a date saved on a
+  // week ahead lets it move on to "My plan is set".
   const [addSignal, setAddSignal] = useState(0)
   const [datesSaved, setDatesSaved] = useState({})
   const loadJira = useCallback(async (w) => {
@@ -826,8 +1135,8 @@ export default function Weekly({
     if (data?.week && data.person) { setJw(undefined); loadJira(data.week) } else if (data) setJw(null)
   }, [data?.week, data?.person, loadJira])
   const jiraMode = jw?.jira === 'on'
-  // Not yet known whether this week runs from Jira or from the form: a spinner,
-  // rather than a flash of the Monday form that Jira then replaces.
+  // Not yet known whether this week runs from Jira or from the form: a
+  // skeleton, rather than a flash of the Monday form that Jira then replaces.
   const jwLoading = !!data?.person && jw === undefined
 
   const load = useCallback(async (w) => {
@@ -910,7 +1219,7 @@ export default function Weekly({
     const key = focusProject.key
     window.history.replaceState(null, '', '#weekly')
     const proj = projectByKey[key]
-    if (!proj) { setError(`There is no project ${key} in the register.`); return }
+    if (!proj) { setError(`There is no project ${key} in the register. Check the link, or open the project from the Projects page.`); return }
     setAskedAbout(proj)
     if (data.writable && !jiraMode && !draft.tasks.some((t) => t.projectKey === key)) {
       setDraft((dr) => ({ ...dr, tasks: [...dr.tasks, { ...blankTask(), projectKey: key }] }))
@@ -937,10 +1246,10 @@ export default function Weekly({
         // saved, so the next automatic save does not put the old date back.
         onProjectsChanged?.(r.projects || [])
         setNotice(`${p.projectKey} is now due ${fmtDay(r.proposal.decidedDue)}`
-          + `${r.proposal.jira?.written ? ` — written to ${r.proposal.jira.key} in Jira too` : ''}.`)
+          + `${r.proposal.jira?.written ? `, and ${r.proposal.jira.key} in Jira says so too` : ''}.`)
       } else {
         await api.rejectProposal(p.id, arg)
-        setNotice(`Rejected — ${p.nick} will see your reason.`)
+        setNotice(`Date change rejected. ${p.nick} sees your reason.`)
       }
       await Promise.all([loadPending(), data ? load(data.week) : null])
     } catch (e) {
@@ -951,12 +1260,7 @@ export default function Weekly({
   }
 
   const save = async (submit) => {
-    const body = jiraMode
-      // A week run from Jira: the tasks are Jira's, kept by the server; this
-      // saves the adhoc work beside them. Last week's carried-over form tasks
-      // do not belong in it.
-      ? { ...draft, mode: 'jira', tasks: draft.tasks.filter((t) => t.source === 'jira') }
-      : { ...draft, ...(submit ? { submit } : {}) }
+    const body = { ...draft, ...(submit ? { submit } : {}) }
     // Checked here first so every missing answer is listed at once; the server
     // checks again and is the one that counts.
     const clean = cleanEntry(body)
@@ -967,11 +1271,35 @@ export default function Weekly({
     setProblems([])
     try {
       await api.saveMyWeek(data.week, body)
-      setNotice(submit === 'plan' ? 'Plan submitted.' : submit === 'report' ? 'Report submitted.' : 'Saved.')
+      setNotice(submit === 'plan' ? 'Plan submitted.' : submit === 'report' ? 'Report submitted.' : 'Draft saved.')
       await load(data.week)
     } catch (e) {
       setError(e.message)
       setProblems(e.problems || [])
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /*
+   * A Jira week's adhoc work is saved as it is added or removed. The tasks
+   * are Jira's, kept by the server; last week's carried-over form tasks do
+   * not belong in it.
+   */
+  const saveAdhoc = async (unplanned, said) => {
+    const body = {
+      ...draft, unplanned, mode: 'jira', tasks: draft.tasks.filter((t) => t.source === 'jira'),
+    }
+    await api.saveMyWeek(data.week, body)
+    setNotice(said)
+    await load(data.week)
+  }
+  const removeAdhoc = async (id) => {
+    setBusy('adhoc')
+    try {
+      await saveAdhoc(draft.unplanned.filter((x) => x.id !== id), 'Adhoc work removed.')
+    } catch (e) {
+      setError(e.message)
     } finally {
       setBusy(null)
     }
@@ -982,39 +1310,67 @@ export default function Weekly({
     setWeek(addWeeks(data.week, n))
   }
 
-  if (!data && !error) {
-    return <Loading variant="block" label="Loading your week…" />
+  const about = (
+    <>
+      <Typography variant="body2" component="p">
+        The plan is due Monday 08:00 and the update Friday 15:00; Sunday 15:00 is the second chance. A week stays
+        editable until the next Monday 08:00. All times are Bangkok time.
+      </Typography>
+      <Typography variant="body2" component="p">
+        Each task&rsquo;s update posts to that task in Jira: a comment, any pictures, and Done or Hold when you pick it.
+        A week ahead is for planning: give your Jira tasks dates in it, then confirm the plan.
+      </Typography>
+      {admin && (
+        <Typography variant="body2" component="p">
+          Open a person under The team this week to read their week. A late task that moves its project waits for your
+          decision at the top.
+        </Typography>
+      )}
+    </>
+  )
+
+  if (!data) {
+    return (
+      <Box>
+        <PageHeader title="Weekly" description={DUE_LINE} help={about} />
+        {error
+          ? <ErrorState title="The week did not load." body={`${error} Check your connection and try again.`} onRetry={() => load(week)} />
+          : <WeekSkeleton label="Loading your week…" />}
+      </Box>
+    )
   }
   // The arrows moved to a week that has not arrived yet.
-  const switching = !!data && !error && week !== 'current' && week !== data.week
+  const switching = !error && week !== 'current' && week !== data.week
 
-  const d = data?.deadlines
-  const mine = data?.mine
-  const readOnly = !data?.writable
+  const d = data.deadlines
+  const mine = data.mine
+  const readOnly = !data.writable
   const planIn = !!mine?.planSubmittedAt
   const reportIn = !!mine?.reportSubmittedAt
   // The report half appears once there is a plan to report on, or once Friday
   // has come — whichever is first, so a plan never submitted can still be
   // reported against when the week is nearly over.
   const showReport = planIn || (d && data.now >= d.reportDue - 2 * 86400_000)
+  const n = weekNo(data.week)
 
   /*
-   * THE ONE THING TO DO NEXT, said in the banner. Worked out from where this
+   * THE ONE THING TO DO NEXT, said in the bar. Worked out from where this
    * person's own week stands; an administrator who does not submit is told
    * how the team is doing instead.
    */
   const toMyWeek = () => myWeekRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   // This week's proposals, by person and task, for the notes on each task.
   const propsBy = {}
-  for (const p of data?.proposals || []) {
+  for (const p of data.proposals || []) {
     propsBy[p.person] = propsBy[p.person] || {}
     propsBy[p.person][p.taskId] = p
   }
-  const required = (data?.team || []).filter((r) => r.required)
+  const required = (data.team || []).filter((r) => r.required)
   const plansIn = required.filter((r) => r.entry?.planSubmittedAt).length
+  const reportsIn = required.filter((r) => ['ontime', 'late'].includes(r.standing?.report)).length
   // A Jira week's own next step: the next task to update, then next week's
   // plan; a week ahead is planned by its dates and confirmed.
-  const jwReady = jiraMode && data && jw.week === data.week
+  const jwReady = jiraMode && jw.week === data.week
   const jiraTodo = jwReady ? [...(jw.overdue || []), ...(jw.tasks || [])].filter((t) => needsUpdate(t, jw.writable)) : []
   const toTask = (key) => {
     const card = document.querySelector(`[data-jira-task="${key}"]`)
@@ -1022,12 +1378,11 @@ export default function Weekly({
     card.scrollIntoView({ behavior: 'smooth', block: 'center' })
     setTimeout(() => card.querySelector('textarea')?.focus({ preventScroll: true }), 400)
   }
-  // To the tasks with no dates, or else the new-task form.
+  // To the tasks with no dates, or else the new-task dialog.
   const toPlanning = () => {
     const undated = document.querySelector('[data-undated]')
     if (undated) { undated.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
     setAddSignal((x) => x + 1)
-    setTimeout(() => document.querySelector('[aria-label="new Jira task"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200)
   }
   const confirmPlan = async () => {
     try {
@@ -1038,17 +1393,17 @@ export default function Weekly({
     }
   }
   const next = (() => {
-    if (!data) return null
-    if (data.locked) return { label: 'This week is closed', sub: 'It locked at 08:00 the following Monday and is kept as the record.' }
+    if (data.locked) return { label: `Week ${n} is locked`, sub: 'You can read it but not change it.' }
     if (!data.person) {
       return admin
-        ? { label: `${plansIn} of ${required.length} plans in`, sub: 'Open anybody below to read their week.' }
-        : { label: 'Your account is not linked yet', sub: 'Ask an administrator to link it to your name on the Access tab.' }
+        ? {
+          label: `${plansIn} of ${required.length} plans in`, sub: `${reportsIn} of ${required.length} updates in`, progress: required.length ? plansIn / required.length : 0,
+        }
+        : { label: 'Your account is not linked yet', sub: 'Ask an administrator to link it to your name on the Access page.' }
     }
     // Whether the week is Jira's or the form's decides the step: wait for it.
     if (jwLoading || (jiraMode && !jwReady)) return { loading: true }
     if (jwReady) {
-      const n = weekNo(data.week)
       if (data.week > data.current) {
         if (planIn) return { label: `Week ${n} is planned`, sub: 'You can still change the dates on your tasks until the week starts.' }
         /*
@@ -1057,17 +1412,18 @@ export default function Weekly({
          */
         const covering = (jw.tasks || []).length
         if (!covering && !datesSaved[data.week]) {
+          const undated = (jw.undated || []).length > 0
           return {
             label: `Plan week ${n}`,
-            sub: `Nothing of yours in Jira covers week ${n} yet. Give your tasks dates in it, or add a task.`,
-            action: 'Set dates / add tasks',
+            sub: `Nothing of yours in Jira is dated in week ${n} yet. Give your tasks dates, or add a task.`,
+            action: undated ? 'Set dates on my tasks' : 'Add a task',
             onClick: toPlanning,
             pulse: true,
           }
         }
         return {
           label: `Plan week ${n}`,
-          sub: `${covering} task${covering === 1 ? '' : 's'} of yours cover${covering === 1 ? 's' : ''} it. Add or re-date any others, then confirm.`,
+          sub: `${plural(covering, 'task')} of yours ${covering === 1 ? 'is' : 'are'} dated in it. Add or re-date any others, then confirm.`,
           action: `My plan for week ${n} is set`,
           onClick: confirmPlan,
           pulse: true,
@@ -1076,466 +1432,538 @@ export default function Weekly({
       if (jiraTodo.length) {
         const t = jiraTodo[0]
         return {
-          label: `Update ${jiraTodo.length} task${jiraTodo.length === 1 ? '' : 's'} for week ${n}`,
-          sub: `Next: ${t.key} · ${t.summary}`,
+          label: `Update ${plural(jiraTodo.length, 'task')} for week ${n}`,
+          sub: `Next: ${t.key} ${t.summary}`,
           action: 'Update next task',
           onClick: () => toTask(t.key),
           pulse: true,
         }
       }
       if (data.week === data.current) {
+        const n1 = weekNo(addWeeks(data.week, 1))
         return {
-          label: 'Every task is updated — plan next week',
-          sub: `Set dates on your tasks for week ${weekNo(addWeeks(data.week, 1))}, before Monday 08:00.`,
-          action: `Plan week ${weekNo(addWeeks(data.week, 1))}`,
+          label: 'Every task is updated',
+          sub: `Next, plan week ${n1}: set dates on your tasks before Monday 08:00.`,
+          action: `Plan week ${n1}`,
           onClick: () => go(1),
           pulse: true,
         }
       }
-      return { label: `Week ${n} is all updated — thank you`, sub: 'You can still change an update until the week locks.' }
+      return { label: `Week ${n} is all updated`, sub: 'You can still change an update until the week locks.' }
     }
-    if (!planIn) return { label: 'Send your plan for the week', sub: `Due ${bangkokTime(d.planDue)}, Bangkok time`, action: 'Write my plan', onClick: toMyWeek, pulse: true }
-    if (!reportIn) return { label: 'Report how the week went', sub: `Due ${bangkokTime(d.reportDue)} — Sunday 15:00 is the second chance`, action: 'Write my report', onClick: toMyWeek, pulse: true }
-    return { label: 'All in for this week — thank you', sub: 'You can still edit until it locks.' }
+    if (!planIn) {
+      return {
+        label: 'Send your plan for the week', sub: `Due ${bkk(d.planDue)}, Bangkok time.`, action: 'Write my plan', onClick: toMyWeek, pulse: true,
+      }
+    }
+    if (!reportIn) {
+      return {
+        label: 'Report how the week went', sub: `Due ${bkk(d.reportDue)}. Sunday 15:00 is the second chance.`, action: 'Write my report', onClick: toMyWeek, pulse: true,
+      }
+    }
+    return { label: 'Your plan and report are in', sub: 'You can still edit until the week locks.' }
   })()
 
+  // What the My week header says under its title.
+  const myMeta = jiraMode || jwLoading
+    ? (data.week > data.current
+      ? `Planning week ${n}: your Jira tasks dated in it are your plan.`
+      : `Your Jira tasks dated in week ${n}.${data.locked ? '' : ` Update due ${bkk(d.reportDue)}.`}`)
+    : `Plan due ${bkk(d.planDue)}, report due ${bkk(d.reportDue)}, locks ${bkk(d.locksAt)}.`
+  // One place for a confirmation: beside the form's buttons, or under the next step.
+  const formMode = !!draft && !jiraMode && !jwLoading
+
+  const weekNav = (
+    <WeekNav
+      data={data}
+      onGo={go}
+      onToday={() => { if (!dirty || window.confirm('Leave unsaved changes?')) setWeek(data.current) }}
+      switching={switching}
+      loadingWeek={week}
+    />
+  )
+
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+    <Box>
+      <PageHeader
+        title="Weekly"
+        description={DUE_LINE}
+        help={about}
+        actions={phone ? null : weekNav}
+      >
+        {phone ? weekNav : null}
+      </PageHeader>
+
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 3, sm: 4 } }}>
+        {error && <Alert severity="error" variant="outlined" onClose={() => setError(null)}>{error}</Alert>}
         {next && <NextStep next={next} />}
-        {data && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <IconButton onClick={() => go(-1)} aria-label="previous week"><ChevronLeftIcon /></IconButton>
-            <Box sx={{ textAlign: 'center', minWidth: 150 }}>
-              <Typography variant="h4">Week {weekNo(data.week)}</Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {weekLabel(data.week)} · {data.week === data.current ? 'this week' : data.week > data.current ? 'next week' : 'past week'}
-              </Typography>
-            </Box>
-            <IconButton
-              onClick={() => go(1)}
-              disabled={data.week > data.current}
-              aria-label="next week"
-            >
-              <ChevronRightIcon />
-            </IconButton>
-            {data.week !== data.current && (
-              <Button size="small" onClick={() => { if (!dirty || window.confirm('Leave unsaved changes?')) setWeek(data.current) }}>
-                This week
-              </Button>
-            )}
-            {switching && <Box sx={{ ml: 1 }}><Loading label={`Loading week ${weekNo(week)}…`} /></Box>}
+        {notice && !formMode && <Alert severity="success" variant="outlined" onClose={() => setNotice(null)}>{notice}</Alert>}
+
+        {!data.person && admin && (
+          <Box sx={{
+            display: 'flex', alignItems: 'flex-start', gap: 1.5, color: 'text.secondary', mt: -1,
+          }}
+          >
+            <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.tertiary', mt: 0.25, flexShrink: 0 }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Your account is not linked to a team member, so there is no week of your own. Link it on the Access page if you submit too.
+            </Typography>
           </Box>
         )}
-      </Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1.5 }}>
-        Plan due <strong>Monday 08:00</strong> · update due <strong>Friday 15:00</strong> (Sunday 15:00 is the second chance)
-        · a week stays editable until the next Monday 08:00. Bangkok time.
-      </Typography>
 
-      {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
-      {/* Here as well as under My week: an administrator with no week of
-          their own still needs to see that a decision went through. */}
-      {notice && !draft && <Alert severity="success" onClose={() => setNotice(null)}>{notice}</Alert>}
-
-      {data && !data.person && (
-        <Alert severity="info">
-          {admin
-            ? 'Your account is not linked to anybody on the team, so there is no week of your own to fill in. Link it on the Access tab if you submit too.'
-            : 'Your account is not linked to your name on the team yet, so the app cannot tell which week is yours. Ask an administrator to link it on the Access tab.'}
-        </Alert>
-      )}
-
-      {/* ------------------------------------------- waiting for a decision */}
-      {admin && pending && pending.length > 0 && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
-            <Typography variant="h3">Waiting for your decision</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>{pending.length}</Typography>
-          </Box>
-          <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.75 }}>
-            A task reported late that moves its project. Approve to move the project&rsquo;s due date — here and in Jira —
-            or reject with a reason.
-          </Typography>
-          {pending.map((p) => (
-            <DecisionCard
-              key={`${p.id}:${p.updatedAt}`}
-              p={p}
-              people={plan?.people}
-              jira={jira}
-              busy={deciding}
-              onApprove={(x, due) => decide('approve', x, due)}
-              onReject={(x, why) => decide('reject', x, why)}
-              onShowTimeline={onShowTimeline}
-            />
-          ))}
-        </Box>
-      )}
-
-      {/* ------------------------------------------------ the AI summary */}
-      {admin && summary?.ai && (
-        <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 } }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
-            <AutoAwesomeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-            <Typography variant="h3">The week, summarised</Typography>
-            {summary.summaries[0] && (
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                written {new Date(summary.summaries[0].writtenAt).toLocaleString('en-GB', {
-                  timeZone: 'Asia/Bangkok', weekday: 'short', hour: '2-digit', minute: '2-digit',
-                })}
-                {' '}{SUMMARY_WHEN[summary.summaries[0].trigger]}
-              </Typography>
-            )}
-          </Box>
-          {summary.summaries[0]
-            ? <Markdown text={summary.summaries[0].text} />
-            : (
-              <Typography variant="body2" sx={{ color: 'text.secondary' }} data-no-summary>
-                No summary yet for {weekTitle(data.week)}. The AI writes one by itself once each deadline has passed —
-                Monday 08:00, Friday 15:00 and Sunday 15:00 — and emails it to the administrators.
-              </Typography>
-            )}
-          {summary.summaries[0] && (
-            <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block', mt: 1 }}>
-              Written by AI from what the team submitted. Check anything you act on against the week below.
-            </Typography>
-          )}
-        </Paper>
-      )}
-
-      {/* ---------------------------------------------------- my week */}
-      {data && draft && (
-        <Paper ref={myWeekRef} variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 96 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            <Typography variant="h3" sx={{ mr: 1 }}>My week</Typography>
-            <StandingChip label="Plan" value={data.mineStanding?.plan} />
-            <StandingChip label="Report" value={data.mineStanding?.report} />
-            {data.locked && <Chip size="small" icon={<LockIcon />} label="Locked" />}
-          </Box>
-          <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1 }}>
-            Plan due {bangkokTime(d.planDue)} · report due {bangkokTime(d.reportDue)} · locks {bangkokTime(d.locksAt)}
-          </Typography>
-
-          {!jiraMode && !jwLoading && mine?.draft && draft.tasks.length > 0 && (
-            <Alert severity="info" sx={{ py: 0 }}>
-              {draft.tasks.length} unfinished task{draft.tasks.length === 1 ? '' : 's'} carried over from last week.
-              Edit, remove or add to them — nothing is saved until you save.
-            </Alert>
-          )}
-          {data.locked && (
-            <Alert severity="info" sx={{ py: 0 }}>This week is locked and kept as the record.</Alert>
-          )}
-
-          {jw?.jira === 'unmatched' && (
-            <Alert severity="info" variant="outlined" sx={{ py: 0 }}>
-              Your Jira account could not be found from your name on the team
-              {jw.names?.length ? ` (tried ${jw.names.join(', ')})` : ''}, so this week is the form below rather than your
-              Jira tasks. Ask an administrator to add your Jira display name on the Model tab.
-            </Alert>
-          )}
-          {askedAbout && jiraMode && (
-            <Alert severity="info" onClose={() => setAskedAbout(null)}>
-              Your manager asked for an update on <strong>{askedAbout.jiraKey || askedAbout.key}</strong>
-              {askedAbout.summary ? ` — ${askedAbout.summary}` : ''}. Submit an update on its tasks below, or add one.
-              They are told when you do.
-            </Alert>
-          )}
-          {(jwLoading || (jiraMode && jw.week !== data.week)) && (
-            <Loading variant="block" label={`Reading your Jira tasks for ${weekTitle(data.week)}…`} />
-          )}
-          {jiraMode && jw.week === data.week && (
-            <JiraWeek
-              week={data.week}
-              current={data.current}
-              person={data.person}
-              canWrite={!readOnly}
-              jw={jw}
-              onReload={() => { loadJira(data.week); load(data.week) }}
-              onDatesSaved={() => setDatesSaved((m) => ({ ...m, [data.week]: true }))}
-              addSignal={addSignal}
-              projects={taskProjects}
-              preset={preset}
-              onPresetUsed={() => setPreset(null)}
-              focusKey={focused}
-              aiOn={aiOn}
-              planIn={planIn}
-              planInAt={mine?.planSubmittedAt || null}
-              onGoWeek={go}
-              onProjectAdded={(r) => { if (r.project) onProjectsAdded?.([r.project]) }}
-            />
-          )}
-          {jiraMode && (
-            <MyProjects
-              projects={myOpen}
-              readOnly={readOnly}
-              ahead={data.week > data.current}
-              onPlan={new Set([...(jw.tasks || []), ...(jw.overdue || [])].map((t) => t.project?.key).filter(Boolean))}
-              onAdd={(key) => setPreset(key)}
-            />
-          )}
-
-          {!jiraMode && !jwLoading && (<>
-          <TextField
-            label="This week I'm focused on…"
-            value={draft.focus}
-            onChange={(e) => edit({ focus: e.target.value })}
-            disabled={readOnly}
-            multiline
-            minRows={2}
-            maxRows={8}
-            fullWidth
-            helperText={readOnly ? undefined : 'A few sentences. This is what your manager sees first.'}
-          />
-          <AiAssist available={aiOn} disabled={readOnly} field="focus" text={draft.focus} onText={(t) => edit({ focus: t })} />
-
-          <MyProjects
-            projects={myOpen}
-            readOnly={readOnly}
-            onPlan={new Set(draft.tasks.map((t) => t.projectKey).filter(Boolean))}
-            onAdd={(key) => edit({ tasks: [...draft.tasks, { ...blankTask(), projectKey: key }] })}
-          />
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-            {askedAbout && (
-              <Alert severity="info" onClose={() => setAskedAbout(null)}>
-                Your manager asked for an update on <strong>{askedAbout.jiraKey || askedAbout.key}</strong>
-                {askedAbout.summary ? ` — ${askedAbout.summary}` : ''}. Fill in its task below, then press Save draft
-                or Submit. They are told when you do.
-              </Alert>
-            )}
-            {draft.tasks.map((t, i) => (
-              <Box
-                key={t.id}
-                data-task-project={t.projectKey || undefined}
-                sx={{
-                  borderRadius: '14px',
-                  transition: 'box-shadow .4s',
-                  boxShadow: focused && t.projectKey === focused ? (th) => `0 0 0 2px ${th.palette.primary.main}` : 'none',
-                }}
-              >
-              <TaskEditor
-                task={t}
-                index={i}
-                projects={projects}
-                projectByKey={projectByKey}
-                onChange={(next) => editTask(i, next)}
-                onRemove={() => edit({ tasks: draft.tasks.filter((_x, j) => j !== i) })}
-                readOnly={readOnly}
-                showReport={showReport}
-                jiraTasks={jiraTasks}
-                onNeedJira={needJira}
-                jiraHint={t.jiraKey && jiraDone[t.jiraKey] ? `${t.jiraKey} is resolved in Jira` : null}
-                proposal={propsBy[data.person]?.[t.id]}
-                onShowTimeline={onShowTimeline}
-                aiOn={aiOn}
-              />
+        {/* ------------------------------------------- waiting for a decision */}
+        {admin && pending && pending.length > 0 && (
+          <Section
+            title="Waiting for your decision"
+            meta={`${plural(pending.length, 'late task')} that would move ${pending.length === 1 ? 'its project' : 'their projects'}. Approve the new due date, or reject it with a reason.`}
+            padded={false}
+            sx={{ '& [data-decision-row] + [data-decision-row]': { borderTop: 1, borderColor: 'border.subtle' } }}
+          >
+            {pending.map((p) => (
+              <Box key={`${p.id}:${p.updatedAt}`} data-decision-row>
+                <DecisionRow
+                  p={p}
+                  jira={jira}
+                  busy={deciding}
+                  onApprove={(x, due) => decide('approve', x, due)}
+                  onReject={(x, why) => decide('reject', x, why)}
+                  onShowTimeline={onShowTimeline}
+                />
               </Box>
             ))}
-            {!readOnly && (
-              <Button
-                startIcon={<AddIcon />}
-                onClick={() => edit({ tasks: [...draft.tasks, blankTask()] })}
-                sx={{ alignSelf: 'flex-start' }}
-              >
-                Add a task
-              </Button>
-            )}
-          </Box>
-          </>)}
+          </Section>
+        )}
 
-          {!jwLoading && (showReport || (jiraMode && data.week <= data.current)) && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Typography variant="h4">{jiraMode ? 'Adhoc work' : 'Unplanned work'}</Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>
-                {jiraMode
-                  ? 'Anything that took your time this week and is not a Jira task. Press Save adhoc work when done.'
-                  : <>Anything that took your time this week and was not in Monday&rsquo;s plan.</>}
-              </Typography>
-              {draft.unplanned.map((u, i) => (
-                <Box
-                  key={u.id}
-                  sx={{
-                    display: 'grid', gap: 1, alignItems: 'center',
-                    gridTemplateColumns: { xs: '1fr 88px 40px', sm: 'minmax(0,3fr) minmax(0,2fr) 110px 40px' },
-                  }}
-                >
-                  <TextField
-                    size="small"
-                    label="What"
-                    value={u.title}
-                    disabled={readOnly}
-                    onChange={(e) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })}
-                    sx={{ gridColumn: { xs: '1 / -1', sm: 'auto' } }}
-                  />
-                  <Autocomplete
-                    size="small"
-                    options={projects}
-                    groupBy={projectGroup}
-                    openOnFocus
-                    autoHighlight
-                    value={u.projectKey ? projectByKey[u.projectKey] || null : null}
-                    disabled={readOnly}
-                    onChange={(_e, v) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, projectKey: v?.key || null } : x)) })}
-                    getOptionLabel={(p) => `${p.key} · ${p.summary}`}
-                    isOptionEqualToValue={(a, b) => a.key === b.key}
-                    renderInput={(params) => <TextField {...params} label="Project" />}
-                  />
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="Days"
-                    value={u.effort ?? ''}
-                    disabled={readOnly}
-                    inputProps={{ min: 0, step: 0.5, inputMode: 'decimal' }}
-                    onChange={(e) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, effort: e.target.value === '' ? null : Number(e.target.value) } : x)) })}
-                  />
-                  {!readOnly ? (
-                    <IconButton size="small" onClick={() => edit({ unplanned: draft.unplanned.filter((_x, j) => j !== i) })} aria-label="remove unplanned work">
-                      <DeleteOutlineIcon sx={{ fontSize: 18 }} />
-                    </IconButton>
-                  ) : <span />}
-                </Box>
-              ))}
-              {!readOnly && (
-                <Button
-                  size="small"
-                  startIcon={<AddIcon />}
-                  onClick={() => edit({ unplanned: [...draft.unplanned, { id: newTaskId(), title: '', projectKey: null, effort: null }] })}
-                  sx={{ alignSelf: 'flex-start' }}
-                >
-                  {jiraMode ? 'Add adhoc work' : 'Add unplanned work'}
-                </Button>
-              )}
-            </Box>
-          )}
-
-          {problems.length > 0 && (
-            <Alert severity="warning">
-              <Box component="ul" sx={{ m: 0, pl: 2 }}>
-                {problems.map((p) => <li key={p}>{p}</li>)}
+        {/* ------------------------------------------------ the AI summary */}
+        {admin && summary?.ai && (
+          <Section
+            title={(
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.5 }}>
+                <AutoAwesomeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                The week, summarised
               </Box>
-            </Alert>
-          )}
-          {notice && <Alert severity="success" onClose={() => setNotice(null)} sx={{ py: 0 }}>{notice}</Alert>}
-
-          {!readOnly && jiraMode && dirty && (
-            <Button variant="outlined" onClick={() => save(null)} disabled={!!busy} sx={{ alignSelf: 'flex-start' }}>
-              {busy === 'save' ? 'Saving…' : 'Save adhoc work'}
-            </Button>
-          )}
-          {!readOnly && !jiraMode && !jwLoading && (
-            <Stack direction={phone ? 'column' : 'row'} spacing={1} sx={{ alignItems: phone ? 'stretch' : 'center' }}>
-              <Button variant="outlined" onClick={() => save(null)} disabled={!!busy || !dirty}>
-                {busy === 'save' ? 'Saving…' : dirty ? 'Save draft' : 'Saved'}
-              </Button>
-              {!planIn && (
-                <Button variant="contained" onClick={() => save('plan')} disabled={!!busy}>
-                  {busy === 'plan' ? 'Submitting…' : 'Submit plan'}
-                </Button>
-              )}
-              {planIn && !reportIn && showReport && (
-                <Button variant="contained" onClick={() => save('report')} disabled={!!busy}>
-                  {busy === 'report' ? 'Submitting…' : 'Submit report'}
-                </Button>
-              )}
-              {planIn && (
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  Plan in {new Date(mine.planSubmittedAt).toLocaleString()}
-                  {reportIn && ` · report in ${new Date(mine.reportSubmittedAt).toLocaleString()}`}
-                  {' '}· you can still edit until it locks
+            )}
+            aria-label="The week, summarised"
+            meta={summary.summaries[0]
+              ? `Written ${new Date(summary.summaries[0].writtenAt).toLocaleString('en-GB', {
+                timeZone: 'Asia/Bangkok', weekday: 'short', hour: '2-digit', minute: '2-digit',
+              })} ${SUMMARY_WHEN[summary.summaries[0].trigger] || ''}`.trim()
+              : `No summary yet for week ${n}. The AI writes one after each deadline and emails it to the administrators.`}
+            data-no-summary={summary.summaries[0] ? undefined : true}
+            // With no summary the meta line says it all: no empty body under it.
+            sx={{ '& > div:last-of-type:empty': { display: 'none' } }}
+          >
+            {summary.summaries[0] ? (
+              <>
+                <Box sx={{ maxWidth: '80ch' }}><Markdown text={summary.summaries[0].text} /></Box>
+                <Typography variant="caption" component="div" sx={{ color: 'text.tertiary', mt: 3 }}>
+                  Written by AI from what the team submitted. Check anything you act on against the week below.
                 </Typography>
-              )}
-            </Stack>
-          )}
-        </Paper>
-      )}
+              </>
+            ) : null}
+          </Section>
+        )}
 
-      {/* ------------------------------------------------ the team
-          An administrator's: a member sees their own week and nobody else's. */}
-      {data && admin && (
-        <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Typography variant="h3">The team this week</Typography>
-          {data.team.length === 0 && (
-            <Typography variant="body2" sx={{ color: 'text.disabled' }}>Nobody is on the submit list.</Typography>
-          )}
-          {data.team.map((row) => {
-            const isOpen = open.has(row.person)
-            const e = row.entry
-            const tj = teamJira[row.person]
-            // A week run from Jira: counted against what is DUE (their Jira week), not only what was sent.
-            const jiraRow = tj?.jira === 'on' || e?.mode === 'jira' || (e?.tasks || []).some((t) => t.source === 'jira')
-            const total = e?.tasks?.length || 0
-            const hold = e?.tasks?.filter((t) => t.hold).length || 0
-            const done = e?.tasks?.filter((t) => !t.hold && t.done === true).length || 0
-            const blocked = e?.tasks?.filter((t) => !t.hold && t.done === false).length || 0
-            const due = tj?.jira === 'on' ? [...(tj.overdue || []), ...(tj.tasks || [])] : null
-            const sentOn = due ? due.filter((t) => t.update).length : total
-            const latest = jiraRow
-              ? [...(e?.tasks || [])].filter((t) => t.progress).sort((a, b) => String(b.reportedAt || '').localeCompare(String(a.reportedAt || '')))[0] || null
-              : null
-            return (
-              <Box key={row.person} sx={{ borderTop: 1, borderColor: 'divider', pt: 1.25 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                  <IconTile text={row.nick.slice(0, 2)} color={personColor(plan?.people, row.person)} size={30} />
-                  <Typography variant="body2" sx={{ fontWeight: 700, minWidth: 80 }}>
-                    {row.nick}
-                    {row.person === data.person && <Chip size="small" label="you" sx={{ ml: 0.75, height: 18, fontSize: '0.65rem' }} />}
-                  </Typography>
-                  {admin && <StandingChip label="Plan" value={row.standing?.plan} />}
-                  {admin && <StandingChip label="Report" value={row.standing?.report} />}
-                  {admin && jiraRow && (
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }} data-team-counts={row.person}>
-                      {due ? `${sentOn} of ${due.length} task${due.length === 1 ? '' : 's'} updated` : tj === undefined && jira?.configured ? 'Reading Jira…' : `${total} task${total === 1 ? '' : 's'} updated`}
-                      {done ? ` · ${done} finished` : ''}{blocked ? ` · ${blocked} not finished` : ''}{hold ? ` · ${hold} on hold` : ''}
-                    </Typography>
-                  )}
-                  {admin && !jiraRow && total > 0 && (
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      {total} task{total === 1 ? '' : 's'}{done ? ` · ${done} finished` : ''}{blocked ? ` · ${blocked} not finished` : ''}{hold ? ` · ${hold} on hold` : ''}
-                    </Typography>
-                  )}
-                  <Box sx={{ flex: 1 }} />
-                  {admin && (
-                    <IconButton
-                      size="small"
-                      aria-label={`${isOpen ? 'hide' : 'show'} ${row.nick}'s week`}
-                      onClick={() => setOpen((s) => {
-                        const n = new Set(s)
-                        if (n.has(row.person)) n.delete(row.person); else n.add(row.person)
-                        return n
-                      })}
-                    >
-                      {isOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                    </IconButton>
-                  )}
-                </Box>
-                {/* Collapsed: the focus they wrote — or, for a week run from Jira (which has no
-                    focus), the latest update they sent. */}
-                {!isOpen && (jiraRow && !row.focus ? (
-                  <Typography variant="body2" sx={{ color: latest ? 'text.secondary' : 'text.disabled', mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                    {latest ? `${latest.jiraKey || latest.title}: ${latest.progress}` : 'No task updated yet.'}
-                  </Typography>
-                ) : (
-                  <Typography
-                    variant="body2"
+        {/* ---------------------------------------------------- my week */}
+        {draft && (
+          <Box ref={myWeekRef} sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 3, sm: 4 }, scrollMarginTop: 96 }}>
+            <Box sx={{ mt: { xs: 1, sm: 2 } }}>
+              <Box sx={{
+                display: 'flex', alignItems: 'center', columnGap: 2, rowGap: 1, flexWrap: 'wrap',
+              }}
+              >
+                <Typography variant="h2" component="h2" sx={{ mr: 1 }}>My week</Typography>
+                <StandingPill label="Plan" value={data.mineStanding?.plan} />
+                <StandingPill label="Report" value={data.mineStanding?.report} />
+              </Box>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>{myMeta}</Typography>
+            </Box>
+
+            {formMode && mine?.draft && draft.tasks.length > 0 && (
+              <Alert severity="info" variant="outlined">
+                {`${plural(draft.tasks.length, 'unfinished task')} carried over from last week. Edit, remove or add to them, then save.`}
+              </Alert>
+            )}
+            {jw?.jira === 'unmatched' && (
+              <Alert severity="info" variant="outlined">
+                {`Your Jira account was not found from your name on the team${jw.names?.length ? ` (tried ${jw.names.join(', ')})` : ''}, so this week uses the form below. Ask an administrator to add your Jira display name on the Model page.`}
+              </Alert>
+            )}
+            {askedAbout && (
+              <Alert severity="info" variant="outlined" onClose={() => setAskedAbout(null)}>
+                Your manager asked for an update on <strong>{askedAbout.jiraKey || askedAbout.key}</strong>
+                {askedAbout.summary ? ` ${askedAbout.summary}` : ''}.
+                {jiraMode ? ' Submit an update on its tasks below, or add one.' : ' Fill in its task below, then save or submit.'}
+                {' '}They are told when you do.
+              </Alert>
+            )}
+            {(jwLoading || (jiraMode && jw.week !== data.week)) && (
+              <WeekSkeleton label={`Reading your Jira tasks for week ${n}…`} next={false} />
+            )}
+            {jwReady && (
+              <JiraWeek
+                week={data.week}
+                current={data.current}
+                person={data.person}
+                canWrite={!readOnly}
+                jw={jw}
+                onReload={() => { loadJira(data.week); load(data.week) }}
+                onDatesSaved={() => setDatesSaved((m) => ({ ...m, [data.week]: true }))}
+                addSignal={addSignal}
+                projects={taskProjects}
+                preset={preset}
+                onPresetUsed={() => setPreset(null)}
+                focusKey={focused}
+                aiOn={aiOn}
+                planIn={planIn}
+                planInAt={mine?.planSubmittedAt || null}
+                onGoWeek={go}
+                onProjectAdded={(r) => { if (r.project) onProjectsAdded?.([r.project]) }}
+              />
+            )}
+            {jwReady && (
+              <MyProjects
+                projects={myOpen}
+                readOnly={readOnly}
+                ahead={data.week > data.current}
+                onPlan={new Set([...(jw.tasks || []), ...(jw.overdue || [])].map((t) => t.project?.key).filter(Boolean))}
+                onAdd={(key) => setPreset(key)}
+              />
+            )}
+
+            {formMode && (
+              <>
+                <Section title="Focus" meta={readOnly ? null : 'A few sentences. This is what your manager reads first.'}>
+                  <TextField
+                    label="This week I'm focused on…"
+                    value={draft.focus}
+                    onChange={(e) => edit({ focus: e.target.value })}
+                    disabled={readOnly}
+                    multiline
+                    minRows={2}
+                    maxRows={8}
+                    fullWidth
+                  />
+                  <Box sx={{ mt: 2 }}>
+                    <AiAssist available={aiOn} disabled={readOnly} field="focus" text={draft.focus} onText={(t) => edit({ focus: t })} />
+                  </Box>
+                </Section>
+
+                <MyProjects
+                  projects={myOpen}
+                  readOnly={readOnly}
+                  onPlan={new Set(draft.tasks.map((t) => t.projectKey).filter(Boolean))}
+                  onAdd={(key) => edit({ tasks: [...draft.tasks, { ...blankTask(), projectKey: key }] })}
+                />
+
+                {draft.tasks.map((t, i) => (
+                  <Box
+                    key={t.id}
+                    data-task-project={t.projectKey || undefined}
                     sx={{
-                      color: row.focus ? 'text.primary' : 'text.disabled', mt: 0.5, whiteSpace: 'pre-wrap',
+                      borderRadius: '8px',
+                      transition: 'box-shadow 180ms ease-out',
+                      boxShadow: focused && t.projectKey === focused ? (th) => `0 0 0 2px ${th.palette.primary.main}` : 'none',
                     }}
                   >
-                    {row.focus || 'No focus written yet.'}
-                  </Typography>
+                    <TaskEditor
+                      task={t}
+                      index={i}
+                      projects={projects}
+                      projectByKey={projectByKey}
+                      onChange={(nx) => editTask(i, nx)}
+                      onRemove={() => edit({ tasks: draft.tasks.filter((_x, j) => j !== i) })}
+                      readOnly={readOnly}
+                      showReport={showReport}
+                      jiraTasks={jiraTasks}
+                      onNeedJira={needJira}
+                      jiraHint={t.jiraKey && jiraDone[t.jiraKey] ? `${t.jiraKey} is resolved in Jira` : null}
+                      proposal={propsBy[data.person]?.[t.id]}
+                      onShowTimeline={onShowTimeline}
+                      aiOn={aiOn}
+                    />
+                  </Box>
                 ))}
-                {admin && (
+                {!readOnly && (
+                  <Button
+                    startIcon={<AddIcon />}
+                    onClick={() => edit({ tasks: [...draft.tasks, blankTask()] })}
+                    sx={{ alignSelf: 'flex-start', mt: -1 }}
+                  >
+                    Add a task
+                  </Button>
+                )}
+              </>
+            )}
+
+            {/* ------------------------------------- adhoc / unplanned work */}
+            {jwReady && data.week <= data.current && (
+              <Section
+                title="Adhoc work"
+                meta="Time spent this week on anything that is not a Jira task."
+                padded={false}
+                actions={!readOnly ? (
+                  <Button startIcon={<AddIcon />} onClick={() => setAdhocOpen(true)} sx={{ mr: -1.5 }} disabled={busy === 'adhoc'}>Add adhoc work</Button>
+                ) : null}
+              >
+                {draft.unplanned.length === 0 ? (
+                  <Box sx={{ px: { xs: 3, sm: 4 } }}>
+                    <EmptyState inline icon={WorkOutlineIcon} title="No adhoc work this week." />
+                  </Box>
+                ) : draft.unplanned.map((u, i) => (
+                  <Box
+                    key={u.id}
+                    sx={{
+                      display: 'flex', alignItems: 'center', gap: 3, px: { xs: 3, sm: 4 }, minHeight: 44, py: 1, borderTop: i ? 1 : 0, borderColor: 'border.subtle',
+                    }}
+                  >
+                    <Typography variant="body1" sx={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+                      {u.title}
+                      {u.projectKey && <Box component="span" sx={{ color: 'text.secondary', ml: 2 }}>{u.projectKey}</Box>}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                      {u.effort != null ? `${u.effort} d` : '–'}
+                    </Typography>
+                    {!readOnly && (
+                      <Tooltip title="Remove">
+                        <IconButton size="small" onClick={() => removeAdhoc(u.id)} disabled={busy === 'adhoc'} aria-label="remove unplanned work" sx={{ mr: -1 }}>
+                          <DeleteOutlineIcon sx={{ fontSize: 18 }} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </Box>
+                ))}
+              </Section>
+            )}
+            {formMode && showReport && (
+              <Section
+                title="Unplanned work"
+                meta="Anything that took your time this week and was not in Monday’s plan."
+                actions={!readOnly ? (
+                  <Button
+                    startIcon={<AddIcon />}
+                    onClick={() => edit({ unplanned: [...draft.unplanned, { id: newTaskId(), title: '', projectKey: null, effort: null }] })}
+                    sx={{ mr: -1.5 }}
+                  >
+                    Add unplanned work
+                  </Button>
+                ) : null}
+              >
+                {draft.unplanned.length === 0 && <EmptyState inline title="No unplanned work this week." />}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  {draft.unplanned.map((u, i) => (
+                    <Box
+                      key={u.id}
+                      sx={{
+                        display: 'grid',
+                        gap: 2,
+                        alignItems: 'center',
+                        gridTemplateColumns: { xs: 'minmax(0,1fr) 88px 40px', sm: 'minmax(0,3fr) minmax(0,2fr) 110px 40px' },
+                      }}
+                    >
+                      <TextField
+                        size="small"
+                        label="What"
+                        value={u.title}
+                        disabled={readOnly}
+                        onChange={(e) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })}
+                        sx={{ gridColumn: { xs: '1 / -1', sm: 'auto' } }}
+                      />
+                      <Autocomplete
+                        size="small"
+                        options={projects}
+                        groupBy={projectGroup}
+                        openOnFocus
+                        autoHighlight
+                        value={u.projectKey ? projectByKey[u.projectKey] || null : null}
+                        disabled={readOnly}
+                        onChange={(_e, v) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, projectKey: v?.key || null } : x)) })}
+                        getOptionLabel={(p) => `${p.key} · ${p.summary}`}
+                        isOptionEqualToValue={(a, b) => a.key === b.key}
+                        renderInput={(params) => <TextField {...params} label="Project" />}
+                      />
+                      <TextField
+                        size="small"
+                        type="number"
+                        label="Days"
+                        value={u.effort ?? ''}
+                        disabled={readOnly}
+                        inputProps={{ min: 0, step: 0.5, inputMode: 'decimal' }}
+                        onChange={(e) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, effort: e.target.value === '' ? null : Number(e.target.value) } : x)) })}
+                      />
+                      {!readOnly ? (
+                        <Tooltip title="Remove">
+                          <IconButton size="small" onClick={() => edit({ unplanned: draft.unplanned.filter((_x, j) => j !== i) })} aria-label="remove unplanned work">
+                            <DeleteOutlineIcon sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </Tooltip>
+                      ) : <span />}
+                    </Box>
+                  ))}
+                </Box>
+              </Section>
+            )}
+
+            {/* ----------------------------------------- the form's buttons */}
+            {formMode && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {problems.length > 0 && (
+                  <Alert severity="warning" variant="outlined">
+                    <Box component="ul" sx={{ m: 0, pl: 4 }}>
+                      {problems.map((p) => <li key={p}>{p}</li>)}
+                    </Box>
+                  </Alert>
+                )}
+                {notice && <Alert severity="success" variant="outlined" onClose={() => setNotice(null)}>{notice}</Alert>}
+                {!readOnly && (
+                  <Box sx={{
+                    display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { xs: 'stretch', sm: 'center' }, gap: 2,
+                  }}
+                  >
+                    <Button variant="outlined" onClick={() => save(null)} disabled={!!busy || !dirty} sx={phone ? { minHeight: 40 } : null}>
+                      {busy === 'save' ? 'Saving…' : dirty ? 'Save draft' : 'Saved'}
+                    </Button>
+                    {!planIn && (
+                      <Button variant="contained" onClick={() => save('plan')} disabled={!!busy} sx={phone ? { minHeight: 40 } : null}>
+                        {busy === 'plan' ? 'Submitting…' : 'Submit plan'}
+                      </Button>
+                    )}
+                    {planIn && !reportIn && showReport && (
+                      <Button variant="contained" onClick={() => save('report')} disabled={!!busy} sx={phone ? { minHeight: 40 } : null}>
+                        {busy === 'report' ? 'Submitting…' : 'Submit report'}
+                      </Button>
+                    )}
+                    {planIn && (
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        {`Plan in ${bkk(mine.planSubmittedAt)}${reportIn ? `, report in ${bkk(mine.reportSubmittedAt)}` : ''}. You can still edit until the week locks.`}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* ------------------------------------------------ the team
+            An administrator's: a member sees their own week and nobody else's. */}
+        {admin && (
+          <Section
+            title="The team this week"
+            meta={(data.team || []).length ? `${plural(required.length, 'person', 'people')} on the submit list.` : null}
+            padded={false}
+            sx={{ mt: draft ? { xs: 1, sm: 2 } : 0 }}
+          >
+            {(data.team || []).length === 0 && (
+              <Box sx={{ px: 4 }}>
+                <EmptyState inline title="Nobody is on the submit list." body="Add people to it on the Access page." />
+              </Box>
+            )}
+            {(data.team || []).map((row, i) => {
+              const isOpen = open.has(row.person)
+              const e = row.entry
+              const tj = teamJira[row.person]
+              // A week run from Jira: counted against what is DUE (their Jira week), not only what was sent.
+              const jiraRow = tj?.jira === 'on' || e?.mode === 'jira' || (e?.tasks || []).some((t) => t.source === 'jira')
+              const total = e?.tasks?.length || 0
+              const hold = e?.tasks?.filter((t) => t.hold).length || 0
+              const done = e?.tasks?.filter((t) => !t.hold && t.done === true).length || 0
+              const blocked = e?.tasks?.filter((t) => !t.hold && t.done === false).length || 0
+              const due = tj?.jira === 'on' ? [...(tj.overdue || []), ...(tj.tasks || [])] : null
+              const sentOn = due ? due.filter((t) => t.update).length : total
+              const latest = jiraRow
+                ? [...(e?.tasks || [])].filter((t) => t.progress).sort((a, b) => String(b.reportedAt || '').localeCompare(String(a.reportedAt || '')))[0] || null
+                : null
+              const tail = `${done ? `, ${done} finished` : ''}${blocked ? `, ${blocked} not finished` : ''}${hold ? `, ${hold} on hold` : ''}`
+              const counts = jiraRow
+                ? `${due ? `${sentOn} of ${plural(due.length, 'task')} updated` : tj === undefined && jira?.configured ? 'Reading Jira…' : `${plural(total, 'task')} updated`}${tail}`
+                : total > 0 ? `${plural(total, 'task')}${tail}` : null
+              const focusLine = jiraRow && !row.focus
+                ? (latest ? `${latest.jiraKey || latest.title}: ${latest.progress}` : null)
+                : row.focus
+              const toggle = () => setOpen((s) => {
+                const nx = new Set(s)
+                if (nx.has(row.person)) nx.delete(row.person); else nx.add(row.person)
+                return nx
+              })
+              return (
+                <Box key={row.person} sx={{ borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
+                  <Box sx={{
+                    display: 'flex', alignItems: 'flex-start', gap: 3, px: { xs: 3, sm: 4 }, py: 2.5,
+                  }}
+                  >
+                    <Box sx={{ pt: 0.25 }}><Avatar name={row.nick} /></Box>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{
+                        display: 'flex', alignItems: 'center', columnGap: 3, rowGap: 1, flexWrap: 'wrap', minHeight: 28,
+                      }}
+                      >
+                        <Typography
+                          variant="body1"
+                          sx={{
+                            fontWeight: 500, minWidth: { md: 120 }, flexBasis: { xs: '100%', sm: 'auto' }, cursor: 'pointer',
+                          }}
+                          onClick={toggle}
+                        >
+                          {row.nick}
+                          {row.person === data.person && <Box component="span" sx={{ color: 'text.tertiary', fontWeight: 400, ml: 1.5 }}>you</Box>}
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'nowrap' }}>
+                          <StandingPill label="Plan" value={row.standing?.plan} />
+                          <StandingPill label="Report" value={row.standing?.report} />
+                        </Box>
+                        {counts && (
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }} data-team-counts={jiraRow ? row.person : undefined}>
+                            {counts}
+                          </Typography>
+                        )}
+                      </Box>
+                      {/* Collapsed: the focus they wrote — or, for a week run from Jira (which has no
+                          focus), the latest update they sent. */}
+                      {!isOpen && (
+                        <Typography
+                          variant="body2"
+                          title={focusLine || undefined}
+                          sx={{
+                            color: focusLine ? 'text.secondary' : 'text.tertiary', mt: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {focusLine || (jiraRow ? 'No task updated yet.' : 'No focus written yet.')}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Tooltip title={isOpen ? 'Hide their week' : 'Show their week'}>
+                      <IconButton
+                        size="small"
+                        aria-label={`${isOpen ? 'hide' : 'show'} ${row.nick}'s week`}
+                        aria-expanded={isOpen}
+                        onClick={toggle}
+                        sx={{ mr: -1, width: { xs: 40, sm: 32 }, height: { xs: 40, sm: 32 } }}
+                      >
+                        <ExpandMoreIcon fontSize="small" sx={{ transition: 'transform 180ms ease-out', transform: isOpen ? 'rotate(180deg)' : 'none' }} />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                   <Collapse in={isOpen} unmountOnExit>
-                    <Box sx={{ mt: 1 }}>
+                    <Box sx={{ pl: { xs: 3, sm: 14 }, pr: { xs: 3, sm: 4 }, pb: 2, mt: -1 }}>
                       <WeekSummary entry={e} projectByKey={projectByKey} proposals={propsBy[row.person]} onShowTimeline={onShowTimeline} />
                     </Box>
                   </Collapse>
-                )}
-              </Box>
-            )
-          })}
-        </Paper>
+                </Box>
+              )
+            })}
+          </Section>
+        )}
+      </Box>
+
+      {jwReady && !readOnly && (
+        <AdhocDialog
+          open={adhocOpen}
+          onClose={() => setAdhocOpen(false)}
+          projects={projects}
+          projectByKey={projectByKey}
+          onSave={(item) => saveAdhoc([...draft.unplanned, item], 'Adhoc work saved.')}
+        />
       )}
     </Box>
   )
