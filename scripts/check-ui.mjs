@@ -717,7 +717,8 @@ try {
   check('  the per-project allowance and the book limit',
     /% of that project/i.test(obj1 || '') && /may drift/i.test(obj1 || ''))
   check('  and it lists the projects with their dates',
-    /by 20\d\d-\d\d-\d\d|no date committed/i.test(obj1 || ''),
+    // Dates read the way the rest of the app writes them: "by 20 Feb 2026".
+    /by \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) 20\d\d|no date committed/.test(obj1 || ''),
     (obj1 || '').split(String.fromCharCode(10)).find((l) => /^by |no date/i.test(l)) || 'no dated row found')
 
   /* ---------- the FTE ratio is adjustable, and drives both sides ---------- */
