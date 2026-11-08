@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Box, Typography, Table, TableBody, TableCell, TableHead, TableRow, Tooltip,
+  Box, Typography, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, TextField, MenuItem, useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import PersonOffOutlinedIcon from '@mui/icons-material/PersonOffOutlined'
@@ -94,6 +94,16 @@ export default function Team({ plan, own = false, loading = false }) {
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const { people, settings, finance: fin } = plan
   const sym = fin.symbol
+  /*
+   * On a phone there is no room for people side by side: three figures each
+   * for six people is eighteen columns. It shows one person at a time, picked
+   * above a four-column table, with the same rows and totals.
+   */
+  const phone = useMediaQuery(theme.breakpoints.down('sm'), { noSsr: true })
+  const [pickedId, setPickedId] = useState(null)
+  const picked = people.find((p) => p.id === pickedId) || people[0]
+  const shown = phone && picked ? [picked] : people
+  const summary = (p) => `${fmtHours(p.scorecardHours)} hrs, ${p.scorecardCount} project${p.scorecardCount === 1 ? '' : 's'}`
 
   const title = own ? 'My scorecard' : 'Overall team'
   const description = own
@@ -158,20 +168,22 @@ export default function Team({ plan, own = false, loading = false }) {
 
   const dash = <Box component="span" sx={{ color: 'text.tertiary' }}>–</Box>
   const num = { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
-  const groupEdge = { borderLeft: 1, borderLeftColor: 'border.subtle' }
+  // A hairline between one person's three columns and the next person's. One
+  // person on a phone needs no such divider.
+  const groupEdge = phone ? {} : { borderLeft: 1, borderLeftColor: 'border.subtle' }
   /*
-   * The pinned first column. On a phone it narrows and wraps, so the people's
-   * figures keep most of the width; a hairline marks where the scrolling part
-   * begins, and deepens once something is sliding under it.
+   * The pinned first column, with a hairline where the scrolling part begins
+   * that deepens once something is sliding under it. On a phone nothing
+   * scrolls: the column takes whatever the three figures leave, and wraps.
    */
-  const stick = (head) => ({
+  const stick = (head) => (phone ? { overflowWrap: 'anywhere' } : {
     position: 'sticky',
     left: 0,
     zIndex: head ? 3 : 1,
     bgcolor: head ? 'bg.subtle' : 'bg.surface',
-    minWidth: { xs: 148, sm: 248 },
-    maxWidth: { xs: 160, sm: 280 },
-    width: { sm: 264 },
+    minWidth: 248,
+    maxWidth: 280,
+    width: 264,
     overflowWrap: 'anywhere',
     boxShadow: (t) => `inset -1px 0 0 ${t.palette.border.subtle}`,
     '.is-scrolled &': { boxShadow: (t) => `inset -1px 0 0 ${t.palette.border.strong}, 4px 0 8px -4px ${t.palette.mode === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(16,24,40,0.12)'}` },
@@ -201,62 +213,107 @@ export default function Team({ plan, own = false, loading = false }) {
       {people.length > 0 && (
         <Section
           title={own ? undefined : 'KPI lines by person'}
-          meta={teamMeta}
+          // A member's phone shows their one card with no person header, so
+          // what it adds up to moves up here.
+          meta={own ? (phone && picked ? summary(picked) : null) : teamMeta}
           padded={false}
           // One person's card reads as a compact table, not one stretched across the screen.
           sx={own ? { maxWidth: 880 } : undefined}
         >
-          <ScrollX label={own ? 'My scorecard' : 'Every scorecard, scroll sideways for more people'}>
+          {phone && !own && people.length > 1 && (
+            <Box sx={{ px: 3, pt: 3, pb: 1 }}>
+              <TextField
+                select
+                fullWidth
+                size="small"
+                label="Person"
+                value={picked.id}
+                onChange={(e) => setPickedId(e.target.value)}
+                helperText={summary(picked)}
+                SelectProps={{ MenuProps: { PaperProps: { sx: { maxHeight: 360 } } } }}
+              >
+                {people.map((p) => (
+                  <MenuItem key={p.id} value={p.id} sx={{ minHeight: 44 }}>
+                    {p.nick}{p.aggregatesTeam && ' (team)'}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Box>
+          )}
+          <ScrollX label={own ? 'My scorecard' : phone ? `Scorecard for ${picked?.nick || ''}` : 'Every scorecard, scroll sideways for more people'}>
             <Table
               size="small"
               sx={{
-                minWidth: own ? 560 : undefined,
+                minWidth: own && !phone ? 560 : undefined,
                 '& td, & th': { px: { xs: 2, sm: 3 } },
-                '& tbody td': { height: 52, verticalAlign: 'middle' },
+                '& tbody td': { height: phone ? 48 : 52, verticalAlign: 'middle' },
               }}
             >
               <TableHead>
-                <TableRow>
-                  {/* One cell over both header rows, so the pinned column
-                      never shows an empty second "KPI line" header. */}
-                  <TableCell rowSpan={2} sx={{ ...stick(true), verticalAlign: 'bottom' }}>
-                    KPI line
-                  </TableCell>
-                  {people.map((p) => (
-                    <TableCell key={p.id} colSpan={3} sx={{ ...groupEdge, pt: 2, pb: 1, height: 'auto' }}>
-                      <Typography variant="h3" component="div" sx={{ color: 'text.primary', whiteSpace: 'nowrap' }}>
-                        {p.nick}{p.aggregatesTeam && ' (team)'}
-                      </Typography>
-                      <Typography variant="caption" component="div" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                        {fmtHours(p.scorecardHours)} hrs, {p.scorecardCount} project{p.scorecardCount === 1 ? '' : 's'}
-                      </Typography>
-                    </TableCell>
-                  ))}
-                </TableRow>
-                <TableRow>
-                  {people.map((p) => [
-                    <TableCell key={`${p.id}-t`} align="right" sx={{ ...groupEdge, minWidth: 96 }}>Target</TableCell>,
-                    <TableCell key={`${p.id}-w`} align="right" sx={{ minWidth: 64 }}>Weight</TableCell>,
-                    <TableCell key={`${p.id}-a`} align="right" sx={{ minWidth: 72 }}>Now</TableCell>,
-                  ])}
-                </TableRow>
+                {phone ? (
+                  // One person: their name is in the picker (or it is your own
+                  // card), so the head is the four columns alone.
+                  <TableRow>
+                    <TableCell sx={stick(true)}>KPI line</TableCell>
+                    <TableCell align="right" sx={{ width: '1%', whiteSpace: 'nowrap' }}>Target</TableCell>
+                    <TableCell align="right" sx={{ width: '1%', whiteSpace: 'nowrap' }}>Weight</TableCell>
+                    <TableCell align="right" sx={{ width: '1%', whiteSpace: 'nowrap' }}>Now</TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    <TableRow>
+                      {/* One cell over both header rows, so the pinned column
+                          never shows an empty second "KPI line" header. */}
+                      <TableCell rowSpan={2} sx={{ ...stick(true), verticalAlign: 'bottom' }}>
+                        KPI line
+                      </TableCell>
+                      {shown.map((p) => (
+                        <TableCell key={p.id} colSpan={3} sx={{ ...groupEdge, pt: 2, pb: 1, height: 'auto' }}>
+                          <Typography variant="h3" component="div" sx={{ color: 'text.primary', whiteSpace: 'nowrap' }}>
+                            {p.nick}{p.aggregatesTeam && ' (team)'}
+                          </Typography>
+                          <Typography variant="caption" component="div" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                            {summary(p)}
+                          </Typography>
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    <TableRow>
+                      {shown.map((p) => [
+                        <TableCell key={`${p.id}-t`} align="right" sx={{ ...groupEdge, minWidth: 96 }}>Target</TableCell>,
+                        <TableCell key={`${p.id}-w`} align="right" sx={{ minWidth: 64 }}>Weight</TableCell>,
+                        <TableCell key={`${p.id}-a`} align="right" sx={{ minWidth: 72 }}>Now</TableCell>,
+                      ])}
+                    </TableRow>
+                  </>
+                )}
               </TableHead>
 
               <TableBody>
                 {OBJECTIVES.map((o, i) => (
-                  <TableRow key={o.id} hover>
+                  // No hover tint on a phone: a tap leaves it stuck on the row.
+                  <TableRow key={o.id} hover={!phone}>
                     <TableCell sx={stick(false)}>
                       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
                         <Box
                           aria-hidden
                           sx={{
-                            width: 8, height: 8, borderRadius: '2px', mt: '6px', bgcolor: CHART[mode].series[i], flexShrink: 0,
+                            width: 8, height: 8, borderRadius: '2px', mt: phone ? '5px' : '6px', bgcolor: CHART[mode].series[i], flexShrink: 0,
                           }}
                         />
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                            Obj {o.no} — {o.name}
-                          </Typography>
+                          {phone ? (
+                            // A narrow column: the number on its own line, so
+                            // the name does not break after a dangling dash.
+                            <>
+                              <Typography variant="body2" sx={{ color: 'text.secondary' }}>Obj {o.no}</Typography>
+                              <Typography variant="body1" sx={{ fontWeight: 500 }}>{o.name}</Typography>
+                            </>
+                          ) : (
+                            <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                              Obj {o.no} — {o.name}
+                            </Typography>
+                          )}
                           <Typography variant="body2" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}>
                             {o.measure === 'ratio' ? 'Share of projects that drifted'
                               : o.measure === 'hours' ? `Saving ${settings.savingBasis === 'annual' ? 'hours a year' : 'hours a month'}`
@@ -267,7 +324,7 @@ export default function Team({ plan, own = false, loading = false }) {
                       </Box>
                     </TableCell>
 
-                    {people.map((p) => {
+                    {shown.map((p) => {
                       const c = cellFor(p, o)
                       if (!c) {
                         return [
@@ -316,12 +373,13 @@ export default function Team({ plan, own = false, loading = false }) {
                   <TableCell sx={{ ...stick(false), fontWeight: 500 }}>
                     Total saving hrs/mth
                   </TableCell>
-                  {people.map((p) => [
+                  {shown.map((p) => [
                     <TableCell key={`${p.id}-th`} align="right" sx={{ ...groupEdge, ...num, fontWeight: 600 }}>
                       {fmtHours(p.kpiTotals.savingHours)}
                     </TableCell>,
                     <TableCell key={`${p.id}-tw`} />,
-                    <TableCell key={`${p.id}-ta`} align="right" sx={{ ...num, color: 'text.secondary' }}>
+                    // On a phone the note may take two lines rather than widen the column.
+                    <TableCell key={`${p.id}-ta`} align="right" sx={{ ...num, color: 'text.secondary', ...(phone && { whiteSpace: 'normal' }) }}>
                       {Math.abs(p.kpiTotals.savingHours - p.registerHours) > 0.5 ? (
                         <Tooltip title="What the project register credits, where the card states something different">
                           <span>Register {fmtHours(p.registerHours)}</span>
@@ -334,7 +392,7 @@ export default function Team({ plan, own = false, loading = false }) {
                   <TableCell sx={{ ...stick(false), fontWeight: 500 }}>
                     Weight total
                   </TableCell>
-                  {people.map((p) => {
+                  {shown.map((p) => {
                     const sum = p.kpiLines.reduce((a, l) => a + l.weight, 0)
                     const ok = Math.abs(sum - 1) < 1e-9
                     return [
