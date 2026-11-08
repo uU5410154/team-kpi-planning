@@ -224,7 +224,8 @@ export default function Timeline({
    * after a dozen letters; the calendar scrolls sideways in what is left.
    */
   const NAME_W = narrow ? Math.max(170, Math.round((boxW || 360) * 0.55)) : 296
-  const SLIP_W = narrow ? 60 : 80
+  // Narrow, the slip pills are a size down, and the column gives its room to the calendar.
+  const SLIP_W = narrow ? 54 : 80
   const PINNED_W = NAME_W + SLIP_W
   /*
    * THE CHART IS THE PAGE. Everything above it is one header, one toolbar and
@@ -1239,7 +1240,9 @@ export default function Timeline({
         else { quietAt = todayPx + 6; roomPx = trackW - 8 - quietAt }
       }
     }
-    const sayQuiet = quiet && roomPx >= 64
+    // Not on a phone: there the calendar is a narrow window, and the words
+    // would mostly be cut off at its edges. The plan's tooltip says the same.
+    const sayQuiet = quiet && !narrow && roomPx >= 64
 
     const sticky = {
       position: 'sticky',
@@ -1601,7 +1604,7 @@ export default function Timeline({
             ...sticky,
             right: 0,
             width: SLIP_W,
-            px: narrow ? 2 : 3,
+            px: narrow ? 1.5 : 3,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
@@ -1616,7 +1619,7 @@ export default function Timeline({
                 tone="danger"
                 data-slip={signed(tl.lateBy)}
                 title={`${plural(tl.lateBy, 'day')} behind schedule`}
-                sx={narrow ? { height: 18, px: 1.5 } : undefined}
+                sx={narrow ? { height: 18, px: 1, fontSize: '0.6875rem' } : undefined}
               >
                 {signed(tl.lateBy)}
               </StatusPill>
@@ -1868,7 +1871,7 @@ export default function Timeline({
           <ListItemIcon sx={{ mt: 0.25 }}><CloudSyncIcon fontSize="small" /></ListItemIcon>
           <ListItemText
             primary={sharing ? 'Syncing for everyone…' : 'Sync for everyone'}
-            secondary={`Runs the sync on the shared plan everybody loads, as the 07:00 job does each morning.${jiraTip}`}
+            secondary="Runs the same sync on the shared plan everybody loads, as the 07:00 job does"
             secondaryTypographyProps={{ sx: { whiteSpace: 'normal' } }}
           />
         </MenuItem>
@@ -2163,7 +2166,7 @@ export default function Timeline({
       <Box sx={{
         width: SLIP_W,
         flexShrink: 0,
-        px: narrow ? 2 : 3,
+        px: narrow ? 1.5 : 3,
         pb: 1,
         display: 'flex',
         alignItems: 'flex-end',
