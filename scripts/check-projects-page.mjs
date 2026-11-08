@@ -189,9 +189,11 @@ try {
     // blank; unfold them before reading which figures there are.
     const unfold = (pg) => pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.trim() === 'Show all figures')?.click())
     const tiles = async (pg) => { await unfold(pg); await sleep(150); return pg.evaluate(() => [...document.querySelectorAll('[data-tile]')].map((t) => t.dataset.tile)) }
+    // Edit layout sits in the page header's ⋮ menu: open it, then pick it.
+    const editLayout = async (pg) => { await pg.click('[data-page-menu]'); await sleep(300); await pg.click('[data-edit-layout]') }
     // The how-to note starts hidden: the page explains itself from "About this page".
     check('the default order: filters, figures, tools, table (the note starts hidden)', (await order(a)).join() === 'filters,figures,tools,table', (await order(a)).join())
-    await a.click('[data-edit-layout]')
+    await editLayout(a)
     await sleep(300)
     await a.click('[aria-label="move Figures up"]')
     await a.click('[aria-label="move Figures up"]')
@@ -214,20 +216,27 @@ try {
     await d2.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
     await sleep(700)
     check('ANOTHER ADMINISTRATOR SEES THE SAME LAYOUT', (await order(d2)).join() === 'figures,filters,table' && !(await tiles(d2)).includes('capex'), (await order(d2)).join())
+    // With the table toolbar hidden, its export, import and columns move to the ⋮ menu.
+    await d2.click('[data-page-menu]')
+    await sleep(300)
+    const menuItems = await d2.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].map((m) => m.innerText.trim().split('\n')[0]))
+    check('  THE HIDDEN TOOLBAR\'S ACTIONS ARE STILL IN THE ⋮ MENU', menuItems.some((x) => /^Export all \(\d+\)$/.test(x)) && ['Import', 'Columns'].every((x) => menuItems.includes(x)), menuItems.join(' | '))
+    await d2.keyboard.press('Escape')
+    await sleep(300)
     check('  ROI is wider than its neighbours', await d2.evaluate(() => {
       const w = (id) => document.querySelector(`[data-tile="${id}"]`).getBoundingClientRect().width
       return w('roi') > w('investment') * 1.3
     }))
     check('  and still no sideways scroll', await d2.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
     // Cancel throws a draft away.
-    await d2.click('[data-edit-layout]')
+    await editLayout(d2)
     await sleep(200)
     await d2.click('[data-toggle-block="filters"]')
     await d2.evaluate(() => [...document.querySelectorAll('[data-layout-toolbar] button')].find((b) => b.innerText.trim() === 'Cancel').click())
     await sleep(300)
     check('CANCEL LEAVES THE LAYOUT AS IT WAS', (await order(d2)).includes('filters'))
     // Reset to default, saved.
-    await d2.click('[data-edit-layout]')
+    await editLayout(d2)
     await sleep(200)
     await d2.evaluate(() => [...document.querySelectorAll('[data-layout-toolbar] button')].find((b) => /Reset to default/.test(b.innerText)).click())
     await d2.click('[data-save-layout]')

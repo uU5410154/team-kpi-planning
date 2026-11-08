@@ -1,8 +1,9 @@
 import { useState } from 'react'
+import { useTheme } from '@mui/material/styles'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography, Button, IconButton,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, Select, MenuItem, Tooltip,
-  Chip, Alert, InputAdornment, Link, Switch, FormControlLabel,
+  Chip, Alert, InputAdornment, Link, Switch, FormControlLabel, useMediaQuery,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
@@ -44,6 +45,8 @@ function EffortField({ manday, onChange, rates, symbol }) {
       <TextField
         size="small"
         label="Mandays"
+        placeholder="0"
+        InputLabelProps={{ shrink: true }}
         value={md}
         onFocus={() => setEditing(true)}
         onChange={(e) => {
@@ -59,6 +62,8 @@ function EffortField({ manday, onChange, rates, symbol }) {
       <TextField
         size="small"
         label="Cost"
+        placeholder="0"
+        InputLabelProps={{ shrink: true }}
         value={money}
         onFocus={() => setEditing(true)}
         onChange={(e) => {
@@ -122,6 +127,7 @@ function MoneyField({ value, onChange, label, placeholder = '0', width = 150, sy
     <TextField
       size="small"
       label={label}
+      InputLabelProps={label ? { shrink: true } : undefined}
       value={draft}
       placeholder={placeholder}
       onFocus={() => setFocused(true)}
@@ -153,6 +159,7 @@ function TextFieldOnBlur({ value, onChange, label, placeholder, sx, inputProps }
     <TextField
       size="small"
       label={label}
+      InputLabelProps={label ? { shrink: true } : undefined}
       value={draft}
       placeholder={placeholder}
       onFocus={() => setFocused(true)}
@@ -214,6 +221,11 @@ function Part({
 const sheetTable = {
   '& th': { whiteSpace: 'nowrap' },
   '& tbody tr:last-of-type td': { borderBottom: 0 },
+}
+
+/* A stacked row on a phone: one task or cost line, hairlines between them. */
+const stackRow = {
+  py: 3, borderBottom: 1, borderColor: 'border.subtle', '&:first-of-type': { pt: 1 },
 }
 
 /* The one tinted note a part may carry. */
@@ -443,8 +455,11 @@ function FinishDate({ p, onUpdate }) {
 }
 
 export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) {
-  // No hooks in this component, so an early return is safe — and the caller
-  // holds only a key, so there is nothing to keep mounted between openings.
+  // A phone stacks each task and cost line instead of a table row of inputs.
+  // The one hook runs before the early return, so the order never changes;
+  // the caller holds only a key, so there is nothing to keep mounted.
+  const theme = useTheme()
+  const phone = useMediaQuery(theme.breakpoints.down('sm'), { noSsr: true })
   if (!project) return null
 
   const fin = plan.finance
@@ -543,68 +558,103 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
           )}
           action={<Button size="small" startIcon={<AddIcon />} onClick={addTask}>Add task</Button>}
         >
-          <Box sx={{ overflowX: 'auto' }}>
-            <Table size="small" sx={{ ...sheetTable, minWidth: 640 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Task</TableCell>
-                  <TableCell sx={{ width: 280 }}>Effort</TableCell>
-                  <TableCell>Note</TableCell>
-                  <TableCell padding="checkbox" />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {tasks.map((t) => (
-                  <TableRow key={t.id}>
-                    <TableCell sx={{ py: 2 }}>
-                      <TextFieldOnBlur
-                        value={t.label}
-                        placeholder="What this covers"
-                        onChange={(v) => setTask(t.id, { label: v })}
-                        inputProps={{ 'aria-label': 'task' }}
-                        sx={{ width: '100%', minWidth: 160 }}
-                      />
+          {phone ? (
+            <Box>
+              {tasks.map((t) => (
+                <Box key={t.id} sx={{ ...stackRow, display: 'grid', gap: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TextFieldOnBlur
+                      label="Task"
+                      value={t.label}
+                      placeholder="What this covers"
+                      onChange={(v) => setTask(t.id, { label: v })}
+                      sx={{ flex: 1, minWidth: 0 }}
+                    />
+                    <IconButton onClick={() => removeTask(t.id)} aria-label="remove task" sx={{ color: 'text.secondary', width: 40, height: 40 }}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                  <EffortField manday={t.manday} rates={fin} symbol={sym} onChange={(v) => setTask(t.id, { manday: v })} />
+                  <TextFieldOnBlur
+                    label="Note"
+                    value={t.note}
+                    placeholder="Optional"
+                    onChange={(v) => setTask(t.id, { note: v })}
+                    sx={{ width: '100%' }}
+                  />
+                </Box>
+              ))}
+              <Box sx={{ ...stackRow, display: 'flex', justifyContent: 'space-between', gap: 3 }}>
+                <Typography variant="body1" sx={{ fontWeight: 600 }}>Total</Typography>
+                <Typography variant="body1" className="tabular" sx={{ fontWeight: 600, textAlign: 'right' }}>
+                  {fmtHours(taskTotal)} mandays, {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
+                </Typography>
+              </Box>
+            </Box>
+          ) : (
+            <Box sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ ...sheetTable, minWidth: 640 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Task</TableCell>
+                    <TableCell sx={{ width: 280 }}>Effort</TableCell>
+                    <TableCell>Note</TableCell>
+                    <TableCell padding="checkbox" />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {tasks.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell sx={{ py: 2 }}>
+                        <TextFieldOnBlur
+                          value={t.label}
+                          placeholder="What this covers"
+                          onChange={(v) => setTask(t.id, { label: v })}
+                          inputProps={{ 'aria-label': 'task' }}
+                          sx={{ width: '100%', minWidth: 160 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 2 }}>
+                        <EffortField
+                          manday={t.manday}
+                          rates={fin}
+                          symbol={sym}
+                          onChange={(v) => setTask(t.id, { manday: v })}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 2 }}>
+                        <TextFieldOnBlur
+                          value={t.note}
+                          placeholder="Optional"
+                          onChange={(v) => setTask(t.id, { note: v })}
+                          inputProps={{ 'aria-label': 'note' }}
+                          sx={{ width: '100%', minWidth: 140 }}
+                        />
+                      </TableCell>
+                      <TableCell padding="checkbox">
+                        <Tooltip title="Remove this task">
+                          <IconButton size="small" onClick={() => removeTask(t.id)} aria-label="remove task" sx={{ color: 'text.secondary' }}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow sx={totalRow}>
+                    <TableCell>Total</TableCell>
+                    <TableCell className="tabular" sx={cell}>
+                      {fmtHours(taskTotal)} mandays, {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
                     </TableCell>
-                    <TableCell sx={{ py: 2 }}>
-                      <EffortField
-                        manday={t.manday}
-                        rates={fin}
-                        symbol={sym}
-                        onChange={(v) => setTask(t.id, { manday: v })}
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 2 }}>
-                      <TextFieldOnBlur
-                        value={t.note}
-                        placeholder="Optional"
-                        onChange={(v) => setTask(t.id, { note: v })}
-                        inputProps={{ 'aria-label': 'note' }}
-                        sx={{ width: '100%', minWidth: 140 }}
-                      />
-                    </TableCell>
-                    <TableCell padding="checkbox">
-                      <Tooltip title="Remove this task">
-                        <IconButton size="small" onClick={() => removeTask(t.id)} aria-label="remove task" sx={{ color: 'text.secondary' }}>
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                    <TableCell colSpan={2} sx={{ '&&': { fontWeight: 400 }, color: 'text.secondary' }}>
+                      {stored.length
+                        ? 'The project carries the sum of these lines.'
+                        : tasks.length ? 'One line, carrying the total entered before this breakdown existed.' : 'No tasks yet.'}
                     </TableCell>
                   </TableRow>
-                ))}
-                <TableRow sx={totalRow}>
-                  <TableCell>Total</TableCell>
-                  <TableCell className="tabular" sx={cell}>
-                    {fmtHours(taskTotal)} mandays, {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
-                  </TableCell>
-                  <TableCell colSpan={2} sx={{ '&&': { fontWeight: 400 }, color: 'text.secondary' }}>
-                    {stored.length
-                      ? 'The project carries the sum of these lines.'
-                      : tasks.length ? 'One line, carrying the total entered before this breakdown existed.' : 'No tasks yet.'}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </Box>
+                </TableBody>
+              </Table>
+            </Box>
+          )}
         </Part>
 
         {/* ---------- CAPEX ---------- */}
@@ -655,6 +705,41 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               No running cost entered. The return is measured against the investment alone.
             </Typography>
+          ) : phone ? (
+            <Box>
+              {opex.map((l) => (
+                <Box key={l.id} sx={{ ...stackRow, display: 'grid', gap: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TextFieldOnBlur
+                      label="Cost line"
+                      value={l.label}
+                      placeholder="e.g. cloud hosting"
+                      onChange={(v) => setLine(l.id, { label: v })}
+                      sx={{ flex: 1, minWidth: 0 }}
+                    />
+                    <IconButton onClick={() => removeLine(l.id)} aria-label="remove cost line" sx={{ color: 'text.secondary', width: 40, height: 40 }}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                  <MoneyField
+                    label="Per month"
+                    symbol={sym}
+                    value={l.monthly || null}
+                    onChange={(v) => setLine(l.id, { monthly: v ?? 0 })}
+                    width="100%"
+                  />
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <Typography variant="body2" aria-hidden sx={{ color: 'text.tertiary' }}>From</Typography>
+                    <MonthSelect value={l.startMonth} label="start month" onChange={(v) => setLine(l.id, { startMonth: v })} />
+                    <Typography variant="body2" aria-hidden sx={{ color: 'text.tertiary' }}>to</Typography>
+                    <MonthSelect value={l.endMonth} label="end month" onChange={(v) => setLine(l.id, { endMonth: v })} />
+                  </Box>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    2026 total <Box component="span" className="tabular" sx={{ color: 'text.primary', fontWeight: 500 }}>{fmtMoney(lineYear(l), sym)}</Box>
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
           ) : (
             <Box sx={{ overflowX: 'auto' }}>
               <Table size="small" sx={{ ...sheetTable, minWidth: 640 }}>

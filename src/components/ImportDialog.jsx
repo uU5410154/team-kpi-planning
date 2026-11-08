@@ -256,7 +256,7 @@ export default function ImportDialog({
       </DialogContent>
 
       <DialogActions>
-        {result && !result.error && choosing ? (
+        {result && choosing ? (
           <Button onClick={onChoose} sx={{ mr: 'auto' }}>Choose another file</Button>
         ) : null}
         <Button onClick={onClose}>Cancel</Button>

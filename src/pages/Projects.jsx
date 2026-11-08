@@ -1165,7 +1165,7 @@ export default function Projects({
 
   /*
    * "Save changes" appears only when an edit is still waiting after the
-   * automatic save has had its chance (four seconds): when this browser is
+   * automatic save has had its chance (6.5 seconds): when this browser is
    * not on the shared plan yet, or is behind it. Shown on every keystroke it
    * would blink in and out of the header all day.
    */
@@ -1363,18 +1363,16 @@ export default function Projects({
       </>
     ) : null
   } else if (canWrite) {
+    /*
+     * The rarer page actions wait behind ⋮: arranging the page, and — only
+     * when an administrator has hidden the table toolbar — the export, import
+     * and columns it would otherwise carry, so hiding it never loses them.
+     */
+    const canLayout = layoutSaved !== undefined && layoutSaved !== null
+    const toolsHidden = lay.hiddenSections.includes('tools')
+    const pageMenu = canLayout || toolsHidden
     actions = (
       <Box data-layout-toolbar sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        {layoutSaved !== undefined && layoutSaved !== null && (
-          <Button
-            startIcon={<LayoutIcon />}
-            onClick={() => { setLayoutDraft(lay); setLayoutError(null) }}
-            sx={{ color: 'text.secondary', '&:hover': { color: 'text.primary' } }}
-            data-edit-layout
-          >
-            Edit layout
-          </Button>
-        )}
         {uncosted.length > 0 && (
           <Tooltip title={estimateHint}>
             <Button variant="outlined" startIcon={<AutoFixHighIcon />} onClick={estimateEffort}>
@@ -1396,6 +1394,56 @@ export default function Projects({
         <Button variant={showSave ? 'outlined' : 'contained'} startIcon={<AddIcon />} onClick={onAdd}>
           Add project
         </Button>
+        {pageMenu && (
+          <>
+            <Tooltip title="More actions">
+              <IconButton
+                aria-label="more page actions"
+                aria-haspopup="menu"
+                aria-expanded={!!menuEl}
+                onClick={(e) => setMenuEl(e.currentTarget)}
+                data-page-menu
+                sx={{ width: 36, height: 36, color: 'text.secondary', '&:hover': { color: 'text.primary' } }}
+              >
+                <MoreVertIcon />
+              </IconButton>
+            </Tooltip>
+            <Menu
+              anchorEl={menuEl}
+              open={!!menuEl}
+              onClose={() => setMenuEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              slotProps={{ paper: { sx: { minWidth: 220 } } }}
+            >
+              {canLayout && (
+                <MenuItem onClick={() => { setMenuEl(null); setLayoutDraft(lay); setLayoutError(null) }} data-edit-layout>
+                  <ListItemIcon><LayoutIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="Edit layout" secondary="Arrange this page for everybody" />
+                </MenuItem>
+              )}
+              {canLayout && toolsHidden && <Divider />}
+              {toolsHidden && (
+                <MenuItem disabled={!rows.length || busy} onClick={() => { setMenuEl(null); doExport() }}>
+                  <ListItemIcon><FileDownloadOutlinedIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary={exportLabel} />
+                </MenuItem>
+              )}
+              {toolsHidden && (
+                <MenuItem disabled={busy} onClick={() => { setMenuEl(null); setImporting({ choosing: true }) }}>
+                  <ListItemIcon><FileUploadOutlinedIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="Import" />
+                </MenuItem>
+              )}
+              {toolsHidden && (
+                <MenuItem onClick={() => { setColsEl(menuEl); setMenuEl(null) }}>
+                  <ListItemIcon><ViewColumnOutlinedIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="Columns" />
+                </MenuItem>
+              )}
+            </Menu>
+          </>
+        )}
       </Box>
     )
   }
@@ -1801,51 +1849,15 @@ export default function Projects({
               {/* Which columns the register shows: an administrator's choice,
                   made once for everybody. A phone shows rows, not columns. */}
               {canWrite && (
-                <>
-                  <Button
-                    variant="outlined"
-                    startIcon={<ViewColumnOutlinedIcon />}
-                    onClick={(e) => setColsEl(e.currentTarget)}
-                    aria-haspopup="menu"
-                    data-columns-button
-                  >
-                    Columns{hidden.size ? ` (${PROJECT_COLUMNS.length - hidden.size} of ${PROJECT_COLUMNS.length})` : ''}
-                  </Button>
-                  <Menu
-                    anchorEl={colsEl}
-                    open={!!colsEl}
-                    onClose={() => setColsEl(null)}
-                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                    MenuListProps={{ dense: true, 'aria-label': 'columns' }}
-                    slotProps={{ paper: { sx: { width: 280, maxHeight: 'min(560px, 80vh)' } } }}
-                  >
-                    <Box sx={{ px: 3, pt: 1, pb: 2 }}>
-                      <Typography variant="h3">Columns</Typography>
-                      <Typography variant="caption" component="div" sx={{ color: 'text.secondary', mt: 0.5 }}>
-                        Shown to everyone who opens the register. The name, the select box and the cost sheet always show.
-                      </Typography>
-                      {colsNote && (
-                        <Typography variant="caption" component="div" sx={{ color: tone.warning.fg, mt: 1 }} data-columns-note>
-                          {colsNote}
-                        </Typography>
-                      )}
-                    </Box>
-                    <Divider />
-                    {PROJECT_COLUMNS.map((c) => (
-                      <MenuItem key={c.id} onClick={() => toggleColumn(c.id)} data-column={c.id}>
-                        <ListItemIcon>
-                          <Checkbox size="small" edge="start" checked={show(c.id)} tabIndex={-1} disableRipple sx={{ p: 0.5 }} />
-                        </ListItemIcon>
-                        <ListItemText primary={c.label} />
-                      </MenuItem>
-                    ))}
-                    <Divider />
-                    <Box sx={{ px: 1, pb: 0.5 }}>
-                      <Button onClick={showAllColumns} disabled={!hidden.size}>Show every column</Button>
-                    </Box>
-                  </Menu>
-                </>
+                <Button
+                  variant="outlined"
+                  startIcon={<ViewColumnOutlinedIcon />}
+                  onClick={(e) => setColsEl(e.currentTarget)}
+                  aria-haspopup="menu"
+                  data-columns-button
+                >
+                  Columns{hidden.size ? ` (${PROJECT_COLUMNS.length - hidden.size} of ${PROJECT_COLUMNS.length})` : ''}
+                </Button>
               )}
             </Box>
           </LayoutBlock>
@@ -2027,6 +2039,7 @@ export default function Projects({
                                   value={p.objective}
                                   onChange={(e) => onUpdate(p.key, { objective: e.target.value })}
                                   width={180}
+                                  sx={{ flexShrink: 0 }}
                                   label="objective"
                                   renderValue={(v) => (
                                     <Box sx={{
@@ -2339,6 +2352,45 @@ export default function Projects({
           )}
         </LayoutBlock>
       </Box>
+
+      {/* Which columns the register shows, opened from the table toolbar
+          (or from the page menu while that toolbar is hidden). */}
+      {canWrite && !phone && (
+        <Menu
+          anchorEl={colsEl}
+          open={!!colsEl}
+          onClose={() => setColsEl(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          MenuListProps={{ dense: true, 'aria-label': 'columns' }}
+          slotProps={{ paper: { sx: { width: 280, maxHeight: 'min(560px, 80vh)' } } }}
+        >
+          <Box sx={{ px: 3, pt: 1, pb: 2 }}>
+            <Typography variant="h3">Columns</Typography>
+            <Typography variant="caption" component="div" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              Shown to everyone who opens the register. The name, the select box and the cost sheet always show.
+            </Typography>
+            {colsNote && (
+              <Typography variant="caption" component="div" sx={{ color: tone.warning.fg, mt: 1 }} data-columns-note>
+                {colsNote}
+              </Typography>
+            )}
+          </Box>
+          <Divider />
+          {PROJECT_COLUMNS.map((c) => (
+            <MenuItem key={c.id} onClick={() => toggleColumn(c.id)} data-column={c.id}>
+              <ListItemIcon>
+                <Checkbox size="small" edge="start" checked={show(c.id)} tabIndex={-1} disableRipple sx={{ p: 0.5 }} />
+              </ListItemIcon>
+              <ListItemText primary={c.label} />
+            </MenuItem>
+          ))}
+          <Divider />
+          <Box sx={{ px: 1, pb: 0.5 }}>
+            <Button onClick={showAllColumns} disabled={!hidden.size}>Show every column</Button>
+          </Box>
+        </Menu>
+      )}
 
       {/* A phone's filters: a sheet from the bottom of the screen. */}
       <Dialog
