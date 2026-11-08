@@ -126,6 +126,19 @@ function driftNote(c, perProjectLimit) {
   return bits.join(' ')
 }
 
+/*
+ * A "%" that sits against its figure, so a cell reads "15%" like every other
+ * percentage on the page. A right-aligned input keeps a caret's width after its
+ * last digit and tabular figures carry side bearing, which together left a
+ * visible space ("15 %"); the adornment takes that back. Same size and weight
+ * as the figure, in the secondary colour.
+ */
+const PCT_ADORN = {
+  ml: '-2px',
+  color: 'text.secondary',
+  '& .MuiTypography-root': { fontSize: 14, lineHeight: '20px', fontWeight: 500, color: 'inherit' },
+}
+
 /** Whole-percent input that commits on blur. Stored as a 0–1 fraction. */
 function PctCell({ value, onChange, invalid }) {
   const asPct = (v) => (v == null ? '' : String(Math.round(v * 100)))
@@ -150,7 +163,7 @@ function PctCell({ value, onChange, invalid }) {
         } else setDraft(asPct(value))
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-      InputProps={{ endAdornment: <InputAdornment position="end" sx={{ ml: 0.25, color: 'text.secondary' }}>%</InputAdornment> }}
+      InputProps={{ endAdornment: <InputAdornment position="end" sx={PCT_ADORN}>%</InputAdornment> }}
       inputProps={{
         'aria-label': 'Weight',
         inputMode: 'numeric',
@@ -207,7 +220,7 @@ function HoursTargetCell({ value, onChange, unit }) {
           // is wider than the whole field, and left to size itself it pushed
           // the figure out of sight — the one thing on the row that has to be
           // readable. It truncates and carries the full text as a tooltip.
-          <InputAdornment position="end" sx={{ ml: unit === '%' ? 0.25 : 1, flex: '0 1 auto', minWidth: 0 }}>
+          <InputAdornment position="end" sx={[{ ml: 1, flex: '0 1 auto', minWidth: 0 }, unit === '%' && PCT_ADORN]}>
             <Typography
               variant="body2"
               component="span"

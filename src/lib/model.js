@@ -3281,8 +3281,18 @@ export function computePlan(state) {
 /* helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-export const fmtHours = (n) =>
-  n == null ? '—' : Math.abs(n) >= 10 ? Math.round(n).toLocaleString() : n.toFixed(1)
+/*
+ * Hours as people read them: whole numbers with separators from 10 up, one
+ * decimal below that only when it says something ("2.5", but "5", never "5.0"
+ * or "0.0"). A value that rounds to -0.0 prints as 0.
+ */
+export const fmtHours = (n) => {
+  if (n == null) return '—'
+  if (Math.abs(n) >= 10) return Math.round(n).toLocaleString()
+  const one = Math.round(n * 10) / 10
+  if (one === 0) return '0'
+  return one.toFixed(1).replace(/\.0$/, '')
+}
 
 export const fmtRatio = (n) => (n == null ? '—' : n.toFixed(1))
 
