@@ -1,5 +1,5 @@
 import WeekSwitcher from './components/WeekSwitcher.jsx'
-import ViewAsBanner from './components/ViewAsBanner.jsx'
+import ViewAsBanner, { ViewAsChoose } from './components/ViewAsBanner.jsx'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, Typography,
@@ -314,6 +314,13 @@ export default function App() {
   const member = viewer?.role === 'user'
   const myPerson = (previewing ? previewPerson : me?.person) || null
   const shown = useMemo(() => (member ? memberView(plan, myPerson) : plan), [member, plan, myPerson])
+  /*
+   * Previewing with nobody chosen: an administrator not on the team, before
+   * picking anyone. Not an unlinked account, so the pages that are somebody's
+   * (their week, their scorecard, their Timeline) ask for a person instead.
+   */
+  const choosing = previewing && !previewPerson
+  const whose = choosing && ['weekly', 'team', 'timeline'].includes(tab)
   useEffect(() => {
     if (!canWrite) { setAiOn(false); return }
     api.aiStatus().then((r) => setAiOn(!!r.configured)).catch(() => setAiOn(false))
@@ -1234,7 +1241,7 @@ export default function App() {
           onToggleView={me?.role === 'admin' ? toggleView : null}
           mode={mode}
           onToggleMode={toggleMode}
-          coverage={member ? memberProgress(shown) : {
+          coverage={choosing ? null : member ? memberProgress(shown) : {
             total: Math.round(plan.totals.totalHours),
             target: plan.totals.target,
             share: cov || 0,
@@ -1271,11 +1278,12 @@ export default function App() {
           >
             {phone ? (
               <>
-                <Tooltip title="Menu">
-                  <IconButton onClick={() => setNavOpen(true)} aria-label="menu" sx={iconBtn}>
-                    <MenuIcon />
-                  </IconButton>
-                </Tooltip>
+                {/* No tooltip on a phone: the menu hands focus back to this
+                    button when it closes, and the tip would then sit over
+                    the bar below until the next tap. */}
+                <IconButton onClick={() => setNavOpen(true)} aria-label="menu" sx={iconBtn}>
+                  <MenuIcon />
+                </IconButton>
                 <Typography
                   noWrap
                   component="div"
@@ -1347,7 +1355,8 @@ export default function App() {
 
             {/* Scenario files are copies of the whole plan: an administrator's too. */}
             {canWrite && (
-              <Tooltip title="More">
+              // Likewise no tip on a phone: closing the menu refocuses the button.
+              <Tooltip title="More" disableHoverListener={phone} disableFocusListener={phone} disableTouchListener>
                 <IconButton onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More" aria-haspopup="menu" sx={iconBtn}>
                   <MoreVertIcon fontSize="small" />
                 </IconButton>
@@ -1485,7 +1494,10 @@ export default function App() {
               onShowTimeline={showOnTimeline}
             />
           )}
-          {allowed && tab === 'weekly' && (
+          {allowed && whose && (
+            <ViewAsChoose title={current?.label} people={state.people} self={me?.person || null} onPick={pickPreview} />
+          )}
+          {allowed && tab === 'weekly' && !whose && (
             <Weekly
               plan={plan}
               me={viewer}
@@ -1496,9 +1508,9 @@ export default function App() {
               focusProject={hashArg.page === 'weekly' && hashArg.key ? hashArg : null}
             />
           )}
-          {allowed && tab === 'team' && <Team plan={shown} own={member} />}
+          {allowed && tab === 'team' && !whose && <Team plan={shown} own={member} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} loading={appsLoading || sharedLoading} />}
-          {allowed && tab === 'timeline' && (
+          {allowed && tab === 'timeline' && !whose && (
             <Timeline
               plan={shown}
               settings={plan.settings}
