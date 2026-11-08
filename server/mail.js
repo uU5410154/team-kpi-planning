@@ -38,7 +38,8 @@ export const appUrl = () => cfg().appUrl
 /** Whether email can go out at all, and from whom. Never the password. */
 export function status() {
   const c = cfg()
-  if (c.transport === 'log') return { configured: true, from: c.from || 'test@localhost', mode: 'log only — nothing is sent' }
+  // Test mode: every email is written to the log and none leaves the server.
+  if (c.transport === 'log') return { configured: true, from: c.from || 'test@localhost', mode: 'log' }
   return {
     configured: !!(c.user && c.pass),
     from: c.from || null,

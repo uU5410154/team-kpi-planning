@@ -23,36 +23,42 @@ export const DRAG = 'dash-drag'
 
 const EDGE = { outline: '1px dashed', outlineColor: 'border.strong', outlineOffset: 2 }
 
-function EditBar({ title, onRemove, overlay }) {
+/*
+ * The handles laid over a bare card while the board is arranged: a grip and
+ * a cross in one small raised group at its top-right corner. The card's own
+ * label already names it, so the group carries no title of its own.
+ */
+function EditHandles({ title, onRemove }) {
   return (
     <Box
-      className={DRAG}
+      data-edit-handles
       sx={{
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        zIndex: 3,
         display: 'flex',
         alignItems: 'center',
-        gap: 1,
-        cursor: 'move',
-        ...(overlay ? {
-          flexShrink: 0,
-          zIndex: 3,
-          px: 2,
-          minHeight: 28,
-          borderRadius: '6px',
-          bgcolor: 'bg.subtle',
-          color: 'text.secondary',
-        } : {}),
+        gap: 0.5,
+        height: 28,
+        pl: 1,
+        pr: onRemove ? 0.5 : 1,
+        borderRadius: '6px',
+        bgcolor: 'bg.raised',
+        border: 1,
+        borderColor: 'border.subtle',
       }}
     >
-      <DragIndicatorIcon sx={{ fontSize: 18, color: 'text.tertiary' }} />
-      {overlay && <Typography variant="caption" sx={{ flex: 1, fontWeight: 500, color: 'text.secondary' }} noWrap>{title}</Typography>}
+      <DragIndicatorIcon aria-hidden sx={{ fontSize: 16, color: 'text.tertiary' }} />
       {onRemove && (
         <Tooltip title="Remove this card">
           <IconButton
             size="small"
             onClick={onRemove}
             onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
             aria-label={`remove ${title}`}
-            sx={{ color: 'text.secondary', ml: overlay ? 0 : 'auto', p: 0.5 }}
+            sx={{ color: 'text.secondary', p: 0.5, borderRadius: '4px' }}
           >
             <CloseIcon sx={{ fontSize: 16 }} />
           </IconButton>
@@ -67,23 +73,28 @@ export default function CardFrame({
 }) {
   const outline = editing ? EDGE : {}
   if (bare) {
-    // Editing, the bar sits ABOVE the card's own content rather than over its
-    // title, so what is being moved can still be read.
+    /*
+     * Editing, the whole tile is what is dragged (it has no buttons of its
+     * own to keep working), and the grip and cross sit over its corner. The
+     * tile keeps its size and its own label, so it reads as it will on the
+     * board.
+     */
     return (
       <Box
         component="section"
         aria-label={label || title}
+        className={editing ? DRAG : undefined}
         sx={{
           position: 'relative',
           height: fill ? '100%' : 'auto',
           overflow: fill ? 'auto' : 'visible',
           borderRadius: '8px',
           ...outline,
-          ...(editing ? { display: 'flex', flexDirection: 'column', gap: 1 } : {}),
+          ...(editing ? { cursor: 'move', userSelect: 'none' } : {}),
         }}
       >
-        {editing && <EditBar title={title} onRemove={onRemove} overlay />}
-        {editing ? <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{children}</Box> : children}
+        {editing && <EditHandles title={title} onRemove={onRemove} />}
+        {children}
       </Box>
     )
   }
