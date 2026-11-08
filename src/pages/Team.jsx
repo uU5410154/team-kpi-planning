@@ -98,7 +98,7 @@ export default function Team({ plan, own = false, loading = false }) {
   const title = own ? 'My scorecard' : 'Overall team'
   const description = own
     ? 'Your 2026 targets, the weight of each on your card, and where each stands now.'
-    : 'Every scorecard side by side, as in the Overall_Objectives sheet of the export.'
+    : 'Every scorecard side by side, the same grid as the Overall objectives sheet in the export.'
 
   const help = (
     <>

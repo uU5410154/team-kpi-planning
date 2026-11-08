@@ -663,8 +663,18 @@ export default function Settings({
                       [o.id]: Math.max(0, Number(e.target.value) || 0),
                     },
                   })}
-                  inputProps={numInput({ step: 0.5, min: 0, 'aria-label': `Priority of objective ${o.no}` })}
-                  sx={[inlineNum, { width: 96 }]}
+                  inputProps={{
+                    step: 0.5,
+                    min: 0,
+                    'aria-label': `Priority of objective ${o.no}`,
+                    style: { fontVariantNumeric: 'tabular-nums', textAlign: 'right', paddingRight: 4 },
+                  }}
+                  // A number lines up under its header: right-aligned, no spinner beside it.
+                  sx={[inlineNum, {
+                    width: 96,
+                    '& input[type=number]': { MozAppearance: 'textfield' },
+                    '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', m: 0 },
+                  }]}
                 />
               </TableCell>
             </TableRow>

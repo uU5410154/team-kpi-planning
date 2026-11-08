@@ -12,6 +12,7 @@ import SyncIcon from '@mui/icons-material/Sync'
 import UndoIcon from '@mui/icons-material/Undo'
 import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import StatTile from '../components/StatTile.jsx'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
 import KpiLineDialog from '../components/KpiLineDialog.jsx'
@@ -38,6 +39,13 @@ const COMMIT_PREVIEW = 5
 const Dash = ({ title }) => (
   <Box component="span" title={title} sx={{ color: 'text.tertiary' }}>–</Box>
 )
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** "2026-02-20" → "20 Feb 2026" (docs/DESIGN.md §13). Anything else is shown as typed. */
+const fmtDay = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''))
+  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : iso
+}
 
 /**
  * Objectives held, said the way a person would: "objectives 1–5",
@@ -89,7 +97,7 @@ function driftNote(c, perProjectLimit) {
   const pct = Math.round(perProjectLimit * 100)
   const bits = []
   if (!c.due) return 'No date committed yet, so there is nothing to measure against.'
-  bits.push(`Committed to ${c.due}.`)
+  bits.push(`Committed to ${fmtDay(c.due)}.`)
   if (c.plannedDays != null && c.plannedDays > 0) {
     bits.push(`Planned to take ${c.plannedDays} days, so ${pct}% allows`
       + ` ${Math.round(c.driftAllowance ?? 0)} days of movement`
@@ -100,7 +108,7 @@ function driftNote(c, perProjectLimit) {
   if (c.drifted === null) {
     bits.push(c.running ? 'Still running, and not yet past its date, so nothing is spent.' : 'Not due yet, so nothing is spent.')
   } else if (c.driftDays === 0) {
-    bits.push(`Landed on the day${c.actualEnd ? ` (${c.actualEnd})` : ''}. None of the allowance used.`)
+    bits.push(`Landed on the day${c.actualEnd ? ` (${fmtDay(c.actualEnd)})` : ''}. None of the allowance used.`)
   } else {
     const left = (c.driftAllowance ?? 0) - c.driftDays
     bits.push(`It ran ${c.driftDays} days past that date`
@@ -112,7 +120,7 @@ function driftNote(c, perProjectLimit) {
   if (c.overReplanned) {
     bits.push(`Re-planned ${c.replans} times. The first was free; the rest count as drift whatever the dates say.`)
   } else if (c.replanned) {
-    bits.push(`Re-planned once${c.baselineDue ? ` from ${c.baselineDue}` : ''}. That was the free re-plan.`)
+    bits.push(`Re-planned once${c.baselineDue ? ` from ${fmtDay(c.baselineDue)}` : ''}. That was the free re-plan.`)
   }
   if (c.plannedBackwards) bits.push('This plan ends before it starts: data to fix, and never scored.')
   return bits.join(' ')
@@ -396,6 +404,12 @@ export default function People({
   const unit = settings.savingBasis === 'monthly' ? 'hrs/month' : 'hrs/year'
   const unitShort = settings.savingBasis === 'monthly' ? 'hrs/mth' : 'hrs/yr'
   const pad = { xs: 3, sm: 4 }
+  const calloutRow = {
+    display: 'flex', alignItems: 'flex-start', columnGap: 2, rowGap: 1, flexWrap: 'wrap', px: 3, py: 2,
+  }
+  const calloutAction = {
+    flexShrink: 0, minHeight: 28, py: 0, my: '-5px', ml: 'auto', whiteSpace: 'nowrap',
+  }
   const toggleFocus = (id) => setFocus((f) => (f === id ? null : id))
 
   /* ---------------------------------------------------------------- */
@@ -699,7 +713,7 @@ export default function People({
                     color: 'text.secondary', fontVariantNumeric: 'tabular-nums', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}
                   >
-                    {[c.jiraKey, c.due || null].filter(Boolean).join(', ')}
+                    {[c.jiraKey, c.due ? fmtDay(c.due) : null].filter(Boolean).join(', ')}
                     {!c.due && (
                       <Box component="span" sx={(t) => ({ color: t.palette.tone.warning.fg })}>
                         {c.jiraKey ? ', ' : ''}no date committed
@@ -743,12 +757,12 @@ export default function People({
                   </Tooltip>
                 </TableCell>
                 <TableCell sx={{ fontVariantNumeric: 'tabular-nums', width: { xs: '30%', lg: 128 } }}>
-                  {c.due ? (compact ? c.due : `by ${c.due}`) : (
+                  {c.due ? (compact ? fmtDay(c.due) : `by ${fmtDay(c.due)}`) : (
                     <Box component="span" sx={(t) => ({ color: t.palette.tone.warning.fg })}>no date committed</Box>
                   )}
                   {c.replans > 0 && (
                     <Tooltip title={c.baselineDue
-                      ? `First committed to ${c.baselineDue}, re-planned ${c.replans} time${c.replans === 1 ? '' : 's'}`
+                      ? `First committed to ${fmtDay(c.baselineDue)}, re-planned ${c.replans} time${c.replans === 1 ? '' : 's'}`
                       : `Re-planned ${c.replans} times`}
                     >
                       <Box
@@ -786,7 +800,7 @@ export default function People({
                       {c.drifted === null
                         ? (c.running ? 'running' : 'not due yet')
                         : c.driftDays === 0
-                          ? `on the day${c.actualEnd ? ` ${c.actualEnd}` : ''}`
+                          ? 'on the day'
                           : `+${c.driftDays}d${c.driftAllowance != null ? ` of ${Math.round(c.driftAllowance)}d` : ''}`}
                     </Box>
                   </Tooltip>
@@ -1087,37 +1101,42 @@ export default function People({
       padded={false}
     >
       {(!weightOk || drifted.length > 0) && (
-        <Box sx={{
-          px: pad, pt: 3, pb: 1, display: 'flex', flexDirection: 'column', gap: 2,
-        }}
-        >
-          {!weightOk && (
-            <Alert
-              severity="error"
-              action={(
-                <Button color="inherit" variant="text" onClick={() => onRebalance(p.id)}>
+        // One callout at the top of the section: a quiet tinted block, a row
+        // per problem, the tone carried by the icon and the word, not a fill.
+        <Box sx={{ px: pad, pt: 3, pb: 1 }}>
+          <Box
+            role="status"
+            sx={{
+              bgcolor: 'bg.subtle',
+              borderRadius: '6px',
+              '& > * + *': { borderTop: 1, borderColor: 'border.subtle' },
+            }}
+          >
+            {!weightOk && (
+              <Box sx={calloutRow}>
+                <ErrorOutlineIcon sx={(t) => ({ fontSize: 18, mt: '1px', color: t.palette.tone.danger.fg, flexShrink: 0 })} />
+                <Typography variant="body2" sx={{ flex: '1 1 220px', minWidth: 0, color: 'text.primary' }}>
+                  Weights total {fmtPct(sum)}, not 100%. Saving is blocked until this is exactly 100%: adjust by{' '}
+                  {sum > 1 ? '−' : '+'}{fmtPct(Math.abs(1 - sum))}.
+                </Typography>
+                <Button variant="text" size="small" onClick={() => onRebalance(p.id)} sx={calloutAction}>
                   Rebalance to 100%
                 </Button>
-              )}
-            >
-              Weights total {fmtPct(sum)}, not 100%. Saving is blocked until this is exactly 100%: adjust by{' '}
-              {sum > 1 ? '−' : '+'}{fmtPct(Math.abs(1 - sum))}.
-            </Alert>
-          )}
-          {drifted.length > 0 && (
-            <Alert
-              severity="warning"
-              icon={<SyncIcon fontSize="inherit" />}
-              action={(
-                <Button color="inherit" variant="text" startIcon={<SyncIcon />} onClick={() => onSyncTargets(p.id)}>
+              </Box>
+            )}
+            {drifted.length > 0 && (
+              <Box sx={calloutRow}>
+                <SyncIcon sx={(t) => ({ fontSize: 18, mt: '1px', color: t.palette.tone.warning.fg, flexShrink: 0 })} />
+                <Typography variant="body2" sx={{ flex: '1 1 220px', minWidth: 0, color: 'text.primary' }}>
+                  {drifted.length === 1 ? '1 target no longer matches' : `${drifted.length} targets no longer match`} what {p.nick} carries.
+                  Project assignments changed after they were typed.
+                </Typography>
+                <Button variant="text" size="small" onClick={() => onSyncTargets(p.id)} sx={calloutAction}>
                   Sync all
                 </Button>
-              )}
-            >
-              {drifted.length === 1 ? '1 target no longer matches' : `${drifted.length} targets no longer match`} what {p.nick} carries.
-              Project assignments changed after they were typed.
-            </Alert>
-          )}
+              </Box>
+            )}
+          </Box>
         </Box>
       )}
 
@@ -1561,8 +1580,8 @@ export default function People({
             position: 'relative',
             borderBottom: 1,
             borderColor: 'border.subtle',
-            // A phone scrolls the names sideways; the fade says there are more.
-            [t.breakpoints.down('sm')]: {
+            // A phone or tablet scrolls the names sideways; the fade says there are more.
+            [t.breakpoints.down('md')]: {
               '&::after': {
                 content: '""',
                 position: 'absolute',
