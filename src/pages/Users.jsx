@@ -35,7 +35,7 @@ const STATUS = {
 /* The sections the tab row jumps between, in page order. */
 const PARTS = [
   { id: 'access-people', label: 'People' },
-  { id: 'access-weekly', label: 'Weekly check-in' },
+  { id: 'access-weekly', label: 'Weekly reminders' },
   { id: 'access-ai', label: 'AI' },
 ]
 
@@ -65,6 +65,8 @@ const inlineSelect = (t) => ({
   '& .MuiOutlinedInput-notchedOutline': { borderColor: 'transparent' },
   '.MuiTableRow-root:hover & .MuiOutlinedInput-notchedOutline': { borderColor: t.palette.border.strong },
   '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: t.palette.primary.main },
+  '& .MuiSelect-icon': { color: t.palette.text.tertiary, fontSize: 18, right: 6 },
+  '.MuiTableRow-root:hover & .MuiSelect-icon, &.Mui-focused .MuiSelect-icon': { color: t.palette.text.secondary },
   '&.Mui-disabled .MuiSelect-icon': { display: 'none' },
 })
 
@@ -419,7 +421,7 @@ export default function Users({ me, people = [], onToast }) {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmDelete(null)}>Cancel</Button>
-          <Button color="error" variant="contained" onClick={() => remove(confirmDelete)}>Delete account</Button>
+          <Button color="error" variant="outlined" onClick={() => remove(confirmDelete)}>Delete account</Button>
         </DialogActions>
       </Dialog>
 
