@@ -466,6 +466,9 @@ export default function Settings({
               valueLabelDisplay="auto"
               valueLabelFormat={(v) => fmtRoi(v)}
               onChange={(_e, v) => setFinance({ roiGate: v })}
+              // On a phone the track is too short for both 100% and 200%:
+              // their labels run together, so 100% keeps its tick only.
+              sx={{ '& .MuiSlider-markLabel[data-index="1"]': { display: { xs: 'none', sm: 'block' } } }}
             />
           </Box>
           {/* Typed entry beside the slider: the slider moves in 25% steps
