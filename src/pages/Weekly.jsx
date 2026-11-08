@@ -6,7 +6,7 @@ import {
   ToggleButton, ToggleButtonGroup, Collapse, Skeleton, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions,
   useMediaQuery,
 } from '@mui/material'
-import { useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles'
 import visuallyHidden from '@mui/utils/visuallyHidden'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -19,7 +19,7 @@ import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import WorkOutlineIcon from '@mui/icons-material/WorkOutlineOutlined'
 import AiAssist from '../components/AiAssist.jsx'
-import JiraWeek, { choiceSx } from '../components/JiraWeek.jsx'
+import JiraWeek, { choiceSx, projectLabel, renderProjectOption } from '../components/JiraWeek.jsx'
 import { Spinner } from '../components/Loading.jsx'
 import { activeInWeek } from '../lib/manager.js'
 import Markdown from '../components/Markdown.jsx'
@@ -240,11 +240,11 @@ function NextStep({ next }) {
         columnGap: 4,
         rowGap: 3,
         flexWrap: 'wrap',
-        borderLeft: `3px solid ${todo ? t.palette.primary.main : t.palette.border.strong}`,
+        // A quiet edge, not a bright one: the button carries the call to action.
+        borderLeft: `3px solid ${todo ? alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.5 : 0.45) : t.palette.border.strong}`,
       })}
     >
       <Box sx={{ flex: '1 1 300px', minWidth: 0 }}>
-        {(todo || next.loading) && <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', mb: 0.5 }}>Next step</Typography>}
         {next.loading ? (
           <Box role="status" aria-label="Working out your next step">
             <Skeleton variant="text" width={260} height={24} sx={{ maxWidth: '90%' }} />
@@ -291,8 +291,7 @@ function WeekSkeleton({ label, next = true, cards = 3 }) {
           px: 4, py: 3.5, border: 1, borderColor: 'border.subtle', borderRadius: '8px', bgcolor: 'bg.surface',
         }}
         >
-          <Skeleton variant="text" width={72} height={16} />
-          <Skeleton variant="text" width={280} height={24} sx={{ mt: 0.5, maxWidth: '80%' }} />
+          <Skeleton variant="text" width={280} height={24} sx={{ maxWidth: '80%' }} />
           <Skeleton variant="text" width={220} height={18} sx={{ maxWidth: '60%' }} />
         </Box>
       )}
@@ -462,9 +461,9 @@ const blankTask = () => ({
 const OPEN_PROJECTS_SHOWN = 8
 
 function MyProjects({
-  projects, onAdd, readOnly, onPlan, ahead = false,
+  projects, onAdd, readOnly, onPlan, ahead = false, past = null,
 }) {
-  const whose = ahead ? 'next week’s plan' : 'this week’s plan'
+  const whose = ahead ? 'next week’s plan' : past ? `week ${past}’s plan` : 'this week’s plan'
   const [all, setAll] = useState(false)
   if (!projects.length) return null
   const shown = all ? projects : projects.slice(0, OPEN_PROJECTS_SHOWN)
@@ -609,7 +608,8 @@ function TaskEditor({
           value={project || null}
           disabled={readOnly}
           onChange={(_e, v) => set({ projectKey: v?.key || null, jiraKey: null })}
-          getOptionLabel={(p) => `${p.key} · ${p.summary}`}
+          getOptionLabel={(p) => projectLabel(p)}
+          renderOption={renderProjectOption()}
           isOptionEqualToValue={(a, b) => a.key === b.key}
           renderInput={(params) => <TextField {...params} label="Project (optional)" />}
         />
@@ -620,7 +620,7 @@ function TaskEditor({
           disabled={readOnly || !project}
           value={task.jiraKey || ''}
           loading={!!project?.jiraKey && children === undefined}
-          getOptionLabel={(o) => (typeof o === 'string' ? o : `${o.key} · ${o.summary}`)}
+          getOptionLabel={(o) => (typeof o === 'string' ? o : `${o.key} ${o.summary}`)}
           isOptionEqualToValue={(o, v) => (typeof o === 'string' ? o : o.key) === (typeof v === 'string' ? v : v?.key)}
           onChange={(_e, v) => set({ jiraKey: (typeof v === 'string' ? v : v?.key) || null })}
           onInputChange={(_e, v, reason) => {
@@ -960,7 +960,8 @@ function AdhocDialog({
               autoHighlight
               value={item.projectKey ? projectByKey[item.projectKey] || null : null}
               onChange={(_e, v) => setItem((x) => ({ ...x, projectKey: v?.key || null }))}
-              getOptionLabel={(p) => `${p.key} · ${p.summary}`}
+              getOptionLabel={(p) => projectLabel(p)}
+              renderOption={renderProjectOption()}
               isOptionEqualToValue={(a, b) => a.key === b.key}
               renderInput={(params) => <TextField {...params} label="Project (optional)" />}
             />
@@ -1626,6 +1627,7 @@ export default function Weekly({
                 projects={myOpen}
                 readOnly={readOnly}
                 ahead={data.week > data.current}
+                past={data.week < data.current ? n : null}
                 onPlan={new Set([...(jw.tasks || []), ...(jw.overdue || [])].map((t) => t.project?.key).filter(Boolean))}
                 onAdd={(key) => setPreset(key)}
               />
@@ -1778,7 +1780,8 @@ export default function Weekly({
                         value={u.projectKey ? projectByKey[u.projectKey] || null : null}
                         disabled={readOnly}
                         onChange={(_e, v) => edit({ unplanned: draft.unplanned.map((x, j) => (j === i ? { ...x, projectKey: v?.key || null } : x)) })}
-                        getOptionLabel={(p) => `${p.key} · ${p.summary}`}
+                        getOptionLabel={(p) => projectLabel(p)}
+                        renderOption={renderProjectOption()}
                         isOptionEqualToValue={(a, b) => a.key === b.key}
                         renderInput={(params) => <TextField {...params} label="Project" />}
                       />

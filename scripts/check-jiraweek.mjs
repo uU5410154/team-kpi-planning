@@ -661,7 +661,7 @@ try {
     await pg.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     const opts = await pg.evaluate(() => [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()))
     const epicKeys = new Set([...seed.projects.filter((p) => p.jiraKey).map((p) => p.jiraKey), np.body.epic?.key])
-    const lead = opts.map((o) => o.split(' · ')[0])
+    const lead = opts.map((o) => o.split(/\s+/)[0])
     check('"ADD A TASK" OFFERS ONLY PROJECTS WITH A JIRA EPIC, ONE PER EPIC, NONE FINISHED OR DELETED', opts.length > 0 && opts.length < seed.projects.length
       && lead.every((k) => epicKeys.has(k)) && new Set(lead).size === lead.length && !opts.some((o) => /deleted/i.test(o))
       && !lead.includes('FNP-868'), `${opts.length} of ${seed.projects.length}: ${opts.slice(0, 3).join(' | ')}`)

@@ -132,6 +132,22 @@ export const choiceSx = (invalid = false) => (t) => ({
 
 const CHOICE_TONE = { yes: 'success', no: 'warning', hold: 'neutral' }
 
+/*
+ * A project in a picker: its key in a quiet fixed column, then its name —
+ * "FNP-379 PL Forecast", with no dot between them.
+ */
+export const projectLabel = (p, keyOf = (x) => x.key) => `${keyOf(p)} ${p.summary}`
+export const renderProjectOption = (keyOf = (x) => x.key) => function ProjectOption(props, p) {
+  const { key, ...rest } = props
+  return (
+    <li key={key} {...rest}>
+      <Box component="span" sx={{ color: 'text.secondary', minWidth: 76, mr: 2, flexShrink: 0 }}>{keyOf(p)}</Box>
+      {' '}
+      <Box component="span" sx={{ minWidth: 0, overflowWrap: 'anywhere' }}>{p.summary}</Box>
+    </li>
+  )
+}
+
 /* ------------------------------------------------------------ one task */
 
 /** The key (a link to Jira) and the task's name, as one heading. */
@@ -825,7 +841,8 @@ function NewTask({
         autoHighlight
         value={project}
         onChange={(_e, v) => setProject(v)}
-        getOptionLabel={(p) => `${p.jiraKey || p.key} · ${p.summary}`}
+        getOptionLabel={(p) => projectLabel(p, (x) => x.jiraKey || x.key)}
+        renderOption={renderProjectOption((x) => x.jiraKey || x.key)}
         isOptionEqualToValue={(a, b) => a.key === b.key}
         renderInput={(params) => <TextField {...params} label="Project" />}
       />
