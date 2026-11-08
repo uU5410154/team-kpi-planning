@@ -386,7 +386,7 @@ export default function Settings({
           label="On-cost multiplier"
           value={settings.finance.loadFactor}
           onChange={(e) => setFinance({ loadFactor: Math.max(0.1, Number(e.target.value) || 1) })}
-          InputProps={unitEnd('×')}
+          InputProps={unitEnd('times')}
           inputProps={numInput({ step: 0.05, min: 0.1 })}
         />
       </Fields>

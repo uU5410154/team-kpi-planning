@@ -182,11 +182,17 @@ export default function MailSettings({ weekly, onWeekly, reloadKey = 0 }) {
         )}
         {st && st.configured && (
           <Box sx={{ display: 'flex', gap: 2, minWidth: 0 }}>
-            <Dot tone="success" />
-            <Typography variant="body1" sx={{ overflowWrap: 'anywhere' }}>
-              Sending as <Box component="span" sx={{ fontWeight: 500 }}>{st.from}</Box>
-              {st.mode !== 'gmail' && <Box component="span" sx={{ color: 'text.secondary' }}>{` (${st.mode})`}</Box>}
-            </Typography>
+            <Dot tone={st.mode === 'log' ? 'info' : 'success'} />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body1" sx={{ overflowWrap: 'anywhere' }}>
+                Sending as <Box component="span" sx={{ fontWeight: 500 }}>{st.from}</Box>
+              </Typography>
+              {st.mode === 'log' && (
+                <Typography variant="body2" data-mail-test-mode sx={{ color: 'text.secondary', mt: 0.5 }}>
+                  Test mode: emails are logged, not sent.
+                </Typography>
+              )}
+            </Box>
           </Box>
         )}
         {st && !st.configured && (
