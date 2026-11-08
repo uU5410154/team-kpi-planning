@@ -667,12 +667,47 @@ try {
       && !lead.includes('FNP-868'), `${opts.length} of ${seed.projects.length}: ${opts.slice(0, 3).join(' | ')}`)
     await pg.keyboard.press('Escape')
     await pg.evaluate(() => [...document.querySelectorAll('[aria-label="new Jira task"] button')].find((b) => b.textContent.trim() === 'Cancel')?.click())
+    // NEW PROJECT: the one-line intro stands clear of the first field's label.
+    await pg.waitForFunction(() => !document.querySelector('[aria-label="new Jira task"]'), { timeout: 5000 }).catch(() => {})
+    await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'New project')?.click())
+    await pg.waitForSelector('[aria-label="new project"] [data-dialog-intro]', { timeout: 5000 }).catch(() => {})
+    const npGap = await pg.evaluate(() => {
+      const d = document.querySelector('[aria-label="new project"]')
+      const intro = d?.querySelector('[data-dialog-intro]')
+      const label = d?.querySelector('label')
+      return intro && label ? { gap: Math.round(label.getBoundingClientRect().top - intro.getBoundingClientRect().bottom), label: label.textContent } : null
+    })
+    check('"NEW PROJECT" LEAVES ROOM BETWEEN ITS INTRO AND THE FIRST FIELD', !!npGap && npGap.label.startsWith('Type') && npGap.gap >= 18, JSON.stringify(npGap))
+    await pg.evaluate(() => [...document.querySelectorAll('[aria-label="new project"] button')].find((b) => b.textContent.trim() === 'Cancel')?.click())
+    await pg.waitForFunction(() => !document.querySelector('[aria-label="new project"]'), { timeout: 5000 }).catch(() => {})
     await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Plan week \d+/.test(b.textContent.trim()))?.click())
     await pg.waitForSelector('[data-jira-task="FNP-2004"] input[type="date"]', { timeout: 10000 }).catch(() => {})
     const plan2 = await pg.evaluate(() => document.body.innerText)
     check('  ONE "MY PLAN IS SET" AT MOST, IN THE NEXT STEP BAR', (await pg.evaluate(() => [...document.querySelectorAll('button')].filter((b) => /My plan for week/.test(b.textContent)).length)) <= 1)
     check('NEXT WEEK OPENS FOR PLANNING, WITH DATES TO SET', plan2.includes('Planning week') && plan2.includes('FNP-2004')
       && (await pg.evaluate(() => !!document.querySelector('[data-jira-task="FNP-2004"] input[type="date"]'))), plan2.slice(plan2.indexOf('My week'), plan2.indexOf('My week') + 500).replace(/\n/g, ' | '))
+    // Changing a date shows "Save dates" straight away; putting it back hides it.
+    const setDue = (v) => pg.evaluate((val) => {
+      const el = document.querySelectorAll('[data-jira-task="FNP-2004"] input[type="date"]')[1]
+      const was = el.value
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, val)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      return was
+    }, v)
+    const saveDatesBtn = () => pg.evaluate(() => {
+      const b = [...document.querySelectorAll('[data-jira-task="FNP-2004"] button')].find((x) => x.textContent.trim() === 'Save dates')
+      if (!b) return null
+      const r = b.getBoundingClientRect()
+      return { w: Math.round(r.width), h: Math.round(r.height), disabled: b.disabled }
+    })
+    const noSaveYet = await saveDatesBtn()
+    const dueWas = await setDue(day(NEXT, 3))
+    await sleep(250)
+    const saveShown = await saveDatesBtn()
+    check('A CHANGED DATE SHOWS "SAVE DATES" AT ONCE', !noSaveYet && !!saveShown && saveShown.w > 0 && saveShown.h >= 32 && !saveShown.disabled, JSON.stringify({ noSaveYet, saveShown }))
+    await setDue(dueWas)
+    await sleep(250)
+    check('  and putting the date back takes it away', !(await saveDatesBtn()))
     if (process.env.SHOT_DIR) await pg.screenshot({ path: `${process.env.SHOT_DIR}/jira-plan.png`, fullPage: true })
     // An administrator decides from the Dashboard.
     await call('POST', `/api/weekly/${WEEK}/jira/FNP-2002/update`, {

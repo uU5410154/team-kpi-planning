@@ -756,7 +756,7 @@ function TaskCard({
 /* ------------------------------------------------------- the dialogs */
 
 function FormDialog({
-  open, onClose, title, label, children, actions, busy,
+  open, onClose, title, label, intro, children, actions, busy,
 }) {
   const theme = useTheme()
   const phone = useMediaQuery(theme.breakpoints.down('sm'))
@@ -777,7 +777,18 @@ function FormDialog({
         <IconButton aria-label="close" onClick={onClose} disabled={busy} size="small"><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
       <DialogContent>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, pt: 1 }}>{children}</Box>
+        {/*
+         * What the dialog does, in one line, then 20px of clear space to the
+         * first field's floating label. Fields are 16px apart: an outlined
+         * field's label sits on its top edge, so 12px would leave it touching
+         * the field above.
+         */}
+        {intro && (
+          <Typography variant="body2" data-dialog-intro sx={{ color: 'text.secondary', maxWidth: '72ch', mb: 7 }}>
+            {intro}
+          </Typography>
+        )}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4, pt: intro ? 0 : 1 }}>{children}</Box>
       </DialogContent>
       <DialogActions sx={phone ? { position: 'sticky', bottom: 0, bgcolor: 'bg.raised', borderTop: 1, borderColor: 'border.subtle' } : undefined}>
         {actions}
@@ -848,7 +859,7 @@ function NewTask({
       />
       <TextField size="small" label="Task" value={summary} onChange={(e) => setSummary(e.target.value)} fullWidth />
       {dateRow(dates, setDates)}
-      <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1 }}>
+      <Typography variant="caption" sx={{ color: 'text.secondary', mt: -2 }}>
         {writable
           ? `Created under ${project?.jiraKey || 'the project’s epic'} and assigned to you.`
           : 'Writing to Jira is switched off on the server, so tasks cannot be created here.'}
@@ -890,6 +901,7 @@ function NewProject({
       onClose={onCancel}
       title="New project"
       label="new project"
+      intro="Created as an epic in Jira, assigned to you, and added to the register with you as PIC."
       busy={busy}
       actions={(
         <>
@@ -900,9 +912,6 @@ function NewProject({
         </>
       )}
     >
-      <Typography variant="body2" sx={{ color: 'text.secondary', mt: -1 }}>
-        Created as an epic in Jira, assigned to you, and added to the register with you as PIC.
-      </Typography>
       <TextField size="small" select label="Type" value={kind} onChange={(e) => setKind(e.target.value)}>
         <MenuItem value="adhoc">Adhoc work</MenuItem>
         <MenuItem value="cr">Change request</MenuItem>

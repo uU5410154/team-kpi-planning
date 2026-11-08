@@ -232,6 +232,7 @@ function NextStep({ next }) {
       component="section"
       aria-label="Next step"
       data-next-step
+      data-view-as-pick={next.pick ? true : undefined}
       sx={(t) => ({
         px: { xs: 3, sm: 4 },
         py: { xs: 3, sm: 3.5 },
@@ -1394,6 +1395,13 @@ export default function Weekly({
     }
   }
   const next = (() => {
+    /*
+     * An administrator previewing the member view with nobody picked has no
+     * week to show: that is a choice still to make, not an unlinked account.
+     */
+    if (me?.previewing && !me?.person) {
+      return { label: 'Choose a team member', sub: 'Pick someone in the bar above to see their week.', pick: true }
+    }
     if (data.locked) return { label: `Week ${n} is locked`, sub: 'You can read it but not change it.' }
     if (!data.person) {
       return admin

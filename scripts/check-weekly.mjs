@@ -342,6 +342,22 @@ try {
     check('THE ACCESS TAB LINKS ACCOUNTS TO PEOPLE', /not linked|James/.test(utext)
       && await admin.evaluate(() => !!document.querySelector('[aria-label="team member for james@lotuss.com"]')))
     check('  and holds the submit list', utext.includes('Weekly check-in: who has to submit'))
+
+    // An administrator with no person of their own, previewing the member view
+    // with nobody picked yet, is asked to choose someone: not told their
+    // account is unlinked.
+    await call('PUT', '/api/auth/users/boss@lotuss.com', { person: null }, boss)
+    await admin.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'member'); localStorage.removeItem('fa-kpi-view-as-person') })
+    // Only a hash away from where it is: reload so the page reads the switch afresh.
+    await admin.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
+    await admin.reload({ waitUntil: 'networkidle0' })
+    await admin.waitForSelector('[data-next-step]', { timeout: 15000 }).catch(() => {})
+    const ptext = await admin.evaluate(() => document.querySelector('[data-next-step]')?.innerText || '')
+    check('VIEWING AS A MEMBER WITH NOBODY PICKED ASKS TO CHOOSE ONE', /Choose a team member/.test(ptext)
+      && /Pick someone in the bar above to see their week/.test(ptext) && !/not linked/i.test(ptext)
+      && await admin.evaluate(() => !!document.querySelector('[data-view-as-pick]')), ptext.replace(/\n/g, ' | '))
+    await admin.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'admin') })
+    await call('PUT', '/api/auth/users/boss@lotuss.com', { person: 'gun' }, boss)
   }
 } catch (e) {
   failures++
