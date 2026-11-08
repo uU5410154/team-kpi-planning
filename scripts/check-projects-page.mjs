@@ -31,7 +31,7 @@ check('the name can never be hidden', !PROJECT_COLUMNS.some((c) => c.id === 'sum
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = 5371
+const PORT = Number(process.env.CHECK_PORT) || 5371   // CHECK_PORT: run beside another copy
 const base = `http://127.0.0.1:${PORT}`
 const TOKEN = 'projects-service-token-'.padEnd(48, '5')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -185,23 +185,27 @@ try {
     const order = (pg) => pg.evaluate(() => [...document.querySelectorAll('[data-layout-block]')]
       .map((b) => [b.dataset.layoutBlock, Number(getComputedStyle(b).order), b.getBoundingClientRect().top])
       .sort((x, y) => x[2] - y[2]).map((x) => x[0]))
-    const tiles = (pg) => pg.evaluate(() => [...document.querySelectorAll('[data-tile]')].map((t) => t.dataset.tile))
-    check('the default order: note, filters, figures, tools, table', (await order(a)).join() === 'about,filters,figures,tools,table', (await order(a)).join())
+    // The costing figures fold behind "Show all figures" while they are all
+    // blank; unfold them before reading which figures there are.
+    const unfold = (pg) => pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.trim() === 'Show all figures')?.click())
+    const tiles = async (pg) => { await unfold(pg); await sleep(150); return pg.evaluate(() => [...document.querySelectorAll('[data-tile]')].map((t) => t.dataset.tile)) }
+    // The how-to note starts hidden: the page explains itself from "About this page".
+    check('the default order: filters, figures, tools, table (the note starts hidden)', (await order(a)).join() === 'filters,figures,tools,table', (await order(a)).join())
     await a.click('[data-edit-layout]')
     await sleep(300)
     await a.click('[aria-label="move Figures up"]')
     await a.click('[aria-label="move Figures up"]')
-    await a.click('[data-toggle-block="about"]')
+    await a.click('[data-toggle-block="tools"]')
     await a.click('[data-toggle-tile="capex"]')
     await a.click('[aria-label="move ROI left"]')
     await a.click('[aria-label="wider ROI"]')
     await sleep(200)
     if (process.env.SHOT) await a.screenshot({ path: `${process.env.SHOT}/layout-editing.png`, fullPage: false })
-    check('EDITING: a hidden block keeps its bar so it can be shown again', await a.evaluate(() => /hidden/i.test(document.querySelector('[data-layout-block="about"]')?.innerText || '')))
+    check('EDITING: a hidden block keeps its bar so it can be shown again', await a.evaluate(() => /hidden/i.test(document.querySelector('[data-layout-block="tools"]')?.innerText || '')))
     await a.click('[data-save-layout]')
     await sleep(800)
     const ao = await order(a)
-    check('SAVED: figures first, the note gone', ao.join() === 'figures,filters,tools,table', ao.join())
+    check('SAVED: figures first, the toolbar gone', ao.join() === 'figures,filters,table', ao.join())
     const at = await tiles(a)
     check('  CAPEX hidden, ROI moved left of Investment', !at.includes('capex') && at.indexOf('roi') === at.indexOf('investment') - 1, at.join())
     const saved = await call('GET', '/api/projects/layout', undefined, james)
@@ -209,7 +213,7 @@ try {
     const d2 = await as(deputy, { width: 1280, height: 900 })
     await d2.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
     await sleep(700)
-    check('ANOTHER ADMINISTRATOR SEES THE SAME LAYOUT', (await order(d2)).join() === 'figures,filters,tools,table' && !(await tiles(d2)).includes('capex'), (await order(d2)).join())
+    check('ANOTHER ADMINISTRATOR SEES THE SAME LAYOUT', (await order(d2)).join() === 'figures,filters,table' && !(await tiles(d2)).includes('capex'), (await order(d2)).join())
     check('  ROI is wider than its neighbours', await d2.evaluate(() => {
       const w = (id) => document.querySelector(`[data-tile="${id}"]`).getBoundingClientRect().width
       return w('roi') > w('investment') * 1.3
@@ -228,7 +232,7 @@ try {
     await d2.evaluate(() => [...document.querySelectorAll('[data-layout-toolbar] button')].find((b) => /Reset to default/.test(b.innerText)).click())
     await d2.click('[data-save-layout]')
     await sleep(800)
-    check('RESET TO DEFAULT puts everything back', (await order(d2)).join() === 'about,filters,figures,tools,table' && (await tiles(d2)).length === 11, (await order(d2)).join())
+    check('RESET TO DEFAULT puts everything back', (await order(d2)).join() === 'filters,figures,tools,table' && (await tiles(d2)).length === 11, (await order(d2)).join())
     await d2.browserContext().close()
     await a.reload({ waitUntil: 'networkidle0' })
     await sleep(600)
@@ -312,21 +316,29 @@ try {
     await ph.keyboard.press('Escape')
     await sleep(500)
     check('  and Esc closes it', (await dialogs(ph)).length === 0)
+    // The filters live in a sheet that opens from the button: not on the page
+    // (or not displayed) before, laid out as a grid inside a dialog after.
     const filters = await ph.evaluate(() => {
       const b = [...document.querySelectorAll('button')].find((x) => /^Filters/.test(x.innerText.trim()))
-      const before = getComputedStyle(document.getElementById('project-filters')).display
+      const el = document.getElementById('project-filters')
+      const before = el ? getComputedStyle(el).display : 'none'
       b.click()
       return { before, b: !!b }
     })
-    await sleep(300)
-    const after = await ph.evaluate(() => getComputedStyle(document.getElementById('project-filters')).display)
+    await sleep(500)
+    const after = await ph.evaluate(() => {
+      const el = document.getElementById('project-filters')
+      return el && el.closest('[role="dialog"]') ? getComputedStyle(el).display : 'none'
+    })
     check('A PHONE FOLDS THE FILTERS BEHIND A BUTTON', filters.b && filters.before === 'none' && after === 'grid', `${filters.before} -> ${after}`)
+    await ph.keyboard.press('Escape')
+    await sleep(400)
     await ph.browserContext().close()
 
     console.log('\n--- and back ---')
     await a.click('[data-columns-button]')
     await sleep(300)
-    await a.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].find((m) => /Show every column/.test(m.innerText)).click())
+    await a.evaluate(() => [...document.querySelectorAll('[role="menuitem"], [role="menu"] button')].find((m) => /Show every column/.test(m.innerText)).click())
     await sleep(800)
     check('SHOW EVERY COLUMN puts it back, on the server too',
       JSON.stringify((await call('GET', '/api/projects/columns', undefined, james)).body.hidden) === '[]')
