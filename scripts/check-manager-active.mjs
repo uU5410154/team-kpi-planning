@@ -345,6 +345,16 @@ try {
     console.log('\n--- view as James ---')
     const v = await as(boss, { width: 1280, height: 900 })
     await v.goto(`${base}/`, { waitUntil: 'networkidle0' })
+    // Switched on with nobody picked (this administrator is not on the team): asked whom, not told "not linked".
+    await v.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'member'); localStorage.removeItem('fa-kpi-view-as-person') })
+    await v.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
+    await v.reload({ waitUntil: 'networkidle0' })
+    await v.waitForSelector('[data-view-as-empty]', { timeout: 15000 }).catch(() => {})
+    const nt = await v.evaluate(() => document.body.innerText)
+    check('VIEW AS, NOBODY PICKED: ASKED TO CHOOSE A TEAM MEMBER', !!(await v.$('[data-view-as-empty]')) && /Choose a team member/.test(nt) && !/not linked/i.test(nt),
+      nt.slice(0, 200).replace(/\n/g, ' | '))
+    check('  the bar says "Choose a person", and no progress meter for nobody', /Viewing as a team member: Choose a person/.test(nt)
+      && !(await v.$('nav [role="progressbar"]')))
     await v.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'member'); localStorage.setItem('fa-kpi-view-as-person', 'james') })
     await v.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await v.reload({ waitUntil: 'networkidle0' })

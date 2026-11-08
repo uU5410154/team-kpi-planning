@@ -7,6 +7,7 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOffOutlined'
 import * as auth from '../lib/authApi.js'
 import { Spinner } from '../components/Loading.jsx'
 import { ErrorState } from '../components/ui.jsx'
+import { AppMark } from '../components/Sidebar.jsx'
 
 /*
  * The way in, and the way to ask for a way in.
@@ -165,17 +166,7 @@ export default function SignIn({ config, onSignedIn }) {
       <Box sx={{ width: '100%', maxWidth: 400 }}>
         <Paper variant="outlined" sx={{ p: { xs: 5, sm: 8 }, borderRadius: '8px' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            <Box
-              aria-hidden
-              sx={{
-                width: 32, height: 32, borderRadius: '6px', bgcolor: 'bg.subtle', border: 1, borderColor: 'border.strong', display: 'grid', placeItems: 'center', flexShrink: 0,
-              }}
-            >
-              <Box sx={{
-                width: 13, height: 13, borderRadius: '2px', border: 2, borderColor: 'text.secondary',
-              }}
-              />
-            </Box>
+            <AppMark size={32} />
             <Typography variant="h1">F&amp;A Tech KPI</Typography>
           </Box>
           <Typography variant="body2" sx={{ color: 'text.secondary', mt: 3 }}>
