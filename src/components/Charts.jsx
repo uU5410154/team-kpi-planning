@@ -375,7 +375,7 @@ export function GateScatter({
                 strokeWidth="2"
                 style={{ cursor: 'pointer' }}
                 onMouseMove={(e) =>
-                  show(e, `${p.key}, ${p.summary}\n${p.note || `${fmt(p.x)} → ${fmt(p.y)}`}\n${clears ? 'Clears' : 'Below'} the gate`)
+                  show(e, `${p.key}, ${p.summary}\n${p.note || `Cost ${fmt(p.x)}, benefit ${fmt(p.y)} a year`}\n${clears ? 'Clears' : 'Below'} the gate`)
                 }
                 onMouseLeave={hide}
               />

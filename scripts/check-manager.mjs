@@ -358,7 +358,7 @@ try {
       && !document.querySelector('section[aria-label="week by week"] [data-loading]'), { timeout: 10000 }).catch(() => {})
     const pt = await text(a)
     check('A PROJECT’S NAME OPENS ITS PAGE', a.url().endsWith('#project/FNP-379') && pt.includes('PL Forecast'), a.url())
-    check('  owner, due date and hours', pt.includes('Owner') && pt.includes('31 Aug 2026') && pt.includes('Saving hours / month'))
+    check('  owner, due date and hours', pt.includes('Owner') && pt.includes('31 Aug 2026') && pt.includes('Saving hours a month'))
     check('  WHAT IS IN THE WAY', pt.includes('Waiting on IT for the data feed'), pt.slice(pt.indexOf('PL Forecast'), pt.indexOf('PL Forecast') + 900).replace(/\n/g, ' | '))
     check('  AND EVERY WEEK’S TASKS', pt.includes('Build the forecast model') && pt.includes('Validate the forecast with FP&A'))
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/project-page.png` })

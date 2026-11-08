@@ -488,6 +488,26 @@ export default function Dashboard({
     )
   }
 
+  // Each card's reading height: its content, up to its saved size (or GROW_TO rows).
+  const natural = Object.fromEntries(items.map((it) => [it.type,
+    fit[it.type] ? Math.min(Math.max(it.h, GROW_TO) * UNIT, fit[it.type]) : it.h * UNIT]))
+  /*
+   * Cards arranged side by side at the same row and height stay one row: the
+   * shorter takes the taller one's height, so the next row starts level. Not
+   * when that would leave it more than ~30% empty; it then stays at its
+   * content (still top-aligned with its neighbour).
+   */
+  const level = { ...natural }
+  const rows = new Map()
+  items.forEach((it) => {
+    const k = `${it.y}:${it.h}`
+    rows.set(k, [...(rows.get(k) || []), it.type])
+  })
+  rows.forEach((types) => {
+    if (types.length < 2) return
+    const tallest = Math.max(...types.map((t) => natural[t]))
+    types.forEach((t) => { if (natural[t] >= tallest * 0.7) level[t] = tallest })
+  })
   const rgl = items.map((it) => (editing ? {
     i: it.type, x: it.x, y: it.y, w: it.w, h: it.h, minW: CARDS[it.type].minW, minH: CARDS[it.type].minH,
   } : {
@@ -495,7 +515,7 @@ export default function Dashboard({
     x: it.x,
     y: it.y * UNIT,
     w: it.w,
-    h: fit[it.type] ? Math.min(Math.max(it.h, GROW_TO) * UNIT, fit[it.type]) : it.h * UNIT,
+    h: level[it.type],
   }))
   return (
     <Box>

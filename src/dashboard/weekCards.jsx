@@ -262,7 +262,7 @@ function RowFollowUp({ ctx, g, p, compact = true }) {
 }
 
 /** Under a project's name: its key and due date, and why it is on the list when that is not its dates. */
-function RowFacts({ p }) {
+function RowFacts({ p, hold = true }) {
   const words = [
     p.jiraKey || p.key,
     p.due ? `due ${fmtDay(p.due)}` : null,
@@ -281,7 +281,7 @@ function RowFacts({ p }) {
       )}
       {p.why === 'decision' && <StatusPill tone="info">Open decision</StatusPill>}
       {p.why === 'forced-on' && <StatusPill tone="neutral">Switched on</StatusPill>}
-      {p.onHold && <StatusPill tone="warning">On hold</StatusPill>}
+      {hold && p.onHold && <StatusPill tone="warning">On hold</StatusPill>}
     </Box>
   )
 }
@@ -304,7 +304,8 @@ function OwnerRow({
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <ProjectLink p={p} onOpen={ctx.onOpenProject} />
-          <RowFacts p={p} />
+          {/* Its state is the pill on the right; not said twice. */}
+          <RowFacts p={p} hold={false} />
         </Box>
         <Box sx={{
           display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, flexShrink: 0,

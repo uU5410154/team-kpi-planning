@@ -62,6 +62,24 @@ function Fact({ label, children }) {
   )
 }
 
+/*
+ * One part of the page. On the page it is a Section (a card); inside the
+ * project popup the dialog is already the surface, so the parts are separated
+ * by space and a hairline, not drawn as boxes within the box.
+ */
+function Part({
+  flat, title, meta, children, ...rest
+}) {
+  if (!flat) return <Section title={title} meta={meta} padded={false} {...rest}>{children}</Section>
+  return (
+    <Box component="section" {...rest}>
+      {title && <Typography variant="h2">{title}</Typography>}
+      {meta && <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>{meta}</Typography>}
+      <Box sx={{ mt: 2, borderTop: 1, borderColor: 'border.subtle' }}>{children}</Box>
+    </Box>
+  )
+}
+
 /** Where a task stands, as one pill. */
 function TaskPill({ t, hold }) {
   if (hold) return <StatusPill tone="warning">On hold</StatusPill>
@@ -70,7 +88,7 @@ function TaskPill({ t, hold }) {
   return <StatusPill tone="neutral">{t.reportIn ? 'No answer' : 'Planned'}</StatusPill>
 }
 
-function TaskLine({ t, first }) {
+function TaskLine({ t, first, px }) {
   // "On hold" written as the blocker is how the Jira flow records a hold; it is not in the way.
   const hold = t.hold || (t.done === false && /^on hold$/i.test(String(t.blocker || '').trim()))
   const why = !hold && t.done === false ? (t.blocker && !/^on hold$/i.test(t.blocker.trim()) ? t.blocker : t.reason || '') : ''
@@ -84,7 +102,7 @@ function TaskLine({ t, first }) {
   return (
     <Box
       sx={{
-        display: 'flex', gap: 3, alignItems: 'flex-start', px: { xs: 3, sm: 4 }, py: 3, borderTop: first ? 0 : 1, borderColor: 'border.subtle',
+        display: 'flex', gap: 3, alignItems: 'flex-start', px, py: 3, borderTop: first ? 0 : 1, borderColor: 'border.subtle',
       }}
       data-task-line={t.jiraKey || t.title}
     >
@@ -249,7 +267,10 @@ export default function Project({
     </>
   )
   const headerActions = (
-    <>
+    <Box sx={{
+      display: { xs: 'flex', sm: 'contents' }, flexWrap: 'wrap', alignItems: 'center', gap: 2, width: '100%',
+    }}
+    >
       {canWrite && lines.some((l) => l.onHold) && (
         <Button variant="outlined" data-resume onClick={() => keys.forEach((k) => onUpdate(k, { onHold: null }))}>
           Resume
@@ -288,35 +309,40 @@ export default function Project({
           compact
         />
       )}
-    </>
+    </Box>
   )
 
+  // Rows run to the card's padding on the page; in the popup, to the dialog's.
+  const px = inDialog ? 0 : { xs: 3, sm: 4 }
+
   /* ------------------------------------------------------------- facts */
-  const facts = (
-    <Section aria-label="facts" padded>
-      <Box
-        component="dl"
-        sx={{
-          m: 0,
-          display: 'grid',
-          columnGap: 6,
-          rowGap: 4,
-          gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'repeat(3, minmax(0, 1fr))', md: 'repeat(6, minmax(0, 1fr))' },
-        }}
-      >
-        <Fact label="Owner">{owner?.nick || owner?.name || 'TBC'}</Fact>
-        <Fact label="Start">{fmtDay(p.start) || <Dash />}</Fact>
-        <Fact label="Due">{fmtDay(p.due) || <Dash />}</Fact>
-        <Fact label="Saving hours / month">{fmtHours(hours)}</Fact>
-        <Fact label="Objective">{OBJ_BY_ID[p.objective]?.short || <Dash />}</Fact>
-        <Fact label="Latest weekly update">
-          {weekly === undefined
-            ? <Skeleton variant="text" width={80} height={20} sx={{ display: 'inline-block' }} />
-            : latest ? ago(latest) : 'None yet'}
-        </Fact>
-      </Box>
-    </Section>
+  const grid = (
+    <Box
+      component="dl"
+      sx={{
+        m: 0,
+        display: 'grid',
+        columnGap: 6,
+        rowGap: 4,
+        gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'repeat(3, minmax(0, 1fr))', md: 'repeat(6, minmax(0, 1fr))' },
+      }}
+    >
+      <Fact label="Owner">{owner?.nick || owner?.name || 'TBC'}</Fact>
+      <Fact label="Start">{fmtDay(p.start) || <Dash />}</Fact>
+      <Fact label="Due">{fmtDay(p.due) || <Dash />}</Fact>
+      <Fact label="Saving hours a month">{fmtHours(hours)}</Fact>
+      <Fact label="Objective">{OBJ_BY_ID[p.objective]?.short || <Dash />}</Fact>
+      <Fact label="Latest weekly update">
+        {weekly === undefined
+          ? <Skeleton variant="text" width={80} height={20} sx={{ display: 'inline-block' }} />
+          : latest ? ago(latest) : 'None yet'}
+      </Fact>
+    </Box>
   )
+  // In the popup the facts are one tinted block, the dialog's single callout.
+  const facts = inDialog
+    ? <Box aria-label="facts" sx={{ bgcolor: 'bg.subtle', borderRadius: '8px', p: { xs: 3, sm: 4 } }}>{grid}</Box>
+    : <Section aria-label="facts" padded>{grid}</Section>
 
   return (
     <Box>
@@ -326,7 +352,7 @@ export default function Project({
         back={!inDialog && onBack ? { label: 'Back', onClick: onBack } : undefined}
         actions={headerActions}
       />
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 3, sm: 4 } }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: inDialog ? 5 : { xs: 3, sm: 4 } }}>
         {facts}
 
         {weekly === null && (
@@ -338,9 +364,9 @@ export default function Project({
         )}
 
         {waiting.length > 0 && (
-          <Section title="Waiting for a decision" aria-label="waiting for a decision" padded={false}>
+          <Part flat={inDialog} title="Waiting for a decision" aria-label="waiting for a decision">
             {waiting.map((x, i) => (
-              <Box key={x.id} sx={{ px: { xs: 3, sm: 4 }, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
+              <Box key={x.id} sx={{ px, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
                 <Typography variant="body1">
                   <Box component="span" sx={{ fontWeight: 500 }}>{x.nick}</Box>
                   {` asks to move it from ${fmtDay(x.currentDue) || 'no date'} to ${x.proposedDue ? fmtDay(x.proposedDue) : 'a date you pick'}.`}
@@ -348,13 +374,13 @@ export default function Project({
                 <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>{`On “${x.taskTitle}”`}</Typography>
               </Box>
             ))}
-          </Section>
+          </Part>
         )}
 
         {story.blockers.length > 0 && (
-          <Section title="In the way" aria-label="in the way" padded={false}>
+          <Part flat={inDialog} title="In the way" aria-label="in the way">
             {story.blockers.map((b, i) => (
-              <Box key={`${b.week}.${b.person}.${b.title}`} sx={{ px: { xs: 3, sm: 4 }, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
+              <Box key={`${b.week}.${b.person}.${b.title}`} sx={{ px, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
                 <Typography variant="body1">
                   <Box component="span" sx={{ fontWeight: 500 }}>{b.nick}</Box>
                   {b.blockerCategory ? <Box component="span" sx={{ color: 'text.secondary' }}>{` (${CATEGORY[b.blockerCategory]})`}</Box> : null}
@@ -365,21 +391,21 @@ export default function Project({
                 </Typography>
               </Box>
             ))}
-          </Section>
+          </Part>
         )}
 
         {weekly !== null && (
-          <Section
+          <Part
+            flat={inDialog}
             title="Week by week"
             meta="Every task linked to this project in the weekly check-ins, the last eight weeks."
             aria-label="week by week"
-            padded={false}
           >
             {weekly === undefined && (
               <Box role="status" aria-label="Loading check-ins…" data-loading>
-                <Box sx={{ px: { xs: 3, sm: 4 }, py: 2, bgcolor: 'bg.subtle' }}><Skeleton variant="text" width={160} height={20} /></Box>
+                <Box sx={{ px: inDialog ? 0 : { xs: 3, sm: 4 }, py: 2, bgcolor: inDialog ? 'transparent' : 'bg.subtle' }}><Skeleton variant="text" width={160} height={20} /></Box>
                 {[0, 1, 2].map((i) => (
-                  <Box key={i} sx={{ px: { xs: 3, sm: 4 }, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
+                  <Box key={i} sx={{ px, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle' }}>
                     <Skeleton variant="text" width={['46%', '58%', '38%'][i]} height={20} />
                     <Skeleton variant="text" width="24%" height={16} sx={{ mt: 0.5 }} />
                   </Box>
@@ -387,31 +413,33 @@ export default function Project({
               </Box>
             )}
             {weekly && weeks.length === 0 && (
-              <Box sx={{ px: { xs: 3, sm: 4 } }}>
+              <Box sx={{ px }}>
                 <EmptyState inline icon={HistoryIcon} title="Nobody has reported on this project in the last eight weeks." />
               </Box>
             )}
             {weeks.map((w) => (
               <Box key={w}>
-                <Box sx={{
-                  px: { xs: 3, sm: 4 }, py: 2, bgcolor: 'bg.subtle', borderTop: 1, borderBottom: 1, borderColor: 'border.subtle', mt: '-1px',
+                <Box sx={inDialog ? {
+                  pt: 4, pb: 1, borderBottom: 1, borderColor: 'border.subtle',
+                } : {
+                  px, py: 2, bgcolor: 'bg.subtle', borderTop: 1, borderBottom: 1, borderColor: 'border.subtle', mt: '-1px',
                 }}
                 >
                   <Typography variant="h3" component="h3">{`Week ${weekNo(w)}, ${weekLabel(w)}`}</Typography>
                 </Box>
-                {byWeek[w].map((t, i) => <TaskLine key={`${t.person}.${t.title}.${t.expected}`} t={t} first={i === 0} />)}
+                {byWeek[w].map((t, i) => <TaskLine key={`${t.person}.${t.title}.${t.expected}`} t={t} first={i === 0} px={px} />)}
               </Box>
             ))}
-          </Section>
+          </Part>
         )}
 
         {decided.length > 0 && (
-          <Section title="Date changes decided" aria-label="date changes decided" padded={false}>
+          <Part flat={inDialog} title="Date changes decided" aria-label="date changes decided">
             {decided.map((x, i) => (
               <Box
                 key={x.id}
                 sx={{
-                  display: 'flex', gap: 3, alignItems: 'flex-start', px: { xs: 3, sm: 4 }, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle',
+                  display: 'flex', gap: 3, alignItems: 'flex-start', px, py: 3, borderTop: i ? 1 : 0, borderColor: 'border.subtle',
                 }}
               >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -425,7 +453,7 @@ export default function Project({
                 <StatusPill tone={PROPOSAL_TONE[x.status]}>{PROPOSAL_LABEL[x.status]}</StatusPill>
               </Box>
             ))}
-          </Section>
+          </Part>
         )}
       </Box>
     </Box>
