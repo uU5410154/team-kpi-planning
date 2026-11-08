@@ -1769,7 +1769,9 @@ export default function Timeline({
                       pl: 0.4,
                       overflow: 'hidden',
                       display: 'flex',
-                      alignItems: 'center',
+                      // Labels sit low, so the Today tag above them covers none.
+                      alignItems: 'flex-end',
+                      pb: 0.25,
                     }}
                   >
                     <Typography
@@ -1789,11 +1791,11 @@ export default function Timeline({
                 <Box
                   data-timeline-today-label
                   sx={{
-                    position: 'absolute', left: `${pct(at(asOf))}%`, top: 2, transform: 'translateX(-50%)', zIndex: 1,
-                    px: 0.6, borderRadius: 1, border: 1, borderColor: STATUS.warning, bgcolor: 'background.paper', pointerEvents: 'none',
+                    position: 'absolute', left: `${pct(at(asOf))}%`, top: 1, transform: 'translateX(-50%)', zIndex: 1,
+                    px: 0.5, borderRadius: 0.75, border: 1, borderColor: STATUS.warning, bgcolor: 'background.paper', pointerEvents: 'none',
                   }}
                 >
-                  <Typography variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 700, color: STATUS.warning, lineHeight: 1.6, display: 'block' }}>Today</Typography>
+                  <Typography variant="caption" sx={{ fontSize: '0.55rem', fontWeight: 700, color: STATUS.warning, lineHeight: 1.25, display: 'block' }}>Today</Typography>
                 </Box>
               </Box>
               <Box sx={{
