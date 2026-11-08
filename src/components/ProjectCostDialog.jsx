@@ -1,13 +1,15 @@
 import { useState } from 'react'
+import { useTheme } from '@mui/material/styles'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography, Button, IconButton,
   Table, TableBody, TableCell, TableHead, TableRow, TextField, Select, MenuItem, Tooltip,
-  Divider, Chip, Alert, InputAdornment, Link, Switch, FormControlLabel,
+  Chip, Alert, InputAdornment, Link, Switch, FormControlLabel, useMediaQuery,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import CloseIcon from '@mui/icons-material/Close'
-import { STATUS } from '../lib/palette.js'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import { AboutPage, FigureStrip, StatusPill } from './ui.jsx'
 import {
   MONTH_LABELS, MONTHS_IN_YEAR, newOpexLine, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtHours,
   normalizeTasks, mandayToMoney, moneyToManday,
@@ -39,10 +41,12 @@ function EffortField({ manday, onChange, rates, symbol }) {
   }
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       <TextField
         size="small"
         label="Mandays"
+        placeholder="0"
+        InputLabelProps={{ shrink: true }}
         value={md}
         onFocus={() => setEditing(true)}
         onChange={(e) => {
@@ -52,12 +56,14 @@ function EffortField({ manday, onChange, rates, symbol }) {
         }}
         onBlur={() => { setEditing(false); commit(num(md)) }}
         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-        inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 68 } }}
+        inputProps={{ inputMode: 'decimal', style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 64 } }}
       />
-      <Typography variant="caption" sx={{ color: 'text.secondary' }}>=</Typography>
+      <Typography variant="body2" aria-hidden sx={{ color: 'text.tertiary' }}>=</Typography>
       <TextField
         size="small"
         label="Cost"
+        placeholder="0"
+        InputLabelProps={{ shrink: true }}
         value={money}
         onFocus={() => setEditing(true)}
         onChange={(e) => {
@@ -69,7 +75,7 @@ function EffortField({ manday, onChange, rates, symbol }) {
         onBlur={() => { setEditing(false); commit(moneyToManday(num(money), rates)) }}
         onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
         InputProps={{ startAdornment: <InputAdornment position="start">{symbol}</InputAdornment> }}
-        inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 96 } }}
+        inputProps={{ inputMode: 'decimal', style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums', width: 88 } }}
       />
     </Box>
   )
@@ -79,7 +85,7 @@ function EffortField({ manday, onChange, rates, symbol }) {
 export function LinkedText({ text }) {
   const parts = String(text || '').split(/(https?:\/\/[^\s]+)/g)
   return (
-    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
       {parts.map((t, i) => (/^https?:\/\//.test(t)
         ? <Link key={i} href={t} target="_blank" rel="noopener noreferrer">{t}</Link>
         : <span key={i}>{t}</span>))}
@@ -121,6 +127,7 @@ function MoneyField({ value, onChange, label, placeholder = '0', width = 150, sy
     <TextField
       size="small"
       label={label}
+      InputLabelProps={label ? { shrink: true } : undefined}
       value={draft}
       placeholder={placeholder}
       onFocus={() => setFocused(true)}
@@ -136,15 +143,15 @@ function MoneyField({ value, onChange, label, placeholder = '0', width = 150, sy
         else setDraft(asStr(value))
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-      InputProps={{ startAdornment: <Typography variant="caption" sx={{ mr: 0.5, color: 'text.secondary' }}>{symbol}</Typography> }}
-      inputProps={{ style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } }}
+      InputProps={{ startAdornment: <InputAdornment position="start">{symbol}</InputAdornment> }}
+      inputProps={{ inputMode: 'decimal', style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } }}
       sx={{ width }}
     />
   )
 }
 
 /** Free-text field that commits on blur. */
-function TextFieldOnBlur({ value, onChange, label, placeholder, sx }) {
+function TextFieldOnBlur({ value, onChange, label, placeholder, sx, inputProps }) {
   const [draft, setDraft] = useState(value ?? '')
   const [focused, setFocused] = useState(false)
   if (!focused && draft !== (value ?? '')) setDraft(value ?? '')
@@ -152,12 +159,14 @@ function TextFieldOnBlur({ value, onChange, label, placeholder, sx }) {
     <TextField
       size="small"
       label={label}
+      InputLabelProps={label ? { shrink: true } : undefined}
       value={draft}
       placeholder={placeholder}
       onFocus={() => setFocused(true)}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { setFocused(false); if (draft.trim() !== (value ?? '')) onChange(draft.trim()) }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+      inputProps={inputProps}
       sx={sx}
     />
   )
@@ -169,11 +178,60 @@ const MonthSelect = ({ value, onChange, label }) => (
     value={value}
     onChange={(e) => onChange(Number(e.target.value))}
     inputProps={{ 'aria-label': label }}
-    sx={{ width: 88, fontSize: '0.8125rem' }}
+    sx={{ width: 92 }}
   >
     {MONTH_LABELS.map((m, i) => <MenuItem key={m} value={i + 1}>{m}</MenuItem>)}
   </Select>
 )
+
+/**
+ * One part of the sheet: a small heading, one line on what it is, the long
+ * explanation behind "How it works", and the part's own action at the right.
+ * Parts are separated by space, not boxes.
+ */
+function Part({
+  title, desc, help, action, first = false, children,
+}) {
+  return (
+    <Box component="section" aria-label={typeof title === 'string' ? title : undefined} sx={{ mt: first ? 0 : 7 }}>
+      <Box sx={{
+        display: 'flex', alignItems: 'flex-start', gap: 3, mb: 3,
+      }}
+      >
+        <Box sx={{ flex: '1 1 0', minWidth: 0 }}>
+          <Typography variant="h3" component="h3">{title}</Typography>
+          {(desc || help) && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', columnGap: 3, rowGap: 0.5, flexWrap: 'wrap', mt: 0.5,
+            }}
+            >
+              {desc && <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '72ch' }}>{desc}</Typography>}
+              {help && <AboutPage label="How it works">{help}</AboutPage>}
+            </Box>
+          )}
+        </Box>
+        {action && <Box sx={{ flexShrink: 0, mt: -1 }}>{action}</Box>}
+      </Box>
+      {children}
+    </Box>
+  )
+}
+
+/* Tables in the sheet: no outer box, a quiet header row, hairlines between rows. */
+const sheetTable = {
+  '& th': { whiteSpace: 'nowrap' },
+  '& tbody tr:last-of-type td': { borderBottom: 0 },
+}
+
+/* A stacked row on a phone: one task or cost line, hairlines between them. */
+const stackRow = {
+  py: 3, borderBottom: 1, borderColor: 'border.subtle', '&:first-of-type': { pt: 1 },
+}
+
+/* The one tinted note a part may carry. */
+const callout = {
+  px: 3, py: 2.5, bgcolor: 'bg.subtle', borderRadius: '8px',
+}
 
 /**
  * The whole cost picture for one project, opened by clicking its row on the
@@ -209,102 +267,92 @@ function TeamRoles({ p, people, onUpdate }) {
   const setRoles = (person, roles) => onUpdate(p.key, setRolesPatch(p, person, roles))
 
   return (
-    <>
-      <Divider sx={{ my: 3 }} />
-      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 0.5 }}>
-        <Typography variant="h4">Team and roles</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          the split of this project&rsquo;s hours
-        </Typography>
-      </Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-        Each person counts at their strongest role, not the sum of them — holding both PM and dev does not
-        double a claim. Shares always add to 100%, so giving someone more takes it from the others. Clear
-        every role to drop a person; the PIC keeps the project at the assignee weight.
-      </Typography>
-
-      <Table size="small" sx={{ mb: 1 }}>
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ width: 150 }}>Person</TableCell>
-            <TableCell sx={{ minWidth: 260 }}>Roles</TableCell>
-            <TableCell align="right" sx={{ width: 90 }}>Share</TableCell>
-            <TableCell align="right" sx={{ width: 120 }}>Credited</TableCell>
-            <TableCell align="center" sx={{ width: 90 }}>PIC</TableCell>
-            <TableCell sx={{ width: 44 }} />
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.map((r) => (
-            <TableRow key={r.person} hover>
-              <TableCell>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>{nameOf(r.person)}</Typography>
-                {r.implied ? (
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>no role set</Typography>
-                ) : null}
-              </TableCell>
-              <TableCell>
-                <Select
-                  multiple
-                  size="small"
-                  fullWidth
-                  displayEmpty
-                  value={r.implied ? [] : r.roles}
-                  onChange={(e) => setRoles(r.person, e.target.value)}
-                  renderValue={(sel) => (sel.length
-                    ? (
-                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                        {sel.map((v) => <Chip key={v} size="small" label={ROLE_LABEL[v] || v} />)}
-                      </Box>
-                    )
-                    : <Typography variant="caption" sx={{ color: 'text.secondary' }}>assignee (implied)</Typography>)}
-                >
-                  {ROLE_ORDER.map((role) => (
-                    <MenuItem key={role} value={role}>{ROLE_LABEL[role] || role}</MenuItem>
-                  ))}
-                </Select>
-              </TableCell>
-              <TableCell align="right">
-                <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {Math.round(r.share * 100)}%
-                </Typography>
-              </TableCell>
-              <TableCell align="right">
-                <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', color: counted ? 'text.primary' : 'text.disabled' }}>
-                  {counted ? `${fmtHours(hours * r.share)}/mth` : '—'}
-                </Typography>
-              </TableCell>
-              <TableCell align="center">
-                {p.pic === r.person
-                  ? <Chip size="small" label="PIC" color="primary" variant="outlined" />
-                  : (
-                    <Tooltip title="Make this person the PIC">
-                      <Button size="small" onClick={() => onUpdate(p.key, reassignPatch(p, r.person))}>set</Button>
-                    </Tooltip>
-                  )}
-              </TableCell>
-              <TableCell>
-                <Tooltip title="Remove from this project">
-                  <span>
-                    <IconButton size="small" disabled={r.implied} onClick={() => setRoles(r.person, [])}>
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  </span>
-                </Tooltip>
-              </TableCell>
-            </TableRow>
-          ))}
-          {rows.length === 0 ? (
+    <Part
+      title="Team and roles"
+      desc="How this project's saving hours are split between the people on it."
+      help={(
+        <>
+          <p>Each person counts at their strongest role, not the sum of them: holding both PM and developer does not double a claim.</p>
+          <p>Shares always add to 100%, so giving someone more takes it from the others. Clear every role to drop a person; the PIC keeps the project at the assignee weight.</p>
+        </>
+      )}
+    >
+      <Box sx={{ overflowX: 'auto' }}>
+        <Table size="small" sx={{ ...sheetTable, minWidth: 620 }}>
+          <TableHead>
             <TableRow>
-              <TableCell colSpan={6}>
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  Nobody is credited. The hours fall to the team lead, who is accountable for them.
-                </Typography>
-              </TableCell>
+              <TableCell sx={{ width: 150 }}>Person</TableCell>
+              <TableCell sx={{ minWidth: 240 }}>Roles</TableCell>
+              <TableCell align="right" sx={{ width: 80 }}>Share</TableCell>
+              <TableCell align="right" sx={{ width: 110 }}>Credited hrs/mth</TableCell>
+              <TableCell sx={{ width: 104 }}>PIC</TableCell>
+              <TableCell sx={{ width: 44 }} />
             </TableRow>
-          ) : null}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {rows.map((r) => (
+              <TableRow key={r.person}>
+                <TableCell>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>{nameOf(r.person)}</Typography>
+                  {r.implied ? (
+                    <Typography variant="caption" sx={{ color: 'text.tertiary' }}>No role set</Typography>
+                  ) : null}
+                </TableCell>
+                <TableCell>
+                  <Select
+                    multiple
+                    size="small"
+                    fullWidth
+                    displayEmpty
+                    value={r.implied ? [] : r.roles}
+                    onChange={(e) => setRoles(r.person, e.target.value)}
+                    renderValue={(sel) => (sel.length
+                      ? (
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                          {sel.map((v) => <Chip key={v} size="small" label={ROLE_LABEL[v] || v} />)}
+                        </Box>
+                      )
+                      : <Typography variant="body2" sx={{ color: 'text.tertiary' }}>Assignee (implied)</Typography>)}
+                  >
+                    {ROLE_ORDER.map((role) => (
+                      <MenuItem key={role} value={role}>{ROLE_LABEL[role] || role}</MenuItem>
+                    ))}
+                  </Select>
+                </TableCell>
+                <TableCell align="right">{Math.round(r.share * 100)}%</TableCell>
+                <TableCell align="right" sx={{ color: counted ? 'text.primary' : 'text.tertiary' }}>
+                  {counted ? `${fmtHours(hours * r.share)}/mth` : '—'}
+                </TableCell>
+                <TableCell>
+                  {p.pic === r.person
+                    ? <StatusPill tone="neutral">PIC</StatusPill>
+                    : (
+                      <Button size="small" variant="text" onClick={() => onUpdate(p.key, reassignPatch(p, r.person))} sx={{ ml: -2 }}>
+                        Make PIC
+                      </Button>
+                    )}
+                </TableCell>
+                <TableCell padding="checkbox">
+                  <Tooltip title="Remove from this project">
+                    <span>
+                      <IconButton size="small" disabled={r.implied} onClick={() => setRoles(r.person, [])} aria-label={`remove ${nameOf(r.person)}`} sx={{ color: 'text.secondary' }}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} sx={{ color: 'text.secondary' }}>
+                  Nobody is credited. The hours fall to the team lead, who is accountable for them.
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </Box>
 
       {spare.length ? (
         <Select
@@ -312,19 +360,27 @@ function TeamRoles({ p, people, onUpdate }) {
           displayEmpty
           value=""
           onChange={(e) => setRoles(e.target.value, ['dev'])}
-          sx={{ minWidth: 240 }}
-          renderValue={() => <Typography variant="body2" sx={{ color: 'text.secondary' }}>Add a person…</Typography>}
+          inputProps={{ 'aria-label': 'add a person' }}
+          sx={{ minWidth: 240, mt: 3 }}
+          renderValue={() => <Typography variant="body1" sx={{ color: 'text.secondary' }}>Add a person…</Typography>}
         >
-          {spare.map((x) => <MenuItem key={x.id} value={x.id}>{x.nick} — {x.name}</MenuItem>)}
+          {spare.map((x) => (
+            <MenuItem key={x.id} value={x.id}>
+              {x.nick}
+              <Typography component="span" variant="body2" sx={{ ml: 2, color: 'text.secondary' }}>{x.name}</Typography>
+            </MenuItem>
+          ))}
         </Select>
       ) : null}
 
       {p.fellBack ? (
-        <Alert severity="info" sx={{ mt: 1.5 }}>
-          Nobody on the team holds a role here, so these hours sit with the team lead rather than vanishing.
-        </Alert>
+        <Box sx={{ ...callout, mt: 3 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Nobody on the team holds a role here, so these hours sit with the team lead rather than vanishing.
+          </Typography>
+        </Box>
       ) : null}
-    </>
+    </Part>
   )
 }
 
@@ -349,17 +405,18 @@ function FinishDate({ p, onUpdate }) {
   const finish = p.actualEnd || null
   // What the drift would be, said in the same words the scorecard uses.
   const lateBy = tl.lateBy
+  let state = 'not finished yet'
+  if (finish) {
+    state = `finished ${finish}`
+    if (lateBy != null && lateBy > 0) state += `, ${lateBy} days past the commitment`
+    else if (lateBy != null) state += ', on or ahead of the commitment'
+  }
   return (
-    <>
-      <Divider sx={{ my: 3 }} />
-      <Typography variant="h4" sx={{ mb: 0.5 }}>Finish date</Typography>
-      <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-        Committed to <strong>{due || 'no date'}</strong>
-        {finish
-          ? <> · finished <strong>{finish}</strong>{lateBy != null && lateBy > 0 ? ` — ${lateBy} days past the commitment` : lateBy != null ? ' — on or ahead of the commitment' : ''}</>
-          : ' · not finished yet'}
-      </Typography>
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+    <Part title="Finish date" desc={`Committed to ${due || 'no date'}; ${state}.`}>
+      <Box sx={{
+        display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap',
+      }}
+      >
         <TextField
           size="small"
           type="date"
@@ -368,9 +425,10 @@ function FinishDate({ p, onUpdate }) {
           value={finish || ''}
           onChange={(e) => onUpdate(p.key, pinFinishPatch(p, e.target.value || null))}
           InputLabelProps={{ shrink: true }}
-          sx={{ width: 190 }}
+          sx={{ width: 180 }}
         />
         <FormControlLabel
+          sx={{ mr: 0 }}
           control={(
             <Switch
               size="small"
@@ -382,29 +440,26 @@ function FinishDate({ p, onUpdate }) {
                 : unpinFinishPatch())}
             />
           )}
-          label={(
-            <Typography variant="caption">
-              Hold this date — the Jira sync will not touch it
-            </Typography>
-          )}
+          label="Hold this date so the Jira sync leaves it alone"
         />
       </Box>
-      <Alert severity={held ? 'warning' : 'info'} sx={{ mt: 1.5, py: 0.5 }}>
-        <Typography variant="caption">
-          {held
-            ? <>Held. The daily sync updates everything else on this project — start date, name, tasks — but leaves
-              the finish date exactly as it is above. Turn this off and the next sync takes it back from Jira.</>
-            : <>Following Jira. The finish date is the resolution date of the last task under this epic, rewritten
-              every morning. Hold it only where Jira&rsquo;s date is not the day the work actually landed.</>}
-        </Typography>
-      </Alert>
-    </>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mt: 3, maxWidth: '72ch' }}>
+        {held
+          ? <>Held. The daily sync updates everything else on this project (start date, name, tasks) but leaves
+            the finish date exactly as it is above. Turn this off and the next sync takes it back from Jira.</>
+          : <>Following Jira. The finish date is the resolution date of the last task under this epic, rewritten
+            every morning. Hold it only where Jira&rsquo;s date is not the day the work actually landed.</>}
+      </Typography>
+    </Part>
   )
 }
 
 export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) {
-  // No hooks in this component, so an early return is safe — and the caller
-  // holds only a key, so there is nothing to keep mounted between openings.
+  // A phone stacks each task and cost line instead of a table row of inputs.
+  // The one hook runs before the early return, so the order never changes;
+  // the caller holds only a key, so there is nothing to keep mounted.
+  const theme = useTheme()
+  const phone = useMediaQuery(theme.breakpoints.down('sm'), { noSsr: true })
   if (!project) return null
 
   const fin = plan.finance
@@ -436,353 +491,418 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
 
   const lineYear = (l) => l.monthly * (l.endMonth - l.startMonth + 1)
   const active = (l, m) => m + 1 >= l.startMonth && m + 1 <= l.endMonth
+  const neverPays = p.netMonthly != null && p.netMonthly <= 0
 
-  const head = [
-    { label: 'Saving hours', value: p.savingHours == null ? '—' : `${fmtHours(p.savingHours)}/mth` },
-    { label: 'Benefit', value: p.monthlyBenefit == null ? '—' : `${fmtMoneyShort(p.monthlyBenefit, sym)}/mth` },
-    { label: 'OPEX', value: p.opexRunRate > 0 ? `${fmtMoneyShort(p.opexRunRate, sym)}/mth` : '—' },
-    { label: 'Investment', value: fmtMoneyShort(p.investment, sym) },
+  let roiNote = 'Needs mandays or CAPEX'
+  let roiTone
+  if (p.roi != null) {
+    roiNote = p.gate === 'pass' ? `Clears the ${fmtRoi(fin.roiGate)} gate` : `Below the ${fmtRoi(fin.roiGate)} gate`
+    roiTone = p.gate === 'pass' ? 'success' : 'danger'
+  }
+  const figures = [
+    { key: 'hours', label: 'Saving hrs/mth', value: p.savingHours == null ? '—' : fmtHours(p.savingHours), note: p.savingHours == null ? 'Still TBC' : undefined },
+    { key: 'benefit', label: 'Benefit/mth', value: p.monthlyBenefit == null ? '—' : fmtMoneyShort(p.monthlyBenefit, sym) },
+    { key: 'opex', label: 'OPEX/mth', value: p.opexRunRate > 0 ? fmtMoneyShort(p.opexRunRate, sym) : '—', note: p.opexRunRate > 0 ? undefined : 'None entered' },
+    { key: 'investment', label: 'Investment', value: fmtMoneyShort(p.investment, sym), note: 'Build cost and CAPEX' },
+    { key: 'roi', label: 'ROI', value: fmtRoi(p.roi), note: roiNote, tone: roiTone },
     {
-      label: 'ROI',
-      value: fmtRoi(p.roi),
-      tone: p.roi == null ? undefined : p.gate === 'pass' ? STATUS.good : STATUS.critical,
-    },
-    {
+      key: 'payback',
       label: 'Payback',
       value: p.paybackMonths == null ? '—' : fmtMonths(p.paybackMonths),
-      tone: p.netMonthly != null && p.netMonthly <= 0 ? STATUS.critical : undefined,
+      note: neverPays ? 'Never pays back' : undefined,
+      tone: neverPays ? 'danger' : undefined,
     },
   ]
 
+  const cell = { whiteSpace: 'nowrap' }
+  const stick = {
+    position: 'sticky', left: 0, zIndex: 1, bgcolor: 'bg.raised', minWidth: 168, maxWidth: 220,
+  }
+  const totalRow = { '& td': { borderTop: 1, borderColor: 'border.strong', fontWeight: 600 } }
+
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth scroll="paper">
-      <DialogTitle sx={{ pr: 6 }}>
-        <Typography variant="h4" component="div">{p.summary}</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-          {p.jiraKey || p.key} · investment and running cost · {p.manday > 0 ? `${fmtHours(p.manday)} mandays` : 'no effort estimate'}
+    <Dialog open onClose={onClose} maxWidth="lg" fullWidth scroll="paper" aria-labelledby="cost-sheet-title">
+      <DialogTitle id="cost-sheet-title" sx={{ pr: 14 }}>
+        <Box component="span" sx={{ display: 'block', overflowWrap: 'anywhere' }}>Cost sheet: {p.summary}</Box>
+        <Typography variant="body2" component="div" sx={{ color: 'text.secondary', mt: 0.5 }}>
+          {p.jiraKey || p.key}, {p.manday > 0 ? `${fmtHours(p.manday)} mandays` : 'no effort estimate yet'}
         </Typography>
-        <IconButton size="small" onClick={onClose} sx={{ position: 'absolute', right: 12, top: 12 }} aria-label="close">
-          <CloseIcon fontSize="small" />
-        </IconButton>
+        <Tooltip title="Close">
+          <IconButton onClick={onClose} sx={{ position: 'absolute', right: 12, top: 14, color: 'text.secondary' }} aria-label="close">
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </DialogTitle>
 
       <DialogContent dividers>
         {/* ---------- the headline ---------- */}
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', border: 1, borderColor: 'divider', borderRadius: 1, mb: 2.5 }}>
-          {head.map((t, i) => (
-            <Box key={t.label} sx={{ flex: '1 1 130px', px: 2, py: 1.25, borderLeft: i === 0 ? 'none' : 1, borderColor: 'divider', minWidth: 120 }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.6875rem' }}>
-                {t.label}
-              </Typography>
-              <Typography sx={{ fontSize: '1.05rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: t.tone || 'text.primary' }}>
-                {t.value}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
+        <FigureStrip items={figures} />
 
-        {p.netMonthly != null && p.netMonthly <= 0 && (
-          <Alert severity="error" variant="outlined" sx={{ mb: 2.5 }}>
-            The operating cost of {fmtMoney(p.opexRunRate, sym)} a month is at or above the{' '}
-            {fmtMoney(p.monthlyBenefit, sym)} a month this project hands back, so it never repays what was
-            invested in it. Payback is shown as blank rather than as a number — there isn't one.
+        {neverPays && (
+          <Alert severity="error" variant="outlined" sx={{ mt: 4 }}>
+            The running cost of {fmtMoney(p.opexRunRate, sym)} a month is at or above the{' '}
+            {fmtMoney(p.monthlyBenefit, sym)} a month this project returns, so it never repays the investment.
+            Lower the OPEX or raise the saving hours to give it a payback.
           </Alert>
         )}
 
         {/* ---------- effort ---------- */}
-        <Typography variant="h4" sx={{ mb: 0.5 }}>Effort — mandays by task</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-          Break the build into tasks and the project total becomes the sum of them. Type either the mandays
-          or the cost — the other follows at {fmtMoney(fin.devDayRate, sym)} a manday. Mandays are what is
-          stored, so changing the developer salary re-prices the plan rather than changing the work.
-        </Typography>
-        <Table size="small" sx={{ mb: 1, '& th, & td': { px: 1 } }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Task</TableCell>
-              <TableCell sx={{ width: 300 }}>Effort</TableCell>
-              <TableCell>Note</TableCell>
-              <TableCell padding="checkbox" />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {tasks.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell>
+        <Part
+          title="Effort by task"
+          desc={`Type mandays or cost; the other follows at ${fmtMoney(fin.devDayRate, sym)} a manday.`}
+          help={(
+            <>
+              <p>Break the build into tasks and the project total becomes the sum of them.</p>
+              <p>Mandays are what is stored, so changing the developer salary on the Model page re-prices the plan rather than changing the work.</p>
+            </>
+          )}
+          action={<Button size="small" startIcon={<AddIcon />} onClick={addTask}>Add task</Button>}
+        >
+          {phone ? (
+            <Box>
+              {tasks.map((t) => (
+                <Box key={t.id} sx={{ ...stackRow, display: 'grid', gap: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TextFieldOnBlur
+                      label="Task"
+                      value={t.label}
+                      placeholder="What this covers"
+                      onChange={(v) => setTask(t.id, { label: v })}
+                      sx={{ flex: 1, minWidth: 0 }}
+                    />
+                    <IconButton onClick={() => removeTask(t.id)} aria-label="remove task" sx={{ color: 'text.secondary', width: 40, height: 40 }}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                  <EffortField manday={t.manday} rates={fin} symbol={sym} onChange={(v) => setTask(t.id, { manday: v })} />
                   <TextFieldOnBlur
-                    value={t.label}
-                    placeholder="What this covers"
-                    onChange={(v) => setTask(t.id, { label: v })}
-                    sx={{ width: '100%' }}
-                  />
-                </TableCell>
-                <TableCell>
-                  <EffortField
-                    manday={t.manday}
-                    rates={fin}
-                    symbol={sym}
-                    onChange={(v) => setTask(t.id, { manday: v })}
-                  />
-                </TableCell>
-                <TableCell>
-                  <TextFieldOnBlur
+                    label="Note"
                     value={t.note}
-                    placeholder="optional"
+                    placeholder="Optional"
                     onChange={(v) => setTask(t.id, { note: v })}
                     sx={{ width: '100%' }}
                   />
-                </TableCell>
-                <TableCell padding="checkbox">
-                  <IconButton size="small" onClick={() => removeTask(t.id)} aria-label="remove task">
-                    <DeleteOutlineIcon sx={{ fontSize: 17 }} />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-            <TableRow>
-              <TableCell sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider' }}>TOTAL</TableCell>
-              <TableCell sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', borderTop: 2, borderColor: 'divider' }}>
-                {fmtHours(taskTotal)} mandays = {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
-              </TableCell>
-              <TableCell colSpan={2} sx={{ borderTop: 2, borderColor: 'divider' }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  {stored.length
-                    ? 'the project carries the sum of these lines'
-                    : 'one line, carrying the total entered before this breakdown existed'}
+                </Box>
+              ))}
+              <Box sx={{ ...stackRow, display: 'flex', justifyContent: 'space-between', gap: 3 }}>
+                <Typography variant="body1" sx={{ fontWeight: 600 }}>Total</Typography>
+                <Typography variant="body1" className="tabular" sx={{ fontWeight: 600, textAlign: 'right' }}>
+                  {fmtHours(taskTotal)} mandays, {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
                 </Typography>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-        <Button size="small" startIcon={<AddIcon />} onClick={addTask} sx={{ mb: 3 }}>Add task</Button>
+              </Box>
+            </Box>
+          ) : (
+            <Box sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ ...sheetTable, minWidth: 640 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Task</TableCell>
+                    <TableCell sx={{ width: 280 }}>Effort</TableCell>
+                    <TableCell>Note</TableCell>
+                    <TableCell padding="checkbox" />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {tasks.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell sx={{ py: 2 }}>
+                        <TextFieldOnBlur
+                          value={t.label}
+                          placeholder="What this covers"
+                          onChange={(v) => setTask(t.id, { label: v })}
+                          inputProps={{ 'aria-label': 'task' }}
+                          sx={{ width: '100%', minWidth: 160 }}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 2 }}>
+                        <EffortField
+                          manday={t.manday}
+                          rates={fin}
+                          symbol={sym}
+                          onChange={(v) => setTask(t.id, { manday: v })}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 2 }}>
+                        <TextFieldOnBlur
+                          value={t.note}
+                          placeholder="Optional"
+                          onChange={(v) => setTask(t.id, { note: v })}
+                          inputProps={{ 'aria-label': 'note' }}
+                          sx={{ width: '100%', minWidth: 140 }}
+                        />
+                      </TableCell>
+                      <TableCell padding="checkbox">
+                        <Tooltip title="Remove this task">
+                          <IconButton size="small" onClick={() => removeTask(t.id)} aria-label="remove task" sx={{ color: 'text.secondary' }}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow sx={totalRow}>
+                    <TableCell>Total</TableCell>
+                    <TableCell className="tabular" sx={cell}>
+                      {fmtHours(taskTotal)} mandays, {fmtMoney(mandayToMoney(taskTotal, fin), sym)}
+                    </TableCell>
+                    <TableCell colSpan={2} sx={{ '&&': { fontWeight: 400 }, color: 'text.secondary' }}>
+                      {stored.length
+                        ? 'The project carries the sum of these lines.'
+                        : tasks.length ? 'One line, carrying the total entered before this breakdown existed.' : 'No tasks yet.'}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </Box>
+          )}
+        </Part>
 
         {/* ---------- CAPEX ---------- */}
-        <Typography variant="h4" sx={{ mb: 0.5 }}>CAPEX — one-off investment</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-          Servers, licences, hardware — anything bought once. Charged whole in the month it is spent: no
-          depreciation is applied anywhere in this app.
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center', mb: 3 }}>
-          <MoneyField
-            label={`CAPEX (${fin.currency})`}
-            symbol={sym}
-            value={p.capex}
-            onChange={(v) => onUpdate(p.key, { capex: v })}
-            width={180}
-          />
-          <TextFieldOnBlur
-            label="What it buys"
-            placeholder="e.g. servers, licences"
-            value={p.capexNote}
-            onChange={(v) => onUpdate(p.key, { capexNote: v })}
-            sx={{ flex: '1 1 260px', minWidth: 220 }}
-          />
-          <Tooltip title={`Mandays x ${fmtMoney(fin.devDayRate, sym)} a day, from the Model tab. Edit the mandays on the Projects tab.`}>
-            <Chip
-              variant="outlined"
-              label={`Build cost ${p.buildCost == null ? '—' : fmtMoney(p.buildCost, sym)}`}
-              sx={{ cursor: 'help' }}
+        <Part
+          title="CAPEX"
+          desc="One-off investment: servers, licences, hardware. Charged in full, with no depreciation."
+        >
+          <Box sx={{
+            display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center',
+          }}
+          >
+            <MoneyField
+              label={`CAPEX (${fin.currency})`}
+              symbol={sym}
+              value={p.capex}
+              onChange={(v) => onUpdate(p.key, { capex: v })}
+              width={180}
             />
-          </Tooltip>
-        </Box>
+            <TextFieldOnBlur
+              label="What it buys"
+              placeholder="e.g. servers, licences"
+              value={p.capexNote}
+              onChange={(v) => onUpdate(p.key, { capexNote: v })}
+              sx={{ flex: '1 1 260px', minWidth: 200 }}
+            />
+            {/* Read only: it comes from the mandays above. */}
+            <Box sx={{ minWidth: 140, pl: { sm: 2 } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary' }}>Build cost</Typography>
+                <Tooltip title={`Mandays x ${fmtMoney(fin.devDayRate, sym)} a day, from the Model page. Change the effort above to change it.`}>
+                  <InfoOutlinedIcon tabIndex={0} aria-label="about build cost" sx={{ fontSize: 14, color: 'text.tertiary', cursor: 'help' }} />
+                </Tooltip>
+              </Box>
+              <Typography variant="body1" className="tabular" sx={{ fontWeight: 500, mt: 0.5, color: p.buildCost == null ? 'text.tertiary' : 'text.primary' }}>
+                {p.buildCost == null ? '—' : fmtMoney(p.buildCost, sym)}
+              </Typography>
+            </Box>
+          </Box>
+        </Part>
 
         {/* ---------- OPEX lines ---------- */}
-        <Divider sx={{ mb: 2 }} />
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 1.5 }}>
-          <Box>
-            <Typography variant="h4" sx={{ mb: 0.5 }}>OPEX — monthly running cost</Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              Cloud, subscriptions, support — anything billed every month. Each line runs between the two months
-              you set, exactly like the budget sheet, and the grid below is that spread month by month.
+        <Part
+          title="OPEX"
+          desc="Monthly running cost, such as cloud, subscriptions and support."
+          action={<Button size="small" startIcon={<AddIcon />} onClick={addLine}>Add OPEX line</Button>}
+        >
+          {opex.length === 0 ? (
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              No running cost entered. The return is measured against the investment alone.
             </Typography>
-          </Box>
-          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addLine}>
-            Add OPEX line
-          </Button>
-        </Box>
-
-        {opex.length === 0 ? (
-          <Typography variant="body2" sx={{ color: 'text.disabled', mb: 2.5 }}>
-            No operating cost entered — this project's return is measured against its investment alone.
-          </Typography>
-        ) : (
-          <Table size="small" sx={{ mb: 2.5 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell>Cost line</TableCell>
-                <TableCell align="right" sx={{ width: 160 }}>{`Per month (${fin.currency})`}</TableCell>
-                <TableCell sx={{ width: 104 }}>From</TableCell>
-                <TableCell sx={{ width: 104 }}>To</TableCell>
-                <TableCell align="right" sx={{ width: 120 }}>2026 total</TableCell>
-                <TableCell padding="checkbox" />
-              </TableRow>
-            </TableHead>
-            <TableBody>
+          ) : phone ? (
+            <Box>
               {opex.map((l) => (
-                <TableRow key={l.id} hover>
-                  <TableCell>
+                <Box key={l.id} sx={{ ...stackRow, display: 'grid', gap: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <TextFieldOnBlur
+                      label="Cost line"
                       value={l.label}
                       placeholder="e.g. cloud hosting"
                       onChange={(v) => setLine(l.id, { label: v })}
-                      sx={{ width: '100%' }}
+                      sx={{ flex: 1, minWidth: 0 }}
                     />
-                  </TableCell>
-                  <TableCell align="right">
-                    <MoneyField
-                      symbol={sym}
-                      value={l.monthly || null}
-                      onChange={(v) => setLine(l.id, { monthly: v ?? 0 })}
-                      width={140}
-                    />
-                  </TableCell>
-                  <TableCell>
+                    <IconButton onClick={() => removeLine(l.id)} aria-label="remove cost line" sx={{ color: 'text.secondary', width: 40, height: 40 }}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                  <MoneyField
+                    label="Per month"
+                    symbol={sym}
+                    value={l.monthly || null}
+                    onChange={(v) => setLine(l.id, { monthly: v ?? 0 })}
+                    width="100%"
+                  />
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <Typography variant="body2" aria-hidden sx={{ color: 'text.tertiary' }}>From</Typography>
                     <MonthSelect value={l.startMonth} label="start month" onChange={(v) => setLine(l.id, { startMonth: v })} />
-                  </TableCell>
-                  <TableCell>
+                    <Typography variant="body2" aria-hidden sx={{ color: 'text.tertiary' }}>to</Typography>
                     <MonthSelect value={l.endMonth} label="end month" onChange={(v) => setLine(l.id, { endMonth: v })} />
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
-                    {fmtMoney(lineYear(l), sym)}
-                  </TableCell>
-                  <TableCell padding="checkbox">
-                    <Tooltip title="Remove this cost line">
-                      <IconButton size="small" onClick={() => removeLine(l.id)}>
-                        <DeleteOutlineIcon sx={{ fontSize: 17 }} />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
+                  </Box>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    2026 total <Box component="span" className="tabular" sx={{ color: 'text.primary', fontWeight: 500 }}>{fmtMoney(lineYear(l), sym)}</Box>
+                  </Typography>
+                </Box>
               ))}
-            </TableBody>
-          </Table>
-        )}
+            </Box>
+          ) : (
+            <Box sx={{ overflowX: 'auto' }}>
+              <Table size="small" sx={{ ...sheetTable, minWidth: 640 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Cost line</TableCell>
+                    <TableCell align="right" sx={{ width: 164 }}>{`Per month (${fin.currency})`}</TableCell>
+                    <TableCell sx={{ width: 108 }}>From</TableCell>
+                    <TableCell sx={{ width: 108 }}>To</TableCell>
+                    <TableCell align="right" sx={{ width: 120 }}>2026 total</TableCell>
+                    <TableCell padding="checkbox" />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {opex.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell sx={{ py: 2 }}>
+                        <TextFieldOnBlur
+                          value={l.label}
+                          placeholder="e.g. cloud hosting"
+                          onChange={(v) => setLine(l.id, { label: v })}
+                          inputProps={{ 'aria-label': 'cost line' }}
+                          sx={{ width: '100%', minWidth: 160 }}
+                        />
+                      </TableCell>
+                      <TableCell align="right" sx={{ py: 2 }}>
+                        <MoneyField
+                          symbol={sym}
+                          value={l.monthly || null}
+                          onChange={(v) => setLine(l.id, { monthly: v ?? 0 })}
+                          width={144}
+                        />
+                      </TableCell>
+                      <TableCell sx={{ py: 2 }}>
+                        <MonthSelect value={l.startMonth} label="start month" onChange={(v) => setLine(l.id, { startMonth: v })} />
+                      </TableCell>
+                      <TableCell sx={{ py: 2 }}>
+                        <MonthSelect value={l.endMonth} label="end month" onChange={(v) => setLine(l.id, { endMonth: v })} />
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 500 }}>
+                        {fmtMoney(lineYear(l), sym)}
+                      </TableCell>
+                      <TableCell padding="checkbox">
+                        <Tooltip title="Remove this cost line">
+                          <IconButton size="small" onClick={() => removeLine(l.id)} aria-label="remove cost line" sx={{ color: 'text.secondary' }}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          )}
+        </Part>
 
         {/* ---------- the month grid, laid out like BG 2026 G..S ---------- */}
-        <Divider sx={{ mb: 2 }} />
-        <Typography variant="h4" sx={{ mb: 0.5 }}>Monthly cost — 2026</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-          Twelve months and an FY total, the shape of the budget sheet's own G..S columns. CAPEX sits on its own
-          one-off row and is never spread across the months.
-        </Typography>
-        {/* Thirteen numeric columns: it scrolls inside this box rather than
-            pushing the dialog — and the page — sideways. */}
-        <Box sx={{ overflowX: 'auto' }}>
-          <Table size="small" sx={{ minWidth: 900, '& th, & td': { px: 0.75, whiteSpace: 'nowrap' } }}>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ minWidth: 150, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>
-                  Cost line
-                </TableCell>
-                {MONTH_LABELS.map((m) => (
-                  <TableCell key={m} align="right" sx={{ fontSize: '0.6875rem' }}>{m}</TableCell>
+        <Part
+          title="Monthly cost 2026"
+          desc={`Twelve months and the FY total, as in the budget sheet. Amounts in ${fin.currency}.`}
+          help={(
+            <>
+              <p>The grid has the shape of the budget sheet&rsquo;s own G..S columns. CAPEX sits on its own one-off row and is never spread across the months.</p>
+              <p>The ROI uses the OPEX run-rate: every line&rsquo;s monthly amount, whatever month it starts in, because a cost that starts in October still runs every month once it has started. That is why this grid&rsquo;s total can differ from twelve times the run-rate.</p>
+            </>
+          )}
+        >
+          {/* Thirteen numeric columns: it scrolls inside this box rather than
+              pushing the dialog — and the page — sideways. */}
+          <Box sx={{ overflowX: 'auto' }}>
+            <Table size="small" sx={{ ...sheetTable, minWidth: 920, '& th, & td': { px: 2, whiteSpace: 'nowrap' } }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ ...stick, bgcolor: 'bg.subtle', zIndex: 2 }}>Cost line</TableCell>
+                  {MONTH_LABELS.map((m) => (
+                    <TableCell key={m} align="right">{m}</TableCell>
+                  ))}
+                  <TableCell align="right" sx={{ color: 'text.primary' }}>FY2026</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {opex.map((l) => (
+                  <TableRow key={l.id}>
+                    <TableCell sx={{ ...stick, overflow: 'hidden', textOverflow: 'ellipsis' }} title={l.label}>{l.label || 'Unnamed line'}</TableCell>
+                    {MONTH_LABELS.map((m, i) => (
+                      <TableCell key={m} align="right" sx={{ color: active(l, i) ? 'text.primary' : 'text.tertiary' }}>
+                        {active(l, i) ? Math.round(l.monthly).toLocaleString() : '—'}
+                      </TableCell>
+                    ))}
+                    <TableCell align="right" sx={{ fontWeight: 500 }}>
+                      {Math.round(lineYear(l)).toLocaleString()}
+                    </TableCell>
+                  </TableRow>
                 ))}
-                <TableCell align="right" sx={{ fontWeight: 700 }}>FY2026</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {opex.map((l) => (
-                <TableRow key={l.id} hover>
-                  <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
-                    <Typography variant="caption" sx={{ fontWeight: 600 }}>{l.label}</Typography>
-                  </TableCell>
-                  {MONTH_LABELS.map((m, i) => (
-                    <TableCell key={m} align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem', color: active(l, i) ? 'text.primary' : 'text.disabled' }}>
-                      {active(l, i) ? Math.round(l.monthly).toLocaleString() : '—'}
+                <TableRow sx={totalRow}>
+                  <TableCell sx={stick}>OPEX total</TableCell>
+                  {grid.map((v, i) => (
+                    <TableCell key={MONTH_LABELS[i]} align="right" sx={{ color: v > 0 ? 'text.primary' : 'text.tertiary' }}>
+                      {v > 0 ? Math.round(v).toLocaleString() : '—'}
                     </TableCell>
                   ))}
-                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.75rem' }}>
-                    {Math.round(lineYear(l)).toLocaleString()}
+                  <TableCell align="right">{Math.round(p.opexYear || 0).toLocaleString()}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell sx={stick}>CAPEX (one-off)</TableCell>
+                  <TableCell colSpan={MONTHS_IN_YEAR} sx={{ color: 'text.tertiary' }}>
+                    {p.capexNote ? `${p.capexNote}. ` : ''}Charged once, not spread, no depreciation.
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 500, color: p.capex == null ? 'text.tertiary' : 'text.primary' }}>
+                    {p.capex == null ? '—' : Math.round(p.capex).toLocaleString()}
                   </TableCell>
                 </TableRow>
-              ))}
-              <TableRow>
-                <TableCell sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider', position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
-                  OPEX total
-                </TableCell>
-                {grid.map((v, i) => (
-                  <TableCell key={MONTH_LABELS[i]} align="right" sx={{ fontWeight: 700, borderTop: 2, borderColor: 'divider', fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem' }}>
-                    {v > 0 ? Math.round(v).toLocaleString() : '—'}
-                  </TableCell>
-                ))}
-                <TableCell align="right" sx={{ fontWeight: 800, borderTop: 2, borderColor: 'divider', fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem' }}>
-                  {Math.round(p.opexYear || 0).toLocaleString()}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
-                  <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                    CAPEX (one-off)
-                  </Typography>
-                </TableCell>
-                <TableCell colSpan={MONTHS_IN_YEAR} sx={{ color: 'text.disabled' }}>
-                  <Typography variant="caption">
-                    {p.capexNote ? `${p.capexNote} — ` : ''}charged once, not spread — no depreciation
-                  </Typography>
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem' }}>
-                  {p.capex == null ? '—' : Math.round(p.capex).toLocaleString()}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
-                  <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                <TableRow>
+                  <TableCell sx={stick}>
                     Build ({p.manday > 0 ? `${fmtHours(p.manday)} mandays` : 'no effort'})
-                  </Typography>
-                </TableCell>
-                <TableCell colSpan={MONTHS_IN_YEAR} sx={{ color: 'text.disabled' }}>
-                  <Typography variant="caption">
-                    Mandays x {fmtMoney(fin.devDayRate, sym)} a day — edit the mandays on the Projects tab
-                  </Typography>
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem' }}>
-                  {p.buildCost == null ? '—' : Math.round(p.buildCost).toLocaleString()}
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell sx={{ fontWeight: 800, borderTop: 2, borderColor: 'divider', position: 'sticky', left: 0, bgcolor: 'background.paper' }}>
-                  TOTAL 2026
-                </TableCell>
-                <TableCell colSpan={MONTHS_IN_YEAR} sx={{ borderTop: 2, borderColor: 'divider' }} />
-                <TableCell align="right" sx={{ fontWeight: 800, borderTop: 2, borderColor: 'divider', fontVariantNumeric: 'tabular-nums', fontSize: '0.75rem' }}>
-                  {Math.round((p.investment ?? 0) + (p.opexYear || 0)).toLocaleString()}
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </Box>
+                  </TableCell>
+                  <TableCell colSpan={MONTHS_IN_YEAR} sx={{ color: 'text.tertiary' }}>
+                    Mandays x {fmtMoney(fin.devDayRate, sym)} a day, from the effort above.
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 500, color: p.buildCost == null ? 'text.tertiary' : 'text.primary' }}>
+                    {p.buildCost == null ? '—' : Math.round(p.buildCost).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+                <TableRow sx={totalRow}>
+                  <TableCell sx={stick}>Total 2026</TableCell>
+                  <TableCell colSpan={MONTHS_IN_YEAR} />
+                  <TableCell align="right">
+                    {Math.round((p.investment ?? 0) + (p.opexYear || 0)).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </Box>
 
-        {/* ---------- how the ROI is built ---------- */}
-        <Alert severity="info" variant="outlined" sx={{ mt: 2.5 }} icon={false}>
-          <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
-            <strong>How this project's return is built.</strong>{' '}
-            {p.investment == null ? (
-              <>No mandays and no CAPEX, so the cost is unknown — not zero — and there is no return to state.
-                Enter either one and every figure above fills in.</>
-            ) : p.monthlyBenefit == null ? (
-              <>Saving hours are still TBC, so there is no benefit to set against the{' '}
-                {fmtMoney(p.investment, sym)} invested. The cost is real and is reported on the Summary sheet,
-                but it cannot produce a return until the hours are quantified.</>
-            ) : (
-              <>
-                Investment {fmtMoney(p.investment, sym)} = build {fmtMoney(p.buildCost ?? 0, sym)} + CAPEX{' '}
-                {fmtMoney(p.capex ?? 0, sym)}. Benefit {fmtMoney(p.monthlyBenefit, sym)}/month − OPEX{' '}
-                {fmtMoney(p.opexRunRate, sym)}/month = <strong>{fmtMoney(p.netMonthly, sym)} net a month</strong>.
-                Over {horizon} months that is {fmtMoney(p.netHorizonBenefit, sym)}, less the investment ={' '}
-                <strong>{fmtMoney(p.netBenefit, sym)}</strong> net, a return of <strong>{fmtRoi(p.roi)}</strong>{' '}
-                against a gate of {fmtRoi(fin.roiGate)}
-                {p.paybackMonths == null
-                  ? ', and it never pays back.'
-                  : `, paying back in ${fmtMonths(p.paybackMonths)}.`}
-              </>
-            )}
-          </Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
-            The ROI uses the OPEX run-rate — every line's monthly amount, whatever months it starts and ends in —
-            because a cost that starts in October still runs every month once it has started. The grid above is the
-            2026 budget view, which is why its total can differ from twelve times the run-rate.
-          </Typography>
-        </Alert>
+          {/* ---------- how the ROI is built ---------- */}
+          <Box sx={{ ...callout, mt: 4 }}>
+            <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>How this project&rsquo;s return is built</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '80ch' }}>
+              {p.investment == null ? (
+                <>No mandays and no CAPEX, so the cost is unknown, not zero, and there is no return to state.
+                  Enter either one and every figure above fills in.</>
+              ) : p.monthlyBenefit == null ? (
+                <>Saving hours are still TBC, so there is no benefit to set against the{' '}
+                  {fmtMoney(p.investment, sym)} invested. The cost is real and is reported on the Summary sheet,
+                  but it cannot produce a return until the hours are quantified.</>
+              ) : (
+                <>
+                  Investment {fmtMoney(p.investment, sym)} is build {fmtMoney(p.buildCost ?? 0, sym)} plus CAPEX{' '}
+                  {fmtMoney(p.capex ?? 0, sym)}. Benefit {fmtMoney(p.monthlyBenefit, sym)} a month less OPEX{' '}
+                  {fmtMoney(p.opexRunRate, sym)} a month leaves <strong>{fmtMoney(p.netMonthly, sym)} net a month</strong>.
+                  Over {horizon} months that is {fmtMoney(p.netHorizonBenefit, sym)}; less the investment it is{' '}
+                  <strong>{fmtMoney(p.netBenefit, sym)}</strong> net, a return of <strong>{fmtRoi(p.roi)}</strong>{' '}
+                  against a gate of {fmtRoi(fin.roiGate)}
+                  {p.paybackMonths == null
+                    ? ', and it never pays back.'
+                    : `, paying back in ${fmtMonths(p.paybackMonths)}.`}
+                </>
+              )}
+            </Typography>
+          </Box>
+        </Part>
+
         {/* ---------- who is credited, and for what ---------- */}
         <TeamRoles p={p} people={plan.people} onUpdate={onUpdate} />
 
@@ -790,37 +910,33 @@ export default function ProjectCostDialog({ project, plan, onUpdate, onClose }) 
         <FinishDate p={p} onUpdate={onUpdate} />
 
         {/* ---------- comments ---------- */}
-        <Divider sx={{ my: 3 }} />
-        <Typography variant="h4" sx={{ mb: 0.5 }}>Notes and links</Typography>
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-          Anything worth recording about this project — a decision, a caveat, a link to the spec or the
-          ticket. Pasted addresses become clickable once saved.
-        </Typography>
-        <TextField
-          fullWidth
-          multiline
-          minRows={3}
-          size="small"
-          placeholder="Type a note, or paste a link…"
-          defaultValue={p.comment || ''}
-          onBlur={(e) => {
-            const v = e.target.value
-            if (v !== (p.comment || '')) onUpdate(p.key, { comment: v })
-          }}
-        />
-        {p.comment ? (
-          <Box sx={{ mt: 1.5, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}>
-              As it reads
-            </Typography>
-            <LinkedText text={p.comment} />
-          </Box>
-        ) : null}
-
+        <Part title="Notes and links" desc="A decision, a caveat, a link to the spec. Pasted addresses become links once saved.">
+          <TextField
+            fullWidth
+            multiline
+            minRows={3}
+            size="small"
+            placeholder="Type a note, or paste a link…"
+            defaultValue={p.comment || ''}
+            inputProps={{ 'aria-label': 'notes and links' }}
+            onBlur={(e) => {
+              const v = e.target.value
+              if (v !== (p.comment || '')) onUpdate(p.key, { comment: v })
+            }}
+          />
+          {p.comment ? (
+            <Box sx={{ ...callout, mt: 3 }}>
+              <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', mb: 1 }}>
+                As it reads
+              </Typography>
+              <LinkedText text={p.comment} />
+            </Box>
+          ) : null}
+        </Part>
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose}>Close</Button>
+        <Button variant="outlined" onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
   )

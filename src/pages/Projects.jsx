@@ -1,16 +1,15 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
-import { Pill, statusTone } from '../components/Brand.jsx'
+import { statusTone } from '../components/Brand.jsx'
 import { projectOnHold } from '../lib/hold.js'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
-  TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
-  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
-  Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery,
+  TextField, Select, MenuItem, InputAdornment, InputBase, Checkbox, Button, Tooltip,
+  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, Link, Popover,
+  ListItemIcon, ListItemText, Divider, Dialog, DialogTitle, DialogContent, DialogActions, useMediaQuery,
 } from '@mui/material'
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import FilterListIcon from '@mui/icons-material/FilterList'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ProjectDetailDialog from '../components/ProjectDetailDialog.jsx'
 import * as api from '../lib/api.js'
@@ -26,17 +25,16 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
 import WidthWideOutlinedIcon from '@mui/icons-material/WidthWideOutlined'
 import WidthNormalOutlinedIcon from '@mui/icons-material/WidthNormalOutlined'
-import SaveIcon from '@mui/icons-material/Save'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import SearchIcon from '@mui/icons-material/Search'
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
-import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, STATUS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLongOutlined'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import CloseIcon from '@mui/icons-material/Close'
+import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
+import { OBJECTIVES, OBJ_BY_ID, COMMIT_LEVELS, CHART, OUT_OF_PLAN } from '../lib/palette.js'
 import {
   fmtHours, fmtPct, fmtMoney, fmtMoneyShort, fmtRoi, fmtMonths, fmtMonthsShort, gateAsPaybackMonths, workingDaysBetween,
   normalizeSoftBenefits, softBenefitsText, impliedObjectives,
@@ -45,29 +43,67 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
 import ImportDialog from '../components/ImportDialog.jsx'
-import Loading from '../components/Loading.jsx'
+import {
+  PageHeader, StatusPill, EmptyState, SectionSkeleton, Toolbar,
+} from '../components/ui.jsx'
+import { Spinner } from '../components/Loading.jsx'
 import { exportFiltered, readProjectsFile, planImport } from '../lib/projectIO.js'
 import { useTheme, alpha } from '@mui/material/styles'
 
-const COMMIT_COLOR = {
-  commit: STATUS.good,
-  stretch: '#2a78d6',
-  watch: STATUS.warning,
-  // Deferred — a distinct hue from commit/stretch/watch so the dot reads at a
-  // glance, though the label beside it always carries the meaning too.
-  nextyear: '#7c5cd6',
-  excluded: '#898781',
+const PHONE = '@media (max-width:599.95px)'
+
+/*
+ * Commit levels as a small dot in the status tones, the word always beside it.
+ * Deferred and excluded are both "not this year": a filled grey dot and an
+ * empty one, so they still read apart.
+ */
+const COMMIT_DOT = {
+  commit: 'success', stretch: 'info', watch: 'warning', nextyear: 'neutral', excluded: 'hollow',
 }
 
+/** Jira's own words in sentence case: "In Progress" reads "In progress"; "UAT" stays "UAT". */
+const sentence = (s) => String(s || '').split(' ')
+  .map((w, i) => (i > 0 && /^[A-Z][a-z]+$/.test(w) ? w.toLowerCase() : w))
+  .join(' ')
+
+/**
+ * AN EDITABLE CELL THAT READS AS TEXT. At rest it is the value and nothing
+ * else; hovering its row draws a quiet box round every cell that can change,
+ * and focus turns the box into the input, edged in the primary colour.
+ */
+const cellBox = (t) => ({
+  fontSize: '0.8125rem',
+  lineHeight: '18px',
+  color: t.palette.text.primary,
+  borderRadius: '6px',
+  border: '1px solid transparent',
+  backgroundColor: 'transparent',
+  transition: 'border-color 120ms, box-shadow 120ms, background-color 120ms',
+  '& .MuiInputBase-input': { padding: '5px 7px', height: 18 },
+  '& .MuiInputBase-input::placeholder': { color: t.palette.text.tertiary, opacity: 1 },
+  'tr:hover &, &:hover': { borderColor: t.palette.border.strong },
+  '&.Mui-focused': {
+    borderColor: t.palette.primary.main,
+    boxShadow: `0 0 0 1px ${t.palette.primary.main}`,
+    backgroundColor: t.palette.bg.surface,
+  },
+  // A select at rest: its value, and a caret in the tertiary colour.
+  '& .MuiSelect-select': {
+    padding: '5px 24px 5px 7px', minHeight: 0, height: 18, display: 'flex', alignItems: 'center',
+  },
+  '& .MuiSelect-icon': { right: 2, fontSize: 18, color: t.palette.text.tertiary },
+})
+
 /** Free-text cell that only commits on blur. */
-function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false }) {
+function TextCell({
+  value, onChange, placeholder, width, bold, autoFocus = false, label,
+}) {
   const [draft, setDraft] = useState(value ?? '')
   const [focused, setFocused] = useState(false)
   if (!focused && draft !== (value ?? '')) setDraft(value ?? '')
   return (
-    <TextField
+    <InputBase
       size="small"
-      variant="standard"
       fullWidth={!width}
       value={draft}
       placeholder={placeholder}
@@ -80,11 +116,88 @@ function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false
         if (next !== (value ?? null)) onChange(next)
       }}
       onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
-      inputProps={{ style: { fontSize: '0.8125rem', fontWeight: bold ? 500 : 400 } }}
-      sx={{ width }}
+      inputProps={{ 'aria-label': label, style: { fontWeight: bold ? 500 : 400 } }}
+      sx={[cellBox, { width }]}
     />
   )
 }
+
+/** Number cell that only commits on blur, so typing never fights React state. */
+function NumCell({
+  value, onChange, placeholder = '—', width = 76, estimated, label,
+}) {
+  const [draft, setDraft] = useState(value == null ? '' : String(value))
+  const [focused, setFocused] = useState(false)
+  if (!focused && draft !== (value == null ? '' : String(value))) {
+    setDraft(value == null ? '' : String(value))
+  }
+  return (
+    <InputBase
+      size="small"
+      value={focused ? draft : (value == null ? '' : Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 }))}
+      placeholder={placeholder}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        setFocused(false)
+        const t = draft.trim()
+        if (t === '') { if (value != null) onChange(null); return }
+        const n = Number(t.replace(/,/g, ''))
+        if (Number.isFinite(n) && n >= 0) { if (n !== value) onChange(n) }
+        else setDraft(value == null ? '' : String(value))
+      }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
+      inputProps={{
+        'aria-label': label,
+        inputMode: 'decimal',
+        style: {
+          textAlign: 'right',
+          fontVariantNumeric: 'tabular-nums',
+          fontStyle: estimated && value != null ? 'italic' : 'normal',
+        },
+      }}
+      sx={[cellBox, { width }]}
+    />
+  )
+}
+
+/** A select inside a table cell: plain text at rest, like the inputs. */
+function CellSelect({
+  value, onChange, renderValue, children, width, displayEmpty, label, sx,
+}) {
+  return (
+    <Select
+      size="small"
+      value={value}
+      onChange={onChange}
+      renderValue={renderValue}
+      displayEmpty={displayEmpty}
+      input={<InputBase />}
+      inputProps={{ 'aria-label': label }}
+      MenuProps={{ slotProps: { paper: { sx: { maxHeight: 420 } } } }}
+      sx={[cellBox, { width, maxWidth: width }, ...(Array.isArray(sx) ? sx : [sx])]}
+    >
+      {children}
+    </Select>
+  )
+}
+
+/** A 6px mark, for a colour that carries a meaning the word beside it repeats. */
+const Dot = ({ color, hollow = false }) => (
+  <Box
+    component="span"
+    aria-hidden
+    sx={{
+      width: 6,
+      height: 6,
+      borderRadius: '50%',
+      flexShrink: 0,
+      bgcolor: hollow ? 'transparent' : color,
+      border: hollow ? '1px solid' : 0,
+      borderColor: 'text.tertiary',
+    }}
+  />
+)
 
 /**
  * ONE BLOCK OF THE PAGE, where the layout puts it. In Edit layout it carries a
@@ -102,33 +215,41 @@ function LayoutBlock({
         order,
         minWidth: 0,
         ...(editing && {
-          outline: '1px dashed', outlineColor: 'divider', outlineOffset: 6, borderRadius: 2,
+          outline: '1px dashed', outlineColor: 'border.strong', outlineOffset: 6, borderRadius: '8px',
         }),
       }}
     >
       {editing && (
         <Box sx={{
-          display: 'flex', alignItems: 'center', gap: 0.5, mb: hidden ? 0 : 1, opacity: hidden ? 0.55 : 1,
+          display: 'flex', alignItems: 'center', gap: 2, mb: hidden ? 0 : 2, minHeight: 28,
         }}
         >
-          <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary' }}>
-            {label}{hidden ? ' · hidden' : ''}
+          <Typography variant="subtitle2" component="div" sx={{ color: hidden ? 'text.tertiary' : 'text.secondary' }}>
+            {label}
           </Typography>
+          {hidden && <StatusPill tone="neutral">Hidden</StatusPill>}
           <Box sx={{ flex: 1 }} />
-          <Tooltip title="Move up"><span><IconButton size="small" disabled={first} onClick={() => onMove(-1)} aria-label={`move ${label} up`}><ArrowUpwardIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
-          <Tooltip title="Move down"><span><IconButton size="small" disabled={last} onClick={() => onMove(1)} aria-label={`move ${label} down`}><ArrowDownwardIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
-          {!locked && (
-            <Tooltip title={hidden ? 'Show' : 'Hide'}>
-              <IconButton size="small" onClick={onToggle} aria-label={`${hidden ? 'show' : 'hide'} ${label}`} data-toggle-block={id}>
-                {hidden ? <VisibilityOffOutlinedIcon sx={{ fontSize: 16 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 16 }} />}
-              </IconButton>
-            </Tooltip>
-          )}
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            <Tooltip title="Move up"><span><IconButton size="small" disabled={first} onClick={() => onMove(-1)} aria-label={`move ${label} up`} sx={tool}><ArrowUpwardIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+            <Tooltip title="Move down"><span><IconButton size="small" disabled={last} onClick={() => onMove(1)} aria-label={`move ${label} down`} sx={tool}><ArrowDownwardIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+            {!locked && (
+              <Tooltip title={hidden ? 'Show' : 'Hide'}>
+                <IconButton size="small" onClick={onToggle} aria-label={`${hidden ? 'show' : 'hide'} ${label}`} data-toggle-block={id} sx={tool}>
+                  {hidden ? <VisibilityOffOutlinedIcon sx={{ fontSize: 16 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 16 }} />}
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
         </Box>
       )}
       {!hidden && children}
     </Box>
   )
+}
+
+/* The 28px icon button of the layout controls. */
+const tool = {
+  width: 28, height: 28, color: 'text.secondary', '&:hover': { color: 'text.primary' },
 }
 
 /**
@@ -139,73 +260,143 @@ function NameCell({ p, onOpen, onRename }) {
   const [editing, setEditing] = useState(false)
   if (editing) {
     return (
-      <Box sx={{ flex: 1, minWidth: 0 }} onBlur={() => setEditing(false)} data-name-editing>
-        <TextCell value={p.summary} placeholder="Project name" onChange={onRename} bold autoFocus />
+      <Box sx={{ minWidth: 0 }} onBlur={() => setEditing(false)} data-name-editing>
+        <TextCell value={p.summary} placeholder="Project name" onChange={onRename} bold autoFocus label="project name" />
       </Box>
     )
   }
   return (
-    <>
-      <Link
-        component="button"
-        type="button"
-        onClick={() => onOpen(p.key)}
-        data-open-project={p.key}
-        underline="hover"
-        title={`Open ${p.jiraKey || p.key}: owner, dates, weekly check-ins`}
-        sx={{
-          flex: 1, minWidth: 0, textAlign: 'left', fontSize: '0.8125rem', fontWeight: 600, color: 'text.primary',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', py: 0.5,
-        }}
-      >
-        {p.summary || 'Untitled'}
-      </Link>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+      <Tooltip title={p.summary || 'Untitled'} enterDelay={700} placement="top-start">
+        <Link
+          component="button"
+          type="button"
+          onClick={() => onOpen(p.key)}
+          data-open-project={p.key}
+          underline="hover"
+          sx={{
+            minWidth: 0,
+            textAlign: 'left',
+            fontSize: '0.8125rem',
+            lineHeight: '18px',
+            fontWeight: 500,
+            color: 'text.primary',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            py: 0.25,
+          }}
+        >
+          {p.summary || 'Untitled'}
+        </Link>
+      </Tooltip>
       <Tooltip title="Rename">
-        <IconButton size="small" onClick={() => setEditing(true)} aria-label={`rename ${p.summary}`} data-rename-project={p.key} sx={{ flexShrink: 0, color: 'text.disabled', p: 0.4 }}>
+        <IconButton
+          size="small"
+          className="row-tool"
+          onClick={() => setEditing(true)}
+          aria-label={`rename ${p.summary}`}
+          data-rename-project={p.key}
+          sx={{
+            flexShrink: 0, width: 24, height: 24, color: 'text.tertiary', '&:hover': { color: 'text.primary' },
+          }}
+        >
           <EditOutlinedIcon sx={{ fontSize: 14 }} />
         </IconButton>
       </Tooltip>
+    </Box>
+  )
+}
+
+/**
+ * The line under a project's name: its team, sub team and programme, written
+ * out in full and never clipped mid-word inside a box. A click opens the three
+ * as labelled fields; closing the popover saves whatever changed.
+ */
+function MetaCell({ p, onUpdate }) {
+  const [at, setAt] = useState(null)
+  const [draft, setDraft] = useState({})
+  const parts = [p.team, p.subTeam, p.program].filter(Boolean)
+  const text = parts.join(', ')
+  const open = (e) => {
+    setDraft({ team: p.team || '', subTeam: p.subTeam || '', program: p.program || '' })
+    setAt(e.currentTarget)
+  }
+  const close = () => {
+    setAt(null)
+    const patch = {}
+    for (const k of ['team', 'subTeam', 'program']) {
+      const v = (draft[k] || '').trim() || null
+      if (v !== (p[k] ?? null)) patch[k] = v
+    }
+    if (Object.keys(patch).length) onUpdate(patch)
+  }
+  const field = (k, label) => (
+    <TextField
+      size="small"
+      label={label}
+      value={draft[k] ?? ''}
+      onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))}
+      onKeyDown={(e) => { if (e.key === 'Enter') close() }}
+      fullWidth
+    />
+  )
+  return (
+    <>
+      <Tooltip title={text} enterDelay={600} placement="bottom-start" disableHoverListener={!text}>
+        <Box
+          component="button"
+          type="button"
+          onClick={open}
+          aria-label={`team and programme of ${p.summary || p.key}`}
+          sx={{
+            all: 'unset',
+            boxSizing: 'border-box',
+            display: 'block',
+            maxWidth: '100%',
+            mt: 0.25,
+            px: 1,
+            mx: -1,
+            borderRadius: '4px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            cursor: 'pointer',
+            fontSize: '0.75rem',
+            lineHeight: '18px',
+            color: text ? 'text.secondary' : 'text.tertiary',
+            transition: 'background-color 120ms, color 120ms',
+            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
+            '&:focus-visible': { outline: 2, outlineStyle: 'solid', outlineColor: 'primary.main', outlineOffset: 0 },
+          }}
+        >
+          {text || 'Add team'}
+        </Box>
+      </Tooltip>
+      <Popover
+        open={!!at}
+        anchorEl={at}
+        onClose={close}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { mt: 1 } } }}
+      >
+        <Box sx={{
+          p: 4, width: 300, display: 'grid', gap: 3,
+        }}
+        >
+          <Typography variant="h3">Team and programme</Typography>
+          {field('team', 'Team')}
+          {field('subTeam', 'Sub team')}
+          {field('program', 'Programme')}
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button variant="contained" onClick={close}>Done</Button>
+          </Box>
+        </Box>
+      </Popover>
     </>
   )
 }
-
-/** Number cell that only commits on blur, so typing never fights React state. */
-function NumCell({ value, onChange, placeholder = '—', width = 76, estimated }) {
-  const [draft, setDraft] = useState(value == null ? '' : String(value))
-  const [focused, setFocused] = useState(false)
-  if (!focused && draft !== (value == null ? '' : String(value))) {
-    setDraft(value == null ? '' : String(value))
-  }
-  return (
-    <TextField
-      size="small"
-      variant="standard"
-      value={draft}
-      placeholder={placeholder}
-      onFocus={() => setFocused(true)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        setFocused(false)
-        const t = draft.trim()
-        if (t === '') { if (value != null) onChange(null); return }
-        const n = Number(t.replace(/,/g, ''))
-        if (Number.isFinite(n) && n >= 0) { if (n !== value) onChange(n) }
-        else setDraft(value == null ? '' : String(value))
-      }}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
-      inputProps={{
-        style: {
-          textAlign: 'right',
-          fontVariantNumeric: 'tabular-nums',
-          fontSize: '0.8125rem',
-          fontStyle: estimated && value != null ? 'italic' : 'normal',
-        },
-      }}
-      sx={{ width }}
-    />
-  )
-}
-
 
 /**
  * The soft benefits on a project: a short list, edited as one bullet a line.
@@ -234,26 +425,31 @@ function SoftBenefitCell({ value, onChange }) {
         tabIndex={0}
         onClick={open}
         onKeyDown={(e) => { if (e.key === 'Enter') open(e) }}
-        sx={{
-          cursor: 'pointer', minHeight: 28, borderRadius: 1, px: 0.75, py: 0.25,
-          '&:hover': { bgcolor: 'action.hover' },
-        }}
+        sx={(t) => ({
+          ...cellBox(t),
+          cursor: 'pointer',
+          minHeight: 30,
+          px: '7px',
+          py: '5px',
+          maxWidth: 200,
+          '&:focus-visible': { outline: 'none', borderColor: t.palette.primary.main, boxShadow: `0 0 0 1px ${t.palette.primary.main}` },
+        })}
       >
         {list.length ? (
           <>
             {list.slice(0, 2).map((b, i) => (
-              <Typography key={i} variant="caption" sx={{ display: 'block', lineHeight: 1.35 }}>
-                &bull; {b.length > 34 ? `${b.slice(0, 34)}…` : b}
+              <Typography key={i} variant="caption" component="div" noWrap sx={{ lineHeight: '18px', color: 'text.primary' }}>
+                {b}
               </Typography>
             ))}
             {list.length > 2 && (
-              <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600 }}>
-                +{list.length - 2} more
+              <Typography variant="caption" component="div" sx={{ color: 'text.secondary', lineHeight: '18px' }}>
+                {list.length - 2} more
               </Typography>
             )}
           </>
         ) : (
-          <Typography variant="caption" sx={{ color: 'text.disabled' }}>add…</Typography>
+          <Typography variant="caption" component="div" sx={{ color: 'text.tertiary', lineHeight: '18px' }}>—</Typography>
         )}
       </Box>
       <Popover
@@ -261,12 +457,13 @@ function SoftBenefitCell({ value, onChange }) {
         anchorEl={anchor}
         onClose={close}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { mt: 1 } } }}
       >
-        <Box sx={{ p: 2, width: 380 }}>
-          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Soft benefits</Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
-            What this delivers that the saving hours do not capture — control, an audit trail, risk removed.
-            One per line; they show on the scorecard of everyone credited on it, and in the export.
+        <Box sx={{ p: 4, width: 380, maxWidth: 'calc(100vw - 32px)' }}>
+          <Typography variant="h3">Soft benefits</Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5, mb: 3 }}>
+            What this delivers that the saving hours do not capture: control, an audit trail, a risk removed.
+            One per line. They show on the scorecard of everyone credited on it, and in the export.
           </Typography>
           <TextField
             autoFocus
@@ -277,9 +474,10 @@ function SoftBenefitCell({ value, onChange }) {
             value={draft}
             placeholder={'Removes a manual reconciliation at month end\nFull audit trail on every posting'}
             onChange={(e) => setDraft(e.target.value)}
+            inputProps={{ 'aria-label': 'soft benefits, one per line' }}
           />
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
-            <Button size="small" onClick={close}>Done</Button>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
+            <Button variant="contained" onClick={close}>Done</Button>
           </Box>
         </Box>
       </Popover>
@@ -296,10 +494,11 @@ function SoftBenefitCell({ value, onChange }) {
  * project to more of them adds what it delivers without adding its saving
  * hours a second time.
  *
- * The primary tag above stays what the register reports in one column; these
- * are the rest.
+ * The primary tag in the select stays what the register reports in one
+ * column; these are the rest, as one quiet count beside it ("+2"). A click
+ * lists them all: the ones every project serves (fixed), the ones added here
+ * (a tick to take off), and the rest (a tick to add).
  */
-
 function AlsoServes({ project, onChange }) {
   const [anchor, setAnchor] = useState(null)
   const extra = (Array.isArray(project.objectives) ? project.objectives : [])
@@ -310,58 +509,78 @@ function AlsoServes({ project, onChange }) {
   const implied = impliedObjectives().filter((id) => id !== project.objective && !extra.includes(id))
   const spare = OBJECTIVES.filter((o) => o.id !== project.objective
     && !extra.includes(o.id) && !implied.includes(o.id))
+  const n = implied.length + extra.length
+  const names = [...implied, ...extra].map((id) => `${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].short}`).join(', ')
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexWrap: 'wrap', mt: 0.25 }}>
-      {implied.map((id) => (
-        <Chip
-          key={id}
-          size="small"
-          variant="outlined"
-          label={`+${OBJ_BY_ID[id].no}`}
-          title={`Every project serves ${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].name} — ${
-            OBJ_BY_ID[id].measure === 'ratio'
-              ? 'its return is worked out over the whole register'
-              : 'its saving hours all count here'}. It cannot be removed.`}
-          sx={{ height: 17, fontSize: '0.625rem', fontWeight: 700, opacity: 0.62 }}
-        />
-      ))}
-      {extra.map((id) => (
-        <Chip
-          key={id}
-          size="small"
-          label={`+${OBJ_BY_ID[id].no}`}
-          title={`Also serves ${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].name}`}
-          onDelete={() => onChange(extra.filter((x) => x !== id))}
-          sx={{ height: 17, fontSize: '0.625rem', fontWeight: 700, '& .MuiChip-deleteIcon': { fontSize: 12 } }}
-        />
-      ))}
-      {spare.length > 0 && (
-        <Tooltip title="Also counts toward another objective">
-          <IconButton
-            size="small"
-            aria-label="add objective tag"
-            sx={{ p: 0.1 }}
-            onClick={(e) => setAnchor(e.currentTarget)}
-          >
-            <AddIcon sx={{ fontSize: 13 }} />
-          </IconButton>
-        </Tooltip>
-      )}
-      <Menu open={!!anchor} anchorEl={anchor} onClose={() => setAnchor(null)}>
+    <>
+      <Tooltip title={n ? `Also counts toward ${names}` : 'Count it toward another objective'}>
+        <Box
+          component="button"
+          type="button"
+          aria-label={n ? `also counts toward ${n} more objectives` : 'add objective tag'}
+          aria-haspopup="menu"
+          onClick={(e) => setAnchor(e.currentTarget)}
+          sx={{
+            all: 'unset',
+            boxSizing: 'border-box',
+            flexShrink: 0,
+            cursor: 'pointer',
+            px: 1,
+            height: 24,
+            display: 'inline-flex',
+            alignItems: 'center',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            color: 'text.secondary',
+            fontVariantNumeric: 'tabular-nums',
+            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
+            '&:focus-visible': { outline: 2, outlineStyle: 'solid', outlineColor: 'primary.main' },
+          }}
+        >
+          {n ? `+${n}` : <AddIcon sx={{ fontSize: 14 }} />}
+        </Box>
+      </Tooltip>
+      <Menu
+        open={!!anchor}
+        anchorEl={anchor}
+        onClose={() => setAnchor(null)}
+        MenuListProps={{ dense: true, 'aria-label': 'other objectives' }}
+      >
+        <Box sx={{ px: 3, pt: 1, pb: 2, maxWidth: 300 }}>
+          <Typography variant="h3">Also counts toward</Typography>
+          <Typography variant="caption" component="div" sx={{ color: 'text.secondary', mt: 0.5 }}>
+            Only the hours objective counts hours, so a tag adds what it delivers, never its hours twice.
+          </Typography>
+        </Box>
+        <Divider />
+        {implied.map((id) => (
+          <MenuItem key={id} disabled sx={{ '&.Mui-disabled': { opacity: 1 } }}>
+            <ListItemIcon><Checkbox size="small" edge="start" checked disabled tabIndex={-1} disableRipple sx={{ p: 0.5 }} /></ListItemIcon>
+            <ListItemText
+              primary={`${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].short}`}
+              secondary={OBJ_BY_ID[id].measure === 'ratio' ? 'Every project: its return is worked out over all of them' : 'Every project: its hours all count here'}
+            />
+          </MenuItem>
+        ))}
+        {extra.map((id) => (
+          <MenuItem key={id} onClick={() => onChange(extra.filter((x) => x !== id))}>
+            <ListItemIcon><Checkbox size="small" edge="start" checked tabIndex={-1} disableRipple sx={{ p: 0.5 }} /></ListItemIcon>
+            <ListItemText primary={`${OBJ_BY_ID[id].no}. ${OBJ_BY_ID[id].short}`} secondary="Added here" />
+          </MenuItem>
+        ))}
         {spare.map((o) => (
-          <MenuItem
-            key={o.id}
-            onClick={() => { onChange([...extra, o.id]); setAnchor(null) }}
-          >
-            {o.no}. {o.name}
-            <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-              {o.measure === 'count' ? `counts ${o.countUnit}` : o.measure === 'hours' ? 'counts the hours' : o.measure}
-            </Typography>
+          <MenuItem key={o.id} onClick={() => onChange([...extra, o.id])}>
+            <ListItemIcon><Checkbox size="small" edge="start" checked={false} tabIndex={-1} disableRipple sx={{ p: 0.5 }} /></ListItemIcon>
+            <ListItemText
+              primary={`${o.no}. ${o.short}`}
+              secondary={o.measure === 'count' ? `Counts ${o.countUnit}` : o.measure === 'hours' ? 'Counts the hours' : `Counts by ${o.measure}`}
+            />
           </MenuItem>
         ))}
       </Menu>
-    </Box>
+    </>
   )
 }
 
@@ -381,26 +600,60 @@ const SESSION_START = Date.now()
  */
 const OWN_CLICK = 'input, textarea, button, a, label, [role="button"], [role="combobox"], [role="option"], .MuiInputBase-root, .MuiSelect-select, .MuiChip-root, .MuiCheckbox-root'
 
+/** A project's state as pills: on hold or where the work is, and past due beside it. */
+function StatePills({ p, column = false }) {
+  const status = projectOnHold(p)
+    ? <StatusPill tone="warning">On hold</StatusPill>
+    : (p.srcStatus || p.status)
+      ? <StatusPill tone={statusTone(p.status || p.srcStatus)}>{sentence(p.srcStatus || p.status)}</StatusPill>
+      : null
+  return (
+    <Box sx={{
+      display: 'flex', flexDirection: column ? 'column' : 'row', alignItems: column ? 'flex-start' : 'center', gap: 1, flexWrap: 'wrap',
+    }}
+    >
+      {status || <Typography variant="body2" component="span" sx={{ color: 'text.tertiary' }}>—</Typography>}
+      {p.pastDue && (
+        // The date lives in the tooltip: spelled out here it was the widest
+        // thing in the column and pushed ROI off-screen.
+        <Tooltip title={`Due ${p.due} and not done`}>
+          <span><StatusPill tone="danger">Past due</StatusPill></span>
+        </Tooltip>
+      )}
+    </Box>
+  )
+}
+
 /**
- * THE REGISTER ON A PHONE: one card a project, the few facts that tell them
+ * THE REGISTER ON A PHONE: one row a project, the few facts that tell them
  * apart, and a tap opens the project. Editing is for a wider screen; on a
  * phone this is for looking something up.
  */
-function PhoneList({ rows, assignees, onOpen }) {
+function PhoneList({ rows, assignees, onOpen, onClear, filtered }) {
   if (!rows.length) {
     return (
-      <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', color: 'text.secondary' }}>
-        No projects match these filters.
+      <Paper variant="outlined">
+        <EmptyState
+          icon={FolderOpenOutlinedIcon}
+          title="No projects match these filters"
+          body="Clear a filter or search for something else."
+          action={filtered ? <Button variant="outlined" onClick={onClear}>Clear filters</Button> : null}
+        />
       </Paper>
     )
   }
   return (
-    <Paper variant="outlined" component="ul" aria-label="projects" sx={{ listStyle: 'none', m: 0, p: 0, overflow: 'hidden' }}>
+    <Paper variant="outlined" component="ul" aria-label="projects" sx={{ listStyle: 'none', m: 0, p: 0 }}>
       {rows.map((p, i) => {
         const owner = assignees.find((x) => x.id === p.pic)
         const muted = OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam
+        const meta = [
+          p.jiraKey || 'No Jira key',
+          owner?.nick || 'No PIC',
+          p.savingHours == null ? 'hours TBC' : `${fmtHours(p.savingHours)} hrs/mth`,
+        ].join(', ')
         return (
-          <Box component="li" key={p.key} sx={{ borderTop: i === 0 ? 0 : 1, borderColor: 'divider' }}>
+          <Box component="li" key={p.key} sx={{ borderTop: i === 0 ? 0 : 1, borderColor: 'border.subtle' }}>
             <Box
               component="button"
               type="button"
@@ -412,23 +665,23 @@ function PhoneList({ rows, assignees, onOpen }) {
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 1,
-                px: 1.75,
-                py: 1.25,
-                minHeight: 56,
+                gap: 2,
+                px: 3,
+                py: 3,
+                minHeight: 64,
                 cursor: 'pointer',
                 color: 'text.primary',
-                opacity: muted ? 0.6 : 1,
-                '&:hover, &:focus-visible': { bgcolor: 'action.hover' },
-                '&:focus-visible': { outline: 2, outlineColor: 'primary.main', outlineOffset: -2 },
+                '&:hover, &:active': { bgcolor: 'bg.subtle' },
+                '&:focus-visible': {
+                  outline: 2, outlineStyle: 'solid', outlineColor: 'primary.main', outlineOffset: -2,
+                },
               }}
             >
-              <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Box sx={{ flex: 1, minWidth: 0, opacity: muted ? 0.6 : 1 }}>
                 <Typography
-                  variant="body2"
+                  variant="body1"
                   sx={{
-                    fontWeight: 600,
-                    lineHeight: 1.35,
+                    fontWeight: 500,
                     display: '-webkit-box',
                     WebkitLineClamp: 2,
                     WebkitBoxOrient: 'vertical',
@@ -437,22 +690,14 @@ function PhoneList({ rows, assignees, onOpen }) {
                 >
                   {p.summary || p.key}
                 </Typography>
-                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }} noWrap>
-                  {p.jiraKey || 'no key'} · {owner?.nick || <Box component="span" sx={{ color: STATUS.critical }}>no PIC</Box>}
-                  {' · '}
-                  <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums', color: 'text.primary' }}>
-                    {p.savingHours == null ? 'TBC' : fmtHours(p.savingHours)}
-                  </Box>
-                  {' hrs/mth'}
+                <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }} noWrap>
+                  {meta}
                 </Typography>
               </Box>
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.25, flexShrink: 0 }}>
-                {projectOnHold(p)
-                  ? <Pill label="On Hold" tone="warn" />
-                  : (p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
-                {p.pastDue && <Typography variant="caption" sx={{ color: STATUS.critical, fontWeight: 600 }}>past due</Typography>}
+              <Box sx={{ flexShrink: 0, maxWidth: 118 }}>
+                <StatePills p={p} column />
               </Box>
-              <ChevronRightIcon sx={{ color: 'text.disabled', flexShrink: 0 }} />
+              <ChevronRightIcon sx={{ color: 'text.tertiary', flexShrink: 0, fontSize: 20 }} />
             </Box>
           </Box>
         )
@@ -463,7 +708,7 @@ function PhoneList({ rows, assignees, onOpen }) {
 
 export default function Projects({
   plan, onUpdate, onBulk, onAdd, onDelete, onImport,
-  onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo, jump = null,
+  onSave, dirty, saving, blocked = [], onGoTo, jump = null,
   canWrite = true, onShowTimeline,
 }) {
   const theme = useTheme()
@@ -516,8 +761,10 @@ export default function Projects({
   const costProject = costKey == null ? null : projects.find((x) => x.key === costKey) || null
   // The project open in the detail popup, by key for the same reason.
   const [detailKey, setDetailKey] = useState(null)
-  const [aboutOpen, setAboutOpen] = useState(false)
+  // A phone's filters open in a sheet; the rarer filters wait behind "More filters".
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [moreEl, setMoreEl] = useState(null)
+  const [menuEl, setMenuEl] = useState(null)
   const [allTiles, setAllTiles] = useState(false)
 
   /*
@@ -629,7 +876,9 @@ export default function Projects({
    */
   // The shared columns and layout are in (or the wait for them is over).
   const ready = !layoutWait || (colsRead && layoutSaved !== undefined)
-  const stickyIds = ['select', 'cost', ...(show('jiraKey') ? ['jiraKey'] : []), ...(wide ? ['summary'] : [])]
+  // A tablet holds the name rather than the key: a row of numbers with only
+  // "FNP-1151" beside it says less than one with the project's name.
+  const stickyIds = ['select', 'cost', ...(wide && show('jiraKey') ? ['jiraKey'] : []), 'summary']
   const headRefs = useRef({})
   const [lefts, setLefts] = useState({})
   const stickyKey = stickyIds.join()
@@ -791,6 +1040,9 @@ export default function Projects({
         active={sort.by === id}
         direction={sort.by === id ? sort.dir : 'asc'}
         onClick={() => setSort((s) => ({ by: id, dir: s.by === id && s.dir === 'desc' ? 'asc' : 'desc' }))}
+        // The arrow on the inside edge, so a right-aligned header still lines
+        // up with the numbers under it.
+        sx={align === 'right' ? { flexDirection: 'row-reverse', '& .MuiTableSortLabel-icon': { ml: 0, mr: 0.5 } } : undefined}
       >
         {label}
       </TableSortLabel>
@@ -911,337 +1163,735 @@ export default function Projects({
     }
   }, [rows, registerHours])
 
+  /*
+   * "Save changes" appears only when an edit is still waiting after the
+   * automatic save has had its chance (6.5 seconds): when this browser is
+   * not on the shared plan yet, or is behind it. Shown on every keystroke it
+   * would blink in and out of the header all day.
+   */
+  const [waiting, setWaiting] = useState(false)
+  useEffect(() => {
+    if (!dirty) { setWaiting(false); return undefined }
+    const t = setTimeout(() => setWaiting(true), 6500)
+    return () => clearTimeout(t)
+  }, [dirty, projects])
+  const showSave = canWrite && !blocked.length && (saving || (dirty && waiting))
+
+  const clearFilters = () => {
+    setQ(''); setFObj('all'); setFPic([]); setFCommit('all')
+    setFGap('all'); setFTeam('all'); setFSub([]); setFHc('all')
+  }
+  const moreOn = [fCommit, fGap, fHc].filter((f) => f !== 'all').length
+
+  const tone = theme.palette.tone
+
   // The figures over the table, by id, for the layout to order and hide.
   const tileById = Object.fromEntries([
-      { id: 'count', label: 'Projects in view', value: agg.count.toLocaleString(), sub: agg.tbc ? `${agg.tbc} still TBC` : 'all quantified' },
-      {
-        id: 'hours',
-        label: 'Saving hrs / month',
-        value: fmtHours(agg.hours),
-        sub: agg.deferred > 0
-          ? `${fmtHours(agg.deferred)} of it out of plan`
-          : `${fmtPct(agg.pctOfBook)} of the register`,
-        strong: true,
-        tone: agg.deferred > 0 ? STATUS.warning : undefined,
-      },
-      { id: 'done', label: 'Of which delivered', value: fmtHours(agg.done), sub: 'status Done' },
-      {
-        id: 'fte',
-        label: 'FTE',
-        value: agg.hc ? agg.hc.toFixed(1) : '—',
-        sub: 'FTE released',
-        help: `The source workbook's own FTE column, editable per row: saving hours ÷ ${fin.hoursPerFteMonth} hours per FTE month, rounded to one decimal on each project. Change the ratio on the Model tab — it drives this column's arithmetic and the accountant hourly rate together. Capacity released, not people removed from the payroll.`,
-      },
-      { id: 'manday', label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', sub: agg.manday ? 'invested' : 'not entered yet' },
-      {
-        id: 'benefit',
-        label: 'Benefit / year',
-        value: fmtMoneyShort(agg.annualBenefit, sym),
-        sub: `${fmtMoney(fin.acctHourRate, sym)} per saved hour`,
-        help: `Saving hours x the accountant rate, annualised. Covers every quantified row in view, whether or not it has an effort estimate.`,
-      },
-      {
-        id: 'build',
-        label: 'Build cost',
-        value: fmtMoneyShort(agg.buildCost, sym),
-        sub: agg.buildCost == null ? 'no mandays in view' : `${fmtMoney(fin.devDayRate, sym)} per manday`,
-        help: 'Mandays x the developer rate, across the in-plan rows in view that carry an effort estimate.',
-      },
-      {
-        id: 'capex',
-        label: 'CAPEX',
-        value: fmtMoneyShort(agg.capex, sym),
-        sub: agg.capex == null ? 'none entered' : 'one-off, not depreciated',
-        help: 'Infrastructure, licences and hardware bought once, across the in-plan rows in view. Open a project\'s cost sheet (the receipt icon on its row) to enter or edit it. No depreciation is applied — the whole amount is charged against the project.',
-      },
-      {
-        id: 'opex',
-        label: 'OPEX / year',
-        value: agg.opexYear > 0 ? fmtMoneyShort(agg.opexYear, sym) : '—',
-        sub: agg.opexRunRate > 0 ? `${fmtMoneyShort(agg.opexRunRate, sym)}/month run-rate` : 'none entered',
-        help: 'The 2026 monthly-cost grid added up: each running-cost line counted only in the months it is live. The run-rate underneath ignores start and end months — that is the steady-state monthly cost the ROI is measured against.',
-      },
-      {
-        id: 'investment',
-        label: 'Investment',
-        value: fmtMoneyShort(agg.investment, sym),
-        sub: agg.investment == null ? 'nothing costed in view' : 'build + CAPEX, returnable rows',
-        help: 'Build cost plus CAPEX, across only the rows in view that carry BOTH a known cost and a known benefit — the same set the ROI beside it divides. It is deliberately not the same as Build cost + CAPEX above, which cover every in-plan row on screen.',
-      },
-      {
-        id: 'roi',
-        label: 'ROI',
-        value: fmtRoi(agg.roi),
-        sub: agg.roi == null
-          ? 'needs mandays or CAPEX'
-          : `${agg.roiRows} of ${agg.inPlanCount} in-plan rows · gate ${fmtRoi(fin.roiGate)}`,
-        tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? STATUS.good : STATUS.critical,
-        help: `Return over ${horizon} months on the whole investment — build cost plus CAPEX — against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are in EITHER side, so this is never a whole-book benefit divided by a partial cost.`,
-      },
-  ].map((t) => [t.id, t]))
+    {
+      id: 'count', label: 'Projects', value: agg.count.toLocaleString(), note: agg.tbc ? `${agg.tbc} still TBC` : 'All quantified',
+    },
+    {
+      id: 'hours',
+      label: 'Saving hrs/mth',
+      value: fmtHours(agg.hours),
+      note: agg.deferred > 0
+        ? `${fmtHours(agg.deferred)} of it out of plan`
+        : `${fmtPct(agg.pctOfBook)} of the register`,
+      tone: agg.deferred > 0 ? 'warning' : undefined,
+    },
+    {
+      id: 'done', label: 'Delivered', value: fmtHours(agg.done), note: 'Marked Done',
+    },
+    {
+      id: 'fte',
+      label: 'FTE released',
+      value: agg.hc ? agg.hc.toFixed(1) : '—',
+      note: `At ${fin.hoursPerFteMonth} hrs/mth each`,
+      help: `The source workbook's own FTE column: saving hours ÷ ${fin.hoursPerFteMonth} hours per FTE month, rounded to one decimal on each project. Change the ratio on the Model page; it drives this figure and the accountant hourly rate together. Capacity released, not people removed from the payroll.`,
+    },
+    {
+      id: 'benefit',
+      label: 'Benefit/yr',
+      value: fmtMoneyShort(agg.annualBenefit, sym),
+      note: `${fmtMoney(fin.acctHourRate, sym)} per saved hour`,
+      help: 'Saving hours x the accountant rate, for a year. Covers every quantified row in view, whether or not it has an effort estimate.',
+    },
+    {
+      id: 'build',
+      label: 'Build cost',
+      value: agg.buildCost == null ? '—' : fmtMoneyShort(agg.buildCost, sym),
+      note: agg.buildCost == null ? 'No mandays in view' : `${fmtMoney(fin.devDayRate, sym)} per manday`,
+      help: 'Mandays x the developer rate, across the in-plan rows in view that carry an effort estimate.',
+    },
+    {
+      id: 'manday', label: 'Mandays', value: agg.manday ? fmtHours(agg.manday) : '—', note: agg.manday ? 'Invested' : 'Not entered yet',
+    },
+    {
+      id: 'capex',
+      label: 'CAPEX',
+      value: agg.capex == null ? '—' : fmtMoneyShort(agg.capex, sym),
+      note: agg.capex == null ? 'None entered' : 'One-off, not depreciated',
+      help: "Infrastructure, licences and hardware bought once, across the in-plan rows in view. Enter it on a project's cost sheet (the receipt icon on its row). No depreciation is applied: the whole amount is charged against the project.",
+    },
+    {
+      id: 'opex',
+      label: 'OPEX/yr',
+      value: agg.opexYear > 0 ? fmtMoneyShort(agg.opexYear, sym) : '—',
+      note: agg.opexRunRate > 0 ? `${fmtMoneyShort(agg.opexRunRate, sym)} a month run-rate` : 'None entered',
+      help: 'The 2026 monthly-cost grid added up: each running-cost line counted only in the months it is live. The run-rate ignores start and end months; it is the steady monthly cost the ROI is measured against.',
+    },
+    {
+      id: 'investment',
+      label: 'Investment',
+      value: agg.investment == null ? '—' : fmtMoneyShort(agg.investment, sym),
+      note: agg.investment == null ? 'Nothing costed in view' : 'Build and CAPEX, costed rows',
+      help: 'Build cost plus CAPEX, across only the rows in view that carry both a known cost and a known benefit: the same set the ROI divides. It is deliberately not Build cost plus CAPEX above, which cover every in-plan row on screen.',
+    },
+    {
+      id: 'roi',
+      label: 'ROI',
+      value: agg.roi == null ? '—' : fmtRoi(agg.roi),
+      note: agg.roi == null
+        ? 'Needs mandays or CAPEX'
+        : `${agg.roi >= fin.roiGate ? 'Clears' : 'Below'} the ${fmtRoi(fin.roiGate)} gate, ${agg.roiRows} of ${agg.inPlanCount} rows`,
+      tone: agg.roi == null ? undefined : agg.roi >= fin.roiGate ? 'success' : 'danger',
+      help: `Return over ${horizon} months on the whole investment (build cost plus CAPEX) against the benefit net of the monthly OPEX. Only rows carrying both a known cost and a known benefit are on either side, so this is never a whole-book benefit divided by a partial cost.`,
+    },
+  ].map((t) => [t.id, { ...t, empty: t.value === '—' }]))
+
+  const description = editingLayout
+    ? 'Move or hide the blocks and figures. The layout is saved for everybody.'
+    : `${projects.length} projects in the 2026 register.`
+
+  const help = phone ? (
+    <>
+      <p>Tap a project to open it. Editing the register is for a wider screen.</p>
+      <p>The figures follow the search and filters.</p>
+    </>
+  ) : (
+    <>
+      <p>Every cell edits in place and updates the dashboard, the scorecards and the export as you type. Hover a row to see which cells can change.</p>
+      <p>Click a project&rsquo;s name, or its row away from the editable cells, to open it: owner, dates, weekly check-ins and the active switch. The pencil renames it; the receipt icon opens its cost sheet with CAPEX, monthly OPEX and the 2026 cost grid.</p>
+      <p>Saving hours are per month, as in the source workbook. FTE is worked out from them at the ratio on the Model page. The figures above the table follow the search and filters.</p>
+      <p>
+        {layoutSaved === null
+          ? 'Columns and layout cannot be changed while the shared database is unavailable.'
+          : layoutSaved?.updatedBy
+            ? `Columns and layout are the same for everybody; the layout was arranged by ${layoutSaved.updatedBy}.`
+            : 'Columns and layout are set by an administrator and are the same for everybody.'}
+      </p>
+    </>
+  )
+
+  /*
+   * One file picked or dropped: read it, plan the import, show the preview.
+   * Nothing is written until the preview's own button says so.
+   */
+  const takeFile = async (file) => {
+    if (!file) return
+    setBusy(true)
+    try {
+      const parsed = await readProjectsFile(await file.arrayBuffer())
+      setImporting({
+        fileName: file.name,
+        choosing: true,
+        result: parsed.error
+          ? { error: parsed.error, changes: [] }
+          : planImport(parsed, { projects, people: assignees }, plan),
+      })
+    } catch (err) {
+      setImporting({ fileName: file.name, choosing: true, result: { error: `Could not read the file: ${err.message}.`, changes: [] } })
+    } finally { setBusy(false) }
+  }
+  const doExport = async () => {
+    setBusy(true)
+    try {
+      await exportFiltered(rows, assignees, describeFilter, filterParts)
+    } finally { setBusy(false) }
+  }
+  const exportLabel = `Export ${rows.length === projects.length ? 'all' : 'filtered'} (${rows.length})`
+  const exportHint = rows.length === projects.length
+    ? 'Exports every project as an Excel working file. Filter the table first to export a subset.'
+    : `Exports the ${rows.length} row${rows.length === 1 ? '' : 's'} shown, not all ${projects.length}.`
+  const estimateHint = `Spreads a year of the team's capacity (${teamSize} people, about ${capacityMandays.toLocaleString()} mandays) across the ${uncosted.length} project${uncosted.length === 1 ? '' : 's'} in view with no effort, in proportion to how long each runs. A starting point to edit; every value stays marked as an estimate.`
+
+  /* ---------------------------------------------------------------- */
+  /* The header's actions                                              */
+  /* ---------------------------------------------------------------- */
+  let actions
+  if (editingLayout) {
+    actions = (
+      <Box data-layout-toolbar sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+        <Button onClick={() => setLayoutDraft(DEFAULT_PROJECT_LAYOUT)}>Reset to default</Button>
+        <Button onClick={() => { setLayoutDraft(null); setLayoutError(null) }}>Cancel</Button>
+        <Button
+          variant="contained"
+          onClick={saveLayout}
+          disabled={layoutBusy}
+          startIcon={layoutBusy ? <Spinner size={14} /> : null}
+          data-save-layout
+        >
+          {layoutBusy ? 'Saving…' : 'Save layout'}
+        </Button>
+      </Box>
+    )
+  } else if (phone) {
+    actions = canWrite ? (
+      <>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>Add project</Button>
+        <Tooltip title="More actions">
+          <IconButton aria-label="more actions" aria-haspopup="menu" onClick={(e) => setMenuEl(e.currentTarget)} sx={{ width: 40, height: 40, color: 'text.secondary' }}>
+            <MoreVertIcon />
+          </IconButton>
+        </Tooltip>
+        <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+          {uncosted.length > 0 && (
+            <MenuItem onClick={() => { setMenuEl(null); estimateEffort() }}>
+              <ListItemIcon><AutoFixHighIcon fontSize="small" /></ListItemIcon>
+              <ListItemText primary={`Estimate effort (${uncosted.length})`} />
+            </MenuItem>
+          )}
+          <MenuItem disabled={!rows.length || busy} onClick={() => { setMenuEl(null); doExport() }}>
+            <ListItemIcon><FileDownloadOutlinedIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary={exportLabel} />
+          </MenuItem>
+          <MenuItem disabled={busy} onClick={() => { setMenuEl(null); setImporting({ choosing: true }) }}>
+            <ListItemIcon><FileUploadOutlinedIcon fontSize="small" /></ListItemIcon>
+            <ListItemText primary="Import" />
+          </MenuItem>
+        </Menu>
+      </>
+    ) : null
+  } else if (canWrite) {
+    /*
+     * The rarer page actions wait behind ⋮: arranging the page, and — only
+     * when an administrator has hidden the table toolbar — the export, import
+     * and columns it would otherwise carry, so hiding it never loses them.
+     */
+    const canLayout = layoutSaved !== undefined && layoutSaved !== null
+    const toolsHidden = lay.hiddenSections.includes('tools')
+    const pageMenu = canLayout || toolsHidden
+    actions = (
+      <Box data-layout-toolbar sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {uncosted.length > 0 && (
+          <Tooltip title={estimateHint}>
+            <Button variant="outlined" startIcon={<AutoFixHighIcon />} onClick={estimateEffort}>
+              Estimate effort ({uncosted.length})
+            </Button>
+          </Tooltip>
+        )}
+        {showSave && (
+          <Button
+            variant="contained"
+            onClick={onSave}
+            disabled={saving}
+            startIcon={saving ? <Spinner size={14} /> : null}
+            data-save-changes
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        )}
+        <Button variant={showSave ? 'outlined' : 'contained'} startIcon={<AddIcon />} onClick={onAdd}>
+          Add project
+        </Button>
+        {pageMenu && (
+          <>
+            <Tooltip title="More actions">
+              <IconButton
+                aria-label="more page actions"
+                aria-haspopup="menu"
+                aria-expanded={!!menuEl}
+                onClick={(e) => setMenuEl(e.currentTarget)}
+                data-page-menu
+                sx={{ width: 36, height: 36, color: 'text.secondary', '&:hover': { color: 'text.primary' } }}
+              >
+                <MoreVertIcon />
+              </IconButton>
+            </Tooltip>
+            <Menu
+              anchorEl={menuEl}
+              open={!!menuEl}
+              onClose={() => setMenuEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              slotProps={{ paper: { sx: { minWidth: 220 } } }}
+            >
+              {canLayout && (
+                <MenuItem onClick={() => { setMenuEl(null); setLayoutDraft(lay); setLayoutError(null) }} data-edit-layout>
+                  <ListItemIcon><LayoutIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="Edit layout" secondary="Arrange this page for everybody" />
+                </MenuItem>
+              )}
+              {canLayout && toolsHidden && <Divider />}
+              {toolsHidden && (
+                <MenuItem disabled={!rows.length || busy} onClick={() => { setMenuEl(null); doExport() }}>
+                  <ListItemIcon><FileDownloadOutlinedIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary={exportLabel} />
+                </MenuItem>
+              )}
+              {toolsHidden && (
+                <MenuItem disabled={busy} onClick={() => { setMenuEl(null); setImporting({ choosing: true }) }}>
+                  <ListItemIcon><FileUploadOutlinedIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="Import" />
+                </MenuItem>
+              )}
+              {toolsHidden && (
+                <MenuItem onClick={() => { setColsEl(menuEl); setMenuEl(null) }}>
+                  <ListItemIcon><ViewColumnOutlinedIcon fontSize="small" /></ListItemIcon>
+                  <ListItemText primary="Columns" />
+                </MenuItem>
+              )}
+            </Menu>
+          </>
+        )}
+      </Box>
+    )
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* The filters: one row of the four everybody uses, the rest behind  */
+  /* "More filters"; on a phone, all of them in a sheet.               */
+  /* ---------------------------------------------------------------- */
+  const fObjective = (
+    <FormControl key="obj" size="small" sx={{ minWidth: 168 }}>
+      <InputLabel id="obj-filter-label">Objective</InputLabel>
+      <Select labelId="obj-filter-label" label="Objective" value={fObj} onChange={(e) => setFObj(e.target.value)}>
+        <MenuItem value="all">All objectives</MenuItem>
+        {OBJECTIVES.map((o) => <MenuItem key={o.id} value={o.id}>{o.no}. {o.short}</MenuItem>)}
+      </Select>
+    </FormControl>
+  )
+  const fPicField = (
+    <FormControl key="pic" size="small" sx={{ minWidth: 140 }}>
+      {/* shrink + notched: with displayEmpty the box is never empty to
+          the reader, but MUI reads the VALUE, so the label stayed put
+          and printed itself over "All PICs". */}
+      <InputLabel shrink id="pic-filter-label">PIC</InputLabel>
+      <Select
+        multiple
+        notched
+        labelId="pic-filter-label"
+        label="PIC"
+        value={fPic}
+        onChange={(e) => setFPic(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+        displayEmpty
+        renderValue={(s) => (s.length === 0
+          ? 'All PICs'
+          : s.map((id) => (id === 'none' ? 'Unassigned' : (assignees.find((x) => x.id === id)?.nick || id))).join(', '))}
+        sx={{ maxWidth: 220 }}
+      >
+        <MenuItem value="none">Unassigned</MenuItem>
+        {/* assignees, not people: IT and any other partner team own
+            delivery on real projects and have to be filterable, even
+            though they carry no scorecard. */}
+        {assignees.map((p) => (
+          <MenuItem key={p.id} value={p.id}>
+            {p.nick}
+            {p.scorecard === false && (
+              <Typography component="span" variant="body2" sx={{ ml: 1.5, color: 'text.secondary' }}>
+                no scorecard
+              </Typography>
+            )}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  )
+  const fTeamField = (
+    <FormControl key="team" size="small" sx={{ minWidth: 132 }}>
+      <InputLabel id="team-filter-label">Team</InputLabel>
+      <Select
+        labelId="team-filter-label"
+        label="Team"
+        value={fTeam}
+        onChange={(e) => {
+          setFTeam(e.target.value)
+          // A sub team belongs to a team. Keeping a selection that the
+          // new team does not contain leaves an empty table and no
+          // visible reason for it.
+          setFSub([])
+        }}
+      >
+        <MenuItem value="all">All teams</MenuItem>
+        {teams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+      </Select>
+    </FormControl>
+  )
+  const fSubField = (
+    <FormControl key="sub" size="small" sx={{ minWidth: 148 }}>
+      <InputLabel shrink id="subteam-filter-label">Sub team</InputLabel>
+      <Select
+        multiple
+        notched
+        labelId="subteam-filter-label"
+        label="Sub team"
+        value={fSub}
+        onChange={(e) => setFSub(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+        displayEmpty
+        renderValue={(s) => (s.length === 0
+          ? 'All sub teams'
+          : s.map((t) => (t === 'none' ? 'None' : t)).join(', '))}
+        sx={{ maxWidth: 240 }}
+      >
+        <MenuItem value="none">No sub team</MenuItem>
+        {subTeams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
+      </Select>
+    </FormControl>
+  )
+  const fFteField = (
+    <FormControl key="fte" size="small" fullWidth sx={{ minWidth: 140 }}>
+      <InputLabel id="fte-filter-label">FTE</InputLabel>
+      <Select labelId="fte-filter-label" label="FTE" value={fHc} onChange={(e) => setFHc(e.target.value)}>
+        <MenuItem value="all">Any FTE</MenuItem>
+        <MenuItem value="some">Has FTE (&gt; 0)</MenuItem>
+        <MenuItem value="none">No FTE</MenuItem>
+        <MenuItem value="gte0.5">0.5 FTE or more</MenuItem>
+        <MenuItem value="gte1">1 FTE or more</MenuItem>
+        <MenuItem value="gte3">3 FTE or more</MenuItem>
+      </Select>
+    </FormControl>
+  )
+  const fCommitField = (
+    <FormControl key="commit" size="small" fullWidth sx={{ minWidth: 140 }}>
+      <InputLabel id="commit-filter-label">Commit</InputLabel>
+      <Select labelId="commit-filter-label" label="Commit" value={fCommit} onChange={(e) => setFCommit(e.target.value)}>
+        <MenuItem value="all">All levels</MenuItem>
+        {COMMIT_LEVELS.map((c) => <MenuItem key={c.id} value={c.id}>{c.label}</MenuItem>)}
+      </Select>
+    </FormControl>
+  )
+  const fGapField = (
+    <FormControl key="gap" size="small" fullWidth sx={{ minWidth: 140 }}>
+      <InputLabel id="gap-filter-label">Data gap</InputLabel>
+      <Select labelId="gap-filter-label" label="Data gap" value={fGap} onChange={(e) => setFGap(e.target.value)}>
+        <MenuItem value="all">Everything</MenuItem>
+        <MenuItem value="saving">Missing saving hrs</MenuItem>
+        <MenuItem value="nokey">Missing Jira key</MenuItem>
+        <MenuItem value="pic">Missing PIC</MenuItem>
+        <MenuItem value="manday">No effort estimate</MenuItem>
+        <MenuItem value="gate">Below the ROI gate</MenuItem>
+        <MenuItem value="pastdue">Past due, not done</MenuItem>
+      </Select>
+    </FormControl>
+  )
+  const search = (
+    <TextField
+      key="q"
+      size="small"
+      placeholder="Search key, project, team, assignee…"
+      value={q}
+      onChange={(e) => setQ(e.target.value)}
+      inputProps={{ 'aria-label': 'search projects' }}
+      InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18, color: 'text.tertiary' }} /></InputAdornment> }}
+      sx={{ flex: '1 1 220px', minWidth: { xs: 0, sm: 200 }, maxWidth: { sm: 360 } }}
+    />
+  )
+  const count = `Showing ${rows.length} of ${projects.length}`
+
+  /* ---------------------------------------------------------------- */
+  /* The figures                                                       */
+  /* ---------------------------------------------------------------- */
+  const tileList = lay.tiles
+    .map((id) => tileById[id])
+    .filter((t) => t && (editingLayout || !lay.hiddenTiles.includes(t.id)))
+  const firstRow = phone ? 4 : 6
+  const rest = tileList.slice(firstRow)
+  // The costing figures stay folded until any of them has a value (or on a
+  // phone, always): a row of dashes is a row nobody needs to read.
+  const folded = !editingLayout && !allTiles && rest.length > 0 && (phone || rest.every((t) => t.empty))
+  const shownTiles = folded ? tileList.slice(0, firstRow) : tileList
+  const canFold = !editingLayout && rest.length > 0 && (phone || rest.every((t) => t.empty))
+
+  const figure = (t, i, list) => {
+    const off = lay.hiddenTiles.includes(t.id)
+    const isWide = lay.wideTiles.includes(t.id)
+    const noteTone = t.tone ? tone[t.tone]?.fg : undefined
+    return (
+      <Box
+        key={t.id}
+        data-tile={t.id}
+        data-stat={t.id}
+        sx={{
+          position: 'relative',
+          gridColumn: isWide ? 'span 2' : 'span 1',
+          px: { xs: 3, lg: 4 },
+          py: 3,
+          minWidth: 0,
+          borderRight: 1,
+          borderBottom: 1,
+          borderColor: 'border.subtle',
+          '&:hover .tile-tools, &:focus-within .tile-tools': { opacity: 1 },
+        }}
+      >
+        <Box sx={{ opacity: off ? 0.4 : 1 }}>
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 1, minHeight: 16, minWidth: 0,
+          }}
+          >
+            <Typography variant="subtitle2" component="div" noWrap sx={{ color: 'text.secondary' }}>{t.label}</Typography>
+            {t.help && (
+              <Tooltip title={t.help} placement="top">
+                <InfoOutlinedIcon tabIndex={0} aria-label={`About ${t.label}`} sx={{ fontSize: 14, color: 'text.tertiary', cursor: 'help', flexShrink: 0 }} />
+              </Tooltip>
+            )}
+          </Box>
+          <Typography variant="figureSm" component="div" sx={{ mt: 1, color: t.empty ? 'text.tertiary' : 'text.primary', whiteSpace: 'nowrap' }}>
+            {t.value}
+          </Typography>
+          {t.note && (
+            <Typography variant="caption" component="div" sx={{ mt: 0.5, color: noteTone || 'text.tertiary' }}>
+              {t.note}
+            </Typography>
+          )}
+        </Box>
+        {editingLayout && (
+          <Box
+            className="tile-tools"
+            data-tile-controls={t.id}
+            sx={{
+              position: 'absolute',
+              top: 6,
+              right: 6,
+              display: 'flex',
+              gap: 0.25,
+              p: 0.25,
+              bgcolor: 'bg.raised',
+              border: 1,
+              borderColor: 'border.subtle',
+              borderRadius: '6px',
+              opacity: 0,
+              transition: 'opacity 120ms',
+              '@media (hover: none)': { opacity: 1 },
+            }}
+          >
+            <Tooltip title="Move left"><span><IconButton size="small" disabled={i === 0} onClick={() => editLayout((d) => ({ ...d, tiles: moveId(d.tiles, t.id, -1) }))} aria-label={`move ${t.label} left`} sx={tool}><ChevronLeftIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+            <Tooltip title="Move right"><span><IconButton size="small" disabled={i === list.length - 1} onClick={() => editLayout((d) => ({ ...d, tiles: moveId(d.tiles, t.id, 1) }))} aria-label={`move ${t.label} right`} sx={tool}><ChevronRightIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
+            <Tooltip title={isWide ? 'Narrower' : 'Wider'}><IconButton size="small" onClick={() => editLayout((d) => ({ ...d, wideTiles: toggleId(d.wideTiles, t.id) }))} aria-label={`${isWide ? 'narrower' : 'wider'} ${t.label}`} sx={tool}>{isWide ? <WidthNormalOutlinedIcon sx={{ fontSize: 16 }} /> : <WidthWideOutlinedIcon sx={{ fontSize: 16 }} />}</IconButton></Tooltip>
+            <Tooltip title={off ? 'Show' : 'Hide'}><IconButton size="small" onClick={() => editLayout((d) => ({ ...d, hiddenTiles: toggleId(d.hiddenTiles, t.id) }))} aria-label={`${off ? 'show' : 'hide'} ${t.label}`} data-toggle-tile={t.id} sx={tool}>{off ? <VisibilityOffOutlinedIcon sx={{ fontSize: 16 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 16 }} />}</IconButton></Tooltip>
+          </Box>
+        )}
+      </Box>
+    )
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* The table                                                         */
+  /* ---------------------------------------------------------------- */
+  const surface = theme.palette.bg.surface
+  const picked = `color-mix(in srgb, ${theme.palette.primary.main} ${mode === 'dark' ? 14 : 8}%, ${surface})`
+  const muted = (p) => OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam
 
   if (!ready) {
-    return <Loading variant="block" label="Loading the register…" />
+    return (
+      <Box>
+        <PageHeader title="Projects" description={`${projects.length} projects in the 2026 register.`} />
+        <SectionSkeleton figures={phone ? 4 : 6} rows={8} header={false} label="Loading the register…" />
+      </Box>
+    )
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Edit layout: an administrator arranges the page for everybody. */}
-      {canWrite && !phone && layoutSaved !== undefined && (
-        <Box sx={{ order: 0, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }} data-layout-toolbar>
-          {!editingLayout ? (
-            <>
-              <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
-                {layoutSaved === null
-                  ? 'The layout cannot be changed while the shared database is unavailable.'
-                  : layoutSaved.updatedBy ? `Layout arranged by ${layoutSaved.updatedBy} — the same for everybody.` : ''}
-              </Typography>
-              {layoutSaved !== null && (
-                <Button size="small" variant="outlined" startIcon={<LayoutIcon />} onClick={() => { setLayoutDraft(lay); setLayoutError(null) }} sx={{ color: 'text.primary', borderColor: 'divider' }} data-edit-layout>
-                  Edit layout
-                </Button>
-              )}
-            </>
-          ) : (
-            <>
-              <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
-                Move blocks up or down, hide what nobody needs, and arrange the figures with the arrows under each one. Saved for everybody.
-              </Typography>
-              <Button size="small" onClick={() => setLayoutDraft(DEFAULT_PROJECT_LAYOUT)}>Reset to default</Button>
-              <Button size="small" onClick={() => { setLayoutDraft(null); setLayoutError(null) }}>Cancel</Button>
-              <Button size="small" variant="contained" onClick={saveLayout} disabled={layoutBusy} startIcon={layoutBusy ? <CircularProgress size={14} /> : null} data-save-layout>
-                Save layout
-              </Button>
-            </>
+    <Box>
+      <PageHeader title="Projects" description={description} help={editingLayout ? null : help} actions={actions} />
+
+      {(blocked.length > 0 || layoutError) && (
+        <Box sx={{ display: 'grid', gap: 3, mb: { xs: 3, sm: 4 } }}>
+          {blocked.length > 0 && (
+            <Alert
+              severity="error"
+              variant="outlined"
+              action={onGoTo ? <Button color="inherit" variant="outlined" onClick={() => onGoTo('people')} sx={{ whiteSpace: 'nowrap' }}>Fix on Scorecards</Button> : null}
+            >
+              Saving is blocked: {blocked.map((x) => `${x.nick} is at ${Math.round(x.sum * 100)}%`).join(', ')}.
+              Every scorecard must total exactly 100% before the plan can be saved.
+            </Alert>
           )}
-          {layoutError && <Alert severity="error" sx={{ width: '100%', py: 0 }} onClose={() => setLayoutError(null)}>{layoutError}</Alert>}
+          {layoutError && (
+            <Alert severity="error" variant="outlined" onClose={() => setLayoutError(null)}>
+              {layoutError} Your arrangement is still here; try Save layout again.
+            </Alert>
+          )}
         </Box>
       )}
 
-      <LayoutBlock {...block('about')}>
-      {/* The how-to, folded to one line: on a phone the whole of it filled
-          the first screen before a single project showed. */}
-      <Alert
-        severity="info"
-        variant="outlined"
-        sx={{ '& .MuiAlert-message': { width: '100%' } }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-          <Box component="span" sx={{ flex: '1 1 260px' }}>
-            {phone
-              ? <>Tap a project to open its detail.</>
-              : <>Every cell is editable and recalculates the dashboard, scorecards and export live. <strong>Click a project&rsquo;s name</strong> (or its row, away from the editable cells) to open its detail; the pencil renames it; the <ReceiptLongIcon sx={{ fontSize: 14, verticalAlign: '-2px' }} /> icon opens its cost sheet.</>}
-          </Box>
-          <Link
-            component="button"
-            onClick={() => setAboutOpen((o) => !o)}
-            aria-expanded={aboutOpen}
-            sx={{ fontWeight: 600, fontSize: '0.8125rem', display: 'inline-flex', alignItems: 'center' }}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: editingLayout ? 7 : { xs: 3, sm: 4 } }}>
+        <LayoutBlock {...block('about')}>
+          {/* Shown only if an administrator turns it on: the page explains
+              itself from "About this page" in the header. */}
+          <Box sx={{
+            display: 'flex', gap: 2, alignItems: 'flex-start', px: 3, py: 2.5, bgcolor: 'bg.subtle', borderRadius: '8px',
+          }}
           >
-            {aboutOpen ? 'Less' : 'About this page'}
-            <ExpandMoreIcon sx={{ fontSize: 16, transform: aboutOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-          </Link>
-        </Box>
-        <Collapse in={aboutOpen} unmountOnExit>
-          <Box sx={{ mt: 1 }}>
-            Every cell is editable — name, team, programme, <strong>PIC</strong>, <strong>saving hrs/month</strong>,{' '}
-            <strong>mandays</strong>, <strong>objective</strong> and <strong>commit level</strong> — and each edit
-            recalculates the dashboard, the scorecards and the export live. <strong>FTE</strong> is the exception: it is
-            computed from the saving hours at the ratio on the Model tab, exactly as the source workbook computes its own
-            column. Use <strong>Add project</strong> for anything not yet in the source file, and the bin icon to remove a
-            row. Saving hours are <strong>per month</strong>, matching the source workbook's <em>Saving hrs/mth</em> column.{' '}
-            <strong>Click a project</strong> — the expand icon beside its name, or the row away from its editable cells —
-            to open its detail: owner, dates, the weekly check-ins and the active switch. The receipt icon at the start of
-            each row (or <strong>Cost sheet</strong> in the detail) opens its cost sheet — infrastructure{' '}
-            <strong>CAPEX</strong>, monthly <strong>OPEX</strong> and the Jan–Dec grid behind the Investment column.
+            <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.tertiary', mt: '1px' }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '96ch' }}>
+              {phone
+                ? 'Tap a project to open it.'
+                : 'Every cell edits in place. Click a project’s name or row to open it; the pencil renames it and the receipt icon opens its cost sheet.'}
+            </Typography>
           </Box>
-        </Collapse>
-      </Alert>
-      </LayoutBlock>
+        </LayoutBlock>
 
-      <LayoutBlock {...block('filters')}>
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        {/* Wraps: beside the side menu a 1500px screen leaves about 1,200px,
-            which is less than the search box and six filters need in one row. */}
-        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
-          <TextField
-            size="small"
-            placeholder="Search key, project, team, assignee…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
-            sx={{ minWidth: { xs: 0, sm: 280 }, flex: { xs: '1 1 0', sm: '1 1 280px' } }}
-          />
-          {phone && (
-            <Button
-              variant="outlined"
-              onClick={() => setFiltersOpen((o) => !o)}
-              aria-expanded={filtersOpen}
-              aria-controls="project-filters"
-              startIcon={<FilterListIcon />}
-              sx={{ flexShrink: 0, color: 'text.primary', borderColor: 'divider' }}
-            >
-              Filters{dropdownsOn ? ` (${dropdownsOn})` : ''}
-            </Button>
-          )}
-          {/* The dropdowns. On a phone, folded behind the Filters button and
-              two to a line when open. Wider, they sit in the row with the
-              search box (display: contents) — stretched to fill each line on
-              a tablet, at their own widths on a wide screen. */}
-          <Box
-            id="project-filters"
-            sx={phone ? {
-              display: filtersOpen ? 'grid' : 'none',
-              width: '100%',
-              gap: 1.5,
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              '& .MuiFormControl-root': { minWidth: 0 },
-            } : {
-              display: 'contents',
-              '& .MuiFormControl-root': { flex: { xs: '1 1 140px', lg: '0 0 auto' } },
-            }}
-          >
-          <FormControl size="small" sx={{ minWidth: 170 }}>
-            <InputLabel>Objective</InputLabel>
-            <Select label="Objective" value={fObj} onChange={(e) => setFObj(e.target.value)}>
-              <MenuItem value="all">All objectives</MenuItem>
-              {OBJECTIVES.map((o) => <MenuItem key={o.id} value={o.id}>{o.no}. {o.short}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            {/* shrink + notched: with displayEmpty the box is never empty to
-                the reader, but MUI reads the VALUE, so the label stayed put
-                and printed itself over "All PICs". */}
-            <InputLabel shrink id="pic-filter-label">PIC</InputLabel>
-            <Select
-              multiple
-              notched
-              labelId="pic-filter-label"
-              label="PIC"
-              value={fPic}
-              onChange={(e) => setFPic(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-              displayEmpty
-              renderValue={(sel) => (sel.length === 0
-                ? 'All PICs'
-                : sel.map((id) => (id === 'none' ? 'Unassigned' : (assignees.find((x) => x.id === id)?.nick || id))).join(', '))}
-            >
-              <MenuItem value="none">Unassigned</MenuItem>
-              {/* assignees, not people: IT and any other partner team own
-                  delivery on real projects and have to be filterable, even
-                  though they carry no scorecard. */}
-              {assignees.map((p) => (
-                <MenuItem key={p.id} value={p.id}>
-                  {p.nick}
-                  {p.scorecard === false && (
-                    <Typography component="span" variant="caption" sx={{ ml: 0.75, color: 'text.secondary' }}>
-                      no scorecard
-                    </Typography>
-                  )}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 128 }}>
-            <InputLabel>Team</InputLabel>
-            <Select
-              label="Team"
-              value={fTeam}
-              onChange={(e) => {
-                setFTeam(e.target.value)
-                // A sub team belongs to a team. Keeping a selection that the
-                // new team does not contain leaves an empty table and no
-                // visible reason for it.
-                setFSub([])
-              }}
-            >
-              <MenuItem value="all">All teams</MenuItem>
-              {teams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel shrink id="subteam-filter-label">Sub team</InputLabel>
-            <Select
-              multiple
-              notched
-              labelId="subteam-filter-label"
-              label="Sub team"
-              value={fSub}
-              onChange={(e) => setFSub(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-              displayEmpty
-              renderValue={(sel) => (sel.length === 0
-                ? 'All sub teams'
-                : sel.map((t) => (t === 'none' ? 'None' : t)).join(', '))}
-            >
-              <MenuItem value="none"><em>No sub team</em></MenuItem>
-              {subTeams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 158 }}>
-            <InputLabel>FTE</InputLabel>
-            <Select label="FTE" value={fHc} onChange={(e) => setFHc(e.target.value)}>
-              <MenuItem value="all">Any FTE</MenuItem>
-              <MenuItem value="some">Has FTE (&gt; 0)</MenuItem>
-              <MenuItem value="none">No FTE</MenuItem>
-              <MenuItem value="gte0.5">0.5 FTE or more</MenuItem>
-              <MenuItem value="gte1">1 FTE or more</MenuItem>
-              <MenuItem value="gte3">3 FTE or more</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>Commit</InputLabel>
-            <Select label="Commit" value={fCommit} onChange={(e) => setFCommit(e.target.value)}>
-              <MenuItem value="all">All levels</MenuItem>
-              {COMMIT_LEVELS.map((c) => <MenuItem key={c.id} value={c.id}>{c.label}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 165 }}>
-            <InputLabel>Data gap</InputLabel>
-            <Select label="Data gap" value={fGap} onChange={(e) => setFGap(e.target.value)}>
-              <MenuItem value="all">Everything</MenuItem>
-              <MenuItem value="saving">Missing saving hrs</MenuItem>
-              <MenuItem value="nokey">Missing Jira key</MenuItem>
-              <MenuItem value="pic">Missing PIC</MenuItem>
-              <MenuItem value="manday">No effort estimate</MenuItem>
-              <MenuItem value="gate">Below the ROI gate</MenuItem>
-              <MenuItem value="pastdue">Past due, not done</MenuItem>
-            </Select>
-          </FormControl>
-          </Box>
-        </Box>
-
-        <Stack direction="row" spacing={{ xs: 1, sm: 2 }} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
-          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            Showing {rows.length} of {projects.length} projects
-          </Typography>
-          {filtersOn && (
-            <Button
-              size="small"
-              onClick={() => {
-                setQ(''); setFObj('all'); setFPic([]); setFCommit('all')
-                setFGap('all'); setFTeam('all'); setFSub([]); setFHc('all')
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
-          <Box sx={{ flex: 1 }} />
-          {uncosted.length > 0 && (
-            <Tooltip title={`Spreads a year of the team's capacity — ${teamSize} people, about ${capacityMandays.toLocaleString()} mandays — across the ${uncosted.length} project${uncosted.length === 1 ? '' : 's'} in view that carry no effort, in proportion to how long each runs. A starting point to edit, not a measurement; every value stays marked as an estimate.`}>
-              <Button size="small" variant="outlined" startIcon={<AutoFixHighIcon />} onClick={estimateEffort}>
-                Estimate effort ({uncosted.length})
-              </Button>
-            </Tooltip>
-          )}
-          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={onAdd}>
-            Add project
-          </Button>
-          {sel.size > 0 && (
-            <>
-              <Typography variant="caption" sx={{ fontWeight: 600 }}>{sel.size} selected</Typography>
+        <LayoutBlock {...block('filters')}>
+          {phone ? (
+            <Toolbar count={count}>
+              {search}
               <Button
-                size="small"
-                color="error"
                 variant="outlined"
+                onClick={() => setFiltersOpen(true)}
+                aria-haspopup="dialog"
+                startIcon={<FilterListIcon />}
+                sx={{ flexShrink: 0 }}
+              >
+                Filters{dropdownsOn ? ` (${dropdownsOn})` : ''}
+              </Button>
+            </Toolbar>
+          ) : (
+            <Toolbar count={count}>
+              {search}
+              {fObjective}
+              {fPicField}
+              {fTeamField}
+              {fSubField}
+              <Button
+                variant="outlined"
+                startIcon={<FilterListIcon />}
+                onClick={(e) => setMoreEl(e.currentTarget)}
+                aria-haspopup="dialog"
+                aria-expanded={!!moreEl}
+                sx={{ flexShrink: 0, minHeight: 36 }}
+              >
+                More filters{moreOn ? ` (${moreOn})` : ''}
+              </Button>
+              {filtersOn && <Button onClick={clearFilters} sx={{ flexShrink: 0 }}>Clear filters</Button>}
+            </Toolbar>
+          )}
+          <Popover
+            open={!!moreEl}
+            anchorEl={moreEl}
+            onClose={() => setMoreEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+            slotProps={{ paper: { sx: { mt: 1 } } }}
+          >
+            <Box role="dialog" aria-label="more filters" sx={{ p: 4, width: 280, display: 'grid', gap: 3 }}>
+              <Typography variant="h3">More filters</Typography>
+              {fFteField}
+              {fCommitField}
+              {fGapField}
+            </Box>
+          </Popover>
+        </LayoutBlock>
+
+        <LayoutBlock {...block('figures')}>
+          <Paper variant="outlined" data-figure-strip data-stat-scope={filtersOn ? 'filtered' : 'all'} sx={{ overflow: 'hidden' }}>
+            {/* Each figure draws its own right and bottom rule; the grid runs
+                a pixel past the frame on those sides so the outer ones are
+                clipped away, whatever the row length or a wide figure. */}
+            <Box sx={(t) => ({
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              [t.breakpoints.up('sm')]: { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
+              [t.breakpoints.up('md')]: { gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' },
+              mr: '-1px',
+              mb: '-1px',
+            })}
+            >
+              {shownTiles.map((t, i) => figure(t, i, shownTiles))}
+            </Box>
+            {canFold && (
+              <Box sx={{ borderTop: 1, borderColor: 'border.subtle', px: 2, py: 1 }}>
+                <Button onClick={() => setAllTiles((o) => !o)} aria-expanded={!folded}>
+                  {folded ? 'Show all figures' : 'Show fewer figures'}
+                </Button>
+              </Box>
+            )}
+          </Paper>
+        </LayoutBlock>
+
+        {!phone && (
+          <LayoutBlock {...block('tools')}>
+            {/*
+              * Export what is on screen, and import it back.
+              *
+              * The whole-plan export in the header is a different thing: it is
+              * the eleven-sheet book of record. This one is the working file —
+              * the rows you have filtered to, in a shape that can be edited and
+              * imported.
+              */}
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end',
+            }}
+            >
+              <Tooltip title={exportHint}>
+                <span>
+                  <Button
+                    variant="outlined"
+                    startIcon={busy ? <Spinner size={14} /> : <FileDownloadOutlinedIcon />}
+                    disabled={!rows.length || busy}
+                    onClick={doExport}
+                  >
+                    {exportLabel}
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip title="Updates only the rows named in the file. You see every change before it is saved.">
+                <span>
+                  <Button
+                    variant="outlined"
+                    startIcon={<FileUploadOutlinedIcon />}
+                    disabled={busy}
+                    onClick={() => setImporting({ choosing: true })}
+                  >
+                    Import
+                  </Button>
+                </span>
+              </Tooltip>
+              {/* Which columns the register shows: an administrator's choice,
+                  made once for everybody. A phone shows rows, not columns. */}
+              {canWrite && (
+                <Button
+                  variant="outlined"
+                  startIcon={<ViewColumnOutlinedIcon />}
+                  onClick={(e) => setColsEl(e.currentTarget)}
+                  aria-haspopup="menu"
+                  data-columns-button
+                >
+                  Columns{hidden.size ? ` (${PROJECT_COLUMNS.length - hidden.size} of ${PROJECT_COLUMNS.length})` : ''}
+                </Button>
+              )}
+            </Box>
+          </LayoutBlock>
+        )}
+
+        <LayoutBlock {...block('table')}>
+          {sel.size > 0 && !phone && (
+            <Box
+              role="region"
+              aria-label="selected projects"
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', minHeight: 44, px: 3, py: 1, mb: 2, bgcolor: 'bg.subtle', borderRadius: '8px',
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 500, mr: 2 }}>{sel.size} selected</Typography>
+              <Button variant="outlined" onClick={(e) => setBulkEl(e.currentTarget)} aria-haspopup="menu">Bulk edit</Button>
+              <Menu anchorEl={bulkEl} open={!!bulkEl} onClose={() => setBulkEl(null)} MenuListProps={{ dense: true }}>
+                <Typography variant="subtitle2" component="div" sx={{ px: 3, py: 1, color: 'text.secondary' }}>
+                  Set commit level
+                </Typography>
+                {COMMIT_LEVELS.map((c) => (
+                  <MenuItem key={c.id} onClick={() => applyBulk({ commitLevel: c.id })}>{c.label}</MenuItem>
+                ))}
+                <Divider />
+                <Typography variant="subtitle2" component="div" sx={{ px: 3, py: 1, color: 'text.secondary' }}>
+                  Assign PIC
+                </Typography>
+                {people.map((p) => (
+                  <MenuItem key={p.id} onClick={() => applyBulk({ pic: p.id })}>{p.nick}</MenuItem>
+                ))}
+              </Menu>
+              <Button
+                variant="outlined"
+                color="error"
                 startIcon={<DeleteOutlineIcon />}
                 onClick={() => {
                   if (confirm(`Delete ${sel.size} project${sel.size === 1 ? '' : 's'}? This cannot be undone (reload the baseline from the ⋮ menu to restore).`)) {
@@ -1251,739 +1901,568 @@ export default function Projects({
               >
                 Delete
               </Button>
-              <Button size="small" variant="outlined" onClick={(e) => setBulkEl(e.currentTarget)}>
-                Bulk edit
-              </Button>
-              <Menu anchorEl={bulkEl} open={!!bulkEl} onClose={() => setBulkEl(null)}>
-                <Typography variant="caption" sx={{ px: 2, py: 1, display: 'block', color: 'text.secondary' }}>
-                  Set commit level
-                </Typography>
-                {COMMIT_LEVELS.map((c) => (
-                  <MenuItem key={c.id} onClick={() => applyBulk({ commitLevel: c.id })}>{c.label}</MenuItem>
-                ))}
-                <Typography variant="caption" sx={{ px: 2, py: 1, display: 'block', color: 'text.secondary', borderTop: 1, borderColor: 'divider', mt: 1 }}>
-                  Assign PIC
-                </Typography>
-                {people.map((p) => (
-                  <MenuItem key={p.id} onClick={() => applyBulk({ pic: p.id })}>{p.nick}</MenuItem>
-                ))}
-              </Menu>
-              <Button size="small" onClick={() => setSel(new Set())}>Clear</Button>
-            </>
-          )}
-          <Tooltip
-            title={
-              blocked.length
-                ? `Blocked: ${blocked.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')}`
-                : dirty ? 'You have unsaved changes' : 'Everything is saved'
-            }
-          >
-            <span>
-              <Button
-                size="small"
-                variant="contained"
-                color={blocked.length ? 'error' : dirty ? 'primary' : 'inherit'}
-                startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
-                onClick={onSave}
-                disabled={saving || (!dirty && !blocked.length)}
-              >
-                {saving ? 'Saving…' : blocked.length ? 'Fix weights to save' : dirty ? 'Save to database' : 'Saved'}
-              </Button>
-            </span>
-          </Tooltip>
-        </Stack>
-        {blocked.length > 0 ? (
-          <Alert severity="error" variant="outlined" sx={{ mt: 1.5, py: 0.25 }}>
-            Saving is blocked — {blocked.map((x) => `${x.nick} is at ${Math.round(x.sum * 100)}%`).join(', ')}. Every
-            scorecard must total exactly 100%.{' '}
-            <Link component="button" onClick={() => onGoTo?.('people')} sx={{ fontWeight: 600 }}>
-              Fix on the Scorecards tab →
-            </Link>
-          </Alert>
-        ) : (dirty || lastSaved) && (
-          <Typography variant="caption" sx={{ color: dirty ? STATUS.warning : 'text.secondary', display: 'block', mt: 1 }}>
-            {dirty
-              ? `Unsaved changes to "${scenarioName || 'this scenario'}" — they are held in this browser until you save.`
-              : `Saved to the database${lastSaved ? ` at ${new Date(lastSaved).toLocaleTimeString()}` : ''} as "${scenarioName}".`}
-          </Typography>
-        )}
-      </Paper>
-      </LayoutBlock>
-
-      <LayoutBlock {...block('figures')}>
-      {/* Filter-aware totals — always reflects exactly what the table shows */}
-      <Paper variant="outlined" sx={{ p: 0, overflow: 'hidden' }}>
-        {/* Two to a line on a phone, as many as fit wider. Each tile draws its
-            own right and bottom rule, and the strip runs a pixel past the
-            frame on those sides so the outer ones are clipped away. */}
-        <Box sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          bgcolor: 'action.hover',
-          mr: '-1px',
-          mb: '-1px',
-        }}
-        >
-          {/* In the layout's order, without the hidden ones (shown faded while
-              the layout is being edited); on a phone, four until asked. */}
-          {lay.tiles
-            .map((id) => tileById[id])
-            .filter((t) => t && (editingLayout || !lay.hiddenTiles.includes(t.id)))
-            .filter((_, i) => editingLayout || !phone || allTiles || i < 4)
-            .map((t, i, list) => {
-              const off = lay.hiddenTiles.includes(t.id)
-              const wide = lay.wideTiles.includes(t.id)
-              return (
-            <Box
-              key={t.id}
-              data-tile={t.id}
-              sx={{
-                flex: { xs: wide ? '1 1 100%' : '1 1 40%', sm: wide ? '2 1 300px' : '1 1 150px' },
-                opacity: off ? 0.4 : 1,
-                px: { xs: 1.5, sm: 2 },
-                py: { xs: 1.25, sm: 1.5 },
-                borderRight: 1,
-                borderBottom: 1,
-                borderColor: 'divider',
-                minWidth: 0,
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.6875rem' }}>
-                  {t.label}
-                </Typography>
-                {t.help && (
-                  <Tooltip title={t.help} arrow>
-                    <InfoOutlinedIcon sx={{ fontSize: 13, color: 'text.disabled', cursor: 'help' }} />
-                  </Tooltip>
-                )}
-              </Box>
-              <Typography
-                sx={{
-                  fontSize: t.strong ? '1.35rem' : '1.15rem',
-                  fontWeight: t.strong ? 700 : 600,
-                  lineHeight: 1.2,
-                  mt: 0.25,
-                  fontVariantNumeric: 'tabular-nums',
-                  color: t.tone || 'text.primary',
-                }}
-              >
-                {t.value}
-              </Typography>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>{t.sub}</Typography>
-              {editingLayout && (
-                <Box sx={{ display: 'flex', gap: 0.25, mt: 0.5, opacity: 1 }} data-tile-controls={t.id}>
-                  <Tooltip title="Move left"><span><IconButton size="small" disabled={i === 0} onClick={() => editLayout((d) => ({ ...d, tiles: moveId(d.tiles, t.id, -1) }))} aria-label={`move ${t.label} left`}><ChevronLeftIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
-                  <Tooltip title="Move right"><span><IconButton size="small" disabled={i === list.length - 1} onClick={() => editLayout((d) => ({ ...d, tiles: moveId(d.tiles, t.id, 1) }))} aria-label={`move ${t.label} right`}><ChevronRightIcon sx={{ fontSize: 16 }} /></IconButton></span></Tooltip>
-                  <Tooltip title={wide ? 'Narrower' : 'Wider'}><IconButton size="small" onClick={() => editLayout((d) => ({ ...d, wideTiles: toggleId(d.wideTiles, t.id) }))} aria-label={`${wide ? 'narrower' : 'wider'} ${t.label}`}>{wide ? <WidthNormalOutlinedIcon sx={{ fontSize: 16 }} /> : <WidthWideOutlinedIcon sx={{ fontSize: 16 }} />}</IconButton></Tooltip>
-                  <Tooltip title={off ? 'Show' : 'Hide'}><IconButton size="small" onClick={() => editLayout((d) => ({ ...d, hiddenTiles: toggleId(d.hiddenTiles, t.id) }))} aria-label={`${off ? 'show' : 'hide'} ${t.label}`} data-toggle-tile={t.id}>{off ? <VisibilityOffOutlinedIcon sx={{ fontSize: 16 }} /> : <VisibilityOutlinedIcon sx={{ fontSize: 16 }} />}</IconButton></Tooltip>
-                </Box>
-              )}
+              <Box sx={{ flex: 1 }} />
+              <Button onClick={() => setSel(new Set())}>Clear selection</Button>
             </Box>
-              )
-            })}
-        </Box>
-        {/* On a phone the money figures wait behind a tap: eleven tiles were
-            six screens' worth of rows before the first project. */}
-        {phone && (
-          <Button
-            fullWidth
-            size="small"
-            onClick={() => setAllTiles((o) => !o)}
-            aria-expanded={allTiles}
-            endIcon={<ExpandMoreIcon sx={{ transform: allTiles ? 'rotate(180deg)' : 'none' }} />}
-            sx={{ borderRadius: 0, color: 'text.secondary', py: 0.75 }}
-          >
-            {allTiles ? 'Fewer figures' : 'All figures — cost, CAPEX, OPEX, ROI'}
-          </Button>
-        )}
-      </Paper>
-      </LayoutBlock>
-
-      <LayoutBlock {...block('tools')}>
-      {/*
-        * Export what is on screen, and import it back.
-        *
-        * The whole-plan export in the header is a different thing: it is the
-        * eleven-sheet book of record. This one is the working file — the rows
-        * you have filtered to, in a shape that can be edited and imported.
-        */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<FileDownloadOutlinedIcon />}
-          disabled={!rows.length || busy}
-          onClick={async () => {
-            setBusy(true)
-            try {
-              await exportFiltered(rows, assignees, describeFilter, filterParts)
-            } finally { setBusy(false) }
-          }}
-        >
-          Export {rows.length === projects.length ? 'all' : 'filtered'} ({rows.length})
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<FileUploadOutlinedIcon />}
-          disabled={busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          Import
-        </Button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx"
-          aria-label="import projects"
-          style={{ display: 'none' }}
-          onChange={async (e) => {
-            const file = e.target.files?.[0]
-            e.target.value = ''            // so the same file can be picked twice
-            if (!file) return
-            setBusy(true)
-            try {
-              const parsed = await readProjectsFile(await file.arrayBuffer())
-              setImporting({
-                fileName: file.name,
-                result: parsed.error
-                  ? { error: parsed.error, changes: [] }
-                  : planImport(parsed, { projects, people: assignees }, plan),
-              })
-            } catch (err) {
-              setImporting({ fileName: file.name, result: { error: `Could not read the file: ${err.message}`, changes: [] } })
-            } finally { setBusy(false) }
-          }}
-        />
-        <Typography variant="caption" sx={{ color: 'text.secondary', flex: '1 1 260px', display: { xs: 'none', sm: 'block' } }}>
-          {rows.length === projects.length
-            ? 'exports every project; filter the table first to export a subset'
-            : `exports the ${rows.length} row${rows.length === 1 ? '' : 's'} shown, not all ${projects.length}`}
-          {' · an import only touches the rows named in the file'}
-        </Typography>
-        {/* Which columns the register shows: an administrator's choice, made
-            once for everybody. A phone shows cards, not columns. */}
-        {canWrite && !phone && (
-          <>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<ViewColumnOutlinedIcon />}
-              onClick={(e) => setColsEl(e.currentTarget)}
-              aria-haspopup="menu"
-              data-columns-button
-              sx={{ ml: 'auto' }}
-            >
-              Columns{hidden.size ? ` (${PROJECT_COLUMNS.length - hidden.size}/${PROJECT_COLUMNS.length})` : ''}
-            </Button>
-            <Menu
-              anchorEl={colsEl}
-              open={!!colsEl}
-              onClose={() => setColsEl(null)}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-              MenuListProps={{ dense: true, 'aria-label': 'columns' }}
-            >
-              <Box sx={{ px: 2, pt: 0.5, pb: 1, maxWidth: 280 }}>
-                <Typography variant="subtitle2">Columns</Typography>
-                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
-                  Shown to everyone who opens the register. The project name, the select box and the cost-sheet button always show.
-                </Typography>
-                {colsNote && (
-                  <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', mt: 0.5 }} data-columns-note>
-                    {colsNote}
-                  </Typography>
-                )}
-              </Box>
-              <Divider />
-              {PROJECT_COLUMNS.map((c) => (
-                <MenuItem key={c.id} onClick={() => toggleColumn(c.id)} data-column={c.id}>
-                  <ListItemIcon>
-                    <Checkbox size="small" edge="start" checked={show(c.id)} tabIndex={-1} disableRipple sx={{ p: 0.25 }} />
-                  </ListItemIcon>
-                  <ListItemText primary={c.label} />
-                </MenuItem>
-              ))}
-              <Divider />
-              <MenuItem onClick={showAllColumns} disabled={!hidden.size}>
-                <ListItemText primary="Show every column" sx={{ pl: 0.5 }} />
-              </MenuItem>
-            </Menu>
-          </>
-        )}
-      </Box>
-      </LayoutBlock>
-
-      <LayoutBlock {...block('table')}>
-      {phone ? (
-        <PhoneList rows={rows} assignees={assignees} onOpen={setDetailKey} />
-      ) : (
-      <Box sx={{ position: 'relative' }}>
-      <TableContainer
-        component={Paper}
-        variant="outlined"
-        ref={scrollRef}
-        onScroll={checkScroll}
-        sx={{ maxHeight: '72vh' }}
-        data-register-table
-      >
-        <Table
-          size="small"
-          stickyHeader
-          sx={{
-            '& th, & td': { px: 1.25 },
-            // The held columns are opaque, so what scrolls under them is
-            // hidden, and take the row's hover and selected tint on top.
-            '& td.held': { bgcolor: 'background.paper' },
-            '& th.held': { bgcolor: 'background.paper' },
-            '& tr.MuiTableRow-hover:hover td.held': {
-              backgroundImage: `linear-gradient(${theme.palette.action.hover}, ${theme.palette.action.hover})`,
-            },
-            '& tr.Mui-selected td.held': {
-              backgroundImage: `linear-gradient(${theme.palette.action.selected}, ${theme.palette.action.selected})`,
-            },
-            '& tbody tr': { cursor: 'pointer' },
-          }}
-        >
-          <TableHead>
-            <TableRow>
-              <TableCell padding="checkbox" {...stick('select', true)}>
-                <Checkbox size="small" checked={allSelected} indeterminate={sel.size > 0 && !allSelected} onChange={toggleAll} />
-              </TableCell>
-              {/* The cost sheet has a button of its own; a click on the rest
-                  of the row opens the project's detail instead. */}
-              <TableCell padding="checkbox" {...stick('cost', true)} />
-              {show('jiraKey') && head('jiraKey', 'Jira', 'left', 88)}
-              {/* A floor on a phone only: there the table squeezed this column
-                  to the width of its smallest input, and the team / programme
-                  fields under each name were a few letters wide. Wider
-                  screens keep the column-width balance tuned below. */}
-              {head('summary', 'Project', 'left', { xs: 220, md: 0 })}
-              {show('objective') && <TableCell sx={{ minWidth: 118, maxWidth: 140, width: 140 }}>Objective</TableCell>}
-              {show('pic') && <TableCell sx={{ minWidth: 84 }}>PIC</TableCell>}
-              {show('savingHours') && head('savingHours', 'Saving hrs/mth', 'right')}
-              {/* The other half of the QUANTIFIED benefit: money that is money
-                  rather than time, so it sits next to the hours it adds to. */}
-              {show('cashBenefit') && head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 96)}
-              {/* And beside them the part no number carries: a case made only
-                  of figures is half a case. */}
-              {show('softBenefits') && <TableCell sx={{ minWidth: 150, maxWidth: 170, width: 160 }}>Soft benefits</TableCell>}
-              {show('fte') && head('fte', 'FTE', 'right')}
-              {show('manday') && head('manday', 'Mandays', 'right')}
-              {/* One column, not three: the build/CAPEX/OPEX split lives in
-                  the tooltip and in the cost sheet. */}
-              {show('investment') && head('investment', 'Investment', 'right', 84)}
-              {show('roi') && head('roi', 'ROI', 'right', 78)}
-              {show('payback') && head('paybackMonths', 'Payback', 'right', 74)}
-              {show('commit') && <TableCell sx={{ minWidth: 104 }}>Commit</TableCell>}
-              {show('status') && <TableCell sx={{ minWidth: 92, maxWidth: 104, width: 104 }}>Status</TableCell>}
-              {show('delete') && <TableCell padding="checkbox" />}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((p) => {
-              const objIdx = OBJECTIVES.findIndex((o) => o.id === p.objective)
-              return (
-                <TableRow
-                  key={p.key}
-                  hover
-                  selected={sel.has(p.key)}
-                  onMouseDown={() => { editing.current = !!document.activeElement?.matches?.('input, textarea') }}
-                  onClick={(e) => openFromRow(e, p.key)}
-                  // Faded cell by cell, not as a row: a see-through row would
-                  // let the scrolled columns show through the held ones.
-                  sx={OUT_OF_PLAN.has(p.commitLevel) || p.outsideTeam ? { '& > td > *': { opacity: 0.55 } } : undefined}
+          )}
+          {phone ? (
+            <PhoneList rows={rows} assignees={assignees} onOpen={setDetailKey} onClear={clearFilters} filtered={filtersOn} />
+          ) : (
+            <Box sx={{ position: 'relative' }}>
+              <TableContainer
+                component={Paper}
+                variant="outlined"
+                ref={scrollRef}
+                onScroll={checkScroll}
+                sx={{ maxHeight: '72vh' }}
+                data-register-table
+              >
+                <Table
+                  size="small"
+                  stickyHeader
+                  aria-label="project register"
+                  sx={{
+                    '& th': { whiteSpace: 'nowrap' },
+                    '& td': {
+                      fontSize: '0.8125rem', lineHeight: '18px', py: 1.5, verticalAlign: 'middle',
+                    },
+                    '& th, & td': { px: 2 },
+                    '& th.MuiTableCell-paddingCheckbox, & td.MuiTableCell-paddingCheckbox': { px: 1, width: 40 },
+                    // The held columns are opaque, so what scrolls under them is
+                    // hidden, and take the row's hover and selected tint too.
+                    '& td.held': { bgcolor: surface },
+                    '& tbody tr.MuiTableRow-hover:hover td.held': { bgcolor: 'bg.subtle' },
+                    '& tbody tr.Mui-selected td.held': { bgcolor: picked },
+                    '& tbody tr': { cursor: 'pointer' },
+                    // The pencil shows on the row in hand, not on all 86.
+                    '& .row-tool': { opacity: 0, transition: 'opacity 120ms' },
+                    '& tr:hover .row-tool, & .row-tool:focus-visible': { opacity: 1 },
+                    '@media (hover: none)': { '& .row-tool': { opacity: 1 } },
+                  }}
                 >
-                  <TableCell padding="checkbox" {...stick('select')}>
-                    <Checkbox
-                      size="small"
-                      checked={sel.has(p.key)}
-                      onChange={() => setSel((s) => {
-                        const n = new Set(s)
-                        n.has(p.key) ? n.delete(p.key) : n.add(p.key)
-                        return n
-                      })}
-                    />
-                  </TableCell>
-                  <TableCell padding="checkbox" {...stick('cost')}>
-                    <Tooltip title={`Cost sheet: effort, CAPEX, monthly cost and notes for ${p.jiraKey || p.key}`}>
-                      <IconButton size="small" onClick={() => setCostKey(p.key)} aria-label="open cost breakdown">
-                        <ReceiptLongIcon sx={{ fontSize: 17, color: p.comment ? STATUS.good : undefined }} />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                  {show('jiraKey') && (
-                  <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }} {...stick('jiraKey')}>
-                    <TextCell
-                      value={p.jiraKey}
-                      placeholder="no key"
-                      width={78}
-                      onChange={(v) => onUpdate(p.key, { jiraKey: v })}
-                      bold
-                    />
-                  </TableCell>
-                  )}
-                  <TableCell sx={{ maxWidth: 320, minWidth: 240 }} {...stick('summary')}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
-                      {/* The way into the project: its name opens its detail, in a popup. */}
-                      <NameCell p={p} onOpen={setDetailKey} onRename={(v) => onUpdate(p.key, { summary: v || 'Untitled' })} />
-                    </Box>
-                    <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', mt: 0.25 }}>
-                      <TextCell
-                        value={p.team}
-                        placeholder="Team"
-                        width={58}
-                        onChange={(v) => onUpdate(p.key, { team: v })}
-                      />
-                      <TextCell
-                        value={p.subTeam}
-                        placeholder="Sub team"
-                        width={66}
-                        onChange={(v) => onUpdate(p.key, { subTeam: v })}
-                      />
-                      <TextCell
-                        value={p.program}
-                        placeholder="Programme"
-                        width={76}
-                        onChange={(v) => onUpdate(p.key, { program: v })}
-                      />
-                    </Box>
-                  </TableCell>
-                  {show('objective') && (
-                  <TableCell>
-                    <Select
-                      size="small"
-                      variant="standard"
-                      value={p.objective}
-                      onChange={(e) => onUpdate(p.key, { objective: e.target.value })}
-                      // A hard width, not 100%: under table-layout auto the
-                      // intrinsic width of "2. Process automation" sets the
-                      // column, and maxWidth on the cell is ignored.
-                      sx={{ fontSize: '0.8125rem', width: 132, maxWidth: 132 }}
-                      renderValue={(v) => {
-                        const o = OBJ_BY_ID[v]
-                        // Ellipsised rather than allowed to set the column width:
-                        // "2. Process automation" alone was pushing the money
-                        // columns off the right edge of the table.
-                        return (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
-                            <Box sx={{ width: 8, height: 8, borderRadius: '2px', bgcolor: CHART[mode].series[objIdx], flexShrink: 0 }} />
-                            <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {o?.no}. {o?.short}
-                            </Box>
-                          </Box>
-                        )
-                      }}
-                    >
-                      {OBJECTIVES.map((o) => <MenuItem key={o.id} value={o.id}>{o.no}. {o.short}</MenuItem>)}
-                    </Select>
-                    <AlsoServes
-                      project={p}
-                      onChange={(ids) => onUpdate(p.key, { objectives: ids })}
-                    />
-                  </TableCell>
-                  )}
-                  {show('pic') && (
-                  <TableCell>
-                    <Select
-                      size="small"
-                      variant="standard"
-                      displayEmpty
-                      value={p.pic ?? ''}
-                      onChange={(e) => onUpdate(p.key, { pic: e.target.value || null })}
-                      sx={{ fontSize: '0.8125rem', width: 76, maxWidth: 76, color: p.pic ? 'text.primary' : STATUS.critical }}
-                      renderValue={(v) => (v ? assignees.find((x) => x.id === v)?.nick : 'TBC')}
-                    >
-                      <MenuItem value=""><em>TBC — unassigned</em></MenuItem>
-                      {assignees.map((x) => (
-                        <MenuItem key={x.id} value={x.id}>
-                          {x.nick} — {x.name}
-                          {x.scorecard === false && ' (no scorecard)'}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </TableCell>
-                  )}
-                  {show('savingHours') && (
-                  <TableCell align="right">
-                    {/* Still editable — it is a real figure and worth keeping
-                        on the record. Struck through because it is not ours:
-                        the PIC is IT or the business, so the hours are outside
-                        the team's commitment and outside every scorecard. */}
-                    <Tooltip title={p.outsideTeam
-                      ? `Delivered by ${assignees.find((x) => x.id === p.pic)?.nick || 'a partner'} — kept on the register, but NOT counted in the team's committed saving hours and not on anyone's scorecard.`
-                      : ''}>
-                      <Box sx={{ textDecoration: p.outsideTeam ? 'line-through' : 'none' }}>
-                        <NumCell
-                          value={p.savingHours}
-                          estimated={false}
-                          onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
+                  <TableHead>
+                    <TableRow>
+                      <TableCell padding="checkbox" {...stick('select', true)}>
+                        <Checkbox
+                          size="small"
+                          checked={allSelected}
+                          indeterminate={sel.size > 0 && !allSelected}
+                          onChange={toggleAll}
+                          inputProps={{ 'aria-label': 'select every project shown' }}
                         />
-                      </Box>
-                    </Tooltip>
-                  </TableCell>
-                  )}
-                  {show('cashBenefit') && (
-                  <TableCell align="right">
-                    <Tooltip title={p.monetaryAnnualBenefit
-                      ? `${fmtMoney(p.monetaryAnnualBenefit, sym)} a year of cash benefit, on top of ${fmtMoney((p.hoursMonthlyBenefit || 0) * 12, sym)} from the hours. Both count toward the ROI.`
-                      : 'Cash this delivers that the saving hours do not already capture — a licence dropped, a penalty avoided. Stated per year. Leave empty where the hours ARE the saving, or it is counted twice.'}>
-                      <Box>
-                        <NumCell
-                          value={p.monetaryAnnualBenefit ?? null}
-                          estimated={false}
-                          width={92}
-                          onChange={(v) => onUpdate(p.key, { monetaryBenefit: v })}
-                        />
-                      </Box>
-                    </Tooltip>
-                  </TableCell>
-                  )}
-                  {show('softBenefits') && (
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <SoftBenefitCell
-                      value={p.softBenefits}
-                      onChange={(v) => onUpdate(p.key, { softBenefits: v })}
-                    />
-                  </TableCell>
-                  )}
-                  {show('fte') && (
-                  <TableCell align="right">
-                    {/* Derived, not typed. The source workbook computes its
-                        own column the same way — ROUND(saving/(22*8), 1) — so
-                        this reads as a formula result, not an input. */}
-                    <Tooltip title={
-                      p.savingHours == null
-                        ? 'Saving hours are still TBC, so there is no FTE to release yet.'
-                        : `${fmtHours(p.savingHours)} hrs/month ÷ ${fin.hoursPerFteMonth} = ${(p.fte ?? 0).toFixed(1)} FTE. Enter saving hours and this follows; change the FTE ratio on the Model tab and every row moves at once.`
-                    }>
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          fontSize: '0.8125rem',
-                          fontVariantNumeric: 'tabular-nums',
-                          cursor: 'help',
-                          color: p.fte > 0 ? 'text.primary' : 'text.disabled',
-                        }}
-                      >
-                        {p.savingHours == null ? '—' : (p.fte ?? 0).toFixed(1)}
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-                  )}
-                  {show('manday') && (
-                  <TableCell align="right">
-                    {p.tasks && p.tasks.length ? (
-                      // Derived from the tasks, so it is a result, not an input.
-                      // Clicking it opens the breakdown it is the sum of.
-                      <Tooltip title={`${p.tasks.length} task${p.tasks.length === 1 ? '' : 's'} totalling ${fmtHours(p.manday)} mandays — click to see the breakdown`}>
-                        <Box
-                          component="button"
-                          type="button"
-                          onClick={() => setCostKey(p.key)}
-                          sx={{
-                            border: 0, background: 'none', p: 0, cursor: 'pointer', font: 'inherit',
-                            fontSize: '0.8125rem', fontVariantNumeric: 'tabular-nums',
-                            color: 'primary.main', textDecoration: 'underline dotted',
-                          }}
+                      </TableCell>
+                      {/* The cost sheet has a button of its own; a click on the rest
+                          of the row opens the project's detail instead. */}
+                      <TableCell padding="checkbox" {...stick('cost', true)} />
+                      {show('jiraKey') && head('jiraKey', 'Jira', 'left', 96)}
+                      {head('summary', 'Project', 'left', { sm: 208, md: 248 })}
+                      {show('objective') && <TableCell sx={{ minWidth: 196 }}>Objective</TableCell>}
+                      {show('pic') && <TableCell sx={{ minWidth: 104 }}>PIC</TableCell>}
+                      {show('savingHours') && head('savingHours', 'Saving hrs/mth', 'right', 112)}
+                      {/* The other half of the QUANTIFIED benefit: money that is money
+                          rather than time, so it sits next to the hours it adds to. */}
+                      {show('cashBenefit') && head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 124)}
+                      {/* And beside them the part no number carries: a case made only
+                          of figures is half a case. */}
+                      {show('softBenefits') && <TableCell sx={{ minWidth: 176 }}>Soft benefits</TableCell>}
+                      {show('fte') && head('fte', 'FTE', 'right', 64)}
+                      {show('manday') && head('manday', 'Mandays', 'right', 92)}
+                      {/* One column, not three: the build/CAPEX/OPEX split lives in
+                          the tooltip and in the cost sheet. */}
+                      {show('investment') && head('investment', 'Investment', 'right', 100)}
+                      {show('roi') && head('roi', 'ROI', 'right', 80)}
+                      {show('payback') && head('paybackMonths', 'Payback', 'right', 88)}
+                      {show('commit') && <TableCell sx={{ minWidth: 124 }}>Commit</TableCell>}
+                      {show('status') && <TableCell sx={{ minWidth: 112 }}>Status</TableCell>}
+                      {show('delete') && <TableCell padding="checkbox" />}
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {rows.map((p) => {
+                      const objIdx = OBJECTIVES.findIndex((o) => o.id === p.objective)
+                      return (
+                        <TableRow
+                          key={p.key}
+                          hover
+                          selected={sel.has(p.key)}
+                          onMouseDown={() => { editing.current = !!document.activeElement?.matches?.('input, textarea') }}
+                          onClick={(e) => openFromRow(e, p.key)}
+                          // Faded cell by cell, not as a row: a see-through row would
+                          // let the scrolled columns show through the held ones.
+                          sx={muted(p) ? { '& > td > *': { opacity: 0.55 } } : undefined}
                         >
-                          {fmtHours(p.manday)}
-                        </Box>
-                      </Tooltip>
-                    ) : (
-                      <NumCell
-                        value={p.manday}
-                        width={56}
-                        estimated={p.mandayEstimated}
-                        onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
-                      />
+                          <TableCell padding="checkbox" {...stick('select')}>
+                            <Checkbox
+                              size="small"
+                              checked={sel.has(p.key)}
+                              inputProps={{ 'aria-label': `select ${p.summary || p.key}` }}
+                              onChange={() => setSel((s) => {
+                                const n = new Set(s)
+                                if (n.has(p.key)) n.delete(p.key)
+                                else n.add(p.key)
+                                return n
+                              })}
+                            />
+                          </TableCell>
+                          <TableCell padding="checkbox" {...stick('cost')}>
+                            <Tooltip title={`Cost sheet for ${p.jiraKey || p.key}: effort, CAPEX, monthly cost, notes${p.comment ? '. Has notes.' : ''}`}>
+                              <IconButton
+                                size="small"
+                                onClick={() => setCostKey(p.key)}
+                                aria-label="open cost breakdown"
+                                sx={{ width: 28, height: 28, color: p.comment ? 'text.primary' : 'text.tertiary', '&:hover': { color: 'text.primary' } }}
+                              >
+                                <ReceiptLongIcon sx={{ fontSize: 17 }} />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                          {show('jiraKey') && (
+                            <TableCell sx={{ whiteSpace: 'nowrap' }} {...stick('jiraKey')}>
+                              <TextCell
+                                value={p.jiraKey}
+                                placeholder="—"
+                                width={84}
+                                onChange={(v) => onUpdate(p.key, { jiraKey: v })}
+                                label="Jira key"
+                              />
+                            </TableCell>
+                          )}
+                          <TableCell sx={{ maxWidth: { sm: 240, md: 320 }, minWidth: { sm: 208, md: 248 } }} {...stick('summary')}>
+                            {/* The way into the project: its name opens its detail, in a popup. */}
+                            <NameCell p={p} onOpen={setDetailKey} onRename={(v) => onUpdate(p.key, { summary: v || 'Untitled' })} />
+                            <MetaCell p={p} onUpdate={(patch) => onUpdate(p.key, patch)} />
+                          </TableCell>
+                          {show('objective') && (
+                            <TableCell>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <CellSelect
+                                  value={p.objective}
+                                  onChange={(e) => onUpdate(p.key, { objective: e.target.value })}
+                                  width={180}
+                                  sx={{ flexShrink: 0 }}
+                                  label="objective"
+                                  renderValue={(v) => (
+                                    <Box sx={{
+                                      display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0,
+                                    }}
+                                    >
+                                      <Dot color={CHART[mode].series[objIdx]} />
+                                      <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {OBJ_BY_ID[v]?.short}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                >
+                                  {OBJECTIVES.map((o, i) => (
+                                    <MenuItem key={o.id} value={o.id}>
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <Dot color={CHART[mode].series[i]} />
+                                        {o.no}. {o.short}
+                                      </Box>
+                                    </MenuItem>
+                                  ))}
+                                </CellSelect>
+                                <AlsoServes
+                                  project={p}
+                                  onChange={(ids) => onUpdate(p.key, { objectives: ids })}
+                                />
+                              </Box>
+                            </TableCell>
+                          )}
+                          {show('pic') && (
+                            <TableCell>
+                              <CellSelect
+                                displayEmpty
+                                value={p.pic ?? ''}
+                                onChange={(e) => onUpdate(p.key, { pic: e.target.value || null })}
+                                width={92}
+                                label="PIC"
+                                renderValue={(v) => (v
+                                  ? assignees.find((x) => x.id === v)?.nick
+                                  : <Box component="span" sx={{ color: tone.warning.fg }}>No PIC</Box>)}
+                              >
+                                <MenuItem value="">No PIC yet</MenuItem>
+                                {assignees.map((x) => (
+                                  <MenuItem key={x.id} value={x.id}>
+                                    {x.nick}
+                                    <Typography component="span" variant="body2" sx={{ ml: 1.5, color: 'text.secondary' }}>
+                                      {x.name}{x.scorecard === false ? ', no scorecard' : ''}
+                                    </Typography>
+                                  </MenuItem>
+                                ))}
+                              </CellSelect>
+                            </TableCell>
+                          )}
+                          {show('savingHours') && (
+                            <TableCell align="right">
+                              {/* Still editable — it is a real figure and worth keeping
+                                  on the record. Struck through because it is not ours:
+                                  the PIC is IT or the business, so the hours are outside
+                                  the team's commitment and outside every scorecard. */}
+                              <Tooltip title={p.outsideTeam
+                                ? `Delivered by ${assignees.find((x) => x.id === p.pic)?.nick || 'a partner'}: kept on the register, but not counted in the team's committed saving hours and not on anyone's scorecard.`
+                                : p.savingHours == null ? 'Saving hours are TBC in the source. This project cannot be committed until it is quantified.' : ''}
+                              >
+                                <Box sx={{ display: 'inline-block', textDecoration: p.outsideTeam ? 'line-through' : 'none' }}>
+                                  <NumCell
+                                    value={p.savingHours}
+                                    placeholder="TBC"
+                                    estimated={false}
+                                    width={88}
+                                    label="saving hours a month"
+                                    onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
+                                  />
+                                </Box>
+                              </Tooltip>
+                            </TableCell>
+                          )}
+                          {show('cashBenefit') && (
+                            <TableCell align="right">
+                              <Tooltip title={p.monetaryAnnualBenefit
+                                ? `${fmtMoney(p.monetaryAnnualBenefit, sym)} a year of cash benefit, on top of ${fmtMoney((p.hoursMonthlyBenefit || 0) * 12, sym)} from the hours. Both count toward the ROI.`
+                                : 'Cash this delivers that the saving hours do not already capture: a licence dropped, a penalty avoided. Per year. Leave it empty where the hours are the saving, or it is counted twice.'}
+                              >
+                                <Box sx={{ display: 'inline-block' }}>
+                                  <NumCell
+                                    value={p.monetaryAnnualBenefit ?? null}
+                                    estimated={false}
+                                    width={100}
+                                    label="cash benefit a year"
+                                    onChange={(v) => onUpdate(p.key, { monetaryBenefit: v })}
+                                  />
+                                </Box>
+                              </Tooltip>
+                            </TableCell>
+                          )}
+                          {show('softBenefits') && (
+                            <TableCell onClick={(e) => e.stopPropagation()}>
+                              <SoftBenefitCell
+                                value={p.softBenefits}
+                                onChange={(v) => onUpdate(p.key, { softBenefits: v })}
+                              />
+                            </TableCell>
+                          )}
+                          {show('fte') && (
+                            <TableCell align="right">
+                              {/* Derived, not typed. The source workbook computes its
+                                  own column the same way — ROUND(saving/(22*8), 1) — so
+                                  this reads as a formula result, not an input. */}
+                              <Tooltip title={
+                                p.savingHours == null
+                                  ? 'Saving hours are still TBC, so there is no FTE to release yet.'
+                                  : `${fmtHours(p.savingHours)} hrs a month ÷ ${fin.hoursPerFteMonth} = ${(p.fte ?? 0).toFixed(1)} FTE. It follows the saving hours, and the FTE ratio on the Model page moves every row at once.`
+                              }
+                              >
+                                <Box component="span" sx={{ cursor: 'help', color: p.fte > 0 ? 'text.primary' : 'text.tertiary' }}>
+                                  {p.savingHours == null ? '—' : (p.fte ?? 0).toFixed(1)}
+                                </Box>
+                              </Tooltip>
+                            </TableCell>
+                          )}
+                          {show('manday') && (
+                            <TableCell align="right">
+                              {p.tasks && p.tasks.length ? (
+                                // Derived from the tasks, so it is a result, not an input.
+                                // Clicking it opens the breakdown it is the sum of.
+                                <Tooltip title={`${p.tasks.length} task${p.tasks.length === 1 ? '' : 's'} totalling ${fmtHours(p.manday)} mandays. Click to see the breakdown.`}>
+                                  <Box
+                                    component="button"
+                                    type="button"
+                                    onClick={() => setCostKey(p.key)}
+                                    sx={{
+                                      border: 0,
+                                      background: 'none',
+                                      p: '5px 8px',
+                                      cursor: 'pointer',
+                                      font: 'inherit',
+                                      fontVariantNumeric: 'tabular-nums',
+                                      color: 'primary.text',
+                                      textDecoration: 'underline dotted',
+                                      textUnderlineOffset: 3,
+                                      borderRadius: '6px',
+                                    }}
+                                  >
+                                    {fmtHours(p.manday)}
+                                  </Box>
+                                </Tooltip>
+                              ) : (
+                                <NumCell
+                                  value={p.manday}
+                                  width={72}
+                                  estimated={p.mandayEstimated}
+                                  label="mandays"
+                                  onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
+                                />
+                              )}
+                            </TableCell>
+                          )}
+                          {show('investment') && (
+                            <TableCell align="right">
+                              {p.investment == null ? (
+                                <Tooltip title={`No mandays and no CAPEX yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate. Open the cost sheet (the receipt icon) to add CAPEX or a monthly running cost.`}>
+                                  <Box component="span" sx={{ color: 'text.tertiary', cursor: 'help' }}>—</Box>
+                                </Tooltip>
+                              ) : (
+                                <Tooltip title={`Build ${fmtMoney(p.buildCost ?? 0, sym)} plus CAPEX ${fmtMoney(p.capex ?? 0, sym)} = ${fmtMoney(p.investment, sym)} one-off${p.opexRunRate > 0 ? `, plus ${fmtMoney(p.opexRunRate, sym)} a month of OPEX (${fmtMoney(p.opexYear, sym)} in 2026)` : ', with no monthly running cost'}. The cost sheet has the month-by-month table.`}>
+                                  <Box component="span" sx={{ cursor: 'help' }}>{fmtMoneyShort(p.investment, sym)}</Box>
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                          )}
+                          {show('roi') && (
+                            <TableCell align="right">
+                              {p.roi == null ? (
+                                <Tooltip title={
+                                  p.savingHours == null
+                                    ? 'Saving hours are still TBC, so there is no benefit to return.'
+                                    : `Worth ${fmtMoneyShort(p.annualBenefit, sym)} a year. Enter mandays or a CAPEX to get a return: break-even is ${Math.round(p.breakEvenMandays).toLocaleString()} mandays, and ${Math.round(p.affordableMandays).toLocaleString()} clears the gate.`
+                                }
+                                >
+                                  <Box component="span" sx={{ color: 'text.tertiary', cursor: 'help' }}>—</Box>
+                                </Tooltip>
+                              ) : (
+                                <Tooltip title={`${p.gate === 'pass' ? 'Clears' : 'Below'} the ${fmtRoi(fin.roiGate)} gate. ${fmtMoney(p.monthlyBenefit, sym)} a month less ${fmtMoney(p.opexRunRate, sym)} of OPEX = ${fmtMoney(p.netMonthly, sym)} net; ${fmtMoney(p.netHorizonBenefit, sym)} over ${horizon} months against ${fmtMoney(p.investment, sym)} invested, net ${fmtMoney(p.netBenefit, sym)}, ${p.paybackMonths == null ? 'and it never pays back' : `paying back in ${fmtMonths(p.paybackMonths)}`}.`}>
+                                  {/* Benefit per project lives in this tooltip, the totals
+                                      strip, the scorecard portfolio and the workbook — a
+                                      column for it as well pushed Commit off the table. */}
+                                  <Box
+                                    component="span"
+                                    aria-label={`${fmtRoi(p.roi)}, ${p.gate === 'pass' ? 'clears' : 'below'} the gate`}
+                                    sx={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 1.5, cursor: 'help',
+                                    }}
+                                  >
+                                    <Dot color={p.gate === 'pass' ? tone.success.solid : tone.danger.solid} />
+                                    {fmtRoi(p.roi)}
+                                  </Box>
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                          )}
+                          {show('payback') && (
+                            <TableCell align="right">
+                              {p.paybackMonths == null ? (
+                                <Tooltip title={
+                                  p.savingHours == null
+                                    ? 'Saving hours are still TBC, so there is nothing to pay the investment back.'
+                                    : p.netMonthly != null && p.netMonthly <= 0
+                                      ? `The ${fmtMoney(p.opexRunRate, sym)} a month of OPEX is at or above the ${fmtMoney(p.monthlyBenefit, sym)} a month this returns, so it never pays back.`
+                                      : 'Enter mandays or a CAPEX to get a payback period.'
+                                }
+                                >
+                                  <Box component="span" sx={{ color: p.netMonthly != null && p.netMonthly <= 0 && p.investment != null ? tone.danger.fg : 'text.tertiary', cursor: 'help' }}>
+                                    {p.netMonthly != null && p.netMonthly <= 0 && p.investment != null ? 'Never' : '—'}
+                                  </Box>
+                                </Tooltip>
+                              ) : (
+                                <Tooltip title={`${fmtMoney(p.investment, sym)} invested, returning ${fmtMoney(p.netMonthly, sym)} a month after OPEX: repaid in ${fmtMonths(p.paybackMonths)}. The gate is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}.`}>
+                                  <Box component="span" sx={{ cursor: 'help' }}>{fmtMonthsShort(p.paybackMonths)}</Box>
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                          )}
+                          {show('commit') && (
+                            <TableCell>
+                              <CellSelect
+                                value={p.commitLevel}
+                                onChange={(e) => onUpdate(p.key, { commitLevel: e.target.value })}
+                                width={112}
+                                label="commit level"
+                                renderValue={(v) => (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                    {COMMIT_DOT[v] === 'hollow'
+                                      ? <Dot hollow />
+                                      : <Dot color={tone[COMMIT_DOT[v]]?.solid} />}
+                                    {COMMIT_LEVELS.find((c) => c.id === v)?.label}
+                                  </Box>
+                                )}
+                              >
+                                {COMMIT_LEVELS.map((c) => (
+                                  <MenuItem key={c.id} value={c.id} sx={{ alignItems: 'flex-start', py: 1.5 }}>
+                                    <Box>
+                                      <Typography variant="body1" sx={{ fontWeight: 500 }}>{c.label}</Typography>
+                                      <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'normal', maxWidth: 300 }}>{c.help}</Typography>
+                                    </Box>
+                                  </MenuItem>
+                                ))}
+                              </CellSelect>
+                            </TableCell>
+                          )}
+                          {show('status') && (
+                            <TableCell>
+                              {/* A pill, coloured by where the work is; the word is on it
+                                  too. Whatever Jira calls it is shown as it is. */}
+                              <StatePills p={p} column />
+                            </TableCell>
+                          )}
+                          {show('delete') && (
+                            <TableCell padding="checkbox">
+                              <Tooltip title="Delete this project">
+                                <IconButton
+                                  size="small"
+                                  className="row-tool"
+                                  aria-label={`delete ${p.summary || p.key}`}
+                                  sx={{ width: 28, height: 28, color: 'text.secondary', '&:hover': { color: tone.danger.fg } }}
+                                  onClick={() => {
+                                    if (confirm(`Delete "${p.summary}"? This cannot be undone.`)) onDelete([p.key])
+                                  }}
+                                >
+                                  <DeleteOutlineIcon sx={{ fontSize: 17 }} />
+                                </IconButton>
+                              </Tooltip>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      )
+                    })}
+                    {rows.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={3 + PROJECT_COLUMNS.length} sx={{ cursor: 'default', borderBottom: 0 }}>
+                          <EmptyState
+                            icon={FolderOpenOutlinedIcon}
+                            title="No projects match these filters"
+                            body="Clear a filter or search for something else."
+                            action={filtersOn ? <Button variant="outlined" onClick={clearFilters}>Clear filters</Button> : null}
+                          />
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </TableCell>
-                  )}
-                  {show('investment') && (
-                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
-                    {p.investment == null ? (
-                      <Tooltip title={`No mandays and no CAPEX yet. This project can afford ${p.affordableMandays == null ? '—' : Math.round(p.affordableMandays).toLocaleString()} mandays and still clear the gate. Open the cost sheet (the receipt icon) to add CAPEX or a monthly operating cost.`}>
-                        <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
-                      </Tooltip>
-                    ) : (
-                      <Tooltip title={`Build ${fmtMoney(p.buildCost ?? 0, sym)} + CAPEX ${fmtMoney(p.capex ?? 0, sym)} = ${fmtMoney(p.investment, sym)} one-off${p.opexRunRate > 0 ? `, plus ${fmtMoney(p.opexRunRate, sym)} a month of OPEX (${fmtMoney(p.opexYear, sym)} in 2026)` : ', with no monthly operating cost'}. The cost sheet (the receipt icon) has the month-by-month table.`}>
-                        <Typography variant="body2" sx={{ fontSize: '0.8125rem', fontVariantNumeric: 'tabular-nums', cursor: 'help' }}>
-                          {fmtMoneyShort(p.investment, sym)}
-                        </Typography>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  )}
-                  {show('roi') && (
-                  <TableCell align="right">
-                    {p.roi == null ? (
-                      <Tooltip title={
-                        p.savingHours == null
-                          ? 'Saving hours are still TBC, so there is no benefit to return.'
-                          : `Worth ${fmtMoneyShort(p.annualBenefit, sym)} a year. Enter mandays or a CAPEX to get a return — break-even is ${Math.round(p.breakEvenMandays).toLocaleString()} mandays, and ${Math.round(p.affordableMandays).toLocaleString()} clears the gate.`
-                      }>
-                        <Typography variant="caption" sx={{ color: 'text.disabled', cursor: 'help' }}>—</Typography>
-                      </Tooltip>
-                    ) : (
-                      <Tooltip title={`${fmtMoney(p.monthlyBenefit, sym)} a month less ${fmtMoney(p.opexRunRate, sym)} of OPEX = ${fmtMoney(p.netMonthly, sym)} net; ${fmtMoney(p.netHorizonBenefit, sym)} over ${horizon} months against ${fmtMoney(p.investment, sym)} invested — net ${fmtMoney(p.netBenefit, sym)}, ${p.paybackMonths == null ? 'and it never pays back' : `paying back in ${fmtMonths(p.paybackMonths)}`}. Gate is ${fmtRoi(fin.roiGate)}.`}>
-                        {/* Benefit per project lives in this tooltip, the totals
-                            strip, the scorecard portfolio and the workbook — a
-                            column for it as well pushed Commit off the table. */}
-                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.4, justifyContent: 'flex-end', cursor: 'help' }}>
-                          {p.gate === 'pass'
-                            ? <CheckCircleOutlineIcon sx={{ fontSize: 13, color: STATUS.good }} />
-                            : <ErrorOutlineIcon sx={{ fontSize: 13, color: STATUS.critical }} />}
-                          <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: '0.8125rem', color: p.gate === 'pass' ? STATUS.good : STATUS.critical }}>
-                            {fmtRoi(p.roi)}
-                          </Typography>
-                        </Box>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  )}
-                  {show('payback') && (
-                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontSize: '0.8125rem' }}>
-                    {p.paybackMonths == null ? (
-                      <Tooltip title={
-                        p.savingHours == null
-                          ? 'Saving hours are still TBC, so there is nothing to pay the investment back.'
-                          : p.netMonthly != null && p.netMonthly <= 0
-                            ? `The ${fmtMoney(p.opexRunRate, sym)} a month of OPEX is at or above the ${fmtMoney(p.monthlyBenefit, sym)} a month this returns, so it never pays back. Blank, deliberately — not a fast payback and not a negative one.`
-                            : 'Enter mandays or a CAPEX to get a payback period.'
-                      }>
-                        <Typography variant="caption" sx={{ color: p.netMonthly != null && p.netMonthly <= 0 ? STATUS.critical : 'text.disabled', cursor: 'help' }}>
-                          {p.netMonthly != null && p.netMonthly <= 0 && p.investment != null ? 'never' : '—'}
-                        </Typography>
-                      </Tooltip>
-                    ) : (
-                      <Tooltip title={`${fmtMoney(p.investment, sym)} invested, returning ${fmtMoney(p.netMonthly, sym)} a month after OPEX — repaid in ${fmtMonths(p.paybackMonths)}. The gate is a payback of ${fmtMonths(gateAsPaybackMonths(fin))}.`}>
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            fontSize: '0.8125rem',
-                            fontVariantNumeric: 'tabular-nums',
-                            cursor: 'help',
-                            color: p.gate === 'pass' ? 'text.primary' : STATUS.critical,
-                          }}
-                        >
-                          {fmtMonthsShort(p.paybackMonths)}
-                        </Typography>
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  )}
-                  {show('commit') && (
-                  <TableCell>
-                    <Select
-                      size="small"
-                      variant="standard"
-                      value={p.commitLevel}
-                      onChange={(e) => onUpdate(p.key, { commitLevel: e.target.value })}
-                      sx={{ fontSize: '0.8125rem', width: '100%' }}
-                      renderValue={(v) => (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: COMMIT_COLOR[v], flexShrink: 0 }} />
-                          {COMMIT_LEVELS.find((c) => c.id === v)?.label}
-                        </Box>
-                      )}
-                    >
-                      {COMMIT_LEVELS.map((c) => (
-                        <MenuItem key={c.id} value={c.id}>
-                          <Box>
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>{c.label}</Typography>
-                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>{c.help}</Typography>
-                          </Box>
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </TableCell>
-                  )}
-                  {show('status') && (
-                  <TableCell>
-                    {/* A pill, coloured by where the work is; the word is on it
-                        too. Whatever Jira calls it is shown as it is. */}
-                    {projectOnHold(p)
-                      ? <Pill label="On Hold" tone="warn" />
-                      : (p.srcStatus || p.status)
-                      ? <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />
-                      : <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>}
-                    {p.pastDue && (
-                      // The date lives in the tooltip: spelled out here it was
-                      // the widest thing in the column and pushed ROI off-screen.
-                      <Tooltip title={`Due ${p.due} and not Done — already past due`}>
-                        <Typography
-                          variant="caption"
-                          sx={{ display: 'block', color: STATUS.critical, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'help' }}
-                        >
-                          past due
-                        </Typography>
-                      </Tooltip>
-                    )}
-                    {p.savingHours == null && (
-                      <Tooltip title="Saving hours are TBC in the source — this project cannot be committed until it is quantified">
-                        <WarningAmberIcon sx={{ fontSize: 14, color: STATUS.warning, ml: 0.5, verticalAlign: 'middle' }} />
-                      </Tooltip>
-                    )}
-                  </TableCell>
-                  )}
-                  {show('delete') && (
-                  <TableCell padding="checkbox">
-                    <Tooltip title="Delete this project">
-                      <IconButton
-                        size="small"
-                        onClick={() => {
-                          if (confirm(`Delete "${p.summary}"? This cannot be undone.`)) onDelete([p.key])
-                        }}
-                      >
-                        <DeleteOutlineIcon sx={{ fontSize: 17 }} />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                  )}
-                </TableRow>
-              )
-            })}
-            {rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={3 + PROJECT_COLUMNS.length} align="center" sx={{ py: 6, color: 'text.secondary', cursor: 'default' }}>
-                  No projects match these filters.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-      {/* More to the right: a soft fade at the edge says so. */}
-      <Box
-        aria-hidden
-        sx={{
-          position: 'absolute',
-          top: 1,
-          right: 1,
-          bottom: 1,
-          width: 28,
-          pointerEvents: 'none',
-          borderTopRightRadius: 14,
-          borderBottomRightRadius: 14,
-          background: `linear-gradient(to right, transparent, ${alpha(theme.palette.background.paper, 0.92)})`,
-          opacity: moreRight ? 1 : 0,
-          transition: 'opacity .2s',
-        }}
-        data-scroll-cue={moreRight ? 'on' : 'off'}
-      />
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              {/* More to the right: a 12px fade at the edge says so. */}
+              <Box
+                aria-hidden
+                sx={{
+                  position: 'absolute',
+                  top: 1,
+                  right: 1,
+                  bottom: 1,
+                  width: 12,
+                  pointerEvents: 'none',
+                  borderTopRightRadius: 8,
+                  borderBottomRightRadius: 8,
+                  background: `linear-gradient(to right, ${alpha(surface, 0)}, ${surface})`,
+                  opacity: moreRight ? 1 : 0,
+                  transition: 'opacity 120ms',
+                }}
+                data-scroll-cue={moreRight ? 'on' : 'off'}
+              />
+            </Box>
+          )}
+        </LayoutBlock>
       </Box>
-      )}
-      </LayoutBlock>
 
-      {/* Looked up by key on every render, so a CAPEX typed inside it moves the
-          ROI in the header of the very same dialog. */}
+      {/* Which columns the register shows, opened from the table toolbar
+          (or from the page menu while that toolbar is hidden). */}
+      {canWrite && !phone && (
+        <Menu
+          anchorEl={colsEl}
+          open={!!colsEl}
+          onClose={() => setColsEl(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          MenuListProps={{ dense: true, 'aria-label': 'columns' }}
+          slotProps={{ paper: { sx: { width: 280, maxHeight: 'min(560px, 80vh)' } } }}
+        >
+          <Box sx={{ px: 3, pt: 1, pb: 2 }}>
+            <Typography variant="h3">Columns</Typography>
+            <Typography variant="caption" component="div" sx={{ color: 'text.secondary', mt: 0.5 }}>
+              Shown to everyone who opens the register. The name, the select box and the cost sheet always show.
+            </Typography>
+            {colsNote && (
+              <Typography variant="caption" component="div" sx={{ color: tone.warning.fg, mt: 1 }} data-columns-note>
+                {colsNote}
+              </Typography>
+            )}
+          </Box>
+          <Divider />
+          {PROJECT_COLUMNS.map((c) => (
+            <MenuItem key={c.id} onClick={() => toggleColumn(c.id)} data-column={c.id}>
+              <ListItemIcon>
+                <Checkbox size="small" edge="start" checked={show(c.id)} tabIndex={-1} disableRipple sx={{ p: 0.5 }} />
+              </ListItemIcon>
+              <ListItemText primary={c.label} />
+            </MenuItem>
+          ))}
+          <Divider />
+          <Box sx={{ px: 1, pb: 0.5 }}>
+            <Button onClick={showAllColumns} disabled={!hidden.size}>Show every column</Button>
+          </Box>
+        </Menu>
+      )}
+
+      {/* A phone's filters: a sheet from the bottom of the screen. */}
+      <Dialog
+        open={phone && filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        fullWidth
+        aria-labelledby="filters-title"
+        sx={{ '& .MuiDialog-container': { alignItems: 'flex-end' } }}
+        PaperProps={{
+          sx: {
+            [PHONE]: {
+              height: 'auto', maxHeight: '88vh !important', borderRadius: '12px 12px 0 0 !important',
+            },
+          },
+        }}
+      >
+        <DialogTitle id="filters-title" sx={{ pr: 14 }}>
+          Filters
+          <IconButton aria-label="close" onClick={() => setFiltersOpen(false)} sx={{ position: 'absolute', right: 8, top: 10, width: 40, height: 40, color: 'text.secondary' }}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <Box
+            id="project-filters"
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr)',
+              gap: 3,
+              pt: 2,
+              '& .MuiFormControl-root': { minWidth: 0, width: '100%' },
+              '& .MuiFormControl-root .MuiInputBase-root': { maxWidth: 'none' },
+            }}
+          >
+            {fObjective}
+            {fPicField}
+            {fTeamField}
+            {fSubField}
+            {fFteField}
+            {fCommitField}
+            {fGapField}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={clearFilters} disabled={!filtersOn}>Clear filters</Button>
+          <Button variant="contained" onClick={() => setFiltersOpen(false)}>
+            Show {rows.length} project{rows.length === 1 ? '' : 's'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <ImportDialog
         result={importing?.result}
         fileName={importing?.fileName}
+        choosing={!!importing?.choosing}
+        busy={busy}
+        onChoose={() => fileRef.current?.click()}
+        onPick={takeFile}
         onClose={() => setImporting(null)}
         onApply={() => { onImport(importing.result); setImporting(null) }}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".xlsx"
+        aria-label="import projects"
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''            // so the same file can be picked twice
+          await takeFile(file)
+        }}
       />
 
       <ProjectDetailDialog
@@ -1997,6 +2476,8 @@ export default function Projects({
         onShowTimeline={onShowTimeline}
       />
 
+      {/* Looked up by key on every render, so a CAPEX typed inside it moves the
+          ROI in the header of the very same dialog. */}
       <ProjectCostDialog
         project={costProject}
         plan={plan}

@@ -29,7 +29,7 @@ const BROWSERS = [
 const exe = BROWSERS.find((p) => existsSync(p))
 if (!exe) { console.log('SKIP — no Chromium-based browser found'); process.exit(0) }
 
-const PORT = 5321
+const PORT = Number(process.env.CHECK_PORT) || 5321   // CHECK_PORT: run beside another copy
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 
 let failures = 0
@@ -146,7 +146,7 @@ try {
   })
   check('project cell now reads 33', projVal === '33', projVal)
 
-  const totalsStrip = await page.evaluate(() => document.body.innerText.match(/SAVING HRS \/ MONTH\s*\n\s*([\d,]+)/)?.[1] ?? null)
+  const totalsStrip = await page.evaluate(() => document.body.innerText.match(/Saving hrs\/mth\s*\n\s*([\d,]+)/)?.[1] ?? null)
   check('filtered totals strip updated', totalsStrip === '33', String(totalsStrip))
 
   /* ---------- THE BUG: scorecard must follow ---------- */
@@ -458,12 +458,19 @@ try {
   check('and an investment column beside it', costCol > 0 && costCol < roiCol, `cost ${costCol} / roi ${roiCol}`)
   const paybackCol = await colIndex('payback')
   check('and a payback column after it', paybackCol === roiCol + 1, `payback ${paybackCol} / roi ${roiCol}`)
+  // The costing figures fold behind "Show all figures" while every one of
+  // them is blank, as they are here; unfold them as a user would.
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.trim() === 'Show all figures')?.click())
+  await new Promise((r) => setTimeout(r, 300))
   check('the money strip carries CAPEX and OPEX beside the build cost',
-    await page.evaluate(() => /\nCAPEX\n/.test(document.body.innerText) && /OPEX \/ YEAR/i.test(document.body.innerText)))
+    await page.evaluate(() => /\nCAPEX\n/.test(document.body.innerText) && /OPEX\/yr/i.test(document.body.innerText)))
 
   /* ---------- the source column reads as FTE, not HC ---------- */
   const fteCol = await colIndex('fte')
   check('the Projects table heads the source column FTE', fteCol > 0, `index ${fteCol}`)
+  // The FTE filter sits behind "More filters" with the other rare ones.
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^More filters/.test(b.innerText.trim()))?.click())
+  await new Promise((r) => setTimeout(r, 400))
   const hcLeftovers = await page.evaluate(() => {
     const heads = [...document.querySelectorAll('table thead th')].map((h) => h.innerText.trim())
     const labels = [...document.querySelectorAll('label')].map((l) => l.innerText.trim())
@@ -480,6 +487,8 @@ try {
     hcLeftovers.fteFilter && hcLeftovers.labels.length === 0, hcLeftovers.labels.join(' | ') || 'no "headcount" label left')
   check('and the totals strip says FTE released',
     hcLeftovers.fteStrip && !hcLeftovers.strip, JSON.stringify({ fte: hcLeftovers.fteStrip, hc: hcLeftovers.strip }))
+  await page.keyboard.press('Escape')
+  await new Promise((r) => setTimeout(r, 300))
 
   // No effort in the seed, so ROI starts blank by design rather than as zero.
   const roiBefore = await page.evaluate((ix) => {
@@ -508,7 +517,7 @@ try {
     cost: document.querySelector('tbody tr').children[c]?.innerText.trim(),
     roi: document.querySelector('tbody tr').children[r]?.innerText.trim(),
     payback: document.querySelector('tbody tr').children[r + 1]?.innerText.trim(),
-    strip: document.body.innerText.match(/BENEFIT \/ YEAR\s*\n\s*([^\n]+)/)?.[1]?.trim(),
+    strip: document.body.innerText.match(/Benefit\/yr\s*\n\s*([^\n]+)/)?.[1]?.trim(),
   }), costCol, roiCol)
   check('entering mandays fills in the investment', /\d/.test(money.cost) && money.cost !== '—', money.cost)
   check('and shows an ROI for that project', /%/.test(money.roi), money.roi)
@@ -794,7 +803,7 @@ try {
   await page.evaluate(() => document.querySelector('tbody tr button[aria-label="open cost breakdown"]').click())
   await new Promise((r) => setTimeout(r, 700))
   const effortText = await dialogText()
-  check('the dialog carries the effort breakdown', /Effort .* mandays by task/i.test(effortText),
+  check('the dialog carries the effort breakdown', /Effort by task/i.test(effortText) && /Mandays/.test(effortText),
     effortText.slice(0, 90).replace(/\n/g, ' / '))
 
   // A project imported with a bare total must show exactly ONE line carrying it.
@@ -1342,7 +1351,7 @@ try {
 
   await page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
-    ;[...d.querySelectorAll('button')].find((b) => /^Apply /.test(b.innerText.trim())).click()
+    ;[...d.querySelectorAll('button')].find((b) => /^Import \d+ row/.test(b.innerText.trim())).click()
   })
   await new Promise((r) => setTimeout(r, 1200))
 
