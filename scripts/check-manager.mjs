@@ -536,6 +536,8 @@ try {
 
     await m.goto(`${base}/#timeline`, { waitUntil: 'networkidle0' })
     await m.waitForFunction(() => document.body.innerText.includes('Only the projects you hold'), { timeout: 10000 }).catch(() => {})
+    // The header says it at once; the rows follow once the check-ins are in (a skeleton until then).
+    await m.waitForSelector('[data-keys]', { timeout: 10000 }).catch(() => {})
     const tl = await text(m)
     check('THE TIMELINE SHOWS ONLY THEIR PROJECTS', tl.includes('PL Forecast') && !tl.includes('Supplier Portal'))
     check('  and says so', tl.includes('Only the projects you hold'))

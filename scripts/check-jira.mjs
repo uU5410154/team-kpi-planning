@@ -936,7 +936,7 @@ if (!exe) {
     /Task that finished late/.test(opened.text) && /No dates, no sprint, nothing at all/.test(opened.text),
     opened.collapsible ? 'row is now collapsible' : 'row did not open')
   check('  and each task says what it is',
-    /FNP-11 · Task/.test(opened.text) && /FNP-12 · Story/.test(opened.text),
+    /FNP-11, Task/.test(opened.text) && /FNP-12, Story/.test(opened.text),
     (opened.text.match(new RegExp('FNP-1[12][^' + String.fromCharCode(10) + ']*', 'g')) || []).join(' | '))
   check('  and a late task carries its own slip',
     /\+41d/.test(opened.text), 'FNP-11 was due 2026-02-02 (its sprint) and finished 2026-03-15')
@@ -946,7 +946,7 @@ if (!exe) {
     // sx compiles to a class, so there is no inline style to read — the
     // rendered geometry is the thing being asserted anyway.
     const rows = [...document.querySelectorAll('div')]
-      .filter((d) => (d.innerText || '').includes('FNP-1 ·') && d.querySelectorAll('div').length < 40)
+      .filter((d) => (d.innerText || '').includes('FNP-1,') && d.querySelectorAll('div').length < 40)
     const row = rows[rows.length - 1]
     const track = row && [...row.parentElement.parentElement.children]
       .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)
@@ -980,7 +980,7 @@ if (!exe) {
   // ---- a task with no planned start still draws a pair ----
   const taskBars = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('div')]
-      .filter((d) => (d.innerText || '').includes('FNP-11 ·') && d.querySelectorAll('div').length < 40)
+      .filter((d) => (d.innerText || '').includes('FNP-11,') && d.querySelectorAll('div').length < 40)
     const row = rows[rows.length - 1]
     const track = row && [...row.parentElement.parentElement.children]
       .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)
@@ -991,11 +991,12 @@ if (!exe) {
         left: Math.round(c.getBoundingClientRect().left * 10) / 10,
         width: Math.round(c.getBoundingClientRect().width * 10) / 10,
         filled: getComputedStyle(c).backgroundColor !== 'rgba(0, 0, 0, 0)',
-        hatched: getComputedStyle(c).backgroundImage !== 'none',
+        // The slip segment: solid, in the danger tone, marked for what it is.
+        slip: c.dataset.bar === 'slip',
       }))
   })
-  const tPlanned = taskBars?.find((b) => !b.filled && !b.hatched)
-  const tActual = taskBars?.find((b) => b.filled && !b.hatched)
+  const tPlanned = taskBars?.find((b) => !b.filled && !b.slip)
+  const tActual = taskBars?.find((b) => b.filled && !b.slip)
   check('A TASK DRAWS TWO BARS, NOT A DOT AND A BAR',
     tPlanned && tActual && tPlanned.width > 5 && tActual.width > 5,
     taskBars ? `planned ${tPlanned?.width}px, actual ${tActual?.width}px` : 'no bars found')
@@ -1003,8 +1004,8 @@ if (!exe) {
     tPlanned && tActual && Math.abs(tPlanned.left - tActual.left) < 0.01,
     `planned at ${tPlanned?.left}, actual at ${tActual?.left}`)
   check('  and the overrun is drawn beyond the planned edge',
-    taskBars.some((b) => b.hatched && b.left >= tPlanned.left + tPlanned.width - 1),
-    `${taskBars.filter((b) => b.hatched).length} hatched segment(s)`)
+    taskBars.some((b) => b.slip && b.left >= tPlanned.left + tPlanned.width - 1),
+    `${taskBars.filter((b) => b.slip).length} slip segment(s)`)
 
   // ---- and the page renders them in that order ----
   const drawnOrder = await page.evaluate(() => {
@@ -1024,7 +1025,7 @@ if (!exe) {
   // ---- a task with NO due date still gets something to read against ----
   const borrowed = await page.evaluate(() => {
     const rows = [...document.querySelectorAll('div')]
-      .filter((d) => (d.innerText || '').includes('FNP-18 ·') && d.querySelectorAll('div').length < 40)
+      .filter((d) => (d.innerText || '').includes('FNP-18,') && d.querySelectorAll('div').length < 40)
     const row = rows[rows.length - 1]
     const track = row && [...row.parentElement.parentElement.children]
       .find((c) => getComputedStyle(c).position === 'relative' && c.children.length > 2)
@@ -1037,7 +1038,8 @@ if (!exe) {
         filled: getComputedStyle(c).backgroundColor !== 'rgba(0, 0, 0, 0)',
         dashed: getComputedStyle(c).borderTopStyle === 'dashed',
       }))
-    const chip = row.parentElement.parentElement.querySelector('.MuiChip-root')
+    // The Slip column's figure, wherever there is a slip to state.
+    const chip = row.parentElement.parentElement.querySelector('[data-slip]')
     return { bars, chip: chip ? chip.innerText.trim() : null }
   })
   const dashed = borrowed?.bars.find((b) => b.dashed)
@@ -1068,13 +1070,14 @@ if (!exe) {
     for (const key of ['FNP-11', 'FNP-13', 'FNP-14']) {
       const row = [...document.querySelectorAll('div')].find((d) => {
         const t = d.innerText || ''
-        return t.startsWith(key + ' ·') || (d.previousElementSibling && false)
+        return t.startsWith(key + ',') || (d.previousElementSibling && false)
       })
       void row
     }
-    // Read the slip chips instead: they carry the same colour as their bar.
-    const chips = [...document.querySelectorAll('.MuiChip-root')].map((c) => ({
-      label: c.innerText.trim(),
+    // Read the Slip column instead: late, early and on time each in their own colour.
+    // The page writes a true minus ("−19d"); compared here as a plain hyphen.
+    const chips = [...document.querySelectorAll('[data-slip]')].map((c) => ({
+      label: c.innerText.trim().replace(/\u2212/g, '-'),
       colour: getComputedStyle(c).color,
     }))
     out.chips = chips
@@ -1089,8 +1092,8 @@ if (!exe) {
     new Set([chipFor('+41d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour]).size === 3,
     [chipFor('+42d')?.colour, chipFor('-19d')?.colour, chipFor('0d')?.colour].join(' | '))
   check('  the legend names all three outcomes',
-    /ahead of schedule/.test(finishes.text) && /on schedule/.test(finishes.text)
-    && /behind schedule/.test(finishes.text))
+    /ahead of schedule/i.test(finishes.text) && /on schedule/i.test(finishes.text)
+    && /behind schedule/i.test(finishes.text))
 
   await page.evaluate(() => {
     document.querySelector('[aria-label="collapse FNP-1"]').click()
@@ -1102,8 +1105,11 @@ if (!exe) {
   // ---- epics the register has never seen ----
   const beforeCount = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('fa-tech-kpi-2026')).projects.length)
+  // In the header's ⋮ menu now, beside Sync with Jira.
+  await page.evaluate(() => document.querySelector('button[aria-label="More Jira actions"]').click())
+  await page.waitForSelector('[role="menuitem"]', { timeout: 5000 })
   await page.evaluate(() => {
-    [...document.querySelectorAll('button')].find((b) => /Find new epics/.test(b.innerText)).click()
+    [...document.querySelectorAll('[role="menuitem"]')].find((b) => /Find new epics/.test(b.innerText)).click()
   })
   await new Promise((r) => setTimeout(r, 2500))
   const dialog = await page.evaluate(() => ({
@@ -1125,8 +1131,11 @@ if (!exe) {
   })
   await page.goto(`${base}/?found=1#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 3000))
+  // In the header's ⋮ menu now, beside Sync with Jira.
+  await page.evaluate(() => document.querySelector('button[aria-label="More Jira actions"]').click())
+  await page.waitForSelector('[role="menuitem"]', { timeout: 5000 })
   await page.evaluate(() => {
-    [...document.querySelectorAll('button')].find((b) => /Find new epics/.test(b.innerText)).click()
+    [...document.querySelectorAll('[role="menuitem"]')].find((b) => /Find new epics/.test(b.innerText)).click()
   })
   await new Promise((r) => setTimeout(r, 2500))
   const offered = await page.evaluate(() => ({
