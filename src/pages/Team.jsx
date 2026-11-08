@@ -257,7 +257,7 @@ export default function Team({ plan, own = false, loading = false }) {
                           <Typography variant="body1" sx={{ fontWeight: 500 }}>
                             Obj {o.no} — {o.name}
                           </Typography>
-                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                          <Typography variant="body2" sx={{ color: 'text.secondary', display: { xs: 'none', sm: 'block' } }}>
                             {o.measure === 'ratio' ? 'Share of projects that drifted'
                               : o.measure === 'hours' ? `Saving ${settings.savingBasis === 'annual' ? 'hours a year' : 'hours a month'}`
                                 : o.measure === 'count' ? countLabel(o.countUnit)

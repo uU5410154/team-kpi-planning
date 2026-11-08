@@ -199,7 +199,7 @@ function HoursTargetCell({ value, onChange, unit }) {
           // is wider than the whole field, and left to size itself it pushed
           // the figure out of sight — the one thing on the row that has to be
           // readable. It truncates and carries the full text as a tooltip.
-          <InputAdornment position="end" sx={{ ml: 1, flex: '0 1 auto', minWidth: 0 }}>
+          <InputAdornment position="end" sx={{ ml: unit === '%' ? 0.25 : 1, flex: '0 1 auto', minWidth: 0 }}>
             <Typography
               variant="body2"
               component="span"
@@ -521,7 +521,7 @@ export default function People({
       // The rule and the full list sit behind Details, beside the verdict.
       return (
         <Box sx={{
-          display: 'inline-flex', flexDirection: compact ? 'row' : 'column', alignItems: compact ? 'center' : 'flex-end', gap: compact ? 2 : 0.5, flexWrap: 'wrap',
+          display: 'inline-flex', flexDirection: 'column', alignItems: compact ? 'flex-start' : 'flex-end', gap: 0.5,
         }}
         >
           {state}
@@ -531,7 +531,7 @@ export default function People({
             aria-expanded={rulesOpen}
             aria-controls={`commit-rules-${p.id}`}
             onClick={() => setRulesOpen((v) => !v)}
-            sx={{ minHeight: 28, py: 0.25, mr: compact ? 0 : -2, ml: compact ? -1 : 0 }}
+            sx={{ minHeight: 28, py: 0.25, mr: compact ? 0 : -2, ml: compact ? -2 : 0 }}
           >
             {rulesOpen ? 'Hide details' : 'Details'}
           </Button>
@@ -891,7 +891,7 @@ export default function People({
           const linkLabel = active
             ? 'Clear the portfolio filter'
             : (o && (o.measure === 'ratio' || o.measure === 'hours')
-              ? 'See every project behind it'
+              ? (phone ? 'See its projects' : 'See every project behind it')
               : 'Filter the portfolio')
           return (
             <Fragment key={l.id}>
@@ -1114,7 +1114,7 @@ export default function People({
                 </Button>
               )}
             >
-              {drifted.length} target{drifted.length === 1 ? '' : 's'} no longer match what {p.nick} carries.
+              {drifted.length === 1 ? '1 target no longer matches' : `${drifted.length} targets no longer match`} what {p.nick} carries.
               Project assignments changed after they were typed.
             </Alert>
           )}
@@ -1232,8 +1232,8 @@ export default function People({
       ? `Showing every project: objective ${focusObj.no} is calculated over all ${visibleRows.length} of them.`
       : `Showing ${visibleRows.length} of ${p.scorecardRows.length} projects that serve objective ${focusObj.no}.`)
     : p.aggregatesTeam
-      ? 'Every in-plan project across the team, at full value. Edits here change the register.'
-      : 'Credited hours are project hours times this person’s share. Edits here change the register.'
+      ? `Every in-plan project across the team, at full value. ${phone ? 'Tap a project for its costs.' : 'Edits here change the register.'}`
+      : `Credited hours are project hours times this person’s share. ${phone ? 'Tap a project for its costs.' : 'Edits here change the register.'}`
 
   const stickyKey = {
     position: 'sticky',
