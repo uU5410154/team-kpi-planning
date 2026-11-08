@@ -29,14 +29,16 @@ import {
   fmtHours, isDate, timelineOf, pinFinishPatch, unpinFinishPatch, timelinessOf,
 } from '../lib/model.js'
 import { syncStatus } from '../lib/storage.js'
+import { ago } from '../components/FollowUp.jsx'
 import { PageHeader, StatusPill } from '../components/ui.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
 import { activitySignals, activeUnits } from '../lib/manager.js'
 import { weekOf, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
 
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
-const fmtD = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '–')
-const fmtS = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '–')
+// "2 Nov 2026", and "Sep" rather than the four-letter "Sept" some browsers write.
+const fmtD = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).replace('Sept', 'Sep') : '–')
+const fmtS = (d) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).replace('Sept', 'Sep') : '–')
 const PROPOSAL_TONE = { pending: 'info', approved: 'success', rejected: 'danger', deciding: 'info' }
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 // The typographic minus, so "−19d" reads as a number and not a dash.
@@ -219,13 +221,17 @@ export default function Timeline({
   // The figures line folds into rows of three below a laptop's width.
   const stacked = narrow || (boxW > 0 && boxW < 900)
   /*
-   * The two pinned columns. On a phone the name takes a little over half the
-   * width and wraps onto two lines, rather than cutting every project off
-   * after a dozen letters; the calendar scrolls sideways in what is left.
+   * A PHONE GETS A LIST, NOT A GANTT. Beside a readable name a phone has about
+   * two hundred pixels of calendar, where a bar is a smudge. So each project is
+   * one row: its name, its key and due date, its slip and state, and a thin
+   * plan-against-actual bar under them on the same calendar for every row.
    */
-  const NAME_W = narrow ? Math.max(170, Math.round((boxW || 360) * 0.55)) : 296
-  // Narrow, the slip pills are a size down, and the column gives its room to the calendar.
-  const SLIP_W = narrow ? 54 : 80
+  const list = phone
+  // A tablet or a small laptop: a narrower name column, so the calendar keeps its room.
+  const compact = !list && boxW > 0 && boxW < 960
+  /* The two pinned columns. Names stay on one line and say the rest in their tooltip. */
+  const NAME_W = compact ? 240 : 296
+  const SLIP_W = compact ? 72 : 80
   const PINNED_W = NAME_W + SLIP_W
   /*
    * THE CHART IS THE PAGE. Everything above it is one header, one toolbar and
@@ -233,8 +239,9 @@ export default function Timeline({
    * own scroll — so the month header stays in sight however far down the list
    * somebody reads.
    */
-  const ROW_H = 36
-  const KID_H = 34
+  // A table row: a name and a meta line with room to breathe.
+  const ROW_H = 44
+  const KID_H = 40
   // The calendar header: a tier for the years (or months), a tier for the units.
   const TIER_H = 20
   const HEAD_H = 44
@@ -538,6 +545,8 @@ export default function Timeline({
       // is never mistaken for one somebody typed.
       issue.sprintName || null,
     ].filter(Boolean).join(', '),
+    // The phone's one meta line: the key, where it stands, when it is due.
+    short: [issue.key, issue.status || null, dueWord(issue.planEnd || issue.due)].filter(Boolean).join(', '),
     leaf: LEAF.test(issue.type || ''),
     timeline: timelineOf({
       /*
@@ -932,10 +941,18 @@ export default function Timeline({
     }
     const year = Number((asOf || '2026-01-01').slice(0, 4))
     all.push(at(`${year}-01-01`), at(`${year}-12-31`))
-    const min = Math.min(...all)
-    const max = Math.max(...all)
-    const pad = Math.max(DAY * 7, (max - min) * 0.02)
-    return { from: min - pad, to: max + pad }
+    /*
+     * Whole months only, at both ends: a sliver of a month at the edge drew a
+     * lone "J" with nothing under it. The calendar opens on the first of the
+     * earliest month and closes on the first of the month after the last date,
+     * with a couple of days' grace so a bar ending on the 31st has room after it.
+     */
+    const lo = new Date(Math.min(...all))
+    const hi = new Date(Math.max(...all) + DAY * 2)
+    return {
+      from: Date.UTC(lo.getUTCFullYear(), lo.getUTCMonth(), 1),
+      to: Date.UTC(hi.getUTCFullYear(), hi.getUTCMonth() + 1, 1),
+    }
   }, [rows, asOf, weekly])
 
   /*
@@ -951,11 +968,10 @@ export default function Timeline({
   const days = Math.max(1, Math.round((span.to - span.from) / DAY))
   // The month view fits the width it is given — unless that leaves the bars
   // too little room beside the pinned columns, when it keeps a floor and
-  // scrolls instead (a phone, or a tablet with the menu open).
-  // A phone's floor is tighter, so the window around today shows half a year rather than two months.
-  const MONTH_MIN = phone ? 360 : 560
+  // scrolls instead (a tablet), opening on today. A phone draws the list instead.
+  const MONTH_MIN = 560
   const trackPx = scale === 'month'
-    ? (phone || (boxW > 0 && boxW - PINNED_W < MONTH_MIN) ? MONTH_MIN : null)
+    ? (boxW > 0 && boxW - PINNED_W < MONTH_MIN ? MONTH_MIN : null)
     : Math.max(720, Math.round(days * (scale === 'day' ? PER_UNIT.day : PER_UNIT.week / 7)))
   // The calendar's drawn width, for deciding whether a word fits beside a bar.
   const trackW = trackPx || Math.max(0, boxW - PINNED_W)
@@ -986,7 +1002,7 @@ export default function Timeline({
 
     if (scale === 'month') {
       d.setUTCDate(1)
-      for (let i = 0; i < 120 && d.getTime() <= span.to; i++) {
+      for (let i = 0; i < 120 && d.getTime() < span.to; i++) {
         const ms = d.getTime()
         if (ms >= span.from) {
           out.push({
@@ -1006,7 +1022,7 @@ export default function Timeline({
       // is not a week anybody reads.
       const back = (d.getUTCDay() + 6) % 7
       d.setUTCDate(d.getUTCDate() - back)
-      for (let i = 0; i < 400 && d.getTime() <= span.to; i++) {
+      for (let i = 0; i < 400 && d.getTime() < span.to; i++) {
         const ms = d.getTime()
         if (ms >= span.from) {
           out.push({
@@ -1020,7 +1036,7 @@ export default function Timeline({
       return out
     }
 
-    for (let i = 0; i < 1200 && d.getTime() <= span.to; i++) {
+    for (let i = 0; i < 1200 && d.getTime() < span.to; i++) {
       const ms = d.getTime()
       const dow = d.getUTCDay()
       if (ms >= span.from) {
@@ -1053,7 +1069,7 @@ export default function Timeline({
     const first = name(d)
     if (byMonth) d.setUTCDate(1)
     else d.setUTCMonth(0, 1)
-    for (let i = 0; i < 60 && d.getTime() <= span.to; i++) {
+    for (let i = 0; i < 60 && d.getTime() < span.to; i++) {
       if (d.getTime() > span.from) out.push({ ms: d.getTime(), label: name(d) })
       if (byMonth) d.setUTCMonth(d.getUTCMonth() + 1)
       else d.setUTCFullYear(d.getUTCFullYear() + 1)
@@ -1061,6 +1077,19 @@ export default function Timeline({
     out.unshift({ ms: span.from, label: first, lead: true })
     return out
   }, [span, scale])
+
+  // The phone's calendar, in quarters: the year at each January, the month at the others.
+  const quarters = useMemo(() => {
+    const out = []
+    const d = new Date(span.from)
+    for (let i = 0; i < 60 && d.getTime() < span.to; i++) {
+      const mo = d.getUTCMonth()
+      // The first label names its year too, so a calendar opening in October says which October.
+      if (mo % 3 === 0) out.push({ ms: d.getTime(), label: mo === 0 ? String(d.getUTCFullYear()) : (out.length ? MONTHS[mo] : `${MONTHS[mo]} ${d.getUTCFullYear()}`), year: mo === 0 || !out.length })
+      d.setUTCMonth(mo + 1)
+    }
+    return out
+  }, [span])
 
   /*
    * Scrolled to today whenever the scale changes.
@@ -1079,7 +1108,8 @@ export default function Timeline({
     // the two pinned columns, not the middle of the whole box.
     el.scrollLeft = Math.max(0, Math.min(width, at01 - Math.max(0, el.clientWidth - PINNED_W) / 2))
     readEdges()
-  }, [scale, asOf, span.from, span.to, trackPx, PINNED_W, ready])
+    // And again when the box settles to its width: measured a moment early, today landed off-centre.
+  }, [scale, asOf, span.from, span.to, trackPx, PINNED_W, ready, boxW])
 
   const picks = [{ id: 'all', nick: 'All PICs' }, ...plan.assignees.map((p) => ({ id: p.id, nick: p.nick }))]
 
@@ -1107,11 +1137,71 @@ export default function Timeline({
     return 'Not started'
   }
 
+  /** The plan in words: "1 Jan to 30 Jun 2026". */
+  const planWords = (tl) => {
+    if (tl.plannedStart && tl.plannedEnd) return `${tl.plannedStart.slice(0, 4) === tl.plannedEnd.slice(0, 4) ? fmtS(tl.plannedStart) : fmtD(tl.plannedStart)} to ${fmtD(tl.plannedEnd)}`
+    if (tl.plannedEnd) return `Due ${fmtD(tl.plannedEnd)}`
+    if (tl.plannedStart) return `From ${fmtD(tl.plannedStart)}`
+    return 'No planned dates'
+  }
+  /** What happened, in words: the finish, or how far it has got. */
+  const outcomeWords = (tl) => {
+    if (tl.actualEnd) return `Finished ${fmtD(tl.actualEnd)}`
+    if (tl.running) return `Running since ${fmtD(tl.actualStart)}`
+    return quietWord(tl)
+  }
+
   // The vertical places of the two lanes, from the middle of the row, so a
   // row that grows (a two-line name on a phone) keeps its bars centred.
   const lane = (depth) => (depth
     ? { plan: 'calc(50% - 8px)', actual: 'calc(50% + 2px)', h: 6 }
     : { plan: 'calc(50% - 10px)', actual: 'calc(50% + 2px)', h: 8 })
+
+  // How wide a caption is, measured in the page's own face, to decide whether it fits whole.
+  const textW = useMemo(() => {
+    let ctx = null
+    try { ctx = document.createElement('canvas').getContext('2d') } catch { /* no canvas */ }
+    if (ctx) ctx.font = `400 12px ${theme.typography.fontFamily}`
+    return (s) => (ctx ? ctx.measureText(s).width : s.length * 6.5)
+  }, [theme.typography.fontFamily])
+
+  /** The slip, said once for the Gantt's column and the phone's row: a pill when late, plain words otherwise. */
+  const slipMark = (tl) => (tl.lateBy == null ? (
+    <Typography component="span" sx={{ fontSize: '0.75rem', color: 'text.tertiary' }} aria-label="no slip to measure">–</Typography>
+  ) : tl.lateBy > 0 ? (
+    <StatusPill
+      tone="danger"
+      data-slip={signed(tl.lateBy)}
+      title={`${plural(tl.lateBy, 'day')} behind schedule`}
+    >
+      {signed(tl.lateBy)}
+    </StatusPill>
+  ) : (
+    <Typography
+      component="span"
+      data-slip={signed(tl.lateBy)}
+      title={tl.lateBy < 0 ? `${plural(Math.abs(tl.lateBy), 'day')} ahead of schedule` : 'On schedule'}
+      className="tabular"
+      sx={{
+        fontSize: '0.75rem', fontWeight: 500, lineHeight: '16px', whiteSpace: 'nowrap', color: tl.lateBy < 0 ? tone.success.fg : 'text.secondary',
+      }}
+    >
+      {signed(tl.lateBy)}
+    </Typography>
+  ))
+
+  /** Where a row stands, in one word, for the phone's list where there is no bar to read it from. */
+  const stateWord = (tl) => {
+    if (tl.overdue) return 'Past due'
+    if (tl.running) return 'Running'
+    if (tl.state === 'finished') return 'Finished'
+    if (tl.actualStart) return 'Started'
+    return 'Not started'
+  }
+  // "due 30 Jun", with the year only when it is not this one.
+  const dueWord = (d) => (isDate(d)
+    ? `due ${d.slice(0, 4) === String(asOf || '').slice(0, 4) ? fmtS(d) : fmtD(d)}`
+    : 'no due date')
 
   // What the chart currently draws, for a legend that names only those.
   const drawn = { adjusted: false, forecast: false, borrowed: false, blocked: false, waiting: false }
@@ -1129,9 +1219,9 @@ export default function Timeline({
    * looking at. Called as a function, not mounted as a component, so a
    * re-render of the page does not tear every row down and build it again.
    */
-  const rowGroup = ({ row, depth, parentPlan }) => {
+  /** What one row draws, worked out once for the Gantt row and the phone's list row alike. */
+  const marksOf = ({ row, depth, parentPlan }) => {
     const tl = row.timeline
-    const L = lane(depth)
     /*
      * A task carries a due date and no planned start — Jira's Start date is an
      * epic-level habit here, and 31 of the 40 tasks under one epic have no due
@@ -1222,27 +1312,45 @@ export default function Timeline({
     if (inherited) drawn.borrowed = true
     if (wk?.blockers.length) drawn.blocked = true
     if (wk?.pending.length) drawn.waiting = true
-
-    // A word beside a plan with no outcome, where there is room for it.
-    const quiet = !actual && planned ? quietWord(tl) : null
-    /*
-     * Where the word goes: just past the plan, stopping short of the today
-     * line rather than running through it — or, with no room before it, just
-     * past it. Never beyond the calendar into the Slip column.
-     */
-    let quietAt = planned ? ((planned.left + planned.width) / 100) * trackW + 8 : 0
-    let roomPx = trackW - 8 - quietAt
-    if (quiet) {
-      const todayPx = (pct(at(asOf)) / 100) * trackW
-      const wants = quiet.length * 6.5
-      if (todayPx > quietAt - 2 && todayPx < quietAt + Math.min(wants, roomPx)) {
-        if (todayPx - quietAt - 6 >= Math.min(wants, 80)) roomPx = todayPx - quietAt - 6
-        else { quietAt = todayPx + 6; roomPx = trackW - 8 - quietAt }
-      }
+    return {
+      tl, planned, inherited, adjusted, actual, finish, overrun, saved, key, canOpen, canEdit, isOpen, under, wk, forecast, lit,
     }
-    // Not on a phone: there the calendar is a narrow window, and the words
-    // would mostly be cut off at its edges. The plan's tooltip says the same.
-    const sayQuiet = quiet && !narrow && roomPx >= 64
+  }
+
+  const rowGroup = ({ row, depth, parentPlan }) => {
+    const {
+      tl, planned, inherited, adjusted, actual, finish, overrun, saved, key, canOpen, canEdit, isOpen, under, wk, forecast, lit,
+    } = marksOf({ row, depth, parentPlan })
+    const L = lane(depth)
+
+    /*
+     * A word beside a plan with no outcome — "Not started", "Done, no finish
+     * date" — said only where it fits WHOLE. Just past the plan (and past a
+     * forecast or adjusted date drawn after it); if the today line is in the
+     * way, just past that; failing both, just before the plan. With room
+     * nowhere, it is left out: the plan's tooltip says the same, and half a
+     * word clipped at the chart's edge reads as a fault.
+     */
+    const quiet = !actual && planned ? quietWord(tl) : null
+    let quietAt = null
+    if (quiet && trackW > 0) {
+      const px = (p) => (p / 100) * trackW
+      const w = textW(quiet) + 2
+      const todayPx = px(pct(at(asOf)))
+      const after = Math.max(
+        px(planned.left + planned.width),
+        forecast ? px(forecast.left + forecast.width) : 0,
+        adjusted ? px(adjusted.left + adjusted.width) : 0,
+      ) + 8
+      const before = px(planned.left) - 8 - w
+      const clearOfToday = (x) => todayPx < x - 4 || todayPx > x + w + 4
+      const inside = (x) => x >= 6 && x + w <= trackW - 8
+      if (inside(after) && clearOfToday(after)) quietAt = after
+      else if (todayPx > after - 8 && inside(todayPx + 6)) quietAt = todayPx + 6
+      // Before the plan only on a calendar that does not scroll: one that does would hide it off the left edge.
+      else if (!trackPx && inside(before) && clearOfToday(before)) quietAt = before
+    }
+    const sayQuiet = quietAt != null
 
     const sticky = {
       position: 'sticky',
@@ -1286,10 +1394,9 @@ export default function Timeline({
             width: NAME_W,
             display: 'flex',
             alignItems: 'center',
-            gap: 1,
-            pl: 1 + depth * 5,
-            pr: 2,
-            py: narrow && depth === 0 ? 1.5 : 0,
+            gap: 1.5,
+            pl: 2 + depth * 5,
+            pr: 3,
             borderRight: 1,
             borderColor: 'border.subtle',
           }}
@@ -1298,7 +1405,7 @@ export default function Timeline({
               <IconButton
                 size="small"
                 sx={{
-                  width: narrow ? 36 : 24, height: narrow ? 36 : 24, p: 0, flexShrink: 0, color: 'text.secondary', mx: narrow ? -1 : 0,
+                  width: 24, height: 24, p: 0, flexShrink: 0, color: 'text.secondary', borderRadius: '6px',
                 }}
                 onClick={() => toggle(key)}
                 aria-label={isOpen ? `collapse ${key}` : `expand ${key}`}
@@ -1308,7 +1415,7 @@ export default function Timeline({
                   : isOpen ? <ExpandMoreIcon sx={{ fontSize: 18 }} /> : <ChevronRightIcon sx={{ fontSize: 18 }} />}
               </IconButton>
             ) : (
-              <Box sx={{ width: narrow ? 28 : 24, flexShrink: 0 }} />
+              <Box sx={{ width: 24, flexShrink: 0 }} />
             )}
             <Box
               sx={{
@@ -1332,12 +1439,12 @@ export default function Timeline({
                 sx={{
                   fontSize: depth ? '0.8125rem' : '0.875rem',
                   fontWeight: depth ? 400 : 500,
-                  lineHeight: '18px',
+                  lineHeight: depth ? '18px' : '20px',
                   color: 'text.primary',
                   transition: 'color 120ms',
-                  ...(narrow && depth === 0 ? {
-                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
-                  } : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
                 {row.title}
@@ -1346,7 +1453,13 @@ export default function Timeline({
                 component="span"
                 title={row.sub}
                 sx={{
-                  display: 'block', fontSize: '0.75rem', lineHeight: '16px', color: depth ? 'text.tertiary' : 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  display: 'block',
+                  fontSize: depth ? '0.75rem' : '0.8125rem',
+                  lineHeight: depth ? '16px' : '18px',
+                  color: depth ? 'text.tertiary' : 'text.secondary',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
                 {row.sub}
@@ -1373,8 +1486,8 @@ export default function Timeline({
                   week={thisWeek}
                   signals={signals}
                   label={`active ${row.jiraKey || row.projectKey}`}
-                  // Narrow, the column has no room for the word as well as the name.
-                  size={narrow ? 'dot' : 'small'}
+                  // Compact, the column has no room for the word as well as the name.
+                  size={compact ? 'dot' : 'small'}
                   onSet={(v) => row.projectKeys.forEach((k) => onUpdate(k, { active: v }))}
                 />
               </Box>
@@ -1585,12 +1698,10 @@ export default function Timeline({
                   left: `${(quietAt / trackW) * 100}%`,
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  maxWidth: `${Math.floor(roomPx)}px`,
                   fontSize: '0.75rem',
+                  fontWeight: 400,
                   lineHeight: '16px',
                   whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
                   color: 'text.tertiary',
                   pointerEvents: 'none',
                 }}
@@ -1604,7 +1715,7 @@ export default function Timeline({
             ...sticky,
             right: 0,
             width: SLIP_W,
-            px: narrow ? 1.5 : 3,
+            px: 3,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
@@ -1612,30 +1723,7 @@ export default function Timeline({
             borderColor: 'border.subtle',
           }}
           >
-            {tl.lateBy == null ? (
-              <Typography component="span" sx={{ fontSize: '0.75rem', color: 'text.tertiary' }} aria-label="no slip to measure">–</Typography>
-            ) : tl.lateBy > 0 ? (
-              <StatusPill
-                tone="danger"
-                data-slip={signed(tl.lateBy)}
-                title={`${plural(tl.lateBy, 'day')} behind schedule`}
-                sx={narrow ? { height: 18, px: 1, fontSize: '0.6875rem' } : undefined}
-              >
-                {signed(tl.lateBy)}
-              </StatusPill>
-            ) : (
-              <Typography
-                component="span"
-                data-slip={signed(tl.lateBy)}
-                title={tl.lateBy < 0 ? `${plural(Math.abs(tl.lateBy), 'day')} ahead of schedule` : 'On schedule'}
-                className="tabular"
-                sx={{
-                  fontSize: '0.75rem', fontWeight: 500, lineHeight: '16px', whiteSpace: 'nowrap', color: tl.lateBy < 0 ? tone.success.fg : 'text.secondary',
-                }}
-              >
-                {signed(tl.lateBy)}
-              </Typography>
-            )}
+            {slipMark(tl)}
           </Box>
         </Box>
 
@@ -1661,6 +1749,178 @@ export default function Timeline({
             </Box>
           ) : (
             under.rows.map((issue) => rowGroup({
+              row: asRow(issue),
+              depth: depth + 1,
+              parentPlan: { start: tl.plannedStart, end: tl.plannedEnd, ownerKey: row.jiraKey },
+            }))
+          )
+        )}
+      </Fragment>
+    )
+  }
+
+  /*
+   * THE PHONE'S ROW: the name on one line, the key and due date under it, the
+   * slip and the state at the right, and a thin bar across the bottom on the
+   * same calendar as every other row: the plan as an outline, what happened
+   * filled over it, the slip in red past its end, and a tick for today. A tap
+   * opens the project's weekly story; the chevron opens the Jira work under it.
+   */
+  const miniBar = ({
+    tl, planned, actual, overrun, saved, inherited,
+  }) => {
+    const seg = (b, sx, extra = {}) => (
+      <Box
+        {...extra}
+        sx={{
+          position: 'absolute', left: `${b.left}%`, width: `${b.width}%`, minWidth: 2, top: 3, height: 4, borderRadius: '1px', ...sx,
+        }}
+      />
+    )
+    return (
+      <Box aria-hidden sx={{ position: 'relative', height: 10 }}>
+        <Box sx={{
+          position: 'absolute', left: 0, right: 0, top: 4, height: 2, borderRadius: '1px', bgcolor: 'border.subtle',
+        }}
+        />
+        {actual && seg(actual, { bgcolor: tl.actualEnd ? INK.finished : INK.running }, { 'data-bar': 'actual' })}
+        {overrun && seg(overrun, { bgcolor: INK.late, borderRadius: '0 1px 1px 0' }, { 'data-bar': 'slip' })}
+        {saved && seg(saved, { border: `1px solid ${INK.early}`, bgcolor: INK.earlyTint }, { 'data-bar': 'early' })}
+        {inherited && seg(inherited, { border: `1px dashed ${INK.plan}` }, { 'data-bar': 'borrowed' })}
+        {/* Hollow: the track does not show through an outline the work has not filled. */}
+        {planned && seg(planned, { border: `1px solid ${INK.plan}`, bgcolor: actual ? 'transparent' : ROW_BG }, { 'data-bar': 'plan', className: actual ? undefined : 'tl-hollow' })}
+        <Box sx={{
+          position: 'absolute', left: `${pct(at(asOf))}%`, top: 0, bottom: 0, width: '1px', bgcolor: INK.today,
+        }}
+        />
+      </Box>
+    )
+  }
+
+  // Three columns: the chevron, the words, the slip. The bar runs under the last two.
+  const LIST_COLS = '28px minmax(0, 1fr) auto'
+
+  const listRow = ({ row, depth, parentPlan }) => {
+    const m = marksOf({ row, depth, parentPlan })
+    const {
+      tl, key, canOpen, canEdit, isOpen, under, wk, lit,
+    } = m
+    const top = depth === 0
+    // A project opens its weekly story; a Jira task underneath opens its dates, where this server may write them.
+    const act = top
+      ? () => setStory(row)
+      : (canEdit ? (el) => setEditing({ anchor: el, row }) : null)
+    return (
+      <Fragment key={row.rowKey}>
+        <Box
+          data-keys={top ? (row.projectKeys || []).join(' ') : undefined}
+          role={act ? 'button' : undefined}
+          tabIndex={act ? 0 : undefined}
+          aria-label={top
+            ? `weekly updates for ${row.jiraKey || row.projectKey}`
+            : (act ? `change dates for ${row.rowKey}` : undefined)}
+          onClick={act ? (e) => act(e.currentTarget) : undefined}
+          onKeyDown={act ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(e.currentTarget) } } : undefined}
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: LIST_COLS,
+            columnGap: 2,
+            alignItems: 'center',
+            pl: 2,
+            pr: 3,
+            pt: 2,
+            pb: 2,
+            borderBottom: 1,
+            borderColor: 'border.subtle',
+            bgcolor: ROW_BG,
+            cursor: act ? 'pointer' : 'default',
+            transition: 'background-color 120ms',
+            WebkitTapHighlightColor: 'transparent',
+            ...(act ? {
+              '&:active, &:active .tl-hollow': { bgcolor: HOVER_BG },
+              '@media (hover: hover)': { '&:hover, &:hover .tl-hollow': { bgcolor: HOVER_BG } },
+            } : {}),
+            ...(lit ? {
+              boxShadow: `inset 2px 0 0 ${P.primary.main}`,
+              animation: `${litFade} 5s ease-out forwards`,
+              '@media (prefers-reduced-motion: reduce)': { animation: 'none', bgcolor: LIT_BG },
+            } : {}),
+          }}
+        >
+          <Box sx={{ gridRow: '1 / span 2', alignSelf: 'center', display: 'flex', justifyContent: 'center' }}>
+            {canOpen && (
+              <IconButton
+                onClick={(e) => { e.stopPropagation(); toggle(key) }}
+                onKeyDown={(e) => e.stopPropagation()}
+                aria-label={isOpen ? `collapse ${key}` : `expand ${key}`}
+                aria-expanded={isOpen}
+                sx={{
+                  width: 40, height: 40, m: -1.5, color: 'text.secondary', borderRadius: '6px',
+                }}
+              >
+                {under?.loading ? <CircularProgress size={14} color="inherit" />
+                  : isOpen ? <ExpandMoreIcon sx={{ fontSize: 20 }} /> : <ChevronRightIcon sx={{ fontSize: 20 }} />}
+              </IconButton>
+            )}
+          </Box>
+          <Box sx={{ minWidth: 0, pl: depth * 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+              <Typography
+                title={row.title}
+                sx={{
+                  fontSize: top ? '0.875rem' : '0.8125rem',
+                  fontWeight: top ? 500 : 400,
+                  lineHeight: '20px',
+                  color: 'text.primary',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  minWidth: 0,
+                }}
+              >
+                {row.title}
+              </Typography>
+              {wk?.blockers.length > 0 && <ReportProblemIcon aria-label="blocked" sx={{ fontSize: 16, color: tone.warning.fg, flexShrink: 0 }} />}
+              {wk?.pending.length > 0 && <HourglassIcon aria-label="date change waiting" sx={{ fontSize: 16, color: tone.info.fg, flexShrink: 0 }} />}
+            </Box>
+            <Typography
+              variant="body2"
+              sx={{
+                color: top ? 'text.secondary' : 'text.tertiary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              {row.short}
+            </Typography>
+          </Box>
+          <Box sx={{
+            display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, alignSelf: 'start',
+          }}
+          >
+            <Box sx={{ height: 20, display: 'flex', alignItems: 'center' }}>{slipMark(tl)}</Box>
+            <Typography variant="body2" component="span" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>{stateWord(tl)}</Typography>
+          </Box>
+          <Box sx={{ gridColumn: '2 / 4', mt: 1.5 }}>{miniBar(m)}</Box>
+        </Box>
+        {isOpen && under && !under.loading && (
+          under.error ? (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', pl: 10 + depth * 4, pr: 3, py: 2, borderBottom: 1, borderColor: 'border.subtle',
+            }}
+            >
+              <Typography variant="body2" sx={{ color: tone.danger.fg }}>
+                {`Jira did not send the work under ${key}. ${under.error}`}
+              </Typography>
+              <Button variant="text" size="small" onClick={() => loadKids(key)}>Try again</Button>
+            </Box>
+          ) : under.rows.length === 0 ? (
+            <Box sx={{
+              pl: 10 + depth * 4, pr: 3, py: 2.5, borderBottom: 1, borderColor: 'border.subtle',
+            }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.tertiary' }}>{`Nothing under ${key} in Jira.`}</Typography>
+            </Box>
+          ) : (
+            under.rows.map((issue) => listRow({
               row: asRow(issue),
               depth: depth + 1,
               parentPlan: { start: tl.plannedStart, end: tl.plannedEnd, ownerKey: row.jiraKey },
@@ -1762,7 +2022,7 @@ export default function Timeline({
       value={scale}
       onChange={(_e, v) => v && setScale(v)}
       aria-label="Calendar scale"
-      sx={{ flexShrink: 0, ml: 'auto', '& .MuiToggleButton-root': { minHeight: phone ? 36 : 28, px: 3 } }}
+      sx={{ flexShrink: 0, ml: 'auto', '& .MuiToggleButton-root': { minHeight: 32, px: 3 } }}
     >
       <ToggleButton value="day">Day</ToggleButton>
       <ToggleButton value="week">Week</ToggleButton>
@@ -1808,8 +2068,8 @@ export default function Timeline({
           )}
         </>
       )}
-      {/* On a phone the scale lives in the sheet with the filters: one row less above the chart. */}
-      {!phone && scaleSwitch}
+      {/* A phone draws the list, which has no scale to choose. */}
+      {!list && scaleSwitch}
     </Box>
   )
 
@@ -1911,9 +2171,11 @@ export default function Timeline({
     </>
   )
 
-  // Drawn first, so the legend knows which marks are on screen.
-  const chartRows = ready ? grouped.map((p) => rowGroup({
-    row: {
+  /* One row per bar, read by the Gantt, the phone's list and the weekly story alike. */
+  const topRows = useMemo(() => grouped.map((p) => {
+    const objs = (p.objectiveIds || [p.objective]).filter(Boolean)
+      .map((id) => (OBJ_BY_ID[id] ? `Obj ${OBJ_BY_ID[id].no}` : null)).filter(Boolean)
+    return {
       rowKey: p.key,
       projectKey: p.key,
       // Every register line this bar stands for. A date edited here moves all
@@ -1925,8 +2187,7 @@ export default function Timeline({
       sub: [
         p.jiraKey || null,
         // Every objective the collapsed lines serve, not just the first one's.
-        (p.objectiveIds || [p.objective]).filter(Boolean).map((id) => (OBJ_BY_ID[id] ? `Obj ${OBJ_BY_ID[id].no}` : null))
-          .filter(Boolean).join(' + ') || null,
+        objs.join(' + ') || null,
         p.savingHours ? `${fmtHours(p.savingHours)} hrs/mth` : null,
         // Said out loud, so a reader can go and find the lines rather than
         // wonder why the hours do not match the register.
@@ -1935,12 +2196,19 @@ export default function Timeline({
         // is something a reader has to be able to see without opening anything.
         p.actualEndPinned ? 'finish held' : null,
       ].filter(Boolean).join(', '),
+      // The phone's one meta line: which ticket, and when it is due.
+      short: [
+        p.jiraKey || objs[0] || 'No Jira key',
+        dueWord(p.timeline.plannedEnd),
+        p.actualEndPinned ? 'finish held' : null,
+      ].filter(Boolean).join(', '),
       timeline: p.timeline,
       actualEndPinned: p.actualEndPinned,
       outsideTeam: p.outsideTeam,
-    },
-    depth: 0,
-  })) : null
+    }
+  }), [grouped, asOf])
+  // Drawn first, so the legend knows which marks are on screen.
+  const chartRows = ready ? topRows.map((row) => (list ? listRow : rowGroup)({ row, depth: 0 })) : null
 
   /* THE LEGEND: the marks on screen and what they mean, under the chart. */
   const legend = (
@@ -1951,31 +2219,53 @@ export default function Timeline({
       }}
     >
       <Key label="Plan">
-        <Box sx={{ position: 'absolute', inset: '5px 0', border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
+        <Box sx={{ position: 'absolute', inset: list ? '7px 0' : '5px 0', border: `1px solid ${INK.plan}`, borderRadius: list ? '1px' : '2px' }} />
       </Key>
       <Key label="Running">
-        <Box sx={{ position: 'absolute', inset: '5px 0', bgcolor: INK.running, borderRadius: '2px' }} />
+        <Box sx={{ position: 'absolute', inset: list ? '7px 0' : '5px 0', bgcolor: INK.running, borderRadius: list ? '1px' : '2px' }} />
       </Key>
       <Key label="Finished">
-        <Box sx={{ position: 'absolute', inset: '5px 0', bgcolor: INK.finished, borderRadius: '2px' }} />
+        <Box sx={{ position: 'absolute', inset: list ? '7px 0' : '5px 0', bgcolor: INK.finished, borderRadius: list ? '1px' : '2px' }} />
       </Key>
-      <Key label="On schedule">
-        <Box sx={{ position: 'absolute', top: 1, height: 7, left: 0, right: 0, border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
-        <Box sx={{ position: 'absolute', top: 10, height: 7, left: 0, right: 0, bgcolor: INK.finished, borderRadius: '2px' }} />
-      </Key>
-      <Key label="Behind schedule">
-        <Box sx={{ position: 'absolute', top: 1, height: 7, left: 0, width: 18, border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
-        <Box sx={{ position: 'absolute', top: 10, height: 7, left: 0, width: 18, bgcolor: INK.finished, borderRadius: '2px 0 0 2px' }} />
-        <Box sx={{ position: 'absolute', top: 10, height: 7, left: 18, right: 0, bgcolor: INK.late, borderRadius: '0 2px 2px 0' }} />
-      </Key>
-      <Key label="Ahead of schedule">
-        <Box sx={{ position: 'absolute', top: 1, height: 7, left: 0, right: 0, border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
-        <Box sx={{ position: 'absolute', top: 10, height: 7, left: 0, width: 18, bgcolor: INK.finished, borderRadius: '2px 0 0 2px' }} />
-        <Box sx={{
-          position: 'absolute', top: 10, height: 7, left: 18, right: 0, border: `1px solid ${INK.early}`, bgcolor: INK.earlyTint, borderRadius: '0 2px 2px 0',
-        }}
-        />
-      </Key>
+      {list ? (
+        /* The phone's bars are one lane: the outcome filled inside the plan's outline. */
+        <>
+          <Key label="On schedule">
+            <Box sx={{ position: 'absolute', top: 7, height: 4, left: 0, right: 0, bgcolor: INK.finished, border: `1px solid ${INK.plan}`, borderRadius: '1px' }} />
+          </Key>
+          <Key label="Behind schedule">
+            <Box sx={{ position: 'absolute', top: 7, height: 4, left: 0, width: 18, bgcolor: INK.finished, border: `1px solid ${INK.plan}`, borderRadius: '1px' }} />
+            <Box sx={{ position: 'absolute', top: 7, height: 4, left: 18, right: 0, bgcolor: INK.late, borderRadius: '0 1px 1px 0' }} />
+          </Key>
+          <Key label="Ahead of schedule">
+            <Box sx={{ position: 'absolute', top: 7, height: 4, left: 0, width: 18, bgcolor: INK.finished, borderRadius: '1px 0 0 1px' }} />
+            <Box sx={{
+              position: 'absolute', top: 7, height: 4, left: 18, right: 0, border: `1px solid ${INK.early}`, bgcolor: INK.earlyTint, borderRadius: '0 1px 1px 0',
+            }}
+            />
+          </Key>
+        </>
+      ) : (
+        <>
+          <Key label="On schedule">
+            <Box sx={{ position: 'absolute', top: 1, height: 7, left: 0, right: 0, border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
+            <Box sx={{ position: 'absolute', top: 10, height: 7, left: 0, right: 0, bgcolor: INK.finished, borderRadius: '2px' }} />
+          </Key>
+          <Key label="Behind schedule">
+            <Box sx={{ position: 'absolute', top: 1, height: 7, left: 0, width: 18, border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
+            <Box sx={{ position: 'absolute', top: 10, height: 7, left: 0, width: 18, bgcolor: INK.finished, borderRadius: '2px 0 0 2px' }} />
+            <Box sx={{ position: 'absolute', top: 10, height: 7, left: 18, right: 0, bgcolor: INK.late, borderRadius: '0 2px 2px 0' }} />
+          </Key>
+          <Key label="Ahead of schedule">
+            <Box sx={{ position: 'absolute', top: 1, height: 7, left: 0, right: 0, border: `1px solid ${INK.plan}`, borderRadius: '2px' }} />
+            <Box sx={{ position: 'absolute', top: 10, height: 7, left: 0, width: 18, bgcolor: INK.finished, borderRadius: '2px 0 0 2px' }} />
+            <Box sx={{
+              position: 'absolute', top: 10, height: 7, left: 18, right: 0, border: `1px solid ${INK.early}`, bgcolor: INK.earlyTint, borderRadius: '0 2px 2px 0',
+            }}
+            />
+          </Key>
+        </>
+      )}
       {drawn.adjusted && (
         <Key label="Adjusted date, from a delay elsewhere">
           <Box sx={{ position: 'absolute', top: 8, height: 2, left: 0, right: 0, bgcolor: INK.adjusted }} />
@@ -2050,7 +2340,7 @@ export default function Timeline({
       <Box sx={{
         width: NAME_W,
         flexShrink: 0,
-        pl: narrow ? 9 : 8,
+        pl: '38px',
         pb: 1,
         display: 'flex',
         alignItems: 'flex-end',
@@ -2133,18 +2423,20 @@ export default function Timeline({
           )
         })}
         {/* Where today is, named above the line. Last, so the units come
-            first in the row. */}
+            first in the row. Centred on the line, but held inside the
+            calendar: near either end it slides in rather than being cut off. */}
         <Box
           aria-label={`Today, ${fmtD(asOf)}`}
           sx={{
             position: 'absolute',
-            left: `${pct(at(asOf))}%`,
+            left: `max(2px, min(calc(${pct(at(asOf))}% - 24px), calc(100% - 50px)))`,
             top: 2,
-            transform: 'translateX(-50%)',
+            width: 48,
             height: TIER_H - 4,
-            px: 1.5,
+            boxSizing: 'border-box',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'center',
             borderRadius: '4px',
             bgcolor: 'bg.subtle',
             border: `1px solid ${INK.today}`,
@@ -2166,7 +2458,7 @@ export default function Timeline({
       <Box sx={{
         width: SLIP_W,
         flexShrink: 0,
-        px: narrow ? 1.5 : 3,
+        px: 3,
         pb: 1,
         display: 'flex',
         alignItems: 'flex-end',
@@ -2184,6 +2476,95 @@ export default function Timeline({
     </Box>
   )
 
+  /* The phone list's heading: the two column names, and the calendar its bars are drawn on, by quarter. */
+  const listHead = (
+    <Box
+      sx={{
+        display: 'grid', gridTemplateColumns: LIST_COLS, columnGap: 2, pl: 2, pr: 3, pt: 2, pb: 1.5, bgcolor: 'bg.subtle', borderBottom: 1, borderColor: 'border.subtle',
+      }}
+    >
+      <Box />
+      <Typography variant="subtitle2" component="span" sx={{ color: 'text.secondary' }}>Project</Typography>
+      <Typography variant="subtitle2" component="span" sx={{ color: 'text.secondary', textAlign: 'right' }}>Slip</Typography>
+      <Box aria-hidden sx={{ gridColumn: '2 / 4', position: 'relative', height: 16, mt: 1.5 }}>
+        {/* Clear of the right edge, and of a long first label ("Oct 2025") crowding the next. */}
+        {quarters.filter((qt, i) => pct(qt.ms) <= 88 && !(i === 1 && quarters[0].label.length > 4 && pct(qt.ms) - pct(quarters[0].ms) < 18)).map((qt) => (
+          <Typography
+            key={qt.ms}
+            component="span"
+            sx={{
+              position: 'absolute',
+              left: `${pct(qt.ms)}%`,
+              top: 0,
+              pl: '4px',
+              borderLeft: 1,
+              borderColor: qt.year ? 'border.strong' : 'border.subtle',
+              fontSize: '0.75rem',
+              lineHeight: '16px',
+              fontWeight: qt.year ? 500 : 400,
+              color: qt.year ? 'text.secondary' : 'text.tertiary',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {qt.label}
+          </Typography>
+        ))}
+        <Box sx={{
+          position: 'absolute', left: `${pct(at(asOf))}%`, top: 16, bottom: -6, width: '1px', bgcolor: INK.today,
+        }}
+        />
+      </Box>
+    </Box>
+  )
+
+  const listSkeleton = (
+    <Box role="status" aria-live="polite" aria-label="Loading the timeline" data-loading>
+      <Box sx={{ height: 62, bgcolor: 'bg.subtle', borderBottom: 1, borderColor: 'border.subtle' }} />
+      {Array.from({ length: 8 }, (_, i) => (
+        <Box
+          key={i}
+          sx={{
+            display: 'grid', gridTemplateColumns: LIST_COLS, columnGap: 2, rowGap: 1, alignItems: 'center', pl: 2, pr: 3, pt: 2, pb: 2, borderBottom: 1, borderColor: 'border.subtle',
+          }}
+        >
+          <Box sx={{ gridRow: '1 / span 3' }} />
+          <Skeleton variant="text" height={14} width={`${[72, 58, 80, 64, 49, 76, 61, 68][i]}%`} sx={{ transform: 'none' }} />
+          <Skeleton variant="rounded" height={16} width={40} />
+          <Skeleton variant="text" height={12} width={`${[38, 44, 30, 41, 35, 46, 33, 39][i]}%`} sx={{ transform: 'none' }} />
+          <Skeleton variant="text" height={12} width={56} sx={{ transform: 'none' }} />
+          <Skeleton
+            variant="rounded"
+            height={4}
+            sx={{
+              gridColumn: '2 / 4', mt: 1.5, ml: `${[4, 18, 26, 30, 42, 44, 45, 47][i]}%`, width: `${[30, 24, 22, 28, 20, 26, 22, 30][i]}%`,
+            }}
+          />
+        </Box>
+      ))}
+    </Box>
+  )
+
+  /* Nothing to draw: say why, and how to get the projects back. */
+  const emptyChart = (
+    <Box sx={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, py: 6, px: 4, textAlign: 'center',
+    }}
+    >
+      <SearchIcon sx={{ fontSize: 24, color: 'text.tertiary', mb: 1 }} />
+      <Typography variant="body1" sx={{ fontWeight: 500 }}>
+        {filtering ? 'No projects match these filters' : 'No projects with dates yet'}
+      </Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '56ch' }}>
+        {filtering
+          ? 'Clear the search or the filters to see the whole plan.'
+          : 'Give a project a planned start or due date on the Projects page, and it appears here.'}
+      </Typography>
+      {filtering && (
+        <Button variant="text" sx={{ mt: 2 }} onClick={() => { setQ(''); clearFilters() }}>{q.trim() ? 'Clear search and filters' : 'Clear filters'}</Button>
+      )}
+    </Box>
+  )
+
   const skeleton = (
     <Box role="status" aria-live="polite" aria-label="Loading the timeline" data-loading>
       <Box sx={{ height: HEAD_H, bgcolor: 'bg.subtle', borderBottom: 1, borderColor: 'border.subtle' }} />
@@ -2195,7 +2576,7 @@ export default function Timeline({
           }}
         >
           <Box sx={{
-            width: NAME_W, flexShrink: 0, pl: narrow ? 9 : 8, pr: 3, borderRight: 1, borderColor: 'border.subtle', alignSelf: 'stretch', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.75,
+            width: NAME_W, flexShrink: 0, pl: '38px', pr: 3, borderRight: 1, borderColor: 'border.subtle', alignSelf: 'stretch', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 0.75,
           }}
           >
             <Skeleton variant="text" height={12} width={`${[72, 58, 80, 64, 49, 76, 61, 68, 54, 70][i]}%`} sx={{ transform: 'none' }} />
@@ -2340,40 +2721,31 @@ export default function Timeline({
         <Box
           ref={scrollRef}
           data-timeline="chart"
-          onScroll={readEdges}
-          sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: fitH ? `${fitH}px` : '70vh' }}
+          onScroll={list ? undefined : readEdges}
+          // The phone's list scrolls with the page; the Gantt scrolls inside itself, header in sight.
+          sx={list ? undefined : { overflowX: 'auto', overflowY: 'auto', maxHeight: fitH ? `${fitH}px` : '70vh' }}
         >
-          {ready ? (
+          {!ready && (list ? listSkeleton : skeleton)}
+          {ready && list && (
+            <Box>
+              {listHead}
+              {chartRows}
+              {grouped.length === 0 && emptyChart}
+            </Box>
+          )}
+          {ready && !list && (
             <Box sx={{ minWidth: trackPx ? trackPx + PINNED_W : 'auto' }}>
               {head}
               <Box>
                 {chartRows}
-                {grouped.length === 0 && (
-                  <Box sx={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, py: 6, px: 4, textAlign: 'center',
-                  }}
-                  >
-                    <SearchIcon sx={{ fontSize: 24, color: 'text.tertiary', mb: 1 }} />
-                    <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                      {filtering ? 'No projects match these filters' : 'No projects with dates yet'}
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '56ch' }}>
-                      {filtering
-                        ? 'Clear the search or the filters to see the whole plan.'
-                        : 'Give a project a planned start or due date on the Projects page, and it appears here.'}
-                    </Typography>
-                    {filtering && (
-                      <Button variant="text" sx={{ mt: 2 }} onClick={() => { setQ(''); clearFilters() }}>{q.trim() ? 'Clear search and filters' : 'Clear filters'}</Button>
-                    )}
-                  </Box>
-                )}
+                {grouped.length === 0 && emptyChart}
               </Box>
             </Box>
-          ) : skeleton}
+          )}
         </Box>
 
         {/* The fades on a calendar that scrolls sideways: more this way. */}
-        {ready && (
+        {ready && !list && (
           <>
             <Box
               aria-hidden
@@ -2421,7 +2793,10 @@ export default function Timeline({
         */}
       <Dialog open={!!story} onClose={() => setStory(null)} maxWidth="sm" fullWidth fullScreen={phone} scroll="paper">
         {story && (() => {
-          const wk = weeklyOf(story.projectKeys)
+          // The row as it is now, not as it was when it was opened: a date changed from here shows at once.
+          const row = topRows.find((r) => r.rowKey === story.rowKey) || story
+          const tl = row.timeline
+          const wk = weeklyOf(row.projectKeys)
           const byWeek = {}
           for (const h of wk.history) (byWeek[h.week] = byWeek[h.week] || []).push(h)
           const weeks = Object.keys(byWeek).sort().reverse()
@@ -2442,9 +2817,9 @@ export default function Timeline({
             <>
               <DialogTitle sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, pr: 3 }}>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Box component="span" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{story.title}</Box>
+                  <Box component="span" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{row.title}</Box>
                   <Typography variant="body2" component="span" sx={{ display: 'block', color: 'text.secondary', mt: 0.5, fontWeight: 400 }}>
-                    {[story.jiraKey, story.timeline.plannedEnd ? `due ${fmtD(story.timeline.plannedEnd)}` : 'no due date'].filter(Boolean).join(', ')}
+                    {[row.jiraKey, tl.plannedEnd ? `due ${fmtD(tl.plannedEnd)}` : 'no due date'].filter(Boolean).join(', ')}
                     {readOnly ? '. Your own weeks only.' : '. Weekly check-ins, last eight weeks.'}
                   </Typography>
                 </Box>
@@ -2453,6 +2828,48 @@ export default function Timeline({
                 </IconButton>
               </DialogTitle>
               <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {/*
+                  * THE SCHEDULE, in words: what the bar draws, for a phone
+                  * that has no room for the bar, and for anybody who would
+                  * rather read the dates than measure them.
+                  */}
+                <Box
+                  data-story="schedule"
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'minmax(0, 3fr) minmax(0, 2fr) minmax(0, 1fr)' },
+                    columnGap: 4,
+                    rowGap: 3,
+                    p: 3,
+                    borderRadius: '8px',
+                    bgcolor: 'bg.subtle',
+                  }}
+                >
+                  {[
+                    ['Planned', planWords(tl)],
+                    ['Outcome', outcomeWords(tl)],
+                    ['Slip', <Box key="slip" component="span" sx={{ display: 'inline-flex', height: 20, alignItems: 'center' }}>{slipMark(tl)}</Box>],
+                  ].map(([label, value]) => (
+                    <Box key={label} sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary' }}>{label}</Typography>
+                      <Typography variant="body1" component="div" sx={{ mt: 0.5 }}>{value}</Typography>
+                    </Box>
+                  ))}
+                  {/* On a phone the row has no room for the active switch, so it is here. */}
+                  {phone && !readOnly && row.projectKeys?.length > 0 && (
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', mb: 0.5 }}>This week</Typography>
+                      <ActiveControl
+                        projects={row.projectKeys.map((k) => projectOf[k])}
+                        week={thisWeek}
+                        signals={signals}
+                        label={`active ${row.jiraKey || row.projectKey}`}
+                        size="small"
+                        onSet={(v) => row.projectKeys.forEach((k) => onUpdate(k, { active: v }))}
+                      />
+                    </Box>
+                  )}
+                </Box>
                 {wk.pending.length > 0 && (
                   <Box>
                     {groupTitle('Waiting for approval')}
@@ -2512,25 +2929,64 @@ export default function Timeline({
                   {weeks.map((w) => (
                     <Box key={w} sx={{ '& + &': { mt: 4 } }}>
                       <Typography variant="subtitle2" component="div" sx={{ color: 'text.secondary', mb: 1 }}>{weekTitle(w).replace(' · ', ', ')}</Typography>
-                      {byWeek[w].map((h) => (
-                        <Box key={`${h.person}${h.title}`} sx={{ ...itemSx, py: 1.5, '&:first-of-type': { borderTop: 0 } }}>
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="body1">{h.title}</Typography>
-                            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>
-                              {h.nick}
-                              {h.done === false && h.newDate ? `, now ${fmtD(h.newDate)}` : h.expected ? `, expected ${fmtD(h.expected)}` : ''}
-                            </Typography>
+                      {byWeek[w].map((h) => {
+                        // "On hold" typed as the blocker is how the Jira flow records a hold: it is not in the way.
+                        const hold = h.hold || (h.done === false && /^on hold$/i.test(String(h.blocker || '').trim()))
+                        const why = !hold && h.done === false
+                          ? (h.blocker && !/^on hold$/i.test(h.blocker.trim()) ? h.blocker : h.reason || '')
+                          : ''
+                        return (
+                          <Box key={`${h.person}${h.title}`} data-task-line={h.jiraKey || h.title} sx={{ ...itemSx, py: 2, '&:first-of-type': { borderTop: 0 } }}>
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography variant="body1" sx={{ fontWeight: 500 }}>{h.title}</Typography>
+                              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>
+                                {[
+                                  h.nick,
+                                  h.done === false && h.newDate ? `now ${fmtD(h.newDate)}` : (h.expected ? `expected ${fmtD(h.expected)}` : null),
+                                  h.reportedAt ? `sent ${ago(h.reportedAt)}` : null,
+                                ].filter(Boolean).join(', ')}
+                              </Typography>
+                              {h.progress && (
+                                <Typography
+                                  variant="body2"
+                                  data-progress
+                                  sx={{
+                                    mt: 1.5, pl: 2, borderLeft: 2, borderColor: 'border.strong', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.5, maxWidth: '72ch',
+                                  }}
+                                >
+                                  {h.progress}
+                                </Typography>
+                              )}
+                              {hold && h.reason && !/^on hold$/i.test(h.reason.trim()) && (
+                                <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>{`Why on hold: ${h.reason}`}</Typography>
+                              )}
+                              {why && (
+                                <Typography variant="body2" sx={{ mt: 1 }}>
+                                  {`In the way${h.blockerCategory && CATEGORY_LABEL[h.blockerCategory] ? ` (${CATEGORY_LABEL[h.blockerCategory]})` : ''}: ${why}`}
+                                </Typography>
+                              )}
+                            </Box>
+                            <StatusPill tone={hold ? 'warning' : h.done === true ? 'success' : h.done === false ? 'warning' : 'neutral'}>
+                              {hold ? 'On hold'
+                                : h.done === true ? 'Finished'
+                                  : h.done === false ? (h.pct != null ? `${h.pct}% done` : 'Not finished')
+                                    : (h.reportIn ? 'No answer' : 'Planned')}
+                            </StatusPill>
                           </Box>
-                          <StatusPill tone={h.done === true ? 'success' : h.done === false ? 'warning' : 'neutral'}>
-                            {h.done === true ? 'Finished' : h.done === false ? (h.pct != null ? `${h.pct}% done` : 'Not finished') : 'Planned'}
-                          </StatusPill>
-                        </Box>
-                      ))}
+                        )
+                      })}
                     </Box>
                   ))}
                 </Box>
               </DialogContent>
               <DialogActions>
+                {/* A phone has no bar to click, so the dates are changed from here. */}
+                {phone && !readOnly && row.projectKey && (
+                  <Button variant="outlined" startIcon={<EditCalendarIcon />} onClick={(e) => setEditing({ anchor: e.currentTarget, row })}>
+                    Change dates
+                  </Button>
+                )}
+                <Box sx={{ flex: 1 }} />
                 <Button variant="text" onClick={() => setStory(null)}>Close</Button>
                 {!readOnly && onOpenWeekly && wk.pending.length > 0 && (
                   <Button variant="contained" onClick={() => { setStory(null); onOpenWeekly() }}>Decide on the Weekly page</Button>
@@ -2625,12 +3081,6 @@ export default function Timeline({
               </IconButton>
             </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {phone && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, mb: 1 }}>
-                  <Typography variant="subtitle2" component="span" sx={{ color: 'text.secondary' }}>Calendar</Typography>
-                  {scaleSwitch}
-                </Box>
-              )}
               {picSelect(true)}
               {stateSelect(true)}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, '& .MuiFormControlLabel-root': { minHeight: 40 } }}>{switches}</Box>

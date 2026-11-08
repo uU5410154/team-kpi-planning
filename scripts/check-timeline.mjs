@@ -325,7 +325,8 @@ if (!exe) {
   console.log('\nSKIP — no Chromium-based browser found; the model checks above still ran')
 } else {
   console.log('\n--- and it draws ---')
-  const PORT = 5403
+  // CHECK_PORT, like check-ui and check-jira, so two checkouts can run it at once.
+  const PORT = Number(process.env.CHECK_PORT) || 5403
   const srv = spawn(process.execPath, ['server/index.js'], {
     env: { ...process.env, PORT: String(PORT), MONGODB_URI: '' },
     stdio: 'ignore',
@@ -583,21 +584,98 @@ if (!exe) {
         rowH: rows[0] ? Math.round(rows[0].getBoundingClientRect().height) : 0,
         seen: seen.length,
         all: rows.length,
+        // How many whole rows the chart's own window has room for, below its header row.
+        room: (() => {
+          const c = box('[data-timeline="chart"]')
+          const r = rows[0]?.getBoundingClientRect()
+          return c && r ? Math.floor((Math.min(c.bottom, H) - r.top) / r.height) : 0
+        })(),
+        chartBottom: Math.round(box('[data-timeline="chart"]')?.bottom || 0),
+        H,
       }
     })
   }
+  /*
+   * What a reader sees at each size: on a phone a list, one line per name, the
+   * due date and where it stands said in words; on a tablet a Gantt whose
+   * words beside the bars are whole or absent, never cut at the chart's edge,
+   * and whose Today tag sits inside the calendar.
+   */
+  const readAt = () => page.evaluate(() => {
+    const first = document.querySelector('[data-keys]')
+    const name = first?.querySelector('[title]')
+    const today = document.querySelector('[aria-label^="Today,"]')
+    const cut = []
+    for (const el of document.querySelectorAll('[data-timeline="chart"] span')) {
+      if (!el.innerText || el.children.length) continue
+      const parent = el.parentElement
+      if (getComputedStyle(parent).overflow !== 'hidden') continue
+      const r = el.getBoundingClientRect()
+      const box = parent.getBoundingClientRect()
+      if (r.right > box.right + 0.5 || r.left < box.left - 0.5) cut.push(el.innerText)
+    }
+    // The month cells ("Jan", or "J" where every month is squeezed), not the year tier above them.
+    const cells = today ? [...today.parentElement.children].filter((c) => /^[A-Z][a-z]{0,2}$/.test(c.innerText.trim())) : []
+    const lefts = cells.map((c) => c.getBoundingClientRect().left)
+    const steps = lefts.slice(1).map((x, i) => x - lefts[i]).sort((a, b) => a - b)
+    const trackRight = today ? today.parentElement.getBoundingClientRect().right : 0
+    return {
+      gantt: !!today,
+      text: first?.innerText || '',
+      nameH: name ? Math.round(name.getBoundingClientRect().height) : 0,
+      cut,
+      todayIn: today ? (() => {
+        const t = today.getBoundingClientRect()
+        const track = today.parentElement.getBoundingClientRect()
+        return t.left >= track.left && t.right <= track.right
+      })() : null,
+      // The last month: as wide as a month is, and labelled the way the others are.
+      last: cells.length > 2 ? {
+        label: cells[cells.length - 1].innerText.trim(),
+        first: cells[0].innerText.trim(),
+        width: Math.round(trackRight - lefts[lefts.length - 1]),
+        month: Math.round(steps[Math.floor(steps.length / 2)]),
+      } : null,
+    }
+  })
   for (const [w, h] of [[390, 844], [768, 1024], [1280, 800]]) {
     const l = await layoutAt(w, h)
     check(`NO SIDEWAYS PAGE SCROLL AT ${w}px`, l.overflow <= 0, `${l.overflow}px too wide`)
+    const r = await readAt()
+    if (w === 390) {
+      check('A PHONE GETS A LIST, NOT A GANTT SQUEEZED INTO 200px', !r.gantt && l.all > 0, `${l.all} rows`)
+      check('  each name on one line', r.nameH > 0 && r.nameH <= 22, `${r.nameH}px`)
+      check('  with its due date and where it stands, in words',
+        /due \d{1,2} [A-Z][a-z]{2}|no due date/.test(r.text) && /Not started|Running|Finished|Past due|Started/.test(r.text),
+        r.text.replace(/\n/g, ' | '))
+    } else {
+      check(`  AT ${w}px NO WORD BESIDE A BAR IS CUT AT THE CHART'S EDGE`, r.cut.length === 0, r.cut.slice(0, 3).join(' | '))
+      check(`  and the Today tag sits inside the calendar`, r.todayIn === true)
+      check('  and the calendar ends on a whole month, not a sliver with a lone letter',
+        r.last && r.last.width >= r.last.month * 0.85 && r.last.label.length === r.last.first.length, JSON.stringify(r.last))
+    }
   }
   const wide = await layoutAt(1440, 900)
+  const wideRead = await readAt()
+  check('  AT 1440px NO WORD BESIDE A BAR IS CUT, AND TODAY AND THE LAST MONTH ARE WHOLE',
+    wideRead.cut.length === 0 && wideRead.todayIn === true && wideRead.last && wideRead.last.width >= wideRead.last.month * 0.85
+    && wideRead.last.label.length === wideRead.last.first.length, JSON.stringify({ cut: wideRead.cut.slice(0, 3), last: wideRead.last }))
   check('NO SIDEWAYS PAGE SCROLL AT 1440px', wide.overflow <= 0, `${wide.overflow}px too wide`)
   check('THE FIGURES AND FILTERS TOGETHER TAKE UNDER 120px',
     wide.summary > 0 && wide.filters > 0 && wide.summary + wide.filters < 120,
     `figures ${wide.summary}px + filters ${wide.filters}px`)
-  check('AT LEAST 14 PROJECTS IN VIEW ON A 1440x900 SCREEN, WITHOUT SCROLLING',
-    wide.seen >= 14, `${wide.seen} of ${wide.all} rows, ${wide.rowH}px each`)
-  check('  rows stay readable, not crushed', wide.rowH >= 32, `${wide.rowH}px`)
+  /*
+   * Rows are 44px now (the design system's table row: a 14px name and a 13px
+   * meta line, neither touching the borders), where they were 36px and two
+   * lines crushed together. So fewer fit, and what is locked is that the chart
+   * still takes the whole window and fills it with rows, not a fixed count
+   * worked out for the old height.
+   */
+  check('THE CHART RUNS TO THE FOOT OF A 1440x900 SCREEN',
+    wide.chartBottom >= wide.H - 24 && wide.chartBottom <= wide.H, `ends at ${wide.chartBottom}px of ${wide.H}`)
+  check('  AND IS FULL OF PROJECTS, AT LEAST 11 IN VIEW WITHOUT SCROLLING',
+    wide.seen >= 11 && wide.seen >= wide.room, `${wide.seen} of ${wide.all} rows in view, room for ${wide.room}, ${wide.rowH}px each`)
+  check('  rows are 44px: readable, not crushed', wide.rowH === 44, `${wide.rowH}px`)
 
   await browser.close()
   srv.kill()
