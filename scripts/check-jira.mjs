@@ -265,7 +265,7 @@ const fake = createServer((req, res) => {
 await new Promise((r) => fake.listen(5411, r))
 
 /* ---------------- the real server, pointed at it ---------------- */
-const PORT = 5412
+const PORT = Number(process.env.CHECK_PORT) || 5412
 const srv = spawn(process.execPath, ['server/index.js'], {
   env: {
     ...process.env,
