@@ -692,6 +692,8 @@ export default function Timeline({
   // The administrator's own word on what is being worked on now. Read by the
   // manager dashboard; nothing becomes active by itself.
   const [onlyActive, setOnlyActive] = useState(false)
+  // How the rows are ordered. Display only: every figure is the same either way.
+  const [sortBy, setSortBy] = useState('start')
   /*
    * ACTIVE THIS WEEK, the dashboard's answer: its dates, Jira work covering the
    * week, an update sent this week or an open decision — unless an
@@ -737,9 +739,22 @@ export default function Timeline({
         return p.timeline.state === fState
       })
       .filter((p) => !hay || `${p.jiraKey || ''} ${p.summary} ${p.program || ''}`.toLowerCase().includes(hay))
-      .sort((a, b) => String(a.timeline.plannedStart || a.timeline.actualStart || '9999')
-        .localeCompare(String(b.timeline.plannedStart || b.timeline.actualStart || '9999')))
-  }, [plan.projects, q, fPic, fState, ours, onlyActive, activeKeys])
+      .sort((a, b) => {
+        const byStart = String(a.timeline.plannedStart || a.timeline.actualStart || '9999')
+          .localeCompare(String(b.timeline.plannedStart || b.timeline.actualStart || '9999'))
+        if (sortBy === 'late') {
+          // Most days late first; nothing to judge yet goes to the end.
+          const la = a.timeline.lateBy ?? -Infinity
+          const lb = b.timeline.lateBy ?? -Infinity
+          return lb - la || byStart
+        }
+        if (sortBy === 'due') {
+          return String(a.timeline.plannedEnd || '9999').localeCompare(String(b.timeline.plannedEnd || '9999')) || byStart
+        }
+        if (sortBy === 'name') return String(a.summary || '').localeCompare(String(b.summary || ''))
+        return byStart
+      })
+  }, [plan.projects, q, fPic, fState, ours, onlyActive, activeKeys, sortBy])
 
   /*
    * ONE BAR PER TICKET.
@@ -924,14 +939,15 @@ export default function Timeline({
    * opens on the first of January — five thousand pixels from anything anybody
    * wanted to look at. Landing on today is the only sane starting point.
    */
-  useEffect(() => {
+  const toToday = (smooth = false) => {
     const el = scrollRef.current
     if (!el || (scale === 'month' && !trackPx)) return
     const width = el.scrollWidth - el.clientWidth
     if (width <= 0) return
     const at01 = (pct(at(asOf)) / 100) * (el.scrollWidth - PINNED_W)
-    el.scrollLeft = Math.max(0, Math.min(width, at01 - el.clientWidth / 2))
-  }, [scale, asOf, span.from, span.to, trackPx, PINNED_W])
+    el.scrollTo({ left: Math.max(0, Math.min(width, at01 - el.clientWidth / 2)), behavior: smooth ? 'smooth' : 'auto' })
+  }
+  useEffect(() => { toToday() }, [scale, asOf, span.from, span.to, trackPx, PINNED_W])
 
   const picks = [{ id: 'all', nick: 'All PICs' }, ...plan.assignees.map((p) => ({ id: p.id, nick: p.nick }))]
 
@@ -1474,7 +1490,7 @@ export default function Timeline({
 
   // Narrow, how many filters are away from their defaults — on the button
   // that hides them, so a short list is never a mystery.
-  const changed = [fPic !== 'all', fState !== 'all', !ours, onlyActive].filter(Boolean).length
+  const changed = [fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
 
   // Small, quiet controls: a toolbar, not a form.
   const jiraBtn = { fontSize: '0.75rem', px: 1, minWidth: 0 }
@@ -1499,6 +1515,15 @@ export default function Timeline({
           <MenuItem value="running">Running now</MenuItem>
           <MenuItem value="finished">Finished</MenuItem>
           <MenuItem value="not started">Not started</MenuItem>
+        </Select>
+      </FormControl>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 130 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+        <InputLabel>Sort</InputLabel>
+        <Select label="Sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-timeline-sort>
+          <MenuItem value="start">Start date</MenuItem>
+          <MenuItem value="late">Most late first</MenuItem>
+          <MenuItem value="due">Due soonest</MenuItem>
+          <MenuItem value="name">Name A–Z</MenuItem>
         </Select>
       </FormControl>
       <FormControlLabel
@@ -1645,6 +1670,9 @@ export default function Timeline({
           <ToggleButton value="week">Week</ToggleButton>
           <ToggleButton value="month">Month</ToggleButton>
         </ToggleButtonGroup>
+        <Button size="small" variant="outlined" onClick={() => toToday(true)} sx={{ flexShrink: 0, borderColor: 'divider', py: 0.3 }} data-timeline-today>
+          Today
+        </Button>
         {narrow && (
           <Collapse in={showFilters} sx={{ flexBasis: '100%' }}>
             <Box sx={{ display: 'flex', gap: 1, rowGap: 1, flexWrap: 'wrap', alignItems: 'center', pt: 0.5 }}>
@@ -1661,6 +1689,27 @@ export default function Timeline({
       >
         {stats}
         <Box sx={{ flex: 1 }} />
+        {/* The key, on the same line: what each mark means. Full key at the bottom. */}
+        <Box data-timeline="key" sx={{ display: 'flex', alignItems: 'center', columnGap: 1.5, rowGap: 0.25, flexWrap: 'wrap' }}>
+          {[
+            { el: <Box sx={{ width: 22, height: 8, border: 1, borderColor: 'text.disabled', borderRadius: 0.5 }} />, label: 'Plan' },
+            { el: <Box sx={{ width: 22, height: 8, bgcolor: STATUS.good, borderRadius: 0.5 }} />, label: 'Finished on time' },
+            { el: <Box sx={{ width: 22, height: 8, bgcolor: CHART[mode].series[0], borderRadius: 0.5 }} />, label: 'Running' },
+            { el: <Box sx={{ width: 22, height: 8, bgcolor: AHEAD, borderRadius: 0.5 }} />, label: 'Finished early' },
+            { el: <Box sx={{ width: 22, height: 8, bgcolor: STATUS.critical, borderRadius: 0.5 }} />, label: 'Late' },
+            {
+              el: <Box sx={{ width: 22, height: 8, borderRadius: 0.5, border: 1, borderColor: STATUS.critical, backgroundImage: `repeating-linear-gradient(45deg, ${STATUS.critical}, ${STATUS.critical} 3px, transparent 3px, transparent 6px)` }} />,
+              label: 'Days of slip',
+            },
+            { el: <Box sx={{ width: 2, height: 12, bgcolor: STATUS.warning }} />, label: 'Today' },
+          ].map((k) => (
+            <Box key={k.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              {k.el}
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>{k.label}</Typography>
+            </Box>
+          ))}
+        </Box>
+
         {!weeklyIn && <Loading label="Loading check-ins…" />}
         <Typography variant="caption" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
           {/* The count is of BARS, which after collapsing is the number of
@@ -1736,6 +1785,16 @@ export default function Timeline({
                     </Typography>
                   </Box>
                 ))}
+                {/* Where today falls, named, so the orange line needs no legend. */}
+                <Box
+                  data-timeline-today-label
+                  sx={{
+                    position: 'absolute', left: `${pct(at(asOf))}%`, top: 2, transform: 'translateX(-50%)', zIndex: 1,
+                    px: 0.6, borderRadius: 1, border: 1, borderColor: STATUS.warning, bgcolor: 'background.paper', pointerEvents: 'none',
+                  }}
+                >
+                  <Typography variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 700, color: STATUS.warning, lineHeight: 1.6, display: 'block' }}>Today</Typography>
+                </Box>
               </Box>
               <Box sx={{
                 width: SLIP_W,
