@@ -32,7 +32,7 @@ if (!chrome || !existsSync(new URL('../dist/index.html', import.meta.url))) {
 }
 
 const mongod = await MongoMemoryServer.create()
-const PORT = Number(process.env.CHECK_PORT) || 5383
+const PORT = 5383
 const base = `http://127.0.0.1:${PORT}`
 const SERVICE = `Bearer ${'loading-service-token-'.padEnd(48, '5')}`
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -138,14 +138,12 @@ try {
   {
     const pg = await open(boss, [{ match: /^\/api\/weekly\/projects$/, ms: 2000 }])
     await pg.goto(`${base}/#project/FNP-88`, { waitUntil: 'domcontentloaded' })
-    // "Week by week" shows the shape of its rows (a skeleton named "Loading check-ins…") while they load.
-    const saw = await pg.waitForFunction(() => [...document.querySelectorAll('section[aria-label="week by week"] [data-loading]')]
-      .some((el) => el.getBoundingClientRect().height > 0 && /Loading check-ins/.test(el.getAttribute('aria-label') || el.innerText)), { timeout: 10000 })
-      .then(() => true).catch(() => false)
-    check('WHILE THE CHECK-INS LOAD, THE PAGE SAYS SO', saw, JSON.stringify(await spinners(pg)))
+    const saw = await waitText(pg, 'Loading check-ins')
+    check('WHILE THE CHECK-INS LOAD, A SPINNER SAYS SO', saw && (await spinners(pg)).some((s) => s.includes('Loading check-ins')),
+      JSON.stringify(await spinners(pg)))
     const t = await text(pg)
     check('  NOT "NOBODY HAS REPORTED"', !t.includes('Nobody has reported on this project'))
-    check('  NOR "none yet" for the latest update', !/Latest weekly update\s*none yet/i.test(t))
+    check('  NOR "none yet" for the latest update', !/Latest weekly update\s*none yet/.test(t))
     const gone = await waitNoSpinner(pg)
     check('ONCE THEY ARE IN, THE SPINNERS ARE GONE', gone, JSON.stringify(await spinners(pg)))
     check('  and the empty answer may show now', (await text(pg)).includes('Nobody has reported on this project'))
@@ -156,17 +154,12 @@ try {
   {
     const pg = await open(boss, [{ match: /^\/api\/decisions$/, ms: 2500 }])
     await pg.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
-    // The card shows the shape of its rows (a skeleton named "Loading decisions…") while they load.
-    const decisionsLoading = () => pg.evaluate(() => [...document.querySelectorAll('section[aria-label="waiting for your decision"] [data-loading]')]
-      .some((el) => el.getBoundingClientRect().height > 0 && /Loading decisions/.test(el.getAttribute('aria-label') || el.innerText)))
-    const saw = await pg.waitForFunction(() => [...document.querySelectorAll('section[aria-label="waiting for your decision"] [data-loading]')]
-      .some((el) => el.getBoundingClientRect().height > 0 && /Loading decisions/.test(el.getAttribute('aria-label') || el.innerText)), { timeout: 10000 })
-      .then(() => true).catch(() => false)
-    check('WHILE THE DECISIONS LOAD, THE CARD SHOWS IT IS LOADING', saw, JSON.stringify(await spinners(pg)))
-    check('  NOT "Nothing is waiting for you"', !(await text(pg)).includes('Nothing is waiting for you'))
-    const ok = await waitText(pg, 'Nothing is waiting for you')
+    const saw = await waitText(pg, 'Loading decisions')
+    check('WHILE THE DECISIONS LOAD, THE CARD SPINS', saw, JSON.stringify(await spinners(pg)))
+    check('  NOT "No date changes or decisions are waiting"', !(await text(pg)).includes('No date changes or decisions are waiting'))
+    const ok = await waitText(pg, 'No date changes or decisions are waiting')
     check('ONCE THEY ARE IN, THE EMPTY ANSWER SHOWS', ok)
-    check('  and that card no longer shows it is loading', !(await decisionsLoading()))
+    check('  and that card no longer spins', !(await spinners(pg)).some((s) => s.includes('Loading decisions')))
     await pg.close()
   }
 } catch (e) {

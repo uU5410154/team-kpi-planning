@@ -19,13 +19,9 @@ export const newId = (prefix = 'app') => {
   return `${prefix}-${Date.now().toString(36)}-${seq.toString(36)}`
 }
 
-export function newApp({
-  name = 'New app', url = '', icon = null, ...rest
-} = {}) {
-  // Department, status and note travel with it: the Add app dialog asks for
-  // them, and an app that lost them on the way in would sit under "All" only.
+export function newApp({ name = 'New app', url = '', icon = null } = {}) {
   return {
-    ...rest, id: newId('app'), type: 'app', name, url, icon,
+    id: newId('app'), type: 'app', name, url, icon,
   }
 }
 
@@ -179,22 +175,6 @@ export function safeUrl(raw) {
   } catch {
     return null
   }
-}
-
-/**
- * The link a tile opens, or null when what was typed is not one yet.
- *
- * Stricter than safeUrl, which assumes https in front of anything: "upcoming"
- * would become https://upcoming/, and a note typed after the address
- * ("https://host:5014 (API :8001)") is not an address at all. A tile with
- * neither says "Link coming" instead of opening a page that cannot load.
- */
-export function linkOf(raw) {
-  const text = String(raw || '').trim()
-  if (!text || /\s/.test(text)) return null
-  const typedScheme = /^[a-z][a-z0-9+.-]*:/i.test(text)
-  if (!typedScheme && !/[.:/]/.test(text)) return null
-  return safeUrl(text)
 }
 
 /** A stable colour for an app with no picture, from its name. */

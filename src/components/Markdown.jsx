@@ -10,7 +10,7 @@ import { Box, Typography } from '@mui/material'
 
 const inline = (s, keyBase) => String(s).split(/(\*\*[^*]+\*\*)/g).map((part, i) => (
   /^\*\*[^*]+\*\*$/.test(part)
-    ? <strong key={`${keyBase}-${i}`} style={{ fontWeight: 600 }}>{part.slice(2, -2)}</strong>
+    ? <strong key={`${keyBase}-${i}`}>{part.slice(2, -2)}</strong>
     : part
 ))
 
@@ -32,28 +32,26 @@ export default function Markdown({ text, dense = false }) {
     if (h) blocks.push({ type: 'h', text: h[1], key: `h${i}` })
     else blocks.push({ type: 'p', text: line, key: `p${i}` })
   })
-  // Body text at 14/20 (a little more air for Thai), lists indented 20px.
-  const para = { lineHeight: '22px', maxWidth: '72ch' }
   return (
-    <Box sx={{ '& > *:first-of-type': { mt: 0 }, '& > *:last-child': { mb: 0 } }}>
+    <Box sx={{ '& > *:first-of-type': { mt: 0 } }}>
       {blocks.map((b) => {
         if (b.type === 'h') {
           return (
-            <Typography key={b.key} variant="h3" sx={{ mt: dense ? 3 : 4, mb: 1 }}>
+            <Typography key={b.key} variant="subtitle2" sx={{ mt: dense ? 1.25 : 1.75, mb: 0.5, color: 'text.secondary' }}>
               {inline(b.text, b.key)}
             </Typography>
           )
         }
         if (b.type === 'list') {
           return (
-            <Box key={b.key} component="ul" sx={{ m: 0, mb: 2, pl: 5 }}>
+            <Box key={b.key} component="ul" sx={{ m: 0, mb: 0.75, pl: 2.25 }}>
               {b.items.map((it) => (
-                <Typography key={it.key} component="li" variant="body1" sx={{ ...para, mb: 1 }}>{inline(it.text, it.key)}</Typography>
+                <Typography key={it.key} component="li" variant="body2" sx={{ mb: 0.4 }}>{inline(it.text, it.key)}</Typography>
               ))}
             </Box>
           )
         }
-        return <Typography key={b.key} variant="body1" sx={{ ...para, mb: 2 }}>{inline(b.text, b.key)}</Typography>
+        return <Typography key={b.key} variant="body2" sx={{ mb: 0.75 }}>{inline(b.text, b.key)}</Typography>
       })}
     </Box>
   )

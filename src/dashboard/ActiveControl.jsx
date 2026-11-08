@@ -31,7 +31,6 @@ const modeOf = (projects) => {
 }
 
 const WORD = { auto: 'Auto', on: 'Always', off: 'Never' }
-const LONG = { auto: 'automatic', on: 'always on', off: 'always off' }
 
 export default function ActiveControl({
   projects = [], label, onSet, week = weekOf(), size = 'small', signals = null,
@@ -45,7 +44,7 @@ export default function ActiveControl({
   const autoWhy = unitSource(live.map((p) => ({ ...p, active: undefined })), week, signals)
   const byAuto = autoWhy !== 'none'
   const wk = `week ${weekNo(week)}`
-  const tip = `${on ? 'Active' : 'Not active'} in ${wk}: ${mode === 'auto' ? (byAuto ? ACTIVE_WHY[autoWhy] : 'automatic, nothing covers it') : 'set by an administrator'}. Click to change.`
+  const tip = `${on ? 'Active' : 'Not active'} in ${wk} — ${mode === 'auto' ? (byAuto ? ACTIVE_WHY[autoWhy] : 'automatic: nothing covers it') : 'set by an administrator'}. Click to change.`
   const pick = (v) => { setAt(null); onSet?.(v) }
   // 'dot': just the dot, for a narrow column — the word is in the tooltip.
   const dot = size === 'dot'
@@ -62,63 +61,48 @@ export default function ActiveControl({
           sx={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 1,
+            gap: 0.6,
             flexShrink: 0,
-            height: big ? 28 : dot ? 20 : 22,
-            px: big ? 2.5 : dot ? 1.25 : 1.75,
-            borderRadius: '4px',
+            px: big ? 1.25 : dot ? 0.6 : 0.75,
+            py: big ? 0.5 : dot ? 0.6 : 0.25,
+            borderRadius: '999px',
             border: 1,
-            borderColor: 'border.strong',
+            borderColor: 'divider',
             color: 'text.secondary',
-            transition: 'background-color 120ms, color 120ms',
-            '&:hover': { bgcolor: 'action.hover', color: 'text.primary' },
+            '&:hover': { bgcolor: 'action.hover' },
           }}
         >
-          <Box
-            aria-hidden
-            sx={(t) => ({
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              flexShrink: 0,
-              boxSizing: 'border-box',
-              border: on ? 0 : `1.5px solid ${t.palette.text.tertiary}`,
-              bgcolor: on ? t.palette.tone.success.solid : 'transparent',
-            })}
+          <Box sx={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            border: 1.5,
+            borderColor: on ? 'primary.main' : 'text.disabled',
+            bgcolor: on ? 'primary.main' : 'transparent',
+          }}
           />
           {!dot && (
-            <Typography component="span" sx={{ fontSize: big ? '0.8125rem' : '0.75rem', fontWeight: 500, lineHeight: '16px', whiteSpace: 'nowrap' }}>
-              {big ? (
-                <>
-                  <Box component="span" sx={{ color: 'text.primary' }}>{on ? 'Active' : 'Not active'}</Box>
-                  {`, ${LONG[mode]}`}
-                </>
-              ) : WORD[mode]}
+            <Typography component="span" sx={{ fontSize: big ? '0.8rem' : '0.66rem', fontWeight: 600, lineHeight: 1.4 }}>
+              {big ? `${on ? 'Active' : 'Not active'} · ${WORD[mode]}` : WORD[mode]}
             </Typography>
           )}
         </ButtonBase>
       </Tooltip>
-      <Menu
-        anchorEl={at}
-        open={!!at}
-        onClose={() => setAt(null)}
-        onClick={(e) => e.stopPropagation()}
-        slotProps={{ paper: { sx: { maxWidth: 360 } } }}
-      >
-        <MenuItem onClick={() => pick(undefined)} selected={mode === 'auto'} sx={{ alignItems: 'flex-start', py: 2 }}>
-          <ListItemIcon sx={{ mt: 0.25 }}>{mode === 'auto' && <CheckIcon fontSize="small" />}</ListItemIcon>
+      <Menu anchorEl={at} open={!!at} onClose={() => setAt(null)} onClick={(e) => e.stopPropagation()}>
+        <MenuItem onClick={() => pick(undefined)} selected={mode === 'auto'}>
+          <ListItemIcon>{mode === 'auto' && <CheckIcon fontSize="small" />}</ListItemIcon>
           <ListItemText
             primary="Automatic"
-            secondaryTypographyProps={{ sx: { whiteSpace: 'normal' } }}
-            secondary={`${byAuto ? `Active in ${wk}: ${ACTIVE_WHY[autoWhy]}` : `Not active in ${wk}`}. Dates, Jira work, an update or an open decision make it active.`}
+            secondaryTypographyProps={{ sx: { whiteSpace: 'normal', maxWidth: 300 } }}
+            secondary={`${byAuto ? `Active in ${wk} — ${ACTIVE_WHY[autoWhy]}` : `Not active in ${wk}`}. Dates, Jira work, an update or an open decision make it active.`}
           />
         </MenuItem>
-        <MenuItem onClick={() => pick(true)} selected={mode === 'on'} sx={{ alignItems: 'flex-start', py: 2 }}>
-          <ListItemIcon sx={{ mt: 0.25 }}>{mode === 'on' && <CheckIcon fontSize="small" />}</ListItemIcon>
+        <MenuItem onClick={() => pick(true)} selected={mode === 'on'}>
+          <ListItemIcon>{mode === 'on' && <CheckIcon fontSize="small" />}</ListItemIcon>
           <ListItemText primary="Always active" secondary="Whatever its dates say" />
         </MenuItem>
-        <MenuItem onClick={() => pick(false)} selected={mode === 'off'} sx={{ alignItems: 'flex-start', py: 2 }}>
-          <ListItemIcon sx={{ mt: 0.25 }}>{mode === 'off' && <CheckIcon fontSize="small" />}</ListItemIcon>
+        <MenuItem onClick={() => pick(false)} selected={mode === 'off'}>
+          <ListItemIcon>{mode === 'off' && <CheckIcon fontSize="small" />}</ListItemIcon>
           <ListItemText primary="Never active" secondary="Kept off the dashboard" />
         </MenuItem>
       </Menu>

@@ -11,36 +11,27 @@ export const PROJECT_SECTIONS = [
   { id: 'about', label: 'How-to note' },
   { id: 'filters', label: 'Search and filters' },
   { id: 'figures', label: 'Figures' },
-  { id: 'tools', label: 'Table toolbar' },
+  { id: 'tools', label: 'Export / import bar' },
   { id: 'table', label: 'Project table', locked: true },
 ]
 
-/*
- * The figures, in the order they show by default: the six a manager reads
- * first make the top row, the costing figures — blank until somebody enters
- * effort or CAPEX — follow on a second row.
- */
 export const PROJECT_TILES = [
-  { id: 'count', label: 'Projects' },
-  { id: 'hours', label: 'Saving hrs/mth' },
-  { id: 'done', label: 'Delivered' },
-  { id: 'fte', label: 'FTE released' },
-  { id: 'benefit', label: 'Benefit/yr' },
-  { id: 'build', label: 'Build cost' },
+  { id: 'count', label: 'Projects in view' },
+  { id: 'hours', label: 'Saving hrs / month' },
+  { id: 'done', label: 'Of which delivered' },
+  { id: 'fte', label: 'FTE' },
   { id: 'manday', label: 'Mandays' },
+  { id: 'benefit', label: 'Benefit / year' },
+  { id: 'build', label: 'Build cost' },
   { id: 'capex', label: 'CAPEX' },
-  { id: 'opex', label: 'OPEX/yr' },
+  { id: 'opex', label: 'OPEX / year' },
   { id: 'investment', label: 'Investment' },
   { id: 'roi', label: 'ROI' },
 ]
 
-/*
- * The how-to note starts hidden: the page explains itself from "About this
- * page" in its header. An administrator can still show the note for everybody.
- */
 export const DEFAULT_PROJECT_LAYOUT = {
   sections: PROJECT_SECTIONS.map((s) => s.id),
-  hiddenSections: ['about'],
+  hiddenSections: [],
   tiles: PROJECT_TILES.map((t) => t.id),
   hiddenTiles: [],
   wideTiles: [],

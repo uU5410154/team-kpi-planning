@@ -111,7 +111,7 @@ check('THE DEFAULT SUBMIT LIST IS ALL SIX, GUN INCLUDED, AND NOT IT',
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = Number(process.env.CHECK_PORT) || 5361
+const PORT = 5361
 const base = `http://127.0.0.1:${PORT}`
 const SERVICE = `Bearer ${'weekly-service-token-'.padEnd(48, '3')}`
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -290,9 +290,7 @@ try {
     await page.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await page.waitForFunction(() => document.body.innerText.includes('My week'), { timeout: 15000 })
     const text = await page.evaluate(() => document.body.innerText)
-    // The next step is its own bar (no "Next step" label over it): its button says what to do.
-    const nextBtn = await page.evaluate(() => document.querySelector('[data-next-step] [data-next-action]')?.innerText || '')
-    check('A MEMBER LANDS ON THEIR WEEK, WITH THE NEXT STEP', /write my (plan|report)/i.test(nextBtn) && /write my (plan|report)/i.test(text) && text.includes('My week') && !text.includes('Hello'), text.slice(0, 300).replace(/\s+/g, ' '))
+    check('A MEMBER LANDS ON THEIR WEEK, WITH THE NEXT STEP', /next step/i.test(text) && /write my (plan|report)/i.test(text) && text.includes('My week') && !text.includes('Hello'), text.slice(0, 300).replace(/\s+/g, ' '))
     check('  with their own draft in it', await page.evaluate(() => [...document.querySelectorAll('textarea')].some((t) => t.value === 'Kade’s private focus')))
     check('  AND NOTHING OF A COLLEAGUE’S WEEK, NOT EVEN THEIR FOCUS', !text.includes('OCR pilot') && !text.includes('What the team is focused on'))
     check('  and none of the colleague’s blocker', !text.includes('Waiting for 200 sample'))
@@ -342,25 +340,6 @@ try {
     check('THE ACCESS TAB LINKS ACCOUNTS TO PEOPLE', /not linked|James/.test(utext)
       && await admin.evaluate(() => !!document.querySelector('[aria-label="team member for james@lotuss.com"]')))
     check('  and holds the submit list', utext.includes('Weekly check-in: who has to submit'))
-
-    // An administrator with no person of their own, previewing the member view
-    // with nobody picked yet, is asked to choose someone: not told their
-    // account is unlinked.
-    await call('PUT', '/api/auth/users/boss@lotuss.com', { person: null }, boss)
-    await admin.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'member'); localStorage.removeItem('fa-kpi-view-as-person') })
-    // Only a hash away from where it is: reload so the page reads the switch afresh.
-    await admin.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
-    await admin.reload({ waitUntil: 'networkidle0' })
-    // With nobody picked the app shows its own "Choose a team member" state in
-    // place of the Weekly page (App.jsx ViewAsChoose), never "not linked".
-    await admin.waitForSelector('[data-view-as-empty]', { timeout: 15000 }).catch(() => {})
-    const ptext = await admin.evaluate(() => document.querySelector('[data-view-as-empty]')?.innerText || '')
-    const main = await admin.evaluate(() => (document.querySelector('main') || document.body).innerText)
-    check('VIEWING AS A MEMBER WITH NOBODY PICKED ASKS TO CHOOSE ONE', /Choose a team member/.test(ptext)
-      && /Pick someone to see their week/.test(ptext) && /Choose a person/.test(ptext) && !/not linked/i.test(main)
-      && await admin.evaluate(() => !document.querySelector('[data-next-step]')), ptext.replace(/\n/g, ' | '))
-    await admin.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'admin') })
-    await call('PUT', '/api/auth/users/boss@lotuss.com', { person: 'gun' }, boss)
   }
 } catch (e) {
   failures++

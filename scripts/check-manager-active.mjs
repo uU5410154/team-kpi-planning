@@ -152,14 +152,14 @@ const fake = createServer((req, res) => {
     return send(404, { errorMessages: [`fake Jira has no ${req.method} ${u.pathname}`] })
   })
 })
-const JPORT = Number(process.env.CHECK_PORT) + 1 || 5392
+const JPORT = 5392
 await new Promise((r) => fake.listen(JPORT, r))
 
 /* --------------------------------------------------------------- server */
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = Number(process.env.CHECK_PORT) || 5391
+const PORT = 5391
 const base = `http://127.0.0.1:${PORT}`
 const TOKEN = 'active-service-token-'.padEnd(48, '5')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -218,7 +218,7 @@ try {
   console.log('\n--- one key Jira does not know ---')
   const sync = await call('POST', '/api/jira/sync', undefined, boss)
   check('THE SYNC RUNS WITH FNP-1446 ON THE REGISTER', sync.status === 200 && sync.body.ok === true, JSON.stringify(sync.body).slice(0, 200))
-  check('  AND NAMES IT', (sync.body.missingInJira || []).includes(UNKNOWN) && /Jira does not know FNP-1446\. Check the key on the Projects page/.test(sync.body.missingNote || ''), sync.body.missingNote)
+  check('  AND NAMES IT', (sync.body.missingInJira || []).includes(UNKNOWN) && /Jira does not know FNP-1446 — check the key on the Projects page/.test(sync.body.missingNote || ''), sync.body.missingNote)
   const iss = await call('POST', '/api/jira/issues', { keys: [UNKNOWN, P_JIRA.jiraKey] }, boss)
   check('ISSUES: the rest still come back, the unknown one is listed', iss.status === 200 && iss.body.issues?.some((i) => i.key === P_JIRA.jiraKey) && iss.body.skipped?.includes(UNKNOWN))
   const ro = await call('POST', '/api/jira/rollup', { keys: [UNKNOWN, P_JIRA.jiraKey] }, boss)
@@ -297,7 +297,7 @@ try {
     check('THE ACTIVE TILE, THE CARD’S COUNT AND ITS ROWS AGREE', shown > 0 && shown === said && said === listed, `tile ${shown} · card ${said} · rows ${listed} — ${act.replace(/\n/g, ' | ')}`)
     check('  THE TILE SAYS WHY: by dates and by Jira work', /by dates/.test(act) && /Jira work this week/.test(act), act.replace(/\n/g, ' | '))
     check('A PROJECT ACTIVE ONLY BY ITS JIRA WORK IS LISTED, and says so',
-      await a.evaluate((k) => (document.querySelector(`section[aria-label="who holds what"] [data-project="${k}"]`)?.innerText || '').includes('Jira this week'), P_JIRA.key), P_JIRA.key)
+      await a.evaluate((k) => (document.querySelector(`section[aria-label="who holds what"] [data-project="${k}"]`)?.innerText || '').includes('has Jira work this week'), P_JIRA.key), P_JIRA.key)
     const upd = await sect(a, 'Updated this week')
     check('UPDATED THIS WEEK COUNTS THE TWO PROJECTS JAMES UPDATED, of the same active total',
       /\n2\n/.test(`\n${upd}\n`) && upd.includes(`of ${shown} active`), upd.replace(/\n/g, ' | '))
@@ -308,13 +308,13 @@ try {
     await a.evaluate((k) => document.querySelector(`button[aria-label="follow up ${k}"]`)?.click(), P_JIRA.key)
     await a.waitForSelector('[data-followup-confirm]', { timeout: 5000 }).catch(() => {})
     const conf = await a.evaluate(() => document.querySelector('[data-followup-confirm]')?.innerText || '')
-    check('FOLLOW UP ASKS FIRST: who gets it and what it asks', /Email Kade about/i.test(conf) && /this week’s update/.test(conf) && /Send email/.test(conf), conf.replace(/\n/g, ' | '))
+    check('FOLLOW UP ASKS FIRST: who gets it and what it asks', /Email Kade about/i.test(conf) && /this week’s update/.test(conf) && /Send the email/.test(conf), conf.replace(/\n/g, ' | '))
     check('  AND NOTHING IS SENT YET', (await D.collection('kpi_followups').countDocuments()) === sentBefore)
     await a.evaluate(() => [...document.querySelectorAll('[data-followup-confirm] button')].find((b) => b.textContent.trim() === 'Cancel')?.click())
     await sleep(300)
     check('  Cancel sends nothing', (await D.collection('kpi_followups').countDocuments()) === sentBefore)
     const heldCell = await a.evaluate((k) => document.querySelector(`[data-followup="${k}"]`)?.innerText || '', P_HELD.key)
-    check('A PROJECT ON HOLD OFFERS NO FOLLOW-UP, and says why', /On hold, no update needed/.test(heldCell)
+    check('A PROJECT ON HOLD OFFERS NO FOLLOW-UP, and says why', /On hold — no update needed/.test(heldCell)
       && !(await a.$(`button[aria-label="follow up ${P_HELD.key}"]`)), `${P_HELD.key}: ${heldCell}`)
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/active-dashboard.png` })
 
@@ -345,16 +345,6 @@ try {
     console.log('\n--- view as James ---')
     const v = await as(boss, { width: 1280, height: 900 })
     await v.goto(`${base}/`, { waitUntil: 'networkidle0' })
-    // Switched on with nobody picked (this administrator is not on the team): asked whom, not told "not linked".
-    await v.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'member'); localStorage.removeItem('fa-kpi-view-as-person') })
-    await v.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
-    await v.reload({ waitUntil: 'networkidle0' })
-    await v.waitForSelector('[data-view-as-empty]', { timeout: 15000 }).catch(() => {})
-    const nt = await v.evaluate(() => document.body.innerText)
-    check('VIEW AS, NOBODY PICKED: ASKED TO CHOOSE A TEAM MEMBER', !!(await v.$('[data-view-as-empty]')) && /Choose a team member/.test(nt) && !/not linked/i.test(nt),
-      nt.slice(0, 200).replace(/\n/g, ' | '))
-    check('  the bar says "Choose a person", and no progress meter for nobody', /Viewing as a team member: Choose a person/.test(nt)
-      && !(await v.$('nav [role="progressbar"]')))
     await v.evaluate(() => { localStorage.setItem('fa-kpi-view-as', 'member'); localStorage.setItem('fa-kpi-view-as-person', 'james') })
     await v.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await v.reload({ waitUntil: 'networkidle0' })

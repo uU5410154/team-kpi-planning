@@ -1,20 +1,16 @@
 import { useState } from 'react'
-import {
-  Box, Paper, Typography, Tooltip, IconButton, TextField,
-} from '@mui/material'
+import { Box, Paper, Typography, Tooltip, IconButton, TextField, Chip } from '@mui/material'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import UndoIcon from '@mui/icons-material/Undo'
-import { StatusPill } from './ui.jsx'
+import { STATUS } from '../lib/palette.js'
 
 /**
- * A headline number with its label and a line of context (docs/DESIGN.md §6).
- * Deliberately not a chart — a single current value reads better as a figure
- * than as a one-bar bar chart.
- *
- * The figure itself is always in the text colour. `tone` (good / warning /
- * critical) says how it stands with a small dot beside the label, never by
- * colouring the number.
+ * A headline number with optional context line. Deliberately not a chart —
+ * a single current value reads better as a tile than as a one-bar bar chart.
+ */
+/**
+ * A headline number that can be typed over.
  *
  * `override` turns the tile into an editable one: `override.value` is what the
  * register calculates, `override.current` what the card is claiming, and
@@ -22,14 +18,11 @@ import { StatusPill } from './ui.jsx'
  * calculated figure rather than re-deriving it, so the number that comes back
  * is provably the one that was there before.
  */
-const TONE = { good: 'success', critical: 'danger', warning: 'warning' }
-
-export default function StatTile({
-  label, value, unit, context, tone, help, hero = false, override,
-}) {
+export default function StatTile({ label, value, unit, context, tone, help, hero = false, override }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
-  const toneKey = TONE[tone] || null
+  const toneColor =
+    tone === 'good' ? STATUS.good : tone === 'critical' ? STATUS.critical : tone === 'warning' ? STATUS.warning : null
 
   const commit = () => {
     setEditing(false)
@@ -39,54 +32,46 @@ export default function StatTile({
     if (Number.isFinite(n) && n >= 0) override.onChange(n)
   }
 
-  const empty = value === null || value === undefined || value === '' || value === '—'
-
   return (
     <Paper
       variant="outlined"
       sx={{
-        p: { xs: 3, sm: 4 },
+        p: 2,
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        gap: 1,
-        minWidth: 0,
+        justifyContent: 'space-between',
+        borderColor: 'divider',
       }}
     >
-      <Box sx={{
-        display: 'flex', alignItems: 'center', gap: 1, minHeight: 20,
-      }}
-      >
-        {toneKey && (
-          <Box
-            aria-hidden
-            sx={(t) => ({
-              width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bgcolor: t.palette.tone[toneKey].solid,
-            })}
-          />
-        )}
-        <Typography variant="subtitle2" component="div" noWrap sx={{ color: 'text.secondary', minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+        <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>
           {label}
         </Typography>
         {help && (
-          <Tooltip title={help} placement="top">
-            <InfoOutlinedIcon tabIndex={0} aria-label={`About ${label}`} sx={{ fontSize: 14, color: 'text.tertiary', cursor: 'help', flexShrink: 0 }} />
+          <Tooltip title={help} arrow placement="top">
+            <InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.disabled', cursor: 'help' }} />
           </Tooltip>
         )}
         {override && (
-          <Box sx={{
-            ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5,
-          }}
-          >
-            {override.on && <StatusPill tone="warning">Manual</StatusPill>}
+          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.25 }}>
+            {override.on && (
+              <Chip
+                size="small"
+                label="manual"
+                color="warning"
+                variant="outlined"
+                sx={{ height: 18, fontSize: '0.625rem', fontWeight: 700 }}
+              />
+            )}
             <Tooltip title={override.editHelp || 'Type a figure over the calculated one'}>
               <IconButton
                 size="small"
                 aria-label={`override ${label}`}
-                sx={{ p: 0.5, color: 'text.secondary' }}
+                sx={{ p: 0.25 }}
                 onClick={() => { setDraft(String(override.current ?? '')); setEditing(true) }}
               >
-                <EditOutlinedIcon sx={{ fontSize: 16 }} />
+                <EditOutlinedIcon sx={{ fontSize: 14 }} />
               </IconButton>
             </Tooltip>
             {override.on && (
@@ -94,20 +79,17 @@ export default function StatTile({
                 <IconButton
                   size="small"
                   aria-label={`revert ${label}`}
-                  sx={{ p: 0.5, color: 'text.secondary' }}
+                  sx={{ p: 0.25 }}
                   onClick={() => { setEditing(false); override.onChange(null) }}
                 >
-                  <UndoIcon sx={{ fontSize: 16 }} />
+                  <UndoIcon sx={{ fontSize: 14 }} />
                 </IconButton>
               </Tooltip>
             )}
           </Box>
         )}
       </Box>
-      <Box sx={{
-        display: 'flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap', minWidth: 0,
-      }}
-      >
+      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
         {editing ? (
           <TextField
             autoFocus
@@ -120,33 +102,38 @@ export default function StatTile({
               if (e.key === 'Escape') setEditing(false)
             }}
             placeholder={String(override.calc ?? '')}
-            helperText="Leave blank to revert"
-            inputProps={{ 'aria-label': `${label} value`, style: { fontSize: '1.125rem', fontWeight: 600 } }}
+            helperText="blank to revert"
+            inputProps={{ 'aria-label': `${label} value`, style: { fontSize: '1.25rem', fontWeight: 600, padding: '4px 8px' } }}
             sx={{ width: 160 }}
           />
         ) : (
           <Typography
             component="div"
-            variant={hero ? 'figure' : 'figureSm'}
-            sx={{ color: empty ? 'text.tertiary' : 'text.primary', minWidth: 0 }}
+            sx={{
+              fontSize: hero ? '2.75rem' : '1.75rem',
+              fontWeight: 600,
+              lineHeight: 1.05,
+              letterSpacing: '-0.02em',
+              color: override?.on ? STATUS.warning : (toneColor || 'text.primary'),
+            }}
           >
-            {empty ? '—' : value}
+            {value}
           </Typography>
         )}
         {unit && (
-          <Typography variant="body2" component="div" sx={{ color: 'text.secondary' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500 }}>
             {unit}
           </Typography>
         )}
       </Box>
       {context && (
-        <Typography variant="caption" component="div" sx={{ color: 'text.secondary' }}>
+        <Typography variant="caption" sx={{ color: 'text.secondary', mt: 1, display: 'block' }}>
           {context}
         </Typography>
       )}
       {override?.on && (
-        <Typography variant="caption" component="div" sx={(t) => ({ color: t.palette.tone.warning.fg })}>
-          Typed over {override.calcLabel}. The project register still says the calculated figure.
+        <Typography variant="caption" sx={{ color: STATUS.warning, display: 'block', fontWeight: 600 }}>
+          typed over {override.calcLabel} — the project register still says so
         </Typography>
       )}
     </Paper>

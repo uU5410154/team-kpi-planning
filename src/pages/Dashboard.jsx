@@ -1,110 +1,44 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
-} from 'react'
-import {
-  Box, Button, Menu, MenuItem, ListSubheader, useMediaQuery, Tooltip, Skeleton,
+  Box, Button, Typography, Menu, MenuItem, ListSubheader, Alert, useMediaQuery, CircularProgress,
 } from '@mui/material'
-import { useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles'
 import EditIcon from '@mui/icons-material/DashboardCustomizeOutlined'
 import AddIcon from '@mui/icons-material/Add'
 import GridLayout, { WidthProvider } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import * as api from '../lib/api.js'
-import {
-  addWeeks, weekNo, weekLabel, weekOf,
-} from '../lib/weekly.js'
+import { addWeeks } from '../lib/weekly.js'
 import { CARDS, DEFAULT_LAYOUT, GROUPS } from '../dashboard/cards.js'
 import { activitySignals } from '../lib/manager.js'
 import CardFrame, { DRAG } from '../dashboard/CardFrame.jsx'
-import { RowsSkeleton } from '../dashboard/planCards.jsx'
 import { ago } from '../components/FollowUp.jsx'
-import WeekSwitcher from '../components/WeekSwitcher.jsx'
-import { Spinner } from '../components/Loading.jsx'
-import { PageHeader, ErrorState } from '../components/ui.jsx'
+import Loading from '../components/Loading.jsx'
 
 const Grid = WidthProvider(GridLayout)
 
 /**
  * THE MANAGER DASHBOARD.
  *
- * A board of cards: where the year stands, what is waiting for a decision,
- * who holds which project and whether it has been updated, the weekly
- * check-in, and the year against its target. An administrator arranges it
- * (adds and removes cards, drags and resizes them) and saves; every
- * administrator then sees that arrangement. Until somebody saves one,
- * everybody sees the default.
+ * A board of cards: what is active and what has been updated this week, who
+ * holds which project and where it stands, the weekly check-in, and the year
+ * against its target. An administrator arranges it — adds and removes cards,
+ * drags and resizes them — and saves; every administrator then sees that
+ * arrangement. Until somebody saves one, everybody sees the default.
  *
- * The page header carries the week switcher and the layout controls. On the
- * board each card is as tall as its content, so none stands half empty: the
- * saved height (or 18 rows, if more) is the most it takes before it scrolls
- * inside itself. On a narrow screen the cards stack in a fixed reading order
- * (the year, the figures, decisions, who holds what) at their natural height,
- * and the board cannot be edited there.
+ * On a narrow screen the cards stack in the board's order at their natural
+ * height, and the board cannot be edited there.
  */
-
-// The grid: twelve columns, rows of 30px with 16px between.
-const ROW = 30
-const GAP = 16
-// A card's bottom padding and edge, below its last line of content.
-const PAD = 17
-/*
- * A card is never cut off for want of a few rows: below this height it grows
- * to show all its content even past its saved size. Above it, a long card
- * (who holds what, with every project) scrolls inside itself.
- */
-const GROW_TO = 18
-/*
- * Arranging, the board snaps to rows of 30px. Reading it, every card is cut
- * to its content to the pixel: the grid runs in 1px rows with no gap between
- * them, and each cell keeps its 16px gap as padding under the card.
- */
-const UNIT = ROW + GAP
-
-/*
- * How tall a card's content really is, whatever height the grid gives it:
- * the lowest line of text (or chart) in it, plus the scroll it is hiding.
- * Containers stretch to fill the card, so only the leaves are read.
- */
-function contentHeight(section) {
-  const top = section.getBoundingClientRect().top
-  let bottom = top
-  let hidden = 0
-  const walk = (el) => {
-    for (const c of el.children) {
-      const tag = c.tagName.toLowerCase()
-      const leaf = tag === 'svg' || !c.children.length
-        || [...c.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
-      if (leaf) {
-        const r = c.getBoundingClientRect()
-        if (r.height > 0) bottom = Math.max(bottom, r.bottom)
-      } else {
-        if (c.scrollTop) hidden = Math.max(hidden, c.scrollTop)
-        walk(c)
-      }
-    }
-  }
-  walk(section)
-  return bottom - top + hidden + PAD
-}
-
-/*
- * The order cards stack in on a narrow screen: the year, its two figures,
- * what needs a decision, who holds what; then the rest as arranged.
- */
-const STACK_FIRST = ['welcome', 'active', 'updated', 'decisions', 'owners', 'teamWeek', 'summary', 'ask', 'headline']
-// Small enough to sit two to a row when stacked.
-const HALF = new Set(['active', 'updated'])
 
 const known = (items) => (items || []).filter((it) => CARDS[it.type])
 
 export default function Dashboard({
-  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null, onWeekChange, planLoading = false,
+  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null, planLoading = false,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
   const stacked = useMediaQuery(theme.breakpoints.down('md'))
-  const phone = useMediaQuery(theme.breakpoints.down('sm'))
 
   /* ---------------------------------------------------------- the data */
   // undefined: still loading; null: not available.
@@ -237,19 +171,7 @@ export default function Dashboard({
     return () => { stop = true }
   }, [wantsTrend, now, prev, trend])
 
-  /*
-   * Arranging starts from the board as it reads: each card at the rows its
-   * content took (measured below), up to GROW_TO, so none opens half empty.
-   * It can then be dragged taller or shorter as before; a card whose content
-   * is shorter than its usual minimum is not made to stand taller than that.
-   */
-  const fitted = (list) => known(list).map((it) => {
-    const px = fit[it.type]
-    if (!px) return it
-    const rows = Math.ceil(Math.min(Math.max(it.h, GROW_TO) * UNIT, px) / UNIT)
-    return { ...it, h: Math.max(2, rows) }
-  })
-  const startEdit = () => { setDraft(fitted(saved?.items || DEFAULT_LAYOUT)); setEditing(true); setError(null) }
+  const startEdit = () => { setDraft(known(saved?.items || DEFAULT_LAYOUT)); setEditing(true); setError(null) }
   const cancel = () => { setEditing(false); setDraft(null); setError(null) }
   const save = async () => {
     setBusy(true)
@@ -331,235 +253,102 @@ export default function Dashboard({
     onOpenProject,
     onFollowSent: (f) => setFollowups((list) => [f, ...list]),
   }
-  /* ------------------------------------------------- fit to the content */
-  // Rows each card's content needs, measured on the board; capped by its saved height.
-  const gridRef = useRef(null)
-  const [fit, setFit] = useState({})
-  const showBoard = !stacked && !(saved === undefined && layoutWait)
-  useLayoutEffect(() => {
-    if (!showBoard || editing) return undefined
-    const root = gridRef.current
-    if (!root) return undefined
-    let frame = 0
-    const measure = () => {
-      frame = 0
-      const next = {}
-      root.querySelectorAll('[data-card]').forEach((cell) => {
-        const sec = cell.querySelector('section')
-        if (sec) next[cell.getAttribute('data-card')] = Math.max(64, Math.ceil(contentHeight(sec))) + GAP
-      })
-      setFit((was) => {
-        const keys = Object.keys(next)
-        return keys.length === Object.keys(was).length && keys.every((k) => was[k] === next[k]) ? was : next
-      })
-    }
-    const later = () => { if (!frame) frame = requestAnimationFrame(measure) }
-    const mo = new MutationObserver(later)
-    mo.observe(root, { subtree: true, childList: true, characterData: true })
-    const ro = new ResizeObserver(later)
-    ro.observe(root)
-    later()
-    return () => { mo.disconnect(); ro.disconnect(); if (frame) cancelAnimationFrame(frame) }
-  }, [showBoard, editing])
-
+  if (saved === undefined && layoutWait) return <Loading variant="block" label="Loading the dashboard…" />
   const card = (type) => {
     const { C, title, group } = CARDS[type]
-    const f = {
-      editing, onRemove: () => remove(type), fill: !stacked, compact: stacked, phone,
-    }
+    const f = { editing, onRemove: () => remove(type), fill: !stacked }
     /*
      * Until the shared plan has arrived, the year's figures would be the
-     * bundled copy's: numbers that then jump. The shape of the card instead.
+     * bundled copy's — numbers that then jump. A spinner instead.
      */
     if (planLoading && group === 'The year') {
-      return <CardFrame {...f} title={title} label={title}><RowsSkeleton rows={3} label="Loading the shared plan…" /></CardFrame>
+      return <CardFrame {...f} title={title} label={title}><Loading variant="block" label="Loading the shared plan…" /></CardFrame>
     }
     return <C ctx={ctx} f={f} />
   }
 
-  /* -------------------------------------------------------- the header */
-  const shownWeek = now?.week || week || weekOf()
+  /* ------------------------------------------------------- the toolbar */
   const missing = Object.keys(CARDS).filter((t) => !onBoard.has(t))
-  const canArrange = !stacked && saved !== undefined
-  const arranged = saved?.updatedBy
-    ? `Saved for every administrator; last arranged by ${saved.updatedBy}, ${ago(saved.updatedAt)}.`
-    : 'Saved for every administrator; this is the default layout.'
-  const viewActions = (
-    <>
-      <WeekSwitcher week={week} onChange={onWeekChange} compact={phone} />
-      {canArrange && (saved === null ? (
-        <Tooltip title="The layout cannot be saved while the database is unavailable.">
-          <span>
-            <Button variant="outlined" startIcon={<EditIcon />} disabled data-edit-layout>Edit layout</Button>
-          </span>
-        </Tooltip>
-      ) : (
-        <Button variant="outlined" startIcon={<EditIcon />} onClick={startEdit} data-edit-layout>Edit layout</Button>
-      ))}
-    </>
-  )
-  const editActions = (
-    <Box
-      data-layout-toolbar
-      sx={{
-        display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap',
-      }}
+  const toolbar = !stacked && saved !== undefined && (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end',
+    }}
     >
-      <Button variant="text" startIcon={<AddIcon />} onClick={(e) => setAddAt(e.currentTarget)} disabled={!missing.length} aria-haspopup="menu">Add card</Button>
-      <Menu anchorEl={addAt} open={!!addAt} onClose={() => setAddAt(null)}>
-        {GROUPS.flatMap((g) => {
-          const list = missing.filter((t) => CARDS[t].group === g)
-          return list.length ? [
-            <ListSubheader
-              key={`g:${g}`}
-              sx={{
-                lineHeight: '32px', bgcolor: 'transparent', color: 'text.secondary', fontSize: '0.75rem', fontWeight: 500,
-              }}
-            >
-              {g}
-            </ListSubheader>,
-            ...list.map((t) => <MenuItem key={t} onClick={() => add(t)}>{CARDS[t].title}</MenuItem>),
-          ] : []
-        })}
-      </Menu>
-      <Button variant="text" onClick={() => setDraft(fitted(DEFAULT_LAYOUT))}>Reset to default</Button>
-      <Button variant="text" onClick={cancel} disabled={busy}>Cancel</Button>
-      <Button
-        variant="contained"
-        onClick={save}
-        disabled={busy}
-        data-save-layout
-        startIcon={busy ? <Spinner size={14} /> : null}
-        sx={{ minWidth: 112 }}
-      >
-        {busy ? 'Saving…' : 'Save layout'}
-      </Button>
+      {!editing && (
+        <>
+          <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
+            {saved === null
+              ? 'The layout cannot be saved while the database is unavailable.'
+              : saved.updatedBy ? `Layout arranged by ${saved.updatedBy}, ${ago(saved.updatedAt)} — the same for every administrator.`
+                : 'The default layout — the same for every administrator.'}
+          </Typography>
+          {saved !== null && (
+            <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={startEdit} sx={{ color: 'text.primary', borderColor: 'divider' }}>
+              Edit layout
+            </Button>
+          )}
+        </>
+      )}
+      {editing && (
+        <>
+          <Typography variant="caption" sx={{ color: 'text.secondary', mr: 'auto' }}>
+            Drag a card by its title bar, resize it from its bottom-right corner, remove it with ×. Saved for every administrator.
+          </Typography>
+          <Button size="small" startIcon={<AddIcon />} onClick={(e) => setAddAt(e.currentTarget)} disabled={!missing.length}>Add card</Button>
+          <Menu anchorEl={addAt} open={!!addAt} onClose={() => setAddAt(null)}>
+            {GROUPS.flatMap((g) => {
+              const list = missing.filter((t) => CARDS[t].group === g)
+              return list.length ? [
+                <ListSubheader key={`g:${g}`} sx={{ lineHeight: '32px' }}>{g}</ListSubheader>,
+                ...list.map((t) => <MenuItem key={t} onClick={() => add(t)}>{CARDS[t].title}</MenuItem>),
+              ] : []
+            })}
+          </Menu>
+          <Button size="small" onClick={() => setDraft(known(DEFAULT_LAYOUT))}>Reset to default</Button>
+          <Button size="small" onClick={cancel}>Cancel</Button>
+          <Button size="small" variant="contained" onClick={save} disabled={busy} startIcon={busy ? <CircularProgress size={14} /> : null}>
+            Save layout
+          </Button>
+        </>
+      )}
     </Box>
   )
-  const weekLine = now === undefined
-    ? `Week ${weekNo(shownWeek)}`
-    : `Week ${weekNo(shownWeek)}, ${weekLabel(shownWeek)}`
-  const header = (
-    <PageHeader
-      title="Dashboard"
-      description={editing
-        ? `Drag a card to move it, resize it from its corner, or remove it with ×. ${arranged}`
-        : weekLine}
-      actions={editing ? editActions : viewActions}
-    />
-  )
-
-  /* ------------------------------------------------- waiting for layout */
-  if (saved === undefined && layoutWait) {
-    return (
-      <Box>
-        {header}
-        <Box
-          role="status"
-          aria-label="Loading the dashboard…"
-          data-loading
-          sx={{
-            display: 'grid', gap: 4, gridTemplateColumns: { xs: '1fr', md: 'repeat(12, minmax(0, 1fr))' },
-          }}
-        >
-          {[['a', 6, 180], ['b', 3, 120], ['c', 3, 120], ['d', 12, 320]].map(([k, w, h]) => (
-            <Box
-              key={k}
-              sx={{
-                gridColumn: { xs: 'auto', md: `span ${w}` }, height: h, p: 4, bgcolor: 'bg.surface', border: 1, borderColor: 'border.subtle', borderRadius: '8px',
-              }}
-            >
-              <Skeleton variant="text" width={140} height={22} />
-              <Skeleton variant="text" width="60%" height={16} sx={{ mt: 1 }} />
-              <Skeleton variant="text" width="40%" height={16} sx={{ mt: 1 }} />
-            </Box>
-          ))}
-        </Box>
-      </Box>
-    )
-  }
 
   /* ---------------------------------------------------------- the board */
   if (stacked) {
-    const rank = (t) => {
-      const i = STACK_FIRST.indexOf(t)
-      return i < 0 ? STACK_FIRST.length : i
-    }
-    const order = [...items].sort((a, b) => rank(a.type) - rank(b.type) || a.y - b.y || a.x - b.x)
+    const order = [...items].sort((a, b) => a.y - b.y || a.x - b.x)
     return (
-      <Box>
-        {header}
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: { xs: 3, sm: 4 } }}>
-          {order.map((it) => (
-            <Box key={it.type} data-card={it.type} sx={{ minWidth: 0, gridColumn: HALF.has(it.type) ? 'span 1' : 'span 2' }}>
-              {card(it.type)}
-            </Box>
-          ))}
-        </Box>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {order.map((it) => <Box key={it.type} sx={{ minWidth: 0 }}>{card(it.type)}</Box>)}
       </Box>
     )
   }
 
-  // Each card's reading height: its content, up to its saved size (or GROW_TO rows).
-  const natural = Object.fromEntries(items.map((it) => [it.type,
-    fit[it.type] ? Math.min(Math.max(it.h, GROW_TO) * UNIT, fit[it.type]) : it.h * UNIT]))
-  /*
-   * Cards arranged side by side at the same row and height stay one row: the
-   * shorter takes the taller one's height, so the next row starts level. Not
-   * when that would leave it more than ~30% empty; it then stays at its
-   * content (still top-aligned with its neighbour).
-   */
-  const level = { ...natural }
-  const rows = new Map()
-  items.forEach((it) => {
-    const k = `${it.y}:${it.h}`
-    rows.set(k, [...(rows.get(k) || []), it.type])
-  })
-  rows.forEach((types) => {
-    if (types.length < 2) return
-    const tallest = Math.max(...types.map((t) => natural[t]))
-    types.forEach((t) => { if (natural[t] >= tallest * 0.7) level[t] = tallest })
-  })
-  const rgl = items.map((it) => (editing ? {
-    i: it.type, x: it.x, y: it.y, w: it.w, h: it.h, minW: CARDS[it.type].minW, minH: Math.min(CARDS[it.type].minH, it.h),
-  } : {
-    i: it.type,
-    x: it.x,
-    y: it.y * UNIT,
-    w: it.w,
-    h: level[it.type],
+  const rgl = items.map((it) => ({
+    i: it.type, x: it.x, y: it.y, w: it.w, h: it.h, minW: CARDS[it.type].minW, minH: CARDS[it.type].minH,
   }))
   return (
-    <Box>
-      {header}
-      {error && (
-        <Box sx={{ mb: 4 }}>
-          <ErrorState title="The layout was not saved." body={`${error} Your arrangement is still on screen; try again.`} onRetry={save} />
-        </Box>
-      )}
-      <Box
-        ref={gridRef}
-        sx={{
-          mx: `-${GAP / 2}px`,
-          mt: `-${GAP / 2}px`,
-          // Cards stand still as their content arrives; they only glide while being arranged.
-          '& .react-grid-item': editing ? {} : { transition: 'none', boxSizing: 'border-box', pb: `${GAP}px` },
-          '& .react-grid-item.react-grid-placeholder': {
-            bgcolor: 'primary.main', opacity: 0.14, borderRadius: '8px',
-          },
-          '& .react-grid-item > .react-resizable-handle': { zIndex: 4 },
-          '& .react-grid-item > .react-resizable-handle::after': {
-            borderRightColor: theme.palette.text.secondary, borderBottomColor: theme.palette.text.secondary,
-          },
-          '& .react-grid-item.resizing, & .react-grid-item.react-draggable-dragging': { zIndex: 5 },
-        }}
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      {toolbar}
+      {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+      <Box sx={{
+        mx: -1,
+        '& .react-grid-item.react-grid-placeholder': {
+          bgcolor: alpha(theme.palette.primary.main, 0.18), borderRadius: '16px', opacity: 1,
+        },
+        '& .react-grid-item > .react-resizable-handle': { zIndex: 4 },
+        '& .react-grid-item > .react-resizable-handle::after': {
+          borderRightColor: theme.palette.text.secondary, borderBottomColor: theme.palette.text.secondary,
+        },
+        '& .react-grid-item.resizing, & .react-grid-item.react-draggable-dragging': { zIndex: 5 },
+      }}
       >
         <Grid
           layout={rgl}
           cols={12}
-          rowHeight={editing ? ROW : 1}
-          margin={editing ? [GAP, GAP] : [GAP, 0]}
-          containerPadding={[GAP / 2, GAP / 2]}
+          rowHeight={30}
+          margin={[16, 16]}
+          containerPadding={[8, 0]}
           isDraggable={editing}
           isResizable={editing}
           draggableHandle={`.${DRAG}`}
@@ -573,6 +362,3 @@ export default function Dashboard({
     </Box>
   )
 }
-
-// App.jsx asks: the week switcher is drawn in this page's header, not the top bar.
-Dashboard.ownsWeekSwitcher = true

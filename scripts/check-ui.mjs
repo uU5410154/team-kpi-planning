@@ -29,7 +29,7 @@ const BROWSERS = [
 const exe = BROWSERS.find((p) => existsSync(p))
 if (!exe) { console.log('SKIP — no Chromium-based browser found'); process.exit(0) }
 
-const PORT = Number(process.env.CHECK_PORT) || 5321   // CHECK_PORT: run beside another copy
+const PORT = 5321
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 
 let failures = 0
@@ -92,10 +92,10 @@ try {
   await new Promise((r) => setTimeout(r, 700))
 
   const leadCard = await page.evaluate(() => ({
-    label: document.body.innerText.includes('Team saving hours'),
-    personalLabel: document.body.innerText.includes('Credited saving hours'),
+    label: document.body.innerText.includes('TEAM SAVING HOURS'),
+    personalLabel: document.body.innerText.includes('CREDITED SAVING HOURS'),
     teamWording: document.body.innerText.includes("carries the team's overall KPI"),
-    value: document.body.innerText.match(/Team saving hours[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? null,
+    value: document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? null,
   }))
   check('the lead card is labelled as the team, not personal',
     leadCard.label && !leadCard.personalLabel, JSON.stringify(leadCard))
@@ -146,7 +146,7 @@ try {
   })
   check('project cell now reads 33', projVal === '33', projVal)
 
-  const totalsStrip = await page.evaluate(() => document.body.innerText.match(/Saving hrs\/mth\s*\n\s*([\d,]+)/)?.[1] ?? null)
+  const totalsStrip = await page.evaluate(() => document.body.innerText.match(/SAVING HRS \/ MONTH\s*\n\s*([\d,]+)/)?.[1] ?? null)
   check('filtered totals strip updated', totalsStrip === '33', String(totalsStrip))
 
   /* ---------- THE BUG: scorecard must follow ---------- */
@@ -407,7 +407,7 @@ try {
 
   /* ---------- editing the portfolio ---------- */
   const teamHeadline = () => page.evaluate(() =>
-    Number((document.body.innerText.match(/Team saving hours[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? '0').replace(/,/g, '')))
+    Number((document.body.innerText.match(/TEAM SAVING HOURS[\s\S]*?([\d,]+)\s*\n?\s*hrs/)?.[1] ?? '0').replace(/,/g, '')))
   const before2 = await teamHeadline()
   /*
    * The header counts the BOOK — every row on the register, including the ones
@@ -458,19 +458,12 @@ try {
   check('and an investment column beside it', costCol > 0 && costCol < roiCol, `cost ${costCol} / roi ${roiCol}`)
   const paybackCol = await colIndex('payback')
   check('and a payback column after it', paybackCol === roiCol + 1, `payback ${paybackCol} / roi ${roiCol}`)
-  // The costing figures fold behind "Show all figures" while every one of
-  // them is blank, as they are here; unfold them as a user would.
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.trim() === 'Show all figures')?.click())
-  await new Promise((r) => setTimeout(r, 300))
   check('the money strip carries CAPEX and OPEX beside the build cost',
-    await page.evaluate(() => /\nCAPEX\n/.test(document.body.innerText) && /OPEX\/yr/i.test(document.body.innerText)))
+    await page.evaluate(() => /\nCAPEX\n/.test(document.body.innerText) && /OPEX \/ YEAR/i.test(document.body.innerText)))
 
   /* ---------- the source column reads as FTE, not HC ---------- */
   const fteCol = await colIndex('fte')
   check('the Projects table heads the source column FTE', fteCol > 0, `index ${fteCol}`)
-  // The FTE filter sits behind "More filters" with the other rare ones.
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^More filters/.test(b.innerText.trim()))?.click())
-  await new Promise((r) => setTimeout(r, 400))
   const hcLeftovers = await page.evaluate(() => {
     const heads = [...document.querySelectorAll('table thead th')].map((h) => h.innerText.trim())
     const labels = [...document.querySelectorAll('label')].map((l) => l.innerText.trim())
@@ -487,8 +480,6 @@ try {
     hcLeftovers.fteFilter && hcLeftovers.labels.length === 0, hcLeftovers.labels.join(' | ') || 'no "headcount" label left')
   check('and the totals strip says FTE released',
     hcLeftovers.fteStrip && !hcLeftovers.strip, JSON.stringify({ fte: hcLeftovers.fteStrip, hc: hcLeftovers.strip }))
-  await page.keyboard.press('Escape')
-  await new Promise((r) => setTimeout(r, 300))
 
   // No effort in the seed, so ROI starts blank by design rather than as zero.
   const roiBefore = await page.evaluate((ix) => {
@@ -517,7 +508,7 @@ try {
     cost: document.querySelector('tbody tr').children[c]?.innerText.trim(),
     roi: document.querySelector('tbody tr').children[r]?.innerText.trim(),
     payback: document.querySelector('tbody tr').children[r + 1]?.innerText.trim(),
-    strip: document.body.innerText.match(/Benefit\/yr\s*\n\s*([^\n]+)/)?.[1]?.trim(),
+    strip: document.body.innerText.match(/BENEFIT \/ YEAR\s*\n\s*([^\n]+)/)?.[1]?.trim(),
   }), costCol, roiCol)
   check('entering mandays fills in the investment', /\d/.test(money.cost) && money.cost !== '—', money.cost)
   check('and shows an ROI for that project', /%/.test(money.roi), money.roi)
@@ -663,7 +654,7 @@ try {
 
   /* ---------- the rates are live from the Model tab ---------- */
   const annualTile = () => page.evaluate(() =>
-    document.body.innerText.match(/Value of hours released\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null)
+    document.body.innerText.match(/VALUE OF HOURS RELEASED\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null)
 
   await page.goto(`${base}/?money=2#dashboard`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 1200))
@@ -726,8 +717,7 @@ try {
   check('  the per-project allowance and the book limit',
     /% of that project/i.test(obj1 || '') && /may drift/i.test(obj1 || ''))
   check('  and it lists the projects with their dates',
-    // Dates read the way the rest of the app writes them: "by 20 Feb 2026".
-    /by \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) 20\d\d|no date committed/.test(obj1 || ''),
+    /by 20\d\d-\d\d-\d\d|no date committed/i.test(obj1 || ''),
     (obj1 || '').split(String.fromCharCode(10)).find((l) => /^by |no date/i.test(l)) || 'no dated row found')
 
   /* ---------- the FTE ratio is adjustable, and drives both sides ---------- */
@@ -740,8 +730,8 @@ try {
   const fteTile = () => page.evaluate(() => {
     const t = document.body.innerText
     return {
-      fte: Number(t.match(/Value of hours released[\s\S]*?([\d.]+)\s*FTE/)?.[1] ?? 0),
-      money: t.match(/Value of hours released\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null,
+      fte: Number(t.match(/VALUE OF HOURS RELEASED[\s\S]*?([\d.]+)\s*FTE/)?.[1] ?? 0),
+      money: t.match(/VALUE OF HOURS RELEASED\s*\n\s*([^\n]+)/)?.[1]?.trim() ?? null,
     }
   })
   const ratioBefore = await fteTile()
@@ -804,7 +794,7 @@ try {
   await page.evaluate(() => document.querySelector('tbody tr button[aria-label="open cost breakdown"]').click())
   await new Promise((r) => setTimeout(r, 700))
   const effortText = await dialogText()
-  check('the dialog carries the effort breakdown', /Effort by task/i.test(effortText) && /Mandays/.test(effortText),
+  check('the dialog carries the effort breakdown', /Effort .* mandays by task/i.test(effortText),
     effortText.slice(0, 90).replace(/\n/g, ' / '))
 
   // A project imported with a bare total must show exactly ONE line carrying it.
@@ -933,7 +923,7 @@ try {
   // Pick the Data warehouse objective out of the dropdown.
   const comboOpened = await page.evaluate(() => {
     const heads = [...document.querySelectorAll('*')]
-    const label = heads.find((e) => e.textContent && /^add an objective$/i.test(e.textContent.trim()))
+    const label = heads.find((e) => e.textContent && e.textContent.trim() === 'ADD AN OBJECTIVE')
     const box = label && label.parentElement
     const combo = box && box.querySelector('[role="combobox"]')
     if (!combo) return false
@@ -1352,7 +1342,7 @@ try {
 
   await page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
-    ;[...d.querySelectorAll('button')].find((b) => /^Import \d+ row/.test(b.innerText.trim())).click()
+    ;[...d.querySelectorAll('button')].find((b) => /^Apply /.test(b.innerText.trim())).click()
   })
   await new Promise((r) => setTimeout(r, 1200))
 
@@ -1470,14 +1460,14 @@ try {
     return {
       lines: rows.length,
       text: c.innerText.split(String.fromCharCode(10)).join(' | '),
-      total: c.innerText.match(/\bTotal\b[^%]*?(\d+)\s*%/)?.[1] ?? null,
+      total: c.innerText.match(/TOTAL[^%]*?(\d+)\s*%/)?.[1] ?? null,
     }
   })
   const kpiBefore = await card()
   check('the scorecard is on screen', kpiBefore.lines > 0, `${kpiBefore.lines} lines`)
 
   await page.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => /^Add KPI line$/.test(x.innerText.trim()))
+    const b = [...document.querySelectorAll('button')].find((x) => /^New KPI$/.test(x.innerText.trim()))
     if (b) b.click()
   })
   await new Promise((r) => setTimeout(r, 900))
@@ -1699,7 +1689,7 @@ try {
     const seen = await page.evaluate(() => {
       const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
       const c = head.closest('.MuiPaper-root')
-      const total = [...c.querySelectorAll('tbody tr')].find((r) => /^Total/.test(r.innerText.trim()))
+      const total = [...c.querySelectorAll('tbody tr')].find((r) => /^TOTAL/.test(r.innerText.trim()))
       const tileHead = [...document.querySelectorAll('*')]
         .find((e) => e.children.length === 0 && /saving hours$/i.test(e.textContent.trim()))
       const tile = tileHead?.closest('.MuiPaper-root')
@@ -1794,7 +1784,7 @@ try {
     return c.innerText.split(String.fromCharCode(10)).join(' | ')
   })
   check('THE SCORECARD SHOWS THE SOFT BENEFITS',
-    /Soft benefits delivered/.test(softOnCard) && /Removes a manual reconciliation/.test(softOnCard),
+    /SOFT BENEFITS DELIVERED/.test(softOnCard) && /Removes a manual reconciliation/.test(softOnCard),
     softOnCard.slice(-220))
   check('and names the project they come from', /FNP-379/.test(softOnCard), softOnCard.slice(-160))
   check('the card total is untouched by them', /100%/.test(softOnCard))
@@ -1827,7 +1817,7 @@ try {
   const readCard = () => page.evaluate(() => {
     const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
     const c = head.closest('.MuiPaper-root')
-    const total = [...c.querySelectorAll('tbody tr')].find((r) => /^Total/.test(r.innerText.trim()))
+    const total = [...c.querySelectorAll('tbody tr')].find((r) => /^TOTAL/.test(r.innerText.trim()))
     const tileHead = [...document.querySelectorAll('*')]
       .find((e) => e.children.length === 0 && /saving hours$/i.test(e.textContent.trim()))
     const tile = tileHead?.closest('.MuiPaper-root')
@@ -2011,8 +2001,8 @@ try {
   check('it has a row for every objective',
     [1, 2, 3, 4, 5].every((n) => new RegExp(`Obj ${n} —`).test(teamGrid.text)),
     teamGrid.rows.slice(0, 2).join(' // '))
-  check('it carries the saving-hours total', /Total saving hrs\/mth/.test(teamGrid.text))
-  check('and the weight total', /Weight total/.test(teamGrid.text) && /100%/.test(teamGrid.text))
+  check('it carries the saving-hours total', /TOTAL SAVING HRS\/MONTH/.test(teamGrid.text))
+  check('and the weight total', /WEIGHT TOTAL/.test(teamGrid.text) && /100%/.test(teamGrid.text))
 
   // the figures must be the ones the scorecards show
   const teamFigures = await page.evaluate(() => {

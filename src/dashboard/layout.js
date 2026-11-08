@@ -4,10 +4,10 @@
  */
 /** What every administrator sees until one of them saves a different arrangement. */
 export const DEFAULT_LAYOUT = [
-  { type: 'welcome', x: 0, y: 0, w: 6, h: 6 },
-  { type: 'active', x: 0, y: 6, w: 3, h: 4 },
-  { type: 'updated', x: 3, y: 6, w: 3, h: 4 },
-  { type: 'decisions', x: 6, y: 0, w: 6, h: 10 },
+  { type: 'welcome', x: 0, y: 0, w: 6, h: 10 },
+  { type: 'active', x: 6, y: 0, w: 3, h: 4 },
+  { type: 'updated', x: 9, y: 0, w: 3, h: 4 },
+  { type: 'decisions', x: 6, y: 4, w: 6, h: 6 },
   { type: 'owners', x: 0, y: 10, w: 12, h: 14 },
   { type: 'teamWeek', x: 0, y: 24, w: 7, h: 12 },
   { type: 'summary', x: 7, y: 24, w: 5, h: 7 },

@@ -1,11 +1,12 @@
 import WeekSwitcher from './components/WeekSwitcher.jsx'
-import ViewAsBanner, { ViewAsChoose } from './components/ViewAsBanner.jsx'
+import ViewAsBanner from './components/ViewAsBanner.jsx'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, Typography,
-  Button, IconButton, Tooltip, Snackbar, Alert, Chip, Divider, Menu, MenuItem, ListItemIcon, ListItemText,
+  Button, IconButton, Tooltip, Snackbar, Alert, Chip, Divider, Menu, MenuItem,
   CircularProgress, useMediaQuery,
 } from '@mui/material'
+import { alpha } from '@mui/material/styles'
 import MenuIcon from '@mui/icons-material/Menu'
 import SpaceDashboardIcon from '@mui/icons-material/SpaceDashboardOutlined'
 import FolderIcon from '@mui/icons-material/FolderOutlined'
@@ -21,20 +22,20 @@ import Loading from './components/Loading.jsx'
 import GlobalSearch from './components/GlobalSearch.jsx'
 import AiChat from './components/AiChat.jsx'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
-import { displayName } from './components/Brand.jsx'
-import { Spinner } from './components/Loading.jsx'
-import DownloadIcon from '@mui/icons-material/FileDownloadOutlined'
+import { IconTile, PAGE_COLOR, displayName } from './components/Brand.jsx'
+import { SURFACE } from './theme.js'
+import DownloadIcon from '@mui/icons-material/Download'
 import DarkModeIcon from '@mui/icons-material/DarkModeOutlined'
 import LightModeIcon from '@mui/icons-material/LightModeOutlined'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import UploadFileIcon from '@mui/icons-material/UploadFileOutlined'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DataObjectIcon from '@mui/icons-material/DataObject'
-import CloudUploadIcon from '@mui/icons-material/CloudUploadOutlined'
-import CloudDownloadIcon from '@mui/icons-material/CloudDownloadOutlined'
+import CloudUploadIcon from '@mui/icons-material/CloudUpload'
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload'
 import ScenarioDialog from './components/ScenarioDialog.jsx'
 
-import { buildTheme, TOKENS } from './theme.js'
+import { buildTheme } from './theme.js'
 import {
   computePlan, newProject, rebalanceWeights, reassignPatch, replanPatch,
 } from './lib/model.js'
@@ -117,8 +118,6 @@ const TABS = [
  * a bookmark carries.
  */
 const DEFAULT_TAB = 'dashboard'
-// Wide data pages that may use the whole width beside the menu.
-const FULL_WIDTH = new Set(['projects', 'timeline'])
 
 /*
  * The hash is the page, and after a slash what on it: #project/FNP-88 is that
@@ -162,9 +161,6 @@ export default function App() {
     try { return localStorage.getItem('fa-kpi-nav-mini') === '1' } catch { return false }
   })
   const [navOpen, setNavOpen] = useState(false)
-  // A tablet starts on the folded rail and opens the wide menu over the page;
-  // that is not remembered as the computer's preference.
-  const [railOpen, setRailOpen] = useState(false)
   /*
    * Where the header search sent somebody: a page, and on it a project to
    * filter to or a person to open. Numbered, so picking the same project twice
@@ -246,17 +242,9 @@ export default function App() {
   // own ThemeProvider, so theme.breakpoints is not reachable from here; 600px
   // is MUI's `sm`, the same line every page below draws.
   const phone = useMediaQuery('(max-width:599.95px)')
-  // A tablet: the menu is a folded rail, and beside it the header has no room
+  // A tablet: the menu is on screen, and beside it the header has no room
   // for the words on its buttons either. (MUI's `md`, written out likewise.)
   const narrow = useMediaQuery('(max-width:899.95px)')
-  const tablet = narrow && !phone
-  // The page colour behind everything, kept in step with the mode so an
-  // overscrolled edge never shows the other mode's colour.
-  useEffect(() => {
-    try { document.documentElement.style.background = TOKENS[mode].bg.page } catch { /* no document */ }
-    const meta = document.querySelector('meta[name="theme-color"]:not([media])') || null
-    if (meta) meta.setAttribute('content', TOKENS[mode].bg.page)
-  }, [mode])
   const plan = useMemo(() => computePlan(state), [state])
 
   /*
@@ -314,13 +302,6 @@ export default function App() {
   const member = viewer?.role === 'user'
   const myPerson = (previewing ? previewPerson : me?.person) || null
   const shown = useMemo(() => (member ? memberView(plan, myPerson) : plan), [member, plan, myPerson])
-  /*
-   * Previewing with nobody chosen: an administrator not on the team, before
-   * picking anyone. Not an unlinked account, so the pages that are somebody's
-   * (their week, their scorecard, their Timeline) ask for a person instead.
-   */
-  const choosing = previewing && !previewPerson
-  const whose = choosing && ['weekly', 'team', 'timeline'].includes(tab)
   useEffect(() => {
     if (!canWrite) { setAiOn(false); return }
     api.aiStatus().then((r) => setAiOn(!!r.configured)).catch(() => setAiOn(false))
@@ -1047,9 +1028,9 @@ export default function App() {
     try {
       // The check-ins as this person may see them; no sheet if the store is down.
       await exportWorkbook(plan, state, await api.weeklyForExport())
-      setToast({ severity: 'success', msg: 'Excel workbook exported' })
+      setToast({ severity: 'success', msg: 'Excel workbook exported.' })
     } catch (e) {
-      setToast({ severity: 'error', msg: `The export did not finish: ${e.message}. Try again.` })
+      setToast({ severity: 'error', msg: `Export failed: ${e.message}` })
     } finally {
       setExporting(false)
     }
@@ -1086,6 +1067,7 @@ export default function App() {
   const menuTabs = visibleTabs.filter((t) => !t.hidden)
 
   const current = visibleTabs.find((t) => t.id === tab) || TABS.find((t) => t.id === tab)
+  const CurrentIcon = current?.icon || null
   // What the welcome banner calls somebody: their nickname on the team when
   // the account is linked to one, otherwise the name in their address.
   const hello = (myPerson && state.people.find((p) => p.id === myPerson)?.nick)
@@ -1137,32 +1119,6 @@ export default function App() {
 
   const cov = plan.totals.totalCoverage
   const covTone = cov >= 1 ? 'success' : cov >= 0.9 ? 'warning' : 'error'
-  const toggleMode = () => setMode(mode === 'dark' ? 'light' : 'dark')
-
-  /*
-   * THE WAITING SCREEN: a 24px spinner in the middle of the page colour, what
-   * it is waiting for, and (while the shared plan wakes) a quieter line on why
-   * it may take a moment. Nothing else: no frame, no glow.
-   */
-  const waiting = (line, sub) => (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Box
-        role="status"
-        aria-live="polite"
-        data-loading
-        sx={{
-          minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, px: 6, textAlign: 'center',
-        }}
-      >
-        <Spinner size={24} />
-        <Box>
-          <Typography variant="body1" sx={{ color: 'text.primary' }}>{line}</Typography>
-          {sub && <Typography variant="body2" sx={{ color: 'text.tertiary', mt: 1 }}>{sub}</Typography>}
-        </Box>
-      </Box>
-    </ThemeProvider>
-  )
 
   /*
    * NOTHING OF THE APP BEFORE WE KNOW WHO IS ASKING.
@@ -1172,7 +1128,19 @@ export default function App() {
    * else's appraisal data before the sign-in page appears would be worse than
    * either.
    */
-  if (me === undefined) return waiting('Loading the plan…')
+  if (me === undefined) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box sx={{
+          minHeight: '100vh', display: 'grid', placeItems: 'center',
+        }}
+        >
+          <Loading variant="block" label="Loading…" />
+        </Box>
+      </ThemeProvider>
+    )
+  }
 
   if (!me) {
     return (
@@ -1183,42 +1151,25 @@ export default function App() {
     )
   }
 
-  if (bootstrapping) return waiting('Loading the plan…', 'The first open of the day can take a moment while the server starts.')
-
-  // The menu's width beside the page: none on a phone, the rail on a tablet.
-  const railMini = tablet ? true : navMini
-  const sideW = phone ? 0 : (railMini ? NAV_W_MINI : NAV_W)
-  const iconBtn = {
-    width: phone ? 40 : 32, height: phone ? 40 : 32, flexShrink: 0, color: 'text.secondary', '&:hover': { color: 'text.primary' },
+  if (bootstrapping) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <Box sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <Loading variant="block" label="Loading the shared plan…" />
+          <Typography variant="caption" sx={{ color: 'text.disabled', mt: -3 }}>
+            first open of the day can take a moment while the server wakes
+          </Typography>
+        </Box>
+      </ThemeProvider>
+    )
   }
-
-  // "Saving…", "Saved", "Not saved yet": an edit reaches the shared plan a few seconds later; said, so nobody wonders.
-  let saveStatus = null
-  if (canWrite && !sharedLoading && linkedToDb.current) {
-    if (dirty || saving) {
-      saveStatus = dbNotice || plan.invalid.length
-        ? <Typography variant="caption" data-save-status="unsaved" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>Not saved yet</Typography>
-        : <Box data-save-status="saving"><Loading label="Saving…" /></Box>
-    } else if (savedHere && lastSaved) {
-      saveStatus = (
-        <Typography variant="caption" data-save-status="saved" title={`Saved to the shared plan ${new Date(lastSaved).toLocaleString()}`} sx={{ color: 'text.tertiary', whiteSpace: 'nowrap' }}>
-          Saved
-        </Typography>
-      )
-    }
-  }
-
-  const invalidChip = canWrite && plan.invalid.length > 0 && (
-    <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')}. Saving is blocked until every scorecard totals 100%.`}>
-      <Chip
-        size="small"
-        color="error"
-        label={phone ? `${plan.invalid.length} not 100%` : `${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} not at 100%`}
-        onClick={() => setTab('people')}
-        sx={{ cursor: 'pointer', minWidth: 0, flexShrink: 0 }}
-      />
-    </Tooltip>
-  )
 
   return (
     <ThemeProvider theme={theme}>
@@ -1227,11 +1178,9 @@ export default function App() {
         <Sidebar
           tabs={menuTabs}
           tab={tab}
-          onTab={(id) => { setTab(id); setNavOpen(false); setRailOpen(false) }}
-          mini={railMini}
-          overlay={tablet && railOpen}
-          onDismiss={() => setRailOpen(false)}
-          onFold={() => (tablet ? setRailOpen((o) => !o) : setNavMini((m) => !m))}
+          onTab={(id) => { setTab(id); setNavOpen(false) }}
+          mini={navMini}
+          onFold={() => setNavMini((m) => !m)}
           phone={phone}
           open={navOpen}
           onClose={() => setNavOpen(false)}
@@ -1239,9 +1188,7 @@ export default function App() {
           onSignOut={signOut}
           previewing={previewing}
           onToggleView={me?.role === 'admin' ? toggleView : null}
-          mode={mode}
-          onToggleMode={toggleMode}
-          coverage={choosing ? null : member ? memberProgress(shown) : {
+          coverage={member ? memberProgress(shown) : {
             total: Math.round(plan.totals.totalHours),
             target: plan.totals.target,
             share: cov || 0,
@@ -1249,16 +1196,35 @@ export default function App() {
           }}
         />
 
-        {/* Everything beside the menu: the top bar, then the page. */}
+        {/* Everything beside the menu: the header, then the page. */}
+        {/*
+          * THE STAGE: one large rounded panel holding the header and the page,
+          * beside the menu, with the glow showing round its edges — the frame
+          * of the reference. On a phone there is no room for a frame, and the
+          * page runs edge to edge.
+          */}
         <Box sx={{
-          ml: `${sideW}px`, minHeight: '100vh', minWidth: 0, transition: 'margin-left 200ms ease-out',
+          ml: phone ? 0 : `${(navMini ? NAV_W_MINI : NAV_W) + 24}px`,
+          mr: phone ? 0 : '12px',
+          my: phone ? 0 : '12px',
+          minHeight: phone ? '100vh' : 'calc(100vh - 24px)',
+          transition: 'margin-left .2s ease',
+          ...(phone ? {} : {
+            borderRadius: '24px',
+            border: 1,
+            borderColor: 'divider',
+            bgcolor: SURFACE[mode].stage,
+            backdropFilter: 'blur(18px)',
+          }),
         }}
         >
           {/*
-            * THE TOP BAR: search on the left; on the right the save status and
-            * the few things that apply to every page. No page title here: each
-            * page's own header carries it. A phone gets ☰, the page's name,
-            * search and ⋮, with everything else inside the ⋮.
+            * THE HEADER: which page this is, and the few things that apply to
+            * every page — the export, the light/dark switch, the file menu.
+            *
+            * On a phone the ☰ opens the menu over the page; a computer has no
+            * ☰, the menu folds from its own button. The export becomes an icon on a
+            * phone, where a 390px row has no room for its words.
             */}
           <Box
             component="header"
@@ -1266,194 +1232,177 @@ export default function App() {
               position: 'sticky',
               top: 0,
               zIndex: (t) => t.zIndex.appBar,
-              height: { xs: 52, sm: 56 },
-              display: 'flex',
-              alignItems: 'center',
-              gap: { xs: 1, sm: 2 },
-              px: { xs: 1.5, sm: 5, md: 6 },
-              bgcolor: 'bg.page',
-              borderBottom: 1,
-              borderColor: 'border.subtle',
+              pt: { xs: 1, sm: 0 },
+              px: { xs: 1, sm: 0 },
             }}
           >
-            {phone ? (
-              <>
-                {/* No tooltip on a phone: the menu hands focus back to this
-                    button when it closes, and the tip would then sit over
-                    the bar below until the next tap. */}
-                <IconButton onClick={() => setNavOpen(true)} aria-label="menu" sx={iconBtn}>
-                  <MenuIcon />
-                </IconButton>
-                <Typography
-                  noWrap
-                  component="div"
-                  sx={{
-                    flex: 1, minWidth: 0, fontSize: '1rem', lineHeight: '24px', fontWeight: 600, ml: 0.5,
-                  }}
-                >
-                  {current?.label || 'F&A Tech KPI'}
-                </Typography>
-                {invalidChip}
-                <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone />
-              </>
-            ) : (
-              <>
-                <Box sx={{ flex: '1 1 360px', minWidth: 160, maxWidth: 360 }}>
-                  <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone={false} />
-                </Box>
-                <Box sx={{ flex: 1 }} />
-                {sharedLoading && <Loading label="Loading the shared plan…" />}
-                {saveStatus}
-                {invalidChip}
-
-                {/* The chatbot: an administrator's, and only when the AI is there. */}
-                {canWrite && aiOn && (narrow ? (
-                  <Tooltip title="Ask about the plan">
-                    <IconButton onClick={() => setChatOpen(true)} aria-label="Ask about the plan" sx={iconBtn}>
-                      <AutoAwesomeIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    variant="outlined"
-                    startIcon={<AutoAwesomeIcon />}
-                    onClick={() => setChatOpen(true)}
-                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-                  >
-                    Ask
-                  </Button>
-                ))}
-
-                {/* The workbook is the whole team's plan: an administrator's. */}
-                {canWrite && (narrow ? (
-                  <Tooltip title="Export Excel">
-                    <span>
-                      <IconButton onClick={handleExport} disabled={exporting} aria-label="Export Excel" sx={iconBtn}>
-                        {exporting ? <Spinner size={16} /> : <DownloadIcon fontSize="small" />}
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    variant="outlined"
-                    startIcon={exporting ? <CircularProgress size={14} color="inherit" /> : <DownloadIcon />}
-                    onClick={handleExport}
-                    disabled={exporting}
-                    sx={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-                  >
-                    {exporting ? 'Exporting…' : 'Export Excel'}
-                  </Button>
-                ))}
-
-                <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
-                  <IconButton onClick={toggleMode} aria-label={mode === 'dark' ? 'Light mode' : 'Dark mode'} sx={iconBtn}>
-                    {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+            <Box sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: { xs: 0.75, sm: 1.5 },
+              px: { xs: 0.75, sm: 2.5 },
+              py: { xs: 0.75, sm: 1.75 },
+              ...(phone
+                ? { borderRadius: 4, border: 1, borderColor: 'divider' }
+                : { borderTopLeftRadius: '24px', borderTopRightRadius: '24px', borderBottom: 1, borderColor: 'divider' }),
+              bgcolor: (t) => alpha(t.palette.mode === 'dark' ? '#0a0c2e' : '#ffffff', 0.82),
+              backdropFilter: 'blur(14px)',
+            }}
+            >
+              {/* Only a phone needs ☰: there the menu is hidden. On a computer
+                  the menu is always on screen and folds from its own button. */}
+              {phone && (
+                <Tooltip title="Menu">
+                  <IconButton onClick={() => setNavOpen(true)} aria-label="menu">
+                    <MenuIcon />
                   </IconButton>
                 </Tooltip>
-              </>
-            )}
+              )}
+              {CurrentIcon && <IconTile icon={CurrentIcon} color={PAGE_COLOR[tab]} size={phone ? 32 : 38} />}
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h4" noWrap sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.1rem' } }}>
+                  {current?.label || 'F&A Tech'}
+                </Typography>
+                <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: { xs: 'none', md: 'block' } }}>
+                  F&amp;A Tech · 2026 Objective &amp; KPI Planning
+                </Typography>
+              </Box>
 
-            {/* Scenario files are copies of the whole plan: an administrator's too. */}
-            {canWrite && (
-              // Likewise no tip on a phone: closing the menu refocuses the button.
-              <Tooltip title="More" disableHoverListener={phone} disableFocusListener={phone} disableTouchListener>
-                <IconButton onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More" aria-haspopup="menu" sx={iconBtn}>
-                  <MoreVertIcon fontSize="small" />
+              {canWrite && plan.invalid.length > 0 && (
+                <Tooltip title={`${plan.invalid.map((x) => `${x.nick} ${Math.round(x.sum * 100)}%`).join(', ')} — saving is blocked until every scorecard totals 100%`}>
+                  <Chip
+                    size="small"
+                    color="error"
+                    label={phone ? `${plan.invalid.length} ≠ 100%` : `${plan.invalid.length} scorecard${plan.invalid.length === 1 ? '' : 's'} ≠ 100%`}
+                    onClick={() => setTab('people')}
+                    sx={{ cursor: 'pointer', minWidth: 0 }}
+                  />
+                </Tooltip>
+              )}
+
+              {sharedLoading && !phone && <Loading label="Loading the shared plan…" />}
+              {/* An edit reaches the shared plan a few seconds later: said, so nobody wonders. */}
+              {canWrite && !phone && !sharedLoading && linkedToDb.current && (dirty || saving) && (
+                dbNotice || plan.invalid.length
+                  ? <Typography variant="caption" data-save-status="unsaved" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>Not saved yet</Typography>
+                  : <Box data-save-status="saving"><Loading label="Saving…" /></Box>
+              )}
+              {canWrite && !phone && !sharedLoading && linkedToDb.current && !dirty && !saving && savedHere && lastSaved && (
+                <Typography variant="caption" data-save-status="saved" title={`Saved to the shared plan ${new Date(lastSaved).toLocaleString()}`} sx={{ color: 'text.disabled', whiteSpace: 'nowrap' }}>
+                  Saved
+                </Typography>
+              )}
+
+              <Box sx={{ flex: 1 }} />
+
+              {/* The manager can look at any week from the top bar. */}
+              {allowed && tab === 'dashboard' && canWrite && !phone && (
+                <WeekSwitcher week={dashWeek} onChange={setDashWeek} compact={narrow} />
+              )}
+
+              <GlobalSearch tabs={menuTabs} plan={shown} admin={canWrite} onGo={goTo} phone={narrow} />
+
+              {/* The chatbot: an administrator's, and only when the AI is there. */}
+              {canWrite && aiOn && (narrow ? (
+                <Tooltip title="Ask about the plan">
+                  <IconButton onClick={() => setChatOpen(true)} aria-label="Ask about the plan">
+                    <AutoAwesomeIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="outlined"
+                  startIcon={<AutoAwesomeIcon />}
+                  onClick={() => setChatOpen(true)}
+                  sx={{ flexShrink: 0, whiteSpace: 'nowrap', color: 'text.primary', borderColor: 'divider' }}
+                >
+                  Ask
+                </Button>
+              ))}
+
+              {/* The workbook is the whole team's plan: an administrator's. */}
+              {canWrite && (narrow ? (
+                <Tooltip title="Export Excel">
+                  <span>
+                    <IconButton onClick={handleExport} disabled={exporting} aria-label="Export Excel">
+                      {exporting ? <CircularProgress size={18} /> : <DownloadIcon fontSize="small" />}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleExport}
+                  disabled={exporting}
+                  sx={{ flexShrink: 0, whiteSpace: 'nowrap', color: 'text.primary', borderColor: 'divider' }}
+                >
+                  {exporting ? 'Building…' : 'Export Excel'}
+                </Button>
+              ))}
+
+              <Tooltip title={mode === 'dark' ? 'Light mode' : 'Dark mode'}>
+                <IconButton size="small" onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')}>
+                  {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
                 </IconButton>
               </Tooltip>
-            )}
-            <Menu
-              anchorEl={menuEl}
-              open={!!menuEl}
-              onClose={() => setMenuEl(null)}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-              slotProps={{ paper: { sx: { mt: 1, minWidth: 260 } } }}
-            >
-              {/* On a phone the top bar's buttons live here. */}
-              {phone && canWrite && aiOn && (
-                <MenuItem onClick={() => { setChatOpen(true); setMenuEl(null) }}>
-                  <ListItemIcon><AutoAwesomeIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="Ask about the plan" />
-                </MenuItem>
-              )}
-              {phone && canWrite && (
-                <MenuItem onClick={() => { handleExport(); setMenuEl(null) }} disabled={exporting}>
-                  <ListItemIcon><DownloadIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary={exporting ? 'Exporting…' : 'Export Excel'} />
-                </MenuItem>
-              )}
-              {phone && (
-                <MenuItem onClick={() => { toggleMode(); setMenuEl(null) }}>
-                  <ListItemIcon>{mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}</ListItemIcon>
-                  <ListItemText primary={mode === 'dark' ? 'Light mode' : 'Dark mode'} />
-                </MenuItem>
-              )}
-              {phone && <Divider />}
-              {/* Writing the shared plan is an administrator's; the server refuses anybody else. */}
+
+              {/* Scenario files are copies of the whole plan: an administrator's too. */}
               {canWrite && (
-                <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
-                  <ListItemIcon><CloudUploadIcon fontSize="small" /></ListItemIcon>
-                  <ListItemText primary="Publish to shared store" />
-                </MenuItem>
+                <IconButton size="small" onClick={(e) => setMenuEl(e.currentTarget)} aria-label="More">
+                  <MoreVertIcon fontSize="small" />
+                </IconButton>
               )}
-              <MenuItem onClick={() => { setScenario('open'); setMenuEl(null) }}>
-                <ListItemIcon><CloudDownloadIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="Open shared scenario" />
-              </MenuItem>
-              <Divider />
-              <MenuItem onClick={() => { downloadScenario(state); setMenuEl(null) }}>
-                <ListItemIcon><DataObjectIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="Save scenario file (.json)" />
-              </MenuItem>
-              <MenuItem onClick={() => { fileRef.current?.click(); setMenuEl(null) }}>
-                <ListItemIcon><UploadFileIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="Load scenario file (.json)" />
-              </MenuItem>
-              <Divider />
-              <MenuItem onClick={() => { handleReset(); setMenuEl(null) }}>
-                <ListItemIcon><RestartAltIcon fontSize="small" /></ListItemIcon>
-                <ListItemText primary="Reset to source workbook" />
-              </MenuItem>
-            </Menu>
-            <input ref={fileRef} type="file" accept="application/json" hidden onChange={handleImport} />
+              <Menu anchorEl={menuEl} open={!!menuEl} onClose={() => setMenuEl(null)}>
+                {/* Writing the shared plan is an administrator's; the server refuses anybody else. */}
+                {canWrite && (
+                  <MenuItem onClick={() => { setScenario('save'); setMenuEl(null) }}>
+                    <CloudUploadIcon fontSize="small" sx={{ mr: 1.5 }} /> Publish to shared store
+                  </MenuItem>
+                )}
+                <MenuItem onClick={() => { setScenario('open'); setMenuEl(null) }}>
+                  <CloudDownloadIcon fontSize="small" sx={{ mr: 1.5 }} /> Open shared scenario
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={() => { downloadScenario(state); setMenuEl(null) }}>
+                  <DataObjectIcon fontSize="small" sx={{ mr: 1.5 }} /> Save scenario file (.json)
+                </MenuItem>
+                <MenuItem onClick={() => { fileRef.current?.click(); setMenuEl(null) }}>
+                  <UploadFileIcon fontSize="small" sx={{ mr: 1.5 }} /> Load scenario file (.json)
+                </MenuItem>
+                <Divider />
+                <MenuItem onClick={() => { handleReset(); setMenuEl(null) }}>
+                  <RestartAltIcon fontSize="small" sx={{ mr: 1.5 }} /> Reset to source workbook
+                </MenuItem>
+              </Menu>
+              <input ref={fileRef} type="file" accept="application/json" hidden onChange={handleImport} />
+            </Box>
+            {/* On a phone the week switcher has a row of its own, under the title. */}
+            {phone && allowed && tab === 'dashboard' && canWrite && (
+              <Box sx={{
+                display: 'flex', justifyContent: 'center', mt: 0.5, py: 0.5, borderRadius: 4, border: 1, borderColor: 'divider',
+                bgcolor: (t) => alpha(t.palette.mode === 'dark' ? '#0a0c2e' : '#ffffff', 0.82), backdropFilter: 'blur(14px)',
+              }}
+              >
+                <WeekSwitcher week={dashWeek} onChange={setDashWeek} />
+              </Box>
+            )}
           </Box>
 
+        {/* Keyed on the view, so switching it rebuilds the page and every page
+            asks the server again under the new rules. */}
+        <Box key={previewing ? `member:${previewPerson || ''}` : 'admin'} sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
           {previewing && (
             <ViewAsBanner people={state.people} person={previewPerson} self={me?.person || null} onPick={pickPreview} onBack={() => toggleView(false)} />
           )}
-
-          {/* Keyed on the view, so switching it rebuilds the page and every page
-              asks the server again under the new rules. The register and the
-              Timeline may use the full width; everything else is held to 1440. */}
-          <Box
-            component="main"
-            key={previewing ? `member:${previewPerson || ''}` : 'admin'}
-            sx={{
-              maxWidth: FULL_WIDTH.has(tab) ? 'none' : 1440,
-              mx: 'auto',
-              px: { xs: 3, sm: 5, md: 6 },
-              pt: { xs: 3, sm: 5, md: 6 },
-              pb: { xs: 8, sm: 10 },
-              minWidth: 0,
-            }}
-          >
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.
             */}
           {allowed && tab === 'users' && <Users me={me} people={state.people} />}
-          {/* Until the Dashboard draws the week switcher in its own header
-              (and says so with Dashboard.ownsWeekSwitcher), it sits here. */}
-          {allowed && tab === 'dashboard' && canWrite && !Dashboard.ownsWeekSwitcher && (
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
-              <WeekSwitcher week={dashWeek} onChange={setDashWeek} compact={phone} />
-            </Box>
-          )}
           {allowed && tab === 'dashboard' && (
             <Dashboard
               week={dashWeek}
-              onWeekChange={setDashWeek}
               plan={plan}
               onGoTo={setTab}
               hello={hello}
@@ -1494,10 +1443,7 @@ export default function App() {
               onShowTimeline={showOnTimeline}
             />
           )}
-          {allowed && whose && (
-            <ViewAsChoose title={current?.label} people={state.people} self={me?.person || null} onPick={pickPreview} />
-          )}
-          {allowed && tab === 'weekly' && !whose && (
+          {allowed && tab === 'weekly' && (
             <Weekly
               plan={plan}
               me={viewer}
@@ -1508,9 +1454,9 @@ export default function App() {
               focusProject={hashArg.page === 'weekly' && hashArg.key ? hashArg : null}
             />
           )}
-          {allowed && tab === 'team' && !whose && <Team plan={shown} own={member} />}
+          {allowed && tab === 'team' && <Team plan={shown} own={member} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} loading={appsLoading || sharedLoading} />}
-          {allowed && tab === 'timeline' && !whose && (
+          {allowed && tab === 'timeline' && (
             <Timeline
               plan={shown}
               settings={plan.settings}
@@ -1556,7 +1502,7 @@ export default function App() {
               onScenarioName={(v) => setState((s) => ({ ...s, scenarioName: v }))}
             />
           )}
-          </Box>
+        </Box>
         </Box>
 
         {canWrite && aiOn && <AiChat open={chatOpen} onClose={() => setChatOpen(false)} phone={phone} seed={chatSeed} />}
@@ -1590,13 +1536,10 @@ export default function App() {
             then showed a stale register indefinitely with no sign of it. */}
         <Snackbar
           open={!!dbNotice}
-          anchorOrigin={{ vertical: 'bottom', horizontal: phone ? 'center' : 'left' }}
-          sx={phone ? undefined : { left: { sm: `${sideW + 24}px` } }}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
           <Alert
             severity="warning"
-            variant="filled"
-            sx={{ maxWidth: 560 }}
             onClose={() => setDbNotice(null)}
             action={(
               <>
@@ -1608,7 +1551,7 @@ export default function App() {
                   size="small"
                   onClick={() => {
                     downloadScenario(state)
-                    setToast({ severity: 'success', msg: 'Copy downloaded. Open it again from the ⋮ menu if you need it.' })
+                    setToast({ severity: 'success', msg: 'Copy downloaded — open it again from the menu if you need it.' })
                   }}
                 >
                   Keep a copy
@@ -1640,24 +1583,18 @@ export default function App() {
           </Alert>
         </Snackbar>
 
-        {/*
-          * THE TOAST: raised, a thin bar in its tone, never a filled colour.
-          * Bottom left on a computer, bottom centre on a phone. A success goes
-          * by itself after four seconds; an error stays until it is closed.
-          */}
         <Snackbar
           open={!!toast}
-          autoHideDuration={toast?.severity === 'error' ? null : 4000}
-          onClose={(_e, why) => { if (why !== 'clickaway') setToast(null) }}
-          anchorOrigin={{ vertical: 'bottom', horizontal: phone ? 'center' : 'left' }}
-          sx={phone ? undefined : { left: { sm: `${sideW + 24}px` } }}
+          autoHideDuration={4000}
+          onClose={() => setToast(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
           {toast ? (
             <Alert
               severity={toast.severity}
-              variant="filled"
+              variant={toast.muted ? 'outlined' : 'filled'}
               onClose={() => setToast(null)}
-              sx={{ minWidth: { sm: 320 }, maxWidth: 520 }}
+              sx={toast.muted ? { bgcolor: 'background.paper', color: 'text.primary' } : undefined}
             >
               {toast.msg}
             </Alert>

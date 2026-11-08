@@ -73,7 +73,7 @@ console.log('\n--- the layout, cleaned ---')
 
 console.log('\nstarting a real mongod…')
 const mongod = await MongoMemoryServer.create()
-const PORT = Number(process.env.CHECK_PORT) || 5366
+const PORT = 5366
 const base = `http://127.0.0.1:${PORT}`
 const TOKEN = 'manager-service-token-'.padEnd(48, '6')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -276,8 +276,8 @@ try {
     })
     await m.keyboard.type('Load the budget data')
     await m.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save draft')?.click())
-    await m.waitForFunction(() => document.body.innerText.includes('Draft saved.'), { timeout: 10000 }).catch(() => {})
-    check('  the member saves', (await text(m)).includes('Draft saved.'))
+    await m.waitForFunction(() => document.body.innerText.includes('Saved.'), { timeout: 10000 }).catch(() => {})
+    check('  the member saves', (await text(m)).includes('Saved.'))
   }
 
   const done = await waitMail('followup-done:')
@@ -310,23 +310,23 @@ try {
     check('  the summary card says why there is no summary', /not switched on/i.test(sum), sum.replace(/\n/g, ' | '))
     const own = await sect(a, 'who holds what')
     check('WHO HOLDS WHAT: by owner, last week and this week',
-      own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /Not done, 60%/i.test(own)
+      own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /NOT DONE · 60%/i.test(own)
       && own.includes('Validate the forecast with FP&A'), own.slice(0, 400).replace(/\n/g, ' | '))
     check('  EACH TASK SHOWS WHAT THE MEMBER WROTE ABOUT IT, NOT JUST ITS NAME', own.includes('Built the driver tree for three regions')
       && /In the way: Waiting on IT/.test(own), own.slice(0, 500).replace(/\n/g, ' | '))
     check('  THE ANSWERED FOLLOW-UP SAYS SO', /UPDATED .*AGO|UPDATED JUST NOW/i.test(own))
     check('  a project with no owner cannot be followed up', own.includes('No owner to ask'))
-    // The week switcher in the page header: any week, and straight back.
+    // The week switcher in the top bar: any week, and straight back.
     const shownWeek = () => a.evaluate(() => document.querySelector('[data-week-shown]')?.getAttribute('data-week-shown'))
-    check('THE DASHBOARD HEADER HAS A WEEK SWITCHER, ON THIS WEEK', (await shownWeek()) === WEEK, String(await shownWeek()))
+    check('THE TOP BAR HAS A WEEK SWITCHER, ON THIS WEEK', (await shownWeek()) === WEEK, String(await shownWeek()))
     await a.click('[aria-label="previous week"]')
     await a.waitForFunction(() => /Week before/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
     const back = await sect(a, 'who holds what')
     check('  A WEEK BACK: the dashboard is about that week and the one before', (await shownWeek()) === addWeeks(WEEK, -1)
-      && /Week before/i.test(back) && !/This week \(W\d+\)/i.test(back), back.slice(0, 200).replace(/\n/g, ' | '))
+      && /Week before/i.test(back) && !/This week · week/i.test(back), back.slice(0, 200).replace(/\n/g, ' | '))
     await a.click('[data-week-today]')
-    await a.waitForFunction(() => /This week \(W\d+\)/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
-    check('  "This week" brings it back', (await shownWeek()) === WEEK && /This week \(W\d+\)/i.test(await sect(a, 'who holds what')))
+    await a.waitForFunction(() => /This week · week/i.test(document.querySelector('section[aria-label="who holds what"]')?.innerText || ''), { timeout: 10000 }).catch(() => {})
+    check('  "This week" brings it back', (await shownWeek()) === WEEK && /This week · week/i.test(await sect(a, 'who holds what')))
     // Kade has no account: the button says why.
 
     for (const width of [390, 768]) {
@@ -337,7 +337,7 @@ try {
       check(`  @${width}px the switcher fits, with no sideways scroll`, r.sw2 && r.sw <= r.cw + 1, JSON.stringify(r))
       await n.browserContext().close()
     }
-    // Follow up asks first; the answer comes once "Send email" is pressed.
+    // Follow up asks first; the answer comes once "Send the email" is pressed.
     await a.evaluate(() => document.querySelector('button[aria-label="follow up FNP-267"]')?.click())
     await a.waitForSelector('[data-followup-send]', { timeout: 5000 }).catch(() => {})
     await a.evaluate(() => document.querySelector('[data-followup-send]')?.click())
@@ -358,7 +358,7 @@ try {
       && !document.querySelector('section[aria-label="week by week"] [data-loading]'), { timeout: 10000 }).catch(() => {})
     const pt = await text(a)
     check('A PROJECT’S NAME OPENS ITS PAGE', a.url().endsWith('#project/FNP-379') && pt.includes('PL Forecast'), a.url())
-    check('  owner, due date and hours', pt.includes('Owner') && pt.includes('31 Aug 2026') && pt.includes('Saving hours a month'))
+    check('  owner, due date and hours', pt.includes('Owner') && pt.includes('31 Aug 2026') && pt.includes('Saving hours / month'))
     check('  WHAT IS IN THE WAY', pt.includes('Waiting on IT for the data feed'), pt.slice(pt.indexOf('PL Forecast'), pt.indexOf('PL Forecast') + 900).replace(/\n/g, ' | '))
     check('  AND EVERY WEEK’S TASKS', pt.includes('Build the forecast model') && pt.includes('Validate the forecast with FP&A'))
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/project-page.png` })
@@ -497,7 +497,7 @@ try {
     const wk = await text(m)
     check('THEIR WEEK, AND NOBODY ELSE’S: no team list, no colleague’s focus',
       !wk.includes('KADE-ONLY') && !wk.includes('What the team is focused on') && !wk.includes('The team this week'))
-    check('  THE WEEK CARRIES ITS NUMBER', /Week \d{1,2}, \d{1,2} \w{3}\n/.test(wk))
+    check('  THE WEEK CARRIES ITS NUMBER', /Week \d{1,2}\n/.test(wk) && /\d{1,2} \w{3} \d{4} · this week/.test(wk))
     check('  no Excel export and no file menu — both are the whole plan',
       !(await m.evaluate(() => [...document.querySelectorAll('button')].some((b) => /Export Excel/.test(b.textContent) || b.getAttribute('aria-label') === 'More'))))
     check('  the side menu shows their own progress, not the team’s', wk.includes('Your projects, finished') && !wk.includes('Saving hours, committed'))
@@ -507,7 +507,7 @@ try {
     if (process.env.SHOT_DIR) { await m.evaluate(() => document.querySelector('section[aria-label="your projects"]')?.scrollIntoView({ block: 'center' })); await m.screenshot({ path: `${process.env.SHOT_DIR}/my-projects.png` }) }
     const mine = await m.evaluate(() => [...document.querySelectorAll('[data-my-project]')].map((x) => x.getAttribute('data-my-project')))
     check('THEIR PROJECTS ARE ON THE PAGE ALREADY', wk.includes('Your projects') && mine.length > 0 && !mine.includes('FNP-267'), mine.join(','))
-    check('  one already planned says so', (await m.evaluate(() => document.querySelector('[data-my-project="FNP-379"]')?.textContent || '')).toLowerCase().includes('on this week’s plan'))
+    check('  one already planned says so', (await m.evaluate(() => document.querySelector('[data-my-project="FNP-379"]')?.textContent || '')).includes('on this week’s plan'))
     const addOn = await m.evaluate(() => {
       const row = [...document.querySelectorAll('[data-my-project]')].find((x) => [...x.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Add task'))
       if (!row) return null
@@ -536,8 +536,6 @@ try {
 
     await m.goto(`${base}/#timeline`, { waitUntil: 'networkidle0' })
     await m.waitForFunction(() => document.body.innerText.includes('Only the projects you hold'), { timeout: 10000 }).catch(() => {})
-    // The header says it at once; the rows follow once the check-ins are in (a skeleton until then).
-    await m.waitForSelector('[data-keys]', { timeout: 10000 }).catch(() => {})
     const tl = await text(m)
     check('THE TIMELINE SHOWS ONLY THEIR PROJECTS', tl.includes('PL Forecast') && !tl.includes('Supplier Portal'))
     check('  and says so', tl.includes('Only the projects you hold'))

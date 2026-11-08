@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box,
   Typography, List, ListItem, ListItemButton, ListItemText, IconButton, Alert,
-  Tooltip,
+  Chip, Divider, Tooltip,
 } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
-import CloseIcon from '@mui/icons-material/Close'
+import CloudDoneIcon from '@mui/icons-material/CloudDone'
+import CloudOffIcon from '@mui/icons-material/CloudOff'
 import * as api from '../lib/api.js'
 import Loading from './Loading.jsx'
-import { StatusPill } from './ui.jsx'
 
 const when = (iso) => {
   if (!iso) return ''
@@ -101,38 +101,37 @@ export default function ScenarioDialog({ open, mode, onClose, state, onLoad, onT
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, pr: 3 }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            {mode === 'save' ? 'Publish scenario' : 'Open shared scenario'}
-            {store && (
-              <StatusPill tone={store.connected ? 'success' : 'neutral'} dot>
-                {store.connected ? 'Shared store online' : 'Offline'}
-              </StatusPill>
-            )}
-          </Box>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-            {mode === 'save'
-              ? 'Saves to the shared database so colleagues can open the same numbers.'
-              : 'Scenarios published by you or your team.'}
-          </Typography>
+      <DialogTitle sx={{ pb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {mode === 'save' ? 'Publish scenario' : 'Open shared scenario'}
+          {store && (
+            <Chip
+              size="small"
+              variant="outlined"
+              color={store.connected ? 'success' : 'default'}
+              icon={store.connected ? <CloudDoneIcon /> : <CloudOffIcon />}
+              label={store.connected ? 'Shared store online' : 'Offline'}
+            />
+          )}
         </Box>
-        <Tooltip title="Close">
-          <IconButton size="small" onClick={onClose} aria-label="close" sx={{ mt: -0.5 }}><CloseIcon fontSize="small" /></IconButton>
-        </Tooltip>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {mode === 'save'
+            ? 'Saves to the shared database so colleagues can open the same numbers.'
+            : 'Scenarios published by you or your team.'}
+        </Typography>
       </DialogTitle>
 
-      <DialogContent>
+      <DialogContent dividers>
         {offline && (
-          <Alert severity="warning" variant="outlined" sx={{ mb: 4 }}>
-            The shared store is not answering{store.reason ? ` (${store.reason})` : ''}. Your work is still saved in this
+          <Alert severity="warning" variant="outlined" sx={{ mb: 2 }}>
+            The shared store is unavailable{store.reason ? ` (${store.reason})` : ''}. Your work is still saved in this
             browser, and <em>Save scenario file</em> in the ⋮ menu always works.
           </Alert>
         )}
-        {err && <Alert severity="error" variant="outlined" sx={{ mb: 4 }}>{err}</Alert>}
+        {err && <Alert severity="error" variant="outlined" sx={{ mb: 2 }}>{err}</Alert>}
 
         {mode === 'save' && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, mb: 5, pt: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
             <TextField
               autoFocus fullWidth size="small" label="Scenario name" value={name}
               onChange={(e) => setName(e.target.value)}
@@ -142,7 +141,7 @@ export default function ScenarioDialog({ open, mode, onClose, state, onLoad, onT
             />
             <TextField
               fullWidth size="small" label="Your name (optional)" value={by}
-              onChange={(e) => setBy(e.target.value)} placeholder="So the team knows who changed what"
+              onChange={(e) => setBy(e.target.value)} placeholder="so the team knows who changed what"
               disabled={offline}
             />
           </Box>
@@ -152,18 +151,18 @@ export default function ScenarioDialog({ open, mode, onClose, state, onLoad, onT
           <Loading variant="block" label="Loading scenarios…" />
         ) : rows.length ? (
           <>
-            <Typography variant="subtitle2" component="h3" sx={{ color: 'text.secondary', mb: 1 }}>
+            {mode === 'save' && <Divider sx={{ mb: 1 }} />}
+            <Typography variant="subtitle2" sx={{ color: 'text.secondary', mb: 1 }}>
               {mode === 'save' ? 'Existing scenarios' : `${rows.length} saved`}
             </Typography>
-            <List dense disablePadding sx={{ borderTop: 1, borderColor: 'border.subtle' }}>
+            <List dense disablePadding>
               {rows.map((r) => (
                 <ListItem
                   key={r.name}
                   disablePadding
-                  sx={{ borderBottom: 1, borderColor: 'border.subtle' }}
                   secondaryAction={
                     <Tooltip title="Delete for everyone">
-                      <IconButton edge="end" size="small" onClick={() => doDelete(r.name)} aria-label={`delete ${r.name}`}>
+                      <IconButton edge="end" size="small" onClick={() => doDelete(r.name)}>
                         <DeleteOutlineIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -172,12 +171,11 @@ export default function ScenarioDialog({ open, mode, onClose, state, onLoad, onT
                   <ListItemButton
                     onClick={() => (mode === 'save' ? setName(r.name) : doLoad(r.name))}
                     disabled={busy}
-                    sx={{ borderRadius: 0, py: 1.5 }}
                   >
                     <ListItemText
                       primary={r.name}
-                      secondary={`${when(r.updatedAt)}${r.updatedBy && r.updatedBy !== 'unknown' ? `, by ${r.updatedBy}` : ''}`}
-                      primaryTypographyProps={{ fontWeight: 500 }}
+                      secondary={`${when(r.updatedAt)}${r.updatedBy && r.updatedBy !== 'unknown' ? ` · ${r.updatedBy}` : ''}`}
+                      primaryTypographyProps={{ fontWeight: 600, variant: 'body2' }}
                     />
                   </ListItemButton>
                 </ListItem>
@@ -187,14 +185,14 @@ export default function ScenarioDialog({ open, mode, onClose, state, onLoad, onT
         ) : (
           !offline && (
             <Typography variant="body2" sx={{ color: 'text.secondary', py: 2 }}>
-              No shared scenarios yet. {mode === 'save' ? 'Name this one and publish it.' : 'Publish one from the ⋮ menu.'}
+              No shared scenarios yet.
             </Typography>
           )
         )}
       </DialogContent>
 
       <DialogActions>
-        <Button variant="text" onClick={onClose}>{mode === 'save' ? 'Cancel' : 'Close'}</Button>
+        <Button onClick={onClose}>Close</Button>
         {mode === 'save' && (
           <Button variant="contained" onClick={doSave} disabled={busy || offline}>
             {busy ? 'Publishing…' : 'Publish'}

@@ -64,7 +64,7 @@ await client.db('team_kpi_planning').collection('kpi_scenarios').insertOne({
 })
 await client.close()
 
-const PORT = Number(process.env.CHECK_PORT) || 5324   // CHECK_PORT: run beside another copy
+const PORT = 5324
 /*
  * The server wants a sign-in for every plan route now. This suite is about
  * what a browser does with the shared plan, not about signing in (check-auth
@@ -270,7 +270,7 @@ try {
   check('  and offers a copy before anything replaces it', conflict.canKeepACopy === true, JSON.stringify(conflict))
 
   /* ---------- 3. no database at all ---------- */
-  const noDbPort = PORT + 1
+  const noDbPort = 5325
   const noDb = spawn(process.execPath, ['server/index.js'], {
     cwd: root,
     env: { ...process.env, PORT: String(noDbPort), MONGODB_URI: '' },

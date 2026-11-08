@@ -160,7 +160,7 @@ if (!exe) {
 }
 
 console.log('\n— the switch —')
-const PORT = Number(process.env.CHECK_PORT) || 5337
+const PORT = 5337
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const server = spawn(process.execPath, ['server/index.js'], {
   cwd: root,
