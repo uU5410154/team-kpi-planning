@@ -352,6 +352,88 @@ try {
     check('SHOW EVERY COLUMN puts it back, on the server too',
       JSON.stringify((await call('GET', '/api/projects/columns', undefined, james)).body.hidden) === '[]')
     await a.browserContext().close()
+
+    console.log('\n--- the register reads cleanly ---')
+    const lum = (rgb) => {
+      const [r, g, b] = rgb.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4 })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const contrast = (x, y) => { const [h, l] = [lum(x), lum(y)].sort((m, n) => n - m); return (h + 0.05) / (l + 0.05) }
+    const rd = await as(boss, { width: 1280, height: 900 })
+    await rd.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+    await sleep(800)
+    const mdCol = (pg) => pg.evaluate(() => {
+      const t = document.querySelector('[data-register-table]')
+      const i = [...t.querySelectorAll('thead th')].findIndex((h) => h.innerText.trim() === 'Mandays')
+      return [...t.querySelectorAll('tbody tr')].slice(0, 12).map((tr) => {
+        const inp = tr.children[i]?.querySelector('input')
+        if (!inp) return null
+        const cs = getComputedStyle(inp)
+        return {
+          value: inp.value,
+          placeholder: inp.placeholder,
+          italic: cs.fontStyle !== 'normal',
+          room: parseFloat(cs.paddingRight) - parseFloat(cs.paddingLeft),
+          est: !!tr.children[i].querySelector('[data-manday-estimate]'),
+        }
+      }).filter(Boolean)
+    })
+    const md0 = await mdCol(rd)
+    // The seed carries 0 mandays on every row: that is "not entered", not a figure.
+    check('MANDAYS OF 0 SHOW THE DASH, NOT "0"',
+      md0.length > 5 && md0.every((m) => m.value === '' && m.placeholder === '—'), JSON.stringify(md0.slice(0, 3)))
+    check('  upright, with 2px more room on the right so no glyph is clipped',
+      md0.every((m) => !m.italic && m.room >= 2), JSON.stringify(md0[0]))
+
+    // Rows outside the plan read as set aside by colour, not by opacity, so
+    // their text still clears 4.5:1.
+    const muted = await rd.evaluate(() => {
+      const rgb = (s) => s.match(/[\d.]+/g).slice(0, 3).map(Number)
+      const tr = document.querySelector('[data-register-table] tbody tr.out-of-plan')
+      const plain = document.querySelector('[data-register-table] tbody tr:not(.out-of-plan)')
+      if (!tr || !plain) return null
+      const seen = (el) => { let o = 1; for (let n = el; n && n !== tr; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o }
+      const name = tr.querySelector('[data-open-project]')
+      const meta = tr.querySelector('[aria-label^="team and programme"]')
+      return {
+        bg: rgb(getComputedStyle(tr.querySelector('td.held')).backgroundColor),
+        name: rgb(getComputedStyle(name).color),
+        meta: rgb(getComputedStyle(meta).color),
+        plainName: getComputedStyle(plain.querySelector('[data-open-project]')).color,
+        opacity: Math.min(seen(name), seen(meta)),
+      }
+    })
+    check('AN OUT-OF-PLAN ROW IS QUIETER THAN THE OTHERS',
+      !!muted && `rgb(${muted.name.join(', ')})` !== muted.plainName, JSON.stringify(muted))
+    check('  and its name and meta line still clear 4.5:1, at full opacity',
+      !!muted && muted.opacity === 1 && contrast(muted.name, muted.bg) >= 4.5 && contrast(muted.meta, muted.bg) >= 4.5,
+      muted && `name ${contrast(muted.name, muted.bg).toFixed(2)}, meta ${contrast(muted.meta, muted.bg).toFixed(2)}, opacity ${muted.opacity}`)
+
+    // A fade on each edge the table can still scroll toward.
+    const cues = () => rd.evaluate(() => [
+      document.querySelector('[data-scroll-cue]')?.dataset.scrollCue,
+      document.querySelector('[data-scroll-cue-left]')?.dataset.scrollCueLeft,
+    ].join('/'))
+    const scrollTo = async (f) => {
+      await rd.evaluate((x) => { const c = document.querySelector('[data-register-table]'); c.scrollLeft = (c.scrollWidth - c.clientWidth) * x }, f)
+      await sleep(300)
+    }
+    const atRest = await cues()
+    await scrollTo(0.5)
+    const mid = await cues()
+    await scrollTo(1)
+    const end = await cues()
+    check('THE SCROLL FADES: right only at rest, both mid-way, left only at the end',
+      atRest === 'on/off' && mid === 'on/on' && end === 'off/on', `${atRest} ${mid} ${end}`)
+    await scrollTo(0)
+
+    // An estimate is a plain figure with "est." beside it, not a slanted one.
+    await rd.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Estimate effort/.test(b.innerText.trim()))?.click())
+    await sleep(800)
+    const md1 = await mdCol(rd)
+    check('AN ESTIMATE READS "est." AND AN UPRIGHT FIGURE',
+      md1.length > 5 && md1.every((m) => /^\d[\d,]*$/.test(m.value) && m.est && !m.italic), JSON.stringify(md1.slice(0, 3)))
+    await rd.browserContext().close()
   }
 } catch (e) {
   failures++

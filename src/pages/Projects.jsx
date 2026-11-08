@@ -66,6 +66,15 @@ const sentence = (s) => String(s || '').split(' ')
   .map((w, i) => (i > 0 && /^[A-Z][a-z]+$/.test(w) ? w.toLowerCase() : w))
   .join(' ')
 
+/*
+ * THE TABLE'S TEXT COLOUR, as a variable a row can reset: a row outside the
+ * plan takes its main text down to the secondary colour, so it reads as set
+ * aside and still clears 4.5:1. An opacity took the secondary meta line below
+ * that, and so would the tertiary colour (4.48:1 in dark), so the meta line
+ * keeps its colour. Outside the table the fallback is the ordinary colour.
+ */
+const fg = (t) => `var(--cell-fg, ${t.palette.text.primary})`
+
 /**
  * AN EDITABLE CELL THAT READS AS TEXT. At rest it is the value and nothing
  * else; hovering its row draws a quiet box round every cell that can change,
@@ -74,7 +83,7 @@ const sentence = (s) => String(s || '').split(' ')
 const cellBox = (t) => ({
   fontSize: '0.8125rem',
   lineHeight: '18px',
-  color: t.palette.text.primary,
+  color: fg(t),
   borderRadius: '6px',
   border: '1px solid transparent',
   backgroundColor: 'transparent',
@@ -122,9 +131,13 @@ function TextCell({
   )
 }
 
-/** Number cell that only commits on blur, so typing never fights React state. */
+/**
+ * Number cell that only commits on blur, so typing never fights React state.
+ * Upright, right-aligned figures with 2px more room on the right than on the
+ * left, so the last glyph never touches the edge of the box and is clipped.
+ */
 function NumCell({
-  value, onChange, placeholder = '—', width = 76, estimated, label,
+  value, onChange, placeholder = '—', width = 76, label,
 }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value))
   const [focused, setFocused] = useState(false)
@@ -153,10 +166,9 @@ function NumCell({
         style: {
           textAlign: 'right',
           fontVariantNumeric: 'tabular-nums',
-          fontStyle: estimated && value != null ? 'italic' : 'normal',
         },
       }}
-      sx={[cellBox, { width }]}
+      sx={[cellBox, { width, '& .MuiInputBase-input': { paddingRight: '9px' } }]}
     />
   )
 }
@@ -187,6 +199,7 @@ const Dot = ({ color, hollow = false }) => (
   <Box
     component="span"
     aria-hidden
+    className="mark"
     sx={{
       width: 6,
       height: 6,
@@ -280,7 +293,7 @@ function NameCell({ p, onOpen, onRename }) {
             fontSize: '0.8125rem',
             lineHeight: '18px',
             fontWeight: 500,
-            color: 'text.primary',
+            color: fg,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -438,7 +451,7 @@ function SoftBenefitCell({ value, onChange }) {
         {list.length ? (
           <>
             {list.slice(0, 2).map((b, i) => (
-              <Typography key={i} variant="caption" component="div" noWrap sx={{ lineHeight: '18px', color: 'text.primary' }}>
+              <Typography key={i} variant="caption" component="div" noWrap sx={{ lineHeight: '18px', color: fg }}>
                 {b}
               </Typography>
             ))}
@@ -677,11 +690,14 @@ function PhoneList({ rows, assignees, onOpen, onClear, filtered }) {
                 },
               }}
             >
-              <Box sx={{ flex: 1, minWidth: 0, opacity: muted ? 0.6 : 1 }}>
+              {/* Outside the plan: the name in the quieter colour rather than
+                  see-through, so name and meta both still read at 4.5:1. */}
+              <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography
                   variant="body1"
                   sx={{
                     fontWeight: 500,
+                    color: muted ? 'text.secondary' : 'text.primary',
                     display: '-webkit-box',
                     WebkitLineClamp: 2,
                     WebkitBoxOrient: 'vertical',
@@ -911,22 +927,66 @@ export default function Projects({
     },
   } : {})
 
-  // The cue that there is more to the right: a soft fade at the edge.
+  /*
+   * THE CUE THAT THERE IS MORE: a 12px fade on each edge the table can still
+   * scroll toward. The right one sits at the container's edge; the left one
+   * sits just past the held columns, where the scrolled cells slide under
+   * them. Both stop short of the scroll bars and match the header row's own
+   * colour over the header, so neither paints a stripe.
+   */
   const scrollRef = useRef(null)
-  const [moreRight, setMoreRight] = useState(false)
+  const [edge, setEdge] = useState({
+    left: false, right: false, held: 0, head: 0, vbar: 0, hbar: 0,
+  })
   const checkScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+    const box = el.getBoundingClientRect()
+    const heldHeads = [...el.querySelectorAll('thead th.held')]
+    const held = heldHeads.length
+      ? Math.max(...heldHeads.map((th) => th.getBoundingClientRect().right)) - box.left - el.clientLeft
+      : 0
+    const next = {
+      left: el.scrollLeft > 1,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 2,
+      held: Math.round(held),
+      head: Math.round(el.querySelector('thead')?.getBoundingClientRect().height || 0),
+      vbar: Math.max(0, el.offsetWidth - el.clientWidth - el.clientLeft * 2),
+      hbar: Math.max(0, el.offsetHeight - el.clientHeight - el.clientTop * 2),
+    }
+    setEdge((prev) => (Object.keys(next).every((k) => prev[k] === next[k]) ? prev : next))
   }, [])
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return undefined
     checkScroll()
+    // The table too: its columns widen once the rows and the fonts are in,
+    // without the box round it changing size.
     const ro = new ResizeObserver(checkScroll)
     ro.observe(el)
+    if (el.firstElementChild) ro.observe(el.firstElementChild)
     return () => ro.disconnect()
   }, [checkScroll, phone, hidden, ready])
+  const fade = (side) => {
+    const to = side === 'right' ? 'to right' : 'to left'
+    const ramp = (c) => `linear-gradient(${to}, ${alpha(c, 0)} 0%, ${alpha(c, 0.75)} 55%, ${c} 100%)`
+    return {
+      position: 'absolute',
+      top: 1,
+      bottom: 1 + edge.hbar,
+      width: 12,
+      pointerEvents: 'none',
+      zIndex: 1,
+      ...(side === 'right' ? { right: 1 + edge.vbar } : { left: 1 + edge.held }),
+      backgroundImage: `${ramp(theme.palette.bg.subtle)}, ${ramp(theme.palette.bg.surface)}`,
+      backgroundRepeat: 'no-repeat',
+      backgroundSize: `100% ${edge.head}px, 100% calc(100% - ${edge.head}px)`,
+      backgroundPosition: `0 0, 0 ${edge.head}px`,
+      opacity: edge[side] ? 1 : 0,
+      transition: 'opacity 120ms',
+      '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+    }
+  }
 
   // Mid-edit, a click elsewhere on the row is how the edit is finished — it
   // must not also throw a popup over the page.
@@ -1034,8 +1094,16 @@ export default function Projects({
     q.trim() !== '' || fPic.length > 0 || fSub.length > 0
     || [fObj, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
 
-  const head = (id, label, align = 'left', minWidth) => (
-    <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined} {...stick(id, true)}>
+  // `typed`: the column's figures sit in input boxes, whose border and padding
+  // (1 + 9px) set them that far in from the cell's edge; the header steps in
+  // as far, so its label ends where the numbers end.
+  const head = (id, label, align = 'left', minWidth, typed = false) => (
+    <TableCell
+      align={align}
+      sortDirection={sort.by === id ? sort.dir : false}
+      sx={{ ...(minWidth && { minWidth }), ...(typed && { '&&': { pr: '18px' } }) }}
+      {...stick(id, true)}
+    >
       <TableSortLabel
         active={sort.by === id}
         direction={sort.by === id ? sort.dir : 'asc'}
@@ -1924,7 +1992,13 @@ export default function Projects({
                   sx={{
                     '& th': { whiteSpace: 'nowrap' },
                     '& td': {
-                      fontSize: '0.8125rem', lineHeight: '18px', py: 1.5, verticalAlign: 'middle',
+                      fontSize: '0.8125rem', lineHeight: '18px', py: 1.5, verticalAlign: 'middle', color: fg,
+                    },
+                    // A row outside the plan: its main text one step quieter (see
+                    // fg), its coloured marks faded, its status pill left as it is.
+                    '& tbody tr.out-of-plan': {
+                      '--cell-fg': theme.palette.text.secondary,
+                      '& .mark': { opacity: 0.5 },
                     },
                     '& th, & td': { px: 2 },
                     '& th.MuiTableCell-paddingCheckbox, & td.MuiTableCell-paddingCheckbox': { px: 1, width: 40 },
@@ -1958,15 +2032,15 @@ export default function Projects({
                       {head('summary', 'Project', 'left', { sm: 208, md: 248 })}
                       {show('objective') && <TableCell sx={{ minWidth: 196 }}>Objective</TableCell>}
                       {show('pic') && <TableCell sx={{ minWidth: 104 }}>PIC</TableCell>}
-                      {show('savingHours') && head('savingHours', 'Saving hrs/mth', 'right', 112)}
+                      {show('savingHours') && head('savingHours', 'Saving hrs/mth', 'right', 112, true)}
                       {/* The other half of the QUANTIFIED benefit: money that is money
                           rather than time, so it sits next to the hours it adds to. */}
-                      {show('cashBenefit') && head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 124)}
+                      {show('cashBenefit') && head('monetaryAnnualBenefit', 'Cash benefit/yr', 'right', 124, true)}
                       {/* And beside them the part no number carries: a case made only
                           of figures is half a case. */}
                       {show('softBenefits') && <TableCell sx={{ minWidth: 176 }}>Soft benefits</TableCell>}
                       {show('fte') && head('fte', 'FTE', 'right', 64)}
-                      {show('manday') && head('manday', 'Mandays', 'right', 92)}
+                      {show('manday') && head('manday', 'Mandays', 'right', 92, true)}
                       {/* One column, not three: the build/CAPEX/OPEX split lives in
                           the tooltip and in the cost sheet. */}
                       {show('investment') && head('investment', 'Investment', 'right', 100)}
@@ -1987,9 +2061,10 @@ export default function Projects({
                           selected={sel.has(p.key)}
                           onMouseDown={() => { editing.current = !!document.activeElement?.matches?.('input, textarea') }}
                           onClick={(e) => openFromRow(e, p.key)}
-                          // Faded cell by cell, not as a row: a see-through row would
-                          // let the scrolled columns show through the held ones.
-                          sx={muted(p) ? { '& > td > *': { opacity: 0.55 } } : undefined}
+                          // Quieter text, not a see-through row: opacity would let
+                          // the scrolled columns show through the held ones, and
+                          // take the meta line below 4.5:1.
+                          className={muted(p) ? 'out-of-plan' : undefined}
                         >
                           <TableCell padding="checkbox" {...stick('select')}>
                             <Checkbox
@@ -2107,7 +2182,6 @@ export default function Projects({
                                   <NumCell
                                     value={p.savingHours}
                                     placeholder="TBC"
-                                    estimated={false}
                                     width={88}
                                     label="saving hours a month"
                                     onChange={(v) => onUpdate(p.key, { savingHours: v, savingEstimated: v == null })}
@@ -2125,7 +2199,6 @@ export default function Projects({
                                 <Box sx={{ display: 'inline-block' }}>
                                   <NumCell
                                     value={p.monetaryAnnualBenefit ?? null}
-                                    estimated={false}
                                     width={100}
                                     label="cash benefit a year"
                                     onChange={(v) => onUpdate(p.key, { monetaryBenefit: v })}
@@ -2153,7 +2226,7 @@ export default function Projects({
                                   : `${fmtHours(p.savingHours)} hrs a month ÷ ${fin.hoursPerFteMonth} = ${(p.fte ?? 0).toFixed(1)} FTE. It follows the saving hours, and the FTE ratio on the Model page moves every row at once.`
                               }
                               >
-                                <Box component="span" sx={{ cursor: 'help', color: p.fte > 0 ? 'text.primary' : 'text.tertiary' }}>
+                                <Box component="span" sx={{ cursor: 'help', color: p.fte > 0 ? fg : 'text.tertiary' }}>
                                   {p.savingHours == null ? '—' : (p.fte ?? 0).toFixed(1)}
                                 </Box>
                               </Tooltip>
@@ -2172,7 +2245,9 @@ export default function Projects({
                                     sx={{
                                       border: 0,
                                       background: 'none',
-                                      p: '5px 8px',
+                                      // Its right edge lines up with the typed cells':
+                                      // their 1px border plus 9px of padding.
+                                      p: '5px 10px 5px 8px',
                                       cursor: 'pointer',
                                       font: 'inherit',
                                       fontVariantNumeric: 'tabular-nums',
@@ -2186,13 +2261,33 @@ export default function Projects({
                                   </Box>
                                 </Tooltip>
                               ) : (
-                                <NumCell
-                                  value={p.manday}
-                                  width={72}
-                                  estimated={p.mandayEstimated}
-                                  label="mandays"
-                                  onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
-                                />
+                                // Zero is "not entered", the same dash as every other
+                                // empty cell. An estimate is a plain figure with "est."
+                                // before it, so the numbers in the column stay aligned.
+                                <Box sx={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1,
+                                }}
+                                >
+                                  {p.mandayEstimated && p.manday > 0 && (
+                                    <Tooltip title="Estimated from the team's capacity, spread by how long the project runs. Type a figure to replace it.">
+                                      <Box
+                                        component="span"
+                                        data-manday-estimate
+                                        sx={{
+                                          fontSize: '0.75rem', lineHeight: '16px', color: 'text.secondary', cursor: 'help', whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        est.
+                                      </Box>
+                                    </Tooltip>
+                                  )}
+                                  <NumCell
+                                    value={p.manday > 0 ? p.manday : null}
+                                    width={72}
+                                    label="mandays"
+                                    onChange={(v) => onUpdate(p.key, { manday: v ?? 0, mandayEstimated: false })}
+                                  />
+                                </Box>
                               )}
                             </TableCell>
                           )}
@@ -2330,24 +2425,9 @@ export default function Projects({
                   </TableBody>
                 </Table>
               </TableContainer>
-              {/* More to the right: a 12px fade at the edge says so. */}
-              <Box
-                aria-hidden
-                sx={{
-                  position: 'absolute',
-                  top: 1,
-                  right: 1,
-                  bottom: 1,
-                  width: 12,
-                  pointerEvents: 'none',
-                  borderTopRightRadius: 8,
-                  borderBottomRightRadius: 8,
-                  background: `linear-gradient(to right, ${alpha(surface, 0)}, ${surface})`,
-                  opacity: moreRight ? 1 : 0,
-                  transition: 'opacity 120ms',
-                }}
-                data-scroll-cue={moreRight ? 'on' : 'off'}
-              />
+              {/* More to the right, or back to the left: a 12px fade on that edge says so. */}
+              <Box aria-hidden sx={fade('right')} data-scroll-cue={edge.right ? 'on' : 'off'} />
+              <Box aria-hidden sx={fade('left')} data-scroll-cue-left={edge.left ? 'on' : 'off'} />
             </Box>
           )}
         </LayoutBlock>
