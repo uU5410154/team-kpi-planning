@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Box, Typography, Button,
-  TextField, MenuItem, Select, FormControl, InputLabel, IconButton, Alert, InputAdornment,
+  TextField, MenuItem, Select, FormControl, InputLabel, FormHelperText, IconButton, InputAdornment, Tooltip,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import { OBJECTIVES, OBJ_BY_ID } from '../lib/palette.js'
@@ -17,7 +17,9 @@ import { TARGET_KINDS, isNumericKind, newCustomLine } from '../lib/model.js'
  * line filters the portfolio and reports under the objective it belongs to,
  * the same as any derived line.
  */
-export default function KpiLineDialog({ open, line, symbol = '฿', onSave, onClose }) {
+export default function KpiLineDialog({
+  open, line, symbol = '฿', onSave, onClose,
+}) {
   const [draft, setDraft] = useState(() => line || newCustomLine())
   const [touched, setTouched] = useState(false)
   if (!open) return null
@@ -43,127 +45,158 @@ export default function KpiLineDialog({ open, line, symbol = '฿', onSave, onCl
     })
   }
 
+  const editing = !!line?.label
+
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ pr: 6 }}>
-        {line?.label ? 'Edit KPI line' : 'Add a KPI line'}
-        <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
-          It joins the same 100% as the rest of the card
-        </Typography>
-        <IconButton onClick={onClose} sx={{ position: 'absolute', right: 8, top: 8 }} size="small">
-          <CloseIcon fontSize="small" />
-        </IconButton>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth aria-labelledby="kpi-line-title">
+      <DialogTitle id="kpi-line-title" sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {editing ? 'Edit KPI line' : 'Add KPI line'}
+          <Typography variant="body2" component="div" sx={{ color: 'text.secondary', mt: 0.5, fontWeight: 400 }}>
+            It shares the card&rsquo;s 100% of weight with the other lines.
+          </Typography>
+        </Box>
+        <Tooltip title="Close">
+          <IconButton onClick={onClose} aria-label="Close" sx={{ width: 32, height: 32, mr: -1, color: 'text.secondary' }}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </DialogTitle>
 
-      <DialogContent dividers>
-        <TextField
-          autoFocus
-          fullWidth
-          size="small"
-          label="What is the KPI"
-          placeholder="Close the books within three working days"
-          value={draft.label}
-          error={labelBad}
-          helperText={labelBad ? 'A KPI needs a name' : 'How it will read on the scorecard'}
-          onChange={(e) => set({ label: e.target.value })}
-          sx={{ mb: 2.5 }}
-        />
+      <DialogContent>
+        <Box
+          component="form"
+          noValidate
+          onSubmit={(e) => { e.preventDefault(); save() }}
+          sx={{
+            display: 'flex', flexDirection: 'column', gap: 3, pt: 1,
+          }}
+        >
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            label="What is the KPI"
+            placeholder="Close the books within three working days"
+            value={draft.label}
+            error={labelBad}
+            helperText={labelBad ? 'Give the KPI a name.' : 'How it reads on the scorecard'}
+            onChange={(e) => set({ label: e.target.value })}
+          />
 
-        <FormControl fullWidth size="small" sx={{ mb: 2.5 }}>
-          <InputLabel id="kpi-objective">Objective (optional)</InputLabel>
-          <Select
-            labelId="kpi-objective"
-            label="Objective (optional)"
-            value={draft.objective || ''}
-            onChange={(e) => set({ objective: e.target.value || null })}
-          >
-            <MenuItem value="">
-              <em>Stands on its own</em>
-            </MenuItem>
-            {OBJECTIVES.map((o) => (
-              <MenuItem key={o.id} value={o.id}>{o.no}. {o.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: -2, mb: 2.5 }}>
-          {draft.objective
-            ? `Tied to ${OBJ_BY_ID[draft.objective]?.name} — clicking the line filters the portfolio to that objective, and it reports under it.`
-            : 'Untied: it appears on the scorecard and carries weight, but belongs to no objective.'}
-        </Typography>
-
-        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <FormControl size="small" sx={{ minWidth: 170 }}>
-            <InputLabel id="kpi-kind">Measured in</InputLabel>
+          <FormControl fullWidth size="small">
+            <InputLabel id="kpi-objective">Objective (optional)</InputLabel>
             <Select
-              labelId="kpi-kind"
-              label="Measured in"
-              value={draft.targetKind}
-              onChange={(e) => {
-                const next = e.target.value
-                // Switching between a number and a sentence cannot carry the
-                // old value across without turning "by Nov 2026" into 0.
-                set({ targetKind: next, target: isNumericKind(next) === numeric ? draft.target : (isNumericKind(next) ? 0 : '') })
-              }}
+              labelId="kpi-objective"
+              label="Objective (optional)"
+              value={draft.objective || ''}
+              onChange={(e) => set({ objective: e.target.value || null })}
             >
-              {TARGET_KINDS.map((k) => <MenuItem key={k.id} value={k.id}>{k.label}</MenuItem>)}
+              <MenuItem value="">
+                <em>Stands on its own</em>
+              </MenuItem>
+              {OBJECTIVES.map((o) => (
+                <MenuItem key={o.id} value={o.id}>{o.no}. {o.name}</MenuItem>
+              ))}
             </Select>
+            <FormHelperText>
+              {draft.objective
+                ? `Reports under ${OBJ_BY_ID[draft.objective]?.name}, and clicking the line filters the portfolio to it.`
+                : 'Carries weight on the card but belongs to no objective.'}
+            </FormHelperText>
           </FormControl>
 
-          {draft.targetKind === 'number' && (
-            <TextField
-              size="small"
-              label="Unit"
-              placeholder="days, %, reports"
-              value={draft.unit || ''}
-              onChange={(e) => set({ unit: e.target.value })}
-              sx={{ width: 140 }}
-            />
-          )}
+          <Box sx={{
+            display: 'grid',
+            gap: 3,
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: draft.targetKind === 'number' ? '1fr 120px 1fr' : '1fr 1fr',
+            },
+            alignItems: 'start',
+          }}
+          >
+            <FormControl size="small" fullWidth>
+              <InputLabel id="kpi-kind">Measured in</InputLabel>
+              <Select
+                labelId="kpi-kind"
+                label="Measured in"
+                value={draft.targetKind}
+                onChange={(e) => {
+                  const next = e.target.value
+                  // Switching between a number and a sentence cannot carry the
+                  // old value across without turning "by Nov 2026" into 0.
+                  set({ targetKind: next, target: isNumericKind(next) === numeric ? draft.target : (isNumericKind(next) ? 0 : '') })
+                }}
+              >
+                {TARGET_KINDS.map((k) => <MenuItem key={k.id} value={k.id}>{k.label}</MenuItem>)}
+              </Select>
+              <FormHelperText>{kind?.help}</FormHelperText>
+            </FormControl>
 
-          {draft.targetKind === 'date' ? (
-            <TextField
-              size="small"
-              type="date"
-              label="Target"
-              value={draft.target || ''}
-              onChange={(e) => set({ target: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-              sx={{ width: 180 }}
-            />
-          ) : numeric ? (
-            <TextField
-              size="small"
-              label="Target"
-              value={draft.target ?? ''}
-              onChange={(e) => set({ target: e.target.value.replace(/[^\d.-]/g, '') })}
-              InputProps={unitFor()
-                ? { endAdornment: <InputAdornment position="end"><Typography variant="caption">{unitFor()}</Typography></InputAdornment> }
-                : undefined}
-              sx={{ width: 200 }}
-            />
-          ) : (
-            <TextField
-              size="small"
-              label="Target"
-              placeholder="Live by November 2026"
-              value={draft.target ?? ''}
-              onChange={(e) => set({ target: e.target.value })}
-              sx={{ minWidth: 240, flex: 1 }}
-            />
-          )}
+            {draft.targetKind === 'number' && (
+              <TextField
+                size="small"
+                label="Unit"
+                placeholder="days"
+                value={draft.unit || ''}
+                onChange={(e) => set({ unit: e.target.value })}
+              />
+            )}
+
+            {draft.targetKind === 'date' ? (
+              <TextField
+                size="small"
+                type="date"
+                label="Target"
+                value={draft.target || ''}
+                onChange={(e) => set({ target: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+              />
+            ) : numeric ? (
+              <TextField
+                size="small"
+                label="Target"
+                value={draft.target ?? ''}
+                onChange={(e) => set({ target: e.target.value.replace(/[^\d.-]/g, '') })}
+                InputProps={unitFor()
+                  ? {
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <Typography variant="body2" component="span" sx={{ color: 'text.secondary' }}>{unitFor()}</Typography>
+                      </InputAdornment>
+                    ),
+                  }
+                  : undefined}
+                inputProps={{ inputMode: 'decimal', style: { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } }}
+              />
+            ) : (
+              <TextField
+                size="small"
+                label="Target"
+                placeholder="Live by November 2026"
+                value={draft.target ?? ''}
+                onChange={(e) => set({ target: e.target.value })}
+              />
+            )}
+          </Box>
+
+          <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: '72ch' }}>
+            Adding a line takes weight from the others so the card still totals 100%. Set its weight on the
+            scorecard, next to the target.
+          </Typography>
+          {/* Enter in any field submits, the same as the button. */}
+          <button type="submit" hidden aria-hidden tabIndex={-1} />
         </Box>
-        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
-          {kind?.help}
-        </Typography>
-
-        <Alert severity="info" sx={{ mt: 2.5 }}>
-          Adding a line takes weight from the others so the card still totals 100%. Set the weight itself on the
-          scorecard, next to the target.
-        </Alert>
       </DialogContent>
 
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        {labelBad && (
+          <Typography variant="body2" sx={(t) => ({ color: t.palette.tone.danger.fg, mr: 'auto' })}>
+            Fill in the marked field.
+          </Typography>
+        )}
+        <Button variant="text" onClick={onClose}>Cancel</Button>
         <Button variant="contained" onClick={save}>Save</Button>
       </DialogActions>
     </Dialog>

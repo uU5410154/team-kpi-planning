@@ -726,7 +726,8 @@ try {
   check('  the per-project allowance and the book limit',
     /% of that project/i.test(obj1 || '') && /may drift/i.test(obj1 || ''))
   check('  and it lists the projects with their dates',
-    /by 20\d\d-\d\d-\d\d|no date committed/i.test(obj1 || ''),
+    // Dates read the way the rest of the app writes them: "by 20 Feb 2026".
+    /by \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) 20\d\d|no date committed/.test(obj1 || ''),
     (obj1 || '').split(String.fromCharCode(10)).find((l) => /^by |no date/i.test(l)) || 'no dated row found')
 
   /* ---------- the FTE ratio is adjustable, and drives both sides ---------- */
@@ -932,7 +933,7 @@ try {
   // Pick the Data warehouse objective out of the dropdown.
   const comboOpened = await page.evaluate(() => {
     const heads = [...document.querySelectorAll('*')]
-    const label = heads.find((e) => e.textContent && e.textContent.trim() === 'ADD AN OBJECTIVE')
+    const label = heads.find((e) => e.textContent && /^add an objective$/i.test(e.textContent.trim()))
     const box = label && label.parentElement
     const combo = box && box.querySelector('[role="combobox"]')
     if (!combo) return false
@@ -1469,14 +1470,14 @@ try {
     return {
       lines: rows.length,
       text: c.innerText.split(String.fromCharCode(10)).join(' | '),
-      total: c.innerText.match(/TOTAL[^%]*?(\d+)\s*%/)?.[1] ?? null,
+      total: c.innerText.match(/\bTotal\b[^%]*?(\d+)\s*%/)?.[1] ?? null,
     }
   })
   const kpiBefore = await card()
   check('the scorecard is on screen', kpiBefore.lines > 0, `${kpiBefore.lines} lines`)
 
   await page.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => /^New KPI$/.test(x.innerText.trim()))
+    const b = [...document.querySelectorAll('button')].find((x) => /^Add KPI line$/.test(x.innerText.trim()))
     if (b) b.click()
   })
   await new Promise((r) => setTimeout(r, 900))
@@ -1698,7 +1699,7 @@ try {
     const seen = await page.evaluate(() => {
       const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
       const c = head.closest('.MuiPaper-root')
-      const total = [...c.querySelectorAll('tbody tr')].find((r) => /^TOTAL/.test(r.innerText.trim()))
+      const total = [...c.querySelectorAll('tbody tr')].find((r) => /^Total/.test(r.innerText.trim()))
       const tileHead = [...document.querySelectorAll('*')]
         .find((e) => e.children.length === 0 && /saving hours$/i.test(e.textContent.trim()))
       const tile = tileHead?.closest('.MuiPaper-root')
@@ -1793,7 +1794,7 @@ try {
     return c.innerText.split(String.fromCharCode(10)).join(' | ')
   })
   check('THE SCORECARD SHOWS THE SOFT BENEFITS',
-    /SOFT BENEFITS DELIVERED/.test(softOnCard) && /Removes a manual reconciliation/.test(softOnCard),
+    /Soft benefits delivered/.test(softOnCard) && /Removes a manual reconciliation/.test(softOnCard),
     softOnCard.slice(-220))
   check('and names the project they come from', /FNP-379/.test(softOnCard), softOnCard.slice(-160))
   check('the card total is untouched by them', /100%/.test(softOnCard))
@@ -1826,7 +1827,7 @@ try {
   const readCard = () => page.evaluate(() => {
     const head = [...document.querySelectorAll('*')].find((e) => e.textContent.trim() === '2026 KPI scorecard')
     const c = head.closest('.MuiPaper-root')
-    const total = [...c.querySelectorAll('tbody tr')].find((r) => /^TOTAL/.test(r.innerText.trim()))
+    const total = [...c.querySelectorAll('tbody tr')].find((r) => /^Total/.test(r.innerText.trim()))
     const tileHead = [...document.querySelectorAll('*')]
       .find((e) => e.children.length === 0 && /saving hours$/i.test(e.textContent.trim()))
     const tile = tileHead?.closest('.MuiPaper-root')
@@ -2010,8 +2011,8 @@ try {
   check('it has a row for every objective',
     [1, 2, 3, 4, 5].every((n) => new RegExp(`Obj ${n} —`).test(teamGrid.text)),
     teamGrid.rows.slice(0, 2).join(' // '))
-  check('it carries the saving-hours total', /TOTAL SAVING HRS\/MONTH/.test(teamGrid.text))
-  check('and the weight total', /WEIGHT TOTAL/.test(teamGrid.text) && /100%/.test(teamGrid.text))
+  check('it carries the saving-hours total', /Total saving hrs\/mth/.test(teamGrid.text))
+  check('and the weight total', /Weight total/.test(teamGrid.text) && /100%/.test(teamGrid.text))
 
   // the figures must be the ones the scorecards show
   const teamFigures = await page.evaluate(() => {
