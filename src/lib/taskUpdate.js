@@ -129,3 +129,20 @@ export function differs(fields, u) {
   const b = baseFields(u)
   return Object.keys(b).some((k) => (fields[k] ?? b[k]) !== b[k])
 }
+
+/* ------------------------------------------------------- read back */
+
+/** The first line of what was written, for a folded card. */
+export const firstLine = (s) => String(s || '').split(/\r?\n/).map((x) => x.trim()).find(Boolean) || ''
+
+/** An update's status as a pill: the word, and the tone it is drawn in. */
+export function statusOf(u) {
+  if (!u) return null
+  if (u.hold) return { label: 'On hold', tone: 'neutral' }
+  if (u.done === true) return { label: 'Finished', tone: 'success' }
+  if (u.done === false) return { label: 'Not finished', tone: 'warning' }
+  return null
+}
+
+/** The order the fields sit on a card, so Submit can take the member to the first one missing. */
+export const PROBLEM_ORDER = ['progress', 'status', 'reason', 'decisionText']

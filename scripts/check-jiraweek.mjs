@@ -484,12 +484,31 @@ try {
     pg.on('dialog', (d) => d.accept().catch(() => {}))
     const [n, v] = james.split('=')
     await pg.setCookie({ name: n, value: v, url: base })
+    // Next week's plan was confirmed above; un-set it for a moment, so the
+    // reminder to plan it has something to remind about.
+    const nextPlanAt = (await D.collection('kpi_weekly').findOne({ week: NEXT, person: 'james' }))?.planSubmittedAt
+    await D.collection('kpi_weekly').updateOne({ week: NEXT, person: 'james' }, { $unset: { planSubmittedAt: '' } })
     await pg.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await pg.waitForSelector('[data-jira-task]', { timeout: 15000 }).catch(() => {})
     const txt = await pg.evaluate(() => document.body.innerText)
+    await D.collection('kpi_weekly').updateOne({ week: NEXT, person: 'james' }, { $set: { planSubmittedAt: nextPlanAt } })
     check('THE PAGE SHOWS THEIR JIRA TASKS, NOT THE MONDAY FORM', txt.includes('FNP-2010') && !txt.includes('This week I\'m focused on'))
-    check('  with the filter between not-updated and updated', /Not updated yet \(1\)/.test(txt) && /Already updated \(2\)/.test(txt), (txt.match(/Not updated yet \(\d+\)|Already updated \(\d+\)/g) || []).join(' '))
-    check('  and the reminder to plan next week', /Don’t forget next week’s plan|Don't forget next week's plan/.test(txt))
+    check('  with the filter between not-updated and updated', /Not updated yet 1(?!\d)/.test(txt) && /Already updated 2(?!\d)/.test(txt), (txt.match(/Not updated yet \d+|Already updated \d+/g) || []).join(' '))
+    // The reminder comes from Thursday (Bangkok) while next week's plan is not set.
+    const bkkDay = new Date(Date.now() + 7 * 3600_000).getUTCDay()
+    const lateInWeek = bkkDay === 0 || bkkDay >= 4
+    check(`  and the reminder to plan next week ${lateInWeek ? 'is there (Thursday on)' : 'waits for Thursday'}`,
+      /Don’t forget next week’s plan|Don't forget next week's plan/.test(txt) === lateInWeek)
+    {
+      // With next week's plan set, nothing to remind about.
+      const p2 = await (await browser.createBrowserContext()).newPage()
+      await p2.setViewport({ width: 1280, height: 900 })
+      await p2.setCookie({ name: james.split('=')[0], value: james.split('=')[1], url: base })
+      await p2.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
+      await p2.waitForSelector('[data-jira-task]', { timeout: 15000 }).catch(() => {})
+      check('  and no reminder once next week’s plan is set', !/Don.t forget next week/.test(await p2.evaluate(() => document.body.innerText)))
+      await p2.close()
+    }
     check('  only the not-updated one is open to start with',
       (await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task]')].map((x) => x.getAttribute('data-jira-task')))).join() === 'FNP-2010')
     const head = await pg.evaluate(() => {
@@ -502,8 +521,8 @@ try {
         next: nx?.innerText.replace(/\s+/g, ' '),
         anim: btn ? getComputedStyle(btn).animationName : null,
         hello: document.body.innerText.includes('Hello'),
-        // One framed block: the header and the card share the same border.
-        framed: !!g && getComputedStyle(g).borderLeftWidth === '4px' && getComputedStyle(g.querySelector('button')).borderLeftWidth === '0px'
+        // One framed block: the header and the card share the same 1px border.
+        framed: !!g && getComputedStyle(g).borderLeftWidth === '1px' && getComputedStyle(g).borderTopWidth === '1px' && getComputedStyle(g.querySelector('button')).borderLeftWidth === '0px'
           && g.getBoundingClientRect().bottom >= document.querySelector('[data-jira-task="FNP-2010"]').getBoundingClientRect().bottom,
       }
     })
@@ -600,9 +619,9 @@ try {
     unlinkSync(pngFile)
     if (process.env.SHOT_DIR) await pg.screenshot({ path: `${process.env.SHOT_DIR}/jira-week.png`, fullPage: true })
     await pg.evaluate(() => document.querySelector('[aria-label="submit FNP-2010"]').click())
-    await pg.waitForFunction(() => document.body.innerText.includes('Already updated (3)'), { timeout: 10000 }).catch(() => {})
+    await pg.waitForFunction(() => /Already updated 3(?!\d)/.test(document.body.innerText), { timeout: 10000 }).catch(() => {})
     const after = await pg.evaluate(() => document.body.innerText)
-    check('SUBMIT ON THE CARD POSTS IT AND MOVES IT TO "ALREADY UPDATED"', after.includes('Already updated (3)') && after.includes('Not updated yet (0)'))
+    check('SUBMIT ON THE CARD POSTS IT AND MOVES IT TO "ALREADY UPDATED"', /Already updated 3(?!\d)/.test(after) && /Not updated yet 0(?!\d)/.test(after))
     check('  the comment reached Jira', writes.some((x) => x.kind === 'comment' && x.key === 'FNP-2010' && /Two accounts wait on AP/.test(JSON.stringify(x.body))))
     check('  AND THE THREE PICTURES ARE ATTACHED TO THE ISSUE IN JIRA', writes.some((x) => x.kind === 'attach' && x.key === 'FNP-2010' && x.names.length === 3), JSON.stringify(writes.filter((x) => x.kind === 'attach').map((x) => [x.key, x.names])))
     const told = await pg.evaluate(() => ({
@@ -615,6 +634,13 @@ try {
     // Done in Jira, then said Not finished: told before it is posted.
     await pg.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^Already updated/.test(b.textContent.trim()))?.click())
     await pg.waitForSelector('[data-jira-task="FNP-2001"]', { timeout: 5000 }).catch(() => {})
+    // A sent update is folded to one row: Edit opens it.
+    check('A SENT UPDATE IS ONE ROW, WITH EDIT', await pg.evaluate(() => {
+      const card = document.querySelector('[data-jira-task="FNP-2001"]')
+      return !!card && !card.querySelector('textarea') && !!card.querySelector('[aria-label="edit the update on FNP-2001"]')
+    }))
+    await pg.click('[aria-label="edit the update on FNP-2001"]')
+    await pg.waitForSelector('[data-jira-task="FNP-2001"] textarea', { timeout: 5000 }).catch(() => {})
     const pick = (key, label) => pg.evaluate((k, l) => [...document.querySelectorAll(`[data-jira-task="${k}"] button`)].find((b) => b.textContent.trim() === l)?.click(), key, label)
     await pick('FNP-2001', 'Not finished')
     await sleep(250)
@@ -622,7 +648,7 @@ try {
       warn: document.querySelector('[data-jira-task="FNP-2001"] [data-done-warning]')?.innerText || '',
       btn: document.querySelector('[aria-label="submit FNP-2001"]')?.innerText || '',
     }))
-    check('RE-SUBMITTING AN ITEM DONE IN JIRA AS NOT FINISHED WARNS FIRST', /FNP-2001 is Done in Jira — this update won.t reopen it/.test(doneWarn.warn) && /Post anyway/.test(doneWarn.btn), JSON.stringify(doneWarn))
+    check('RE-SUBMITTING AN ITEM DONE IN JIRA AS NOT FINISHED WARNS FIRST', /FNP-2001 is Done in Jira\. This update won.t reopen it/.test(doneWarn.warn) && /Post anyway/.test(doneWarn.btn), JSON.stringify(doneWarn))
     await pick('FNP-2001', 'Finished')
     await sleep(250)
     check('  and picking Finished again takes the warning away', !(await pg.evaluate(() => !!document.querySelector('[data-jira-task="FNP-2001"] [data-done-warning]'))))
@@ -635,7 +661,7 @@ try {
     await pg.waitForSelector('[role="option"]', { timeout: 5000 }).catch(() => {})
     const opts = await pg.evaluate(() => [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()))
     const epicKeys = new Set([...seed.projects.filter((p) => p.jiraKey).map((p) => p.jiraKey), np.body.epic?.key])
-    const lead = opts.map((o) => o.split(' · ')[0])
+    const lead = opts.map((o) => o.split(/\s+/)[0])
     check('"ADD A TASK" OFFERS ONLY PROJECTS WITH A JIRA EPIC, ONE PER EPIC, NONE FINISHED OR DELETED', opts.length > 0 && opts.length < seed.projects.length
       && lead.every((k) => epicKeys.has(k)) && new Set(lead).size === lead.length && !opts.some((o) => /deleted/i.test(o))
       && !lead.includes('FNP-868'), `${opts.length} of ${seed.projects.length}: ${opts.slice(0, 3).join(' | ')}`)
@@ -680,10 +706,10 @@ try {
     }
     await sleep(500)
     const shut = await pg.evaluate(() => document.body.innerText)
-    check('A LOCKED WEEK HAS NO PLANNING PROMPTS AND NO ADD-A-TASK', /This week is closed/.test(shut) && !/Plan week \d+/.test(shut) && !/Don.t forget next week/.test(shut)
-      && !/Add a task/.test(shut) && !/New project/.test(shut), (shut.match(/Next step[^\n]*\n[^\n]*/) || [''])[0])
+    check('A LOCKED WEEK HAS NO PLANNING PROMPTS AND NO ADD-A-TASK', /Week \d+ is locked/.test(shut) && !/Plan week \d+/.test(shut) && !/Don.t forget next week/.test(shut)
+      && !/Add a task/.test(shut) && !/New project/.test(shut), (shut.match(/Week \d+ is locked[^\n]*/) || [''])[0])
 
-    // A POST JIRA REFUSED: still to do on the page, with Retry posting on its card.
+    // A POST JIRA REFUSED: still to do on the page, with Try again on its card.
     put('FNP-2017', { summary: 'Jira will refuse this', assignee: ACC.james, parent: 'FNP-379', start: day(WEEK, 0), due: day(WEEK, 4), status: 'In Progress', cat: 'indeterminate' })
     failComment.add('FNP-2017')
     await call('POST', `/api/weekly/${WEEK}/jira/FNP-2017/update`, { progress: 'Drafted the memo', done: false, reason: 'Waiting on sign-off' }, james)
@@ -693,15 +719,15 @@ try {
       const card = document.querySelector('[data-jira-task="FNP-2017"]')
       return {
         warn: card?.querySelector('[data-post-failed]')?.innerText || '',
-        retry: !!card && [...card.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Retry posting'),
+        retry: !!card && [...card.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Try again'),
         next: document.querySelector('[data-next-step]')?.innerText.replace(/\s+/g, ' ') || '',
         group: card?.closest('[data-project-group]')?.querySelector('button')?.innerText.replace(/\s+/g, ' ') || '',
       }
     })
-    check('A FAILED JIRA POST STAYS UNDER "NOT UPDATED YET", SAYS WHY, WITH RETRY POSTING', /NOT posted to FNP-2017 in Jira/.test(fail.warn) && /maintenance|503/.test(fail.warn) && fail.retry, JSON.stringify(fail))
+    check('A FAILED JIRA POST STAYS UNDER "NOT UPDATED YET", SAYS WHY, WITH TRY AGAIN', /Jira did not take this update on FNP-2017/.test(fail.warn) && /maintenance|503/.test(fail.warn) && fail.retry, JSON.stringify(fail))
     check('  the Next step and the project block count it as to do', /Update 1 task/.test(fail.next) && /FNP-2017/.test(fail.next) && /1 to update/i.test(fail.group), `${fail.next} · ${fail.group}`)
     failComment.delete('FNP-2017')
-    await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task="FNP-2017"] button')].find((b) => b.textContent.trim() === 'Retry posting')?.click())
+    await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task="FNP-2017"] button')].find((b) => b.textContent.trim() === 'Try again')?.click())
     await pg.waitForSelector('[data-posted="FNP-2017"]', { timeout: 10000 }).catch(() => {})
     // The confirmation shows first; the card leaves the list once the week reloads.
     await pg.waitForFunction(() => !document.querySelector('[data-jira-task="FNP-2017"]'), { timeout: 10000 }).catch(() => {})
