@@ -38,6 +38,39 @@ export const NAV_W_MINI = 64
 // Pages an administrator alone has: under a divider at the foot of the list.
 const ADMIN_PAGES = new Set(['settings', 'users'])
 
+/*
+ * THE APP'S MARK: "FA" set in the interface's own type on a quiet tile. Not a
+ * logo and not a colour, just a deliberate sign that this is the F&A Tech
+ * tool; the side menu shows it at 24px and the sign-in card at 32px.
+ */
+export function AppMark({ size = 24 }) {
+  const big = size >= 32
+  return (
+    <Box
+      aria-hidden
+      sx={{
+        width: size,
+        height: size,
+        flexShrink: 0,
+        display: 'grid',
+        placeItems: 'center',
+        borderRadius: '6px',
+        bgcolor: 'bg.subtle',
+        border: 1,
+        borderColor: 'border.subtle',
+        color: 'text.secondary',
+        fontSize: big ? '0.875rem' : '0.75rem',
+        lineHeight: 1,
+        fontWeight: 600,
+        letterSpacing: 0,
+        userSelect: 'none',
+      }}
+    >
+      FA
+    </Box>
+  )
+}
+
 const displayName = (email) => nameOf(email)
 const initials = (email) => displayName(email).split(' ').map((w) => w[0]).slice(0, 2).join('')
 
@@ -232,17 +265,7 @@ function NavBody({
       >
         {!mini && (
           <>
-            <Box
-              aria-hidden
-              sx={{
-                width: 24, height: 24, borderRadius: '6px', bgcolor: 'bg.subtle', border: 1, borderColor: 'border.strong', display: 'grid', placeItems: 'center', flexShrink: 0,
-              }}
-            >
-              <Box sx={{
-                width: 10, height: 10, borderRadius: '2px', border: 2, borderColor: 'text.secondary',
-              }}
-              />
-            </Box>
+            <AppMark />
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography noWrap sx={{ fontSize: '0.875rem', lineHeight: '18px', fontWeight: 600 }}>F&amp;A Tech KPI</Typography>
               <Typography noWrap variant="caption" component="div" sx={{ color: 'text.secondary', lineHeight: '14px' }}>2026 plan</Typography>
