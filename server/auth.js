@@ -235,7 +235,10 @@ export async function login(email, password) {
   if (locked()) return { error: LOCKED_MESSAGE }
   const c = await coll()
   if (!c) return UNAVAILABLE
-  const u = await c.findOne({ email: cleanEmail(email) })
+  // A bare username ("admin") signs in as that name at the work domain.
+  const typed = cleanEmail(email)
+  const id = /^[a-z0-9._-]+$/.test(typed) ? `${typed}${cfg().domain}` : typed
+  const u = await c.findOne({ email: id })
   // The same answer whether the address is unknown or the password is wrong:
   // one that distinguishes them tells a stranger which addresses exist.
   if (!u || !verify(u, password)) return { error: 'That email and password do not match.' }

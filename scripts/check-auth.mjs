@@ -109,6 +109,11 @@ try {
 
   const session = await post('/api/auth/login', { email: 'boss@lotuss.com', password: 'bosspass1' })
   check('the administrator signs in', session.status === 200)
+  const bare = await post('/api/auth/login', { email: 'Boss', password: 'bosspass1' })
+  check('  and can type just the username, without the domain',
+    bare.status === 200 && bare.body.user?.email === 'boss@lotuss.com', JSON.stringify(bare.body))
+  check('  but a bare username with the wrong password still fails',
+    (await post('/api/auth/login', { email: 'boss', password: 'not-it' })).status === 401)
   const admin = session.cookie
   // On the header itself: `admin` keeps only name=value, which is why this
   // check used to end in `|| true` and could never fail.

@@ -25,7 +25,14 @@ export default function SignIn({ config, onSignedIn }) {
   const [note, setNote] = useState(null)
 
   const domain = config?.domain || '@lotuss.com'
-  const clean = email.trim().toLowerCase()
+  const typed = email.trim().toLowerCase()
+  /*
+   * Signing in also takes a bare username — "admin" is admin@lotuss.com — so a
+   * shared test account can be typed without the domain. Registering still
+   * wants the whole work address.
+   */
+  const bare = mode === 'in' && /^[a-z0-9._-]+$/.test(typed)
+  const clean = bare ? `${typed}${domain}` : typed
   const emailOk = clean.length > domain.length && clean.endsWith(domain)
   const passOk = password.length >= 8
   const matches = mode === 'in' || password === confirm
@@ -98,12 +105,14 @@ export default function SignIn({ config, onSignedIn }) {
           <TextField
             fullWidth
             size="small"
-            label="Work email"
+            label={mode === 'in' ? 'Work email or username' : 'Work email'}
             value={email}
             autoComplete="username"
             onChange={(e) => setEmail(e.target.value)}
             error={!!email && !emailOk}
-            helperText={email && !emailOk ? `It has to end ${domain}.` : ' '}
+            helperText={email && !emailOk
+              ? (mode === 'in' ? `A username, or an address ending ${domain}.` : `It has to end ${domain}.`)
+              : ' '}
             sx={{ mb: 1 }}
           />
           <TextField
