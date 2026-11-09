@@ -15,7 +15,7 @@ import { Pill } from './Brand.jsx'
  * Whether email can go out at all (and if not, the two settings that are
  * missing), a test to oneself — the only honest way to know a reminder will
  * reach a work inbox rather than its junk folder — a switch to pause the
- * reminders, the list that gets the 23:00 "still missing" email, and the last
+ * reminders, a switch to stop them repeating every hour, the list that gets the 23:00 "still missing" email, and the last
  * forty emails with what happened to each.
  */
 
@@ -25,12 +25,16 @@ const KIND = {
 const TONE = {
   sent: 'good', failed: 'bad', sending: 'violet',
 }
-const SCHEDULE = [
+const SCHEDULE = (hourly) => [
   ['Mon 07:00', 'heads-up: the plan is due at 08:00'],
-  ['Mon 08:00–23:00', 'every hour, to anybody whose plan is not in'],
+  hourly
+    ? ['Mon 08:00–23:00', 'every hour, to anybody whose plan is not in']
+    : ['Mon 08:00', 'once, to anybody whose plan is not in'],
   ['Fri 10:00', 'heads-up: the report is due at 15:00'],
-  ['Fri 15:00–23:00', 'every hour, to anybody whose report is not in'],
-  ['Sun 15:00–23:00', 'every hour — the second chance'],
+  hourly
+    ? ['Fri 15:00–23:00', 'every hour, to anybody whose report is not in']
+    : ['Fri 15:00', 'once, to anybody whose report is not in'],
+  hourly ? ['Sun 15:00–23:00', 'every hour — the second chance'] : ['Sun 15:00', 'once — the second chance'],
   ['23:00 Mon, Fri, Sun', 'who is still missing, to the list below'],
 ]
 
@@ -114,10 +118,20 @@ export default function MailSettings({ weekly, onWeekly }) {
           )}
           label={weekly?.remindersOn === false ? 'Reminders paused' : 'Reminders on'}
         />
+        <FormControlLabel
+          control={(
+            <Switch
+              checked={weekly?.hourlyOn !== false}
+              disabled={!weekly || !!busy || weekly?.remindersOn === false}
+              onChange={(e) => save({ hourlyOn: e.target.checked }, 'hourly')}
+            />
+          )}
+          label={weekly?.hourlyOn === false ? 'Hourly repeats off: one reminder only' : 'Repeat every hour until 23:00'}
+        />
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'max-content 1fr' }, columnGap: 2, rowGap: 0.5 }}>
-        {SCHEDULE.map(([when, what]) => (
+        {SCHEDULE(weekly?.hourlyOn !== false).map(([when, what]) => (
           <Box key={when} sx={{ display: 'contents' }}>
             <Typography variant="caption" sx={{ fontWeight: 700 }}>{when}</Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', mb: { xs: 0.75, sm: 0 } }}>{what}</Typography>

@@ -76,6 +76,17 @@ check('NOBODY MISSING, NO 23:00 EMAIL',
 const sun = emailsAt(BKK('2026-11-08T16:00'), ctx)
 check('Sunday’s reminder says it is the second chance and the week locks tomorrow',
   sun.every((e) => /Second chance/.test(e.subject) && /locks at 08:00 tomorrow/.test(e.text)))
+const once = { ...ctx, hourly: false }
+check('HOURLY REPEATS OFF: the reminder still goes at 08:00', emailsAt(BKK('2026-11-02T08:00'), once).some((e) => e.to === 'kade@lotuss.com'))
+check('  and says it is the only one', /only reminder today/.test(emailsAt(BKK('2026-11-02T08:00'), once)[0].text)
+  && !/every hour/.test(emailsAt(BKK('2026-11-02T08:00'), once)[0].text))
+check('  BUT NOT AT 09:00 OR 15:00', !emailsAt(BKK('2026-11-02T09:00'), once).length && !emailsAt(BKK('2026-11-02T15:00'), once).length)
+check('  Friday and Sunday: once at 15:00, not at 16:00',
+  emailsAt(BKK('2026-11-06T15:00'), once).length > 0 && !emailsAt(BKK('2026-11-06T16:00'), once).length
+  && emailsAt(BKK('2026-11-08T15:00'), once).length > 0 && !emailsAt(BKK('2026-11-08T16:00'), once).length)
+check('  the heads-ups and the 23:00 list are unchanged',
+  emailsAt(BKK('2026-11-02T07:00'), once).length === emailsAt(BKK('2026-11-02T07:00'), ctx).length
+  && /reminded at 08:00\./.test(emailsAt(BKK('2026-11-02T23:00'), once).find((e) => e.kind === 'digest').text))
 check('the HTML part is escaped — a nickname cannot inject markup',
   !emailsAt(BKK('2026-11-02T23:00'), { ...ctx, nick: { ...ctx.nick, pol: '<script>x</script>' } })
     .find((e) => e.kind === 'digest').html.includes('<script>'))
@@ -164,19 +175,32 @@ try {
   const run = (at) => call('POST', '/api/weekly/reminders/run', { at: iso(at) }, boss)
   const r1 = await run(d.planDue + 3600_000)
   check('MONDAY 09:00: REMINDERS GO OUT', r1.status === 200 && r1.body.sent > 0, JSON.stringify(r1.body).slice(0, 200))
-  const mondayRows = await logged(`remind:plan:${WEEK}:`)
+  /*
+   * Only the 09:00 names: on a real Monday the server's own once-a-minute
+   * pass sends the current hour's reminders too, under their own names.
+   */
+  const at09 = `remind:plan:${WEEK}:${new Date(d.planDue + 3600_000 + 7 * 3600_000).toISOString().slice(0, 13)}:`
+  const mondayRows = await logged(at09)
   check('  to Kade, who has not sent a plan', mondayRows.some((m) => m.to.includes('kade@lotuss.com')))
   check('  NOT TO JAMES, WHO HAS', !mondayRows.some((m) => m.to.includes('james@lotuss.com')))
   check('  and the email itself is right', mondayRows.find((m) => m.to.includes('kade@lotuss.com'))?.body?.includes('due at 08:00'))
   const r2 = await run(d.planDue + 3600_000 + 20 * 60_000)
   check('THE SAME HOUR AGAIN SENDS NOTHING — a restart or a second server cannot double it', r2.body.sent === 0
-    && (await logged(`remind:plan:${WEEK}:`)).length === mondayRows.length, JSON.stringify(r2.body.results?.map((x) => x.result)))
+    && (await logged(at09)).length === mondayRows.length, JSON.stringify(r2.body.results?.map((x) => x.result)))
   const r3 = await run(d.planDue + 2 * 3600_000)
-  check('the next hour sends the next one', r3.body.sent === mondayRows.length)
+  check('the next hour sends the next one', r3.body.sent === mondayRows.length, JSON.stringify(r3.body).slice(0, 200))
 
   await call('PUT', '/api/weekly/settings', { remindersOn: false }, boss)
   check('PAUSED, NOTHING GOES', (await run(d.planDue + 3 * 3600_000)).body.skipped === 'reminders are paused')
   await call('PUT', '/api/weekly/settings', { remindersOn: true }, boss)
+
+  const off = await call('PUT', '/api/weekly/settings', { hourlyOn: false }, boss)
+  check('AN ADMINISTRATOR CAN TURN THE HOURLY REPEATS OFF', off.status === 200 && off.body.hourlyOn === false && off.body.remindersOn === true)
+  check('  a member cannot', (await call('PUT', '/api/weekly/settings', { hourlyOn: true }, james)).status === 403)
+  const r4 = await run(d.planDue + 4 * 3600_000)
+  check('  and then the hourly reminder does not go', r4.body.due === 0 && r4.body.sent === 0, JSON.stringify(r4.body).slice(0, 200))
+  const on = await call('PUT', '/api/weekly/settings', { hourlyOn: true }, boss)
+  check('  turned back on, it goes again', on.body.hourlyOn === true && (await run(d.planDue + 5 * 3600_000)).body.sent > 0)
 
   check('a bad address is refused for the 23:00 list',
     (await call('PUT', '/api/weekly/settings', { escalation: ['not-an-address'] }, boss)).status === 400)

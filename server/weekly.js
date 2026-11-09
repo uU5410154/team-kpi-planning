@@ -93,6 +93,8 @@ export async function getSettings() {
     escalation: Array.isArray(doc?.escalation) ? doc.escalation : null,
     // The reminders can be paused without touching anything else.
     remindersOn: doc?.remindersOn !== false,
+    // Off: each reminder goes once, at its deadline, instead of every hour.
+    hourlyOn: doc?.hourlyOn !== false,
     updatedAt: doc?.updatedAt || null,
     updatedBy: doc?.updatedBy || null,
   }
@@ -100,8 +102,8 @@ export async function getSettings() {
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** Change any of: who submits, who gets the 23:00 list, whether reminders go out. */
-export async function saveSettings({ submitters, escalation, remindersOn }, by) {
+/** Change any of: who submits, who gets the 23:00 list, whether reminders go out, whether they repeat hourly. */
+export async function saveSettings({ submitters, escalation, remindersOn, hourlyOn }, by) {
   const c = await colls()
   if (!c) return UNAVAILABLE
   const set = { updatedAt: new Date().toISOString(), updatedBy: by || 'admin' }
@@ -124,6 +126,7 @@ export async function saveSettings({ submitters, escalation, remindersOn }, by) 
     } else set.escalation = null
   }
   if (remindersOn !== undefined) set.remindersOn = remindersOn !== false
+  if (hourlyOn !== undefined) set.hourlyOn = hourlyOn !== false
   await c.settings.updateOne({ _id: 'settings' }, { $set: set }, { upsert: true })
   return getSettings()
 }

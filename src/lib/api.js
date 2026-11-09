@@ -155,7 +155,7 @@ export const saveWeeklySettings = async (submitters) =>
     body: JSON.stringify({ submitters }),
   }))
 
-/** Any of: escalation (a list of addresses, or null for the administrators), remindersOn. */
+/** Any of: escalation (a list of addresses, or null for the administrators), remindersOn, hourlyOn. */
 export const saveWeeklyOptions = async (patch) =>
   j(await fetch('/api/weekly/settings', {
     method: 'PUT',

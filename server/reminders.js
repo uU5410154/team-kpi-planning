@@ -17,6 +17,10 @@ import { weekOf, weekLabel, weekNo, bangkokTime, deadlines } from '../src/lib/we
  *   Sun 15:00–23:00  every hour, the second chance, same
  *   23:00 Mon/Fri/Sun  the list of who is still missing, to the escalation list
  *
+ * An administrator can turn the hourly repeats off. Then each reminder goes
+ * once, at the hour it falls due (Mon 08:00, Fri 15:00, Sun 15:00), and the
+ * heads-ups and the 23:00 list are unchanged.
+ *
  * Plus, as they happen: a new date proposal to the administrators, and the
  * decision on it to the member who asked.
  *
@@ -38,22 +42,24 @@ export function bangkokClock(ms) {
  * WHAT IS DUE THIS HOUR — pure, so the calendar can be checked without a clock.
  *
  * `stage` is which half of the week it is about; `kind` is what sort of email.
+ * With `hourly` false a reminder is due only in its first hour.
  */
-export function slotsAt(ms) {
+export function slotsAt(ms, { hourly = true } = {}) {
   const { dow, hour } = bangkokClock(ms)
+  const from = (first) => (hourly ? hour >= first : hour === first)
   const out = []
   if (dow === 1) {
     if (hour === 7) out.push({ kind: 'headsup', stage: 'plan' })
-    if (hour >= 8) out.push({ kind: 'reminder', stage: 'plan' })
+    if (from(8)) out.push({ kind: 'reminder', stage: 'plan' })
     if (hour === 23) out.push({ kind: 'digest', stage: 'plan' })
   }
   if (dow === 5) {
     if (hour === 10) out.push({ kind: 'headsup', stage: 'report' })
-    if (hour >= 15) out.push({ kind: 'reminder', stage: 'report' })
+    if (from(15)) out.push({ kind: 'reminder', stage: 'report' })
     if (hour === 23) out.push({ kind: 'digest', stage: 'report' })
   }
   if (dow === 0) {
-    if (hour >= 15) out.push({ kind: 'reminder', stage: 'report', second: true })
+    if (from(15)) out.push({ kind: 'reminder', stage: 'report', second: true })
     if (hour === 23) out.push({ kind: 'digest', stage: 'report', second: true })
   }
   return out.map((s) => ({ ...s, week: weekOf(ms) }))
@@ -69,6 +75,7 @@ const isIn = (e, stage) => !!(stage === 'plan' ? e?.planSubmittedAt : e?.reportS
  *   ctx.accounts    every account: { email, role, status, person }
  *   ctx.nick        person id → nickname
  *   ctx.escalation  addresses for the 23:00 list, or null for the administrators
+ *   ctx.hourly      false when the hourly repeats are off (missing means on)
  *
  * Each email comes with its name, which is what stops it going twice.
  */
@@ -79,9 +86,10 @@ export function emailsAt(ms, ctx) {
   const emailOf = Object.fromEntries(active.filter((a) => a.person).map((a) => [a.person, a.email]))
   const admins = active.filter((a) => a.role === 'admin').map((a) => a.email)
   const link = `${mail.appUrl()}/#weekly`
+  const hourly = ctx.hourly !== false
   const out = []
 
-  for (const slot of slotsAt(ms)) {
+  for (const slot of slotsAt(ms, { hourly })) {
     const d = deadlines(slot.week)
     const missing = (ctx.submitters || []).filter((p) => !isIn(ctx.entries?.[p], slot.stage))
     const what = slot.stage === 'plan' ? 'plan' : 'report'
@@ -98,7 +106,7 @@ export function emailsAt(ms, ctx) {
           `For week ${wk}, ${slot.second ? 'after the Sunday 15:00 second chance' : `due ${bangkokTime(slot.stage === 'plan' ? d.planDue : d.reportDue)}`}:`,
           { html: `<b>${lines.map(mail.esc).join('<br>')}</b>`, text: lines.map((l) => `  • ${l}`).join('\n') },
           slot.stage === 'plan'
-            ? 'They were reminded every hour from 08:00.'
+            ? (hourly ? 'They were reminded every hour from 08:00.' : 'They were reminded at 08:00.')
             : slot.second ? 'The week locks at 08:00 tomorrow and becomes the record.' : 'They get another chance until Sunday 15:00.',
         ],
         button: { label: 'Open the team’s week', href: link },
@@ -146,7 +154,7 @@ export function emailsAt(ms, ctx) {
             : slot.second
               ? `The second chance for week ${wk} was 15:00 today. The week locks at 08:00 tomorrow.`
               : `It was due at 15:00 today for week ${wk}. Sunday 15:00 is the second chance.`,
-          `You will get this every hour until 23:00, until it is in.`,
+          hourly ? `You will get this every hour until 23:00, until it is in.` : 'This is the only reminder today.',
         ]
       }
       const { html, text } = mail.layout({
@@ -177,6 +185,7 @@ async function context(ms) {
     accounts,
     nick: Object.fromEntries(roster.people.map((p) => [p.id, p.nick])),
     escalation: settings.escalation,
+    hourly: settings.hourlyOn,
   }
 }
 
