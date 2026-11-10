@@ -214,7 +214,7 @@ export async function followUp(projectKey, by, now = Date.now()) {
   }
   await k.followups.insertOne(doc)
 
-  const link = `${mail.appUrl()}/#weekly/${encodeURIComponent(projectKey)}`
+  const link = mail.pageLink(`weekly/${encodeURIComponent(projectKey)}`)
   const { html, text } = mail.layout({
     heading: `${askerNick} asks for an update on ${projectKey}`,
     lines: [
@@ -269,7 +269,7 @@ export async function answered(week, person, entry, now = Date.now()) {
         task?.title ? `“${task.title}”${state ? ` — ${state}` : ''}.` : null,
         task?.blocker ? `In the way: ${task.blocker}` : null,
       ].filter(Boolean),
-      button: { label: `Open ${f.projectKey}`, href: `${mail.appUrl()}/#project/${encodeURIComponent(f.projectKey)}` },
+      button: { label: `Open ${f.projectKey}`, href: mail.pageLink(`project/${encodeURIComponent(f.projectKey)}`) },
       foot: `You asked for this update on ${new Date(f.sentAt).toLocaleString('en-GB', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' })}.`,
     })
     await mail.sendOnce(`followup-done:${f._id}`, {

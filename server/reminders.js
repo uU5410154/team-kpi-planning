@@ -85,7 +85,7 @@ export function emailsAt(ms, ctx) {
   const active = (ctx.accounts || []).filter((a) => a.status === 'active')
   const emailOf = Object.fromEntries(active.filter((a) => a.person).map((a) => [a.person, a.email]))
   const admins = active.filter((a) => a.role === 'admin').map((a) => a.email)
-  const link = `${mail.appUrl()}/#weekly`
+  const link = mail.pageLink('weekly')
   const hourly = ctx.hourly !== false
   const out = []
 
@@ -250,7 +250,7 @@ export async function proposalsRaised(list, nickOf = {}) {
         p.blocker ? `In the way: ${p.blocker}` : null,
         p.disagree ? 'The dates and the member disagree on whether the deadline moves.' : null,
       ].filter(Boolean),
-      button: { label: 'Decide', href: `${mail.appUrl()}/#weekly` },
+      button: { label: 'Decide', href: mail.pageLink('weekly') },
       foot: 'Approving moves the project’s due date here and in Jira. It counts as a re-plan.',
     })
     await mail.sendOnce(`proposal:${p._id || p.id}:${p.createdAt}`, {
@@ -272,7 +272,7 @@ export async function decided(p) {
       ? [`${p.decidedBy} approved moving it from ${p.fromDue || 'no date'} to ${p.decidedDue}, for “${p.taskTitle}”.`,
         p.jira?.written ? `The epic ${p.jira.key} has the new date in Jira too.` : null].filter(Boolean)
       : [`${p.decidedBy} did not approve moving it to ${p.proposedDue || p.newDate}, for “${p.taskTitle}”.`, `Why: ${p.reason}`],
-    button: { label: 'Open my week', href: `${mail.appUrl()}/#weekly` },
+    button: { label: 'Open my week', href: mail.pageLink('weekly') },
   })
   await mail.sendOnce(`decision:${p._id || p.id}:${p.decidedAt}`, {
     to, kind: 'decision', subject: ok ? `Approved: ${p.projectKey} moves to ${p.decidedDue}` : `Not approved: ${p.projectKey} keeps its date`,

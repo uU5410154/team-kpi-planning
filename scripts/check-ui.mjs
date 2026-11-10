@@ -79,7 +79,7 @@ const scorecardTarget = async (objLabel) =>
 
 try {
   /* ---------- start clean ---------- */
-  await page.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+  await page.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
   await page.evaluate(() => localStorage.clear())
   await page.reload({ waitUntil: 'networkidle0' })
   await new Promise((r) => setTimeout(r, 800))

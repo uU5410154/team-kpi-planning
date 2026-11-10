@@ -753,7 +753,7 @@ if (!exe) {
   const page = await browser.newPage()
   page.on('dialog', (d) => d.accept())
   await page.setViewport({ width: 1600, height: 1100 })
-  await page.goto(`${base}/#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.goto(`${base}/?go#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 4000))
 
   // Put our three fixture keys on real projects, with a plan of their own.

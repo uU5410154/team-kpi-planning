@@ -234,7 +234,7 @@ try {
   check('FOLLOW UP FNP-877: sent to its owner', fu.status === 200 && fu.body.followup?.person === 'james' && fu.body.followup.status === 'sent', JSON.stringify(fu.body).slice(0, 160))
   const m1 = await waitMail('followup:')
   check('  THE EMAIL GOES TO JAMES, with a link to his week on that project',
-    JSON.stringify(m1?.to) === '["james@lotuss.com"]' && (m1?.body || '').includes('https://kpi.example/#weekly/FNP-877'), m1 && JSON.stringify(m1.to))
+    JSON.stringify(m1?.to) === '["james@lotuss.com"]' && (m1?.body || '').includes('https://kpi.example/?go#weekly/FNP-877'), m1 && JSON.stringify(m1.to))
   check('  and names the project in the subject', /FNP-877/.test(m1?.subject || ''))
   check('ASKING AGAIN AT ONCE IS A DOUBLE CLICK, not a second email', (await call('POST', '/api/followups', { projectKey: 'FNP-877' }, boss)).status === 429)
   const list = (await call('GET', '/api/followups?week=current', undefined, boss)).body.followups || []
@@ -283,7 +283,7 @@ try {
   const done = await waitMail('followup-done:')
   check('SAVING ANSWERS THE FOLLOW-UP — the administrator is emailed',
     JSON.stringify(done?.to) === '"boss@lotuss.com"' || JSON.stringify(done?.to) === '["boss@lotuss.com"]', done && JSON.stringify(done.to))
-  check('  WITH A LINK TO THE PROJECT PAGE', (done?.body || '').includes('https://kpi.example/#project/FNP-877'))
+  check('  WITH A LINK TO THE PROJECT PAGE', (done?.body || '').includes('https://kpi.example/?go#project/FNP-877'))
   check('  and the task in it', /Load the budget data/.test(done?.body || ''))
   const after = (await call('GET', '/api/followups?week=current', undefined, boss)).body.followups || []
   check('the follow-up now reads updated', after[0]?.status === 'updated' && !!after[0].updatedAt)

@@ -446,7 +446,7 @@ async function raiseDecision(k, d, now) {
       `${d.jiraKey}${d.summary ? ` — ${d.summary}` : ''}${d.projectKey ? ` (project ${d.projectKey})` : ''}.`,
       `“${d.decisionText}”`,
     ],
-    button: { label: 'Open the Dashboard', href: `${mail.appUrl()}/#dashboard` },
+    button: { label: 'Open the Dashboard', href: mail.pageLink('dashboard') },
     foot: `Raised in the weekly update for ${weekTitle(d.week)}.`,
   })
   await mail.sendOnce(`decision:${id}:${Date.parse(doc.createdAt)}`, {

@@ -257,7 +257,7 @@ async function emailSummary(s) {
   const { html: body, text } = mail.layout({
     heading: weekTitle(s.week),
     lines: [`Written by the AI ${TRIGGER_LABEL[s.trigger]}.`, ...html],
-    button: { label: 'Open the team’s week', href: `${mail.appUrl()}/#weekly` },
+    button: { label: 'Open the team’s week', href: mail.pageLink('weekly') },
     foot: 'An AI summary of what the team submitted. Check anything you act on against the week itself.',
   })
   await mail.sendOnce(`summary:${s._id}`, {

@@ -133,6 +133,31 @@ const tabFromHash = () => {
   return TABS.some((t) => t.id === h) ? h : DEFAULT_TAB
 }
 
+/*
+ * AN ADMINISTRATOR OPENS ON THE DASHBOARD — every time the app is opened
+ * fresh, even when the address still names yesterday's page (a bookmark, the
+ * browser filling the address in, a tab reopened in the morning). The page in
+ * the address is kept only when it was asked for on purpose:
+ *
+ *   a refresh, or back/forward    the page somebody was already on
+ *   a link to one thing           #project/FNP-88, #weekly/FNP-88
+ *   a link with a query           the app's emails carry ?go
+ *
+ * Read once, as the page loads. A team member is not affected: they cannot
+ * open the Dashboard and land on their week as before.
+ */
+const OPENED_ON_PURPOSE = (() => {
+  try {
+    if (!hashParts()[0]) return true
+    if (window.location.search) return true
+    if (hashParts()[1]) return true
+    const nav = performance.getEntriesByType?.('navigation')?.[0]?.type
+    return !!nav && nav !== 'navigate'
+  } catch {
+    return true
+  }
+})()
+
 export default function App() {
   // Dark unless this browser has been told otherwise. A choice already made
   // here is still honoured — the toggle would be pointless if a reload undid it.
@@ -215,6 +240,18 @@ export default function App() {
   const previewing = me?.role === 'admin' && viewAsMember
   const previewPerson = previewing ? (viewAsPerson || me?.person || null) : null
   const viewer = previewing ? { ...me, role: 'user', previewing: true, person: previewPerson } : me
+  // Once, when it is known who has signed in: an administrator starts on the
+  // Dashboard (see OPENED_ON_PURPOSE). ?go has done its job, so it leaves the
+  // address rather than ending up in a bookmark.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!me || opened.current) return
+    opened.current = true
+    if (me.role === 'admin' && !previewing && !OPENED_ON_PURPOSE) setTab(DEFAULT_TAB)
+    if (new URLSearchParams(window.location.search).has('go')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.hash)
+    }
+  }, [me, previewing])
   // Set before any page below asks the server for anything. Somebody else's
   // view is asked for by name (`as`); one's own needs no name.
   api.setViewAs(previewing ? 'member' : null, previewPerson && previewPerson !== me?.person ? previewPerson : null)

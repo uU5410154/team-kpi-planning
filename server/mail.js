@@ -34,6 +34,11 @@ const cfg = () => {
 }
 
 export const appUrl = () => cfg().appUrl
+/**
+ * A link to one page of the app. ?go marks it as asked for on purpose, so an
+ * administrator lands on that page rather than on the Dashboard.
+ */
+export const pageLink = (hash) => `${appUrl()}/?go#${hash}`
 
 /** Whether email can go out at all, and from whom. Never the password. */
 export function status() {

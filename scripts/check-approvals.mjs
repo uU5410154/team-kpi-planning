@@ -300,7 +300,7 @@ try {
 
     console.log('\n--- the approver’s page ---')
     const a = await as(boss, { width: 1440, height: 900 })
-    await a.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
+    await a.goto(`${base}/?go#weekly`, { waitUntil: 'networkidle0' })
     await a.waitForFunction(() => document.body.innerText.includes('Waiting for your decision'), { timeout: 15000 }).catch(() => {})
     const atext = await a.evaluate(() => document.body.innerText)
     await shot(a, 'approvals-panel')
@@ -404,7 +404,7 @@ try {
 
     console.log('\n--- the member, on a phone ---')
     const m = await as(james, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
-    await m.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
+    await m.goto(`${base}/?go#weekly`, { waitUntil: 'networkidle0' })
     await m.waitForFunction(() => document.body.innerText.includes('My week'), { timeout: 15000 })
     const mtext = await m.evaluate(() => document.body.innerText)
     await m.evaluate(() => [...document.querySelectorAll('span')].find((x) => /^rejected$/i.test(x.textContent))?.scrollIntoView({ block: 'center' }))

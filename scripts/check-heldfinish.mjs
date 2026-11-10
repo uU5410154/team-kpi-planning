@@ -177,7 +177,7 @@ const browser = await puppeteer.launch({ executablePath: exe, headless: 'new', a
 const page = await browser.newPage()
 await page.setViewport({ width: 1700, height: 1000 })
 page.on('dialog', (d) => d.accept().catch(() => {}))
-await page.goto(`${url}/#projects`, { waitUntil: 'networkidle2' })
+await page.goto(`${url}/?go#projects`, { waitUntil: 'networkidle2' })
 await page.evaluate(() => localStorage.clear())
 await page.reload({ waitUntil: 'networkidle2' })
 await new Promise((r) => setTimeout(r, 1000))

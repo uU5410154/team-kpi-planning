@@ -95,7 +95,7 @@ try {
   await asAdmin(page)
   await page.setViewport({ width: 1500, height: 1000 })
   page.on('dialog', (d) => d.accept())
-  await page.goto(`${base}/#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.goto(`${base}/?go#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.evaluate(() => localStorage.clear())
   await page.goto(`${base}/?fresh=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 3000))
@@ -283,7 +283,7 @@ try {
   }
   const p2 = await browser.newPage()
   await asAdmin(p2)
-  await p2.goto(`${noDbBase}/#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await p2.goto(`${noDbBase}/?go#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await p2.evaluate(() => localStorage.clear())
   await p2.goto(`${noDbBase}/?nodb=1#projects`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   // Past the loader's own cap: with no database the app shows what it has

@@ -427,6 +427,30 @@ try {
     check('  and shown when it is',
       /brand-new-1|bosspass1/.test(await page.evaluate(() => document.body.innerText)))
 
+    /*
+     * AN ADMINISTRATOR OPENS ON THE DASHBOARD, even when the address still
+     * names another page — but a link from an email (?go), or a refresh,
+     * keeps the page. Each is a real load (from a blank page, or with a
+     * query), not just a change of hash in the page already open.
+     */
+    const selected = () => page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+      .find((t) => t.getAttribute('aria-selected') === 'true')?.textContent.trim() || null)
+    const openFresh = async (path) => {
+      await page.goto(`${base}/${path}`, { waitUntil: 'networkidle2' })
+      await new Promise((r) => setTimeout(r, 2500))
+      return selected()
+    }
+    await page.goto('about:blank')
+    const stale = await openFresh('#timeline')
+    check('AN ADMINISTRATOR OPENING THE APP LANDS ON THE DASHBOARD, whatever page the address still names', stale === 'Dashboard', stale)
+    const fromEmail = await openFresh('?go#timeline')
+    check('  BUT A LINK FROM AN EMAIL OPENS ITS PAGE', fromEmail === 'Timeline', fromEmail)
+    check('  and ?go leaves the address once it has done its job', !(await page.evaluate(() => window.location.search)))
+    await page.reload({ waitUntil: 'networkidle2' })
+    await new Promise((r) => setTimeout(r, 2500))
+    const refreshed = await selected()
+    check('  AND A REFRESH STAYS ON THE PAGE', refreshed === 'Timeline', refreshed)
+
     await page.evaluate(() => [...document.querySelectorAll('button')]
       .find((b) => b.textContent.trim() === 'Sign out')?.click())
     await new Promise((r) => setTimeout(r, 1500))

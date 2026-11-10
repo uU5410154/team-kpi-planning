@@ -341,7 +341,7 @@ if (!exe) {
   const page = await browser.newPage()
   page.on('dialog', (d) => d.accept())
   await page.setViewport({ width: 1600, height: 1100 })
-  await page.goto(`${url}/#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+  await page.goto(`${url}/?go#timeline`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await new Promise((r) => setTimeout(r, 4000))
 
   const seen = await page.evaluate(() => ({

@@ -127,7 +127,7 @@ try {
     console.log('\n--- every screen size ---')
     for (const width of [390, 768, 1280, 1440]) {
       const pg = await as(boss, { width, height: 900 })
-      await pg.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+      await pg.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
       await sleep(600)
       const r = await pg.evaluate(() => ({
         sw: document.documentElement.scrollWidth,
@@ -155,7 +155,7 @@ try {
 
     console.log('\n--- an administrator hides a column, for everybody ---')
     const a = await as(boss, { width: 1440, height: 900 })
-    await a.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+    await a.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
     await sleep(600)
     check('the PIC column shows to begin with', (await heads(a)).includes('pic'))
     await a.click('[data-columns-button]')
@@ -168,7 +168,7 @@ try {
     const stored = await call('GET', '/api/projects/columns', undefined, james)
     check('SAVED ON THE SERVER — a member reads it too', JSON.stringify(stored.body.hidden) === '["pic"]' && stored.body.updatedBy === 'boss@lotuss.com', JSON.stringify(stored.body))
     const d = await as(deputy, { width: 1440, height: 900 })
-    await d.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+    await d.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
     await sleep(600)
     const dh = await heads(d)
     check('ANOTHER ADMINISTRATOR, IN ANOTHER BROWSER, DOES NOT SEE IT', dh.length > 5 && !dh.includes('pic') && dh.includes('objective'), dh.join(','))
@@ -207,7 +207,7 @@ try {
     const saved = await call('GET', '/api/projects/layout', undefined, james)
     check('  kept on the server, with who arranged it', saved.body.updatedBy === 'boss@lotuss.com' && saved.body.layout.wideTiles.includes('roi'), JSON.stringify(saved.body).slice(0, 200))
     const d2 = await as(deputy, { width: 1280, height: 900 })
-    await d2.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+    await d2.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
     await sleep(700)
     check('ANOTHER ADMINISTRATOR SEES THE SAME LAYOUT', (await order(d2)).join() === 'figures,filters,tools,table' && !(await tiles(d2)).includes('capex'), (await order(d2)).join())
     check('  ROI is wider than its neighbours', await d2.evaluate(() => {
@@ -293,7 +293,7 @@ try {
 
     console.log('\n--- on a phone ---')
     const ph = await as(boss, { width: 390, height: 844 })
-    await ph.goto(`${base}/#projects`, { waitUntil: 'networkidle0' })
+    await ph.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
     await sleep(600)
     const card = await ph.evaluate(() => {
       const c = document.querySelector('[data-project-card]')
