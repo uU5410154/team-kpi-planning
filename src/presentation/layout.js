@@ -142,8 +142,9 @@ export function roadmapParts(el) {
       { k: 'text', x: x + 10, y: cy + 1, w: labelW - 8, h: rh, text: r.label || r.projectKey || '', size: 6.4 * f, bold: true, color: C.navy, valign: 'middle', link },
     )
     if (r.status) out.push(...pillParts({ x: x + labelW + 4, y: cy + 1 + rh * 0.18, w: statusW, h: rh * 0.64 }, r.status, 5.2 * f, link))
-    const a = dayOfYear(r.start || `${year}-01-01`, year)
-    const b = dayOfYear(r.end || `${year}-12-31`, year)
+    // No dates, no bar: a bar would claim dates nobody gave.
+    const a = r.start || r.end ? dayOfYear(r.start || `${year}-01-01`, year) : null
+    const b = r.end || r.start ? dayOfYear(r.end || `${year}-12-31`, year) : null
     if (a != null && b != null && b > a) {
       const tone = r.tone || toneFor(r.status, n)
       out.push(

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, IconButton, Tooltip, Menu, MenuItem, ListItemIcon, ListItemText, Divider, TextField, Alert,
-  Dialog, DialogTitle, DialogContent, DialogActions, Chip, CircularProgress, Snackbar,
+  Dialog, DialogTitle, DialogContent, DialogActions, Chip, CircularProgress, Snackbar, Tabs, Tab,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -30,7 +30,11 @@ import Canvas from '../presentation/Canvas.jsx'
 import Inspector from '../presentation/Inspector.jsx'
 import Present from '../presentation/Present.jsx'
 import ProjectDrill from '../presentation/ProjectDrill.jsx'
-import { ProjectPicker, NewDeckDialog, AiDialog, BrandDialog } from '../presentation/Dialogs.jsx'
+import { ProjectPicker, NewDeckDialog, AiDialog, BrandDialog, InitiativePicker } from '../presentation/Dialogs.jsx'
+import InitiativesEditor from '../presentation/InitiativesEditor.jsx'
+import {
+  initiativeAgenda, initiativeCardsSlides, initiativeRoadmap, cardFromInitiative, pillOf, targetDate,
+} from '../presentation/initiatives.js'
 import { downloadPptx } from '../presentation/exportPptx.js'
 import { W, H, C } from '../presentation/theme.js'
 import {
@@ -98,6 +102,8 @@ export default function Presentation({ plan, me }) {
   const [toast, setToast] = useState(null)
   const [newOpen, setNewOpen] = useState(false)
   const [brandOpen, setBrandOpen] = useState(false)
+  const [view, setView] = useState('decks')
+  const [initiatives, setInitiatives] = useState([])
 
   const loadList = useCallback(async () => {
     try { setDecks(await api.listDecks()); setListError(null) } catch (e) { setListError(api.plainError(e)) }
@@ -107,6 +113,10 @@ export default function Presentation({ plan, me }) {
     loadList()
     api.deckBrand().then(setBrand).catch(() => {})
   }, [loadList])
+  // The initiative list, for "new deck from the list" — read again after editing it.
+  useEffect(() => {
+    if (view === 'decks') api.getInitiatives().then((r) => setInitiatives(r.items || [])).catch(() => {})
+  }, [view])
 
   const open = useCallback(async (id) => {
     setOpening(true)
@@ -145,7 +155,19 @@ export default function Presentation({ plan, me }) {
   const create = async ({ title, date, kind, keys, ask }) => {
     let slides
     const chosen = projects.filter((p) => keys.includes(p.key))
-    if (kind === 'blank') {
+    if (kind === 'initiatives') {
+      const tops = initiatives.filter((x) => !x.parentId)
+      const fin = tops.filter((x) => x.team !== 'Accounting')
+      const acc = tops.filter((x) => x.team === 'Accounting')
+      slides = [
+        coverSlide({ title, date, hasBrand: !!brand.logo }),
+        initiativeAgenda(initiatives, tops),
+        ...(fin.length ? initiativeCardsSlides(initiatives, fin, byKey, 'Finance') : []),
+        ...(acc.length ? initiativeCardsSlides(initiatives, acc, byKey, 'Accounting') : []),
+        initiativeRoadmap(initiatives, tops, { byKey, year: Number(String(date || '').slice(0, 4)) || undefined, hasBrand: !!brand.logo }),
+        thanksSlide(),
+      ]
+    } else if (kind === 'blank') {
       slides = [coverSlide({ title, date, hasBrand: !!brand.logo })]
     } else if (kind === 'ai') {
       const r = await api.deckAi({ mode: 'plan', request: ask, projects: projects.map((p) => ({ key: p.key, summary: p.summary, team: p.team, status: p.status, start: p.start, due: p.due })) })
@@ -218,6 +240,13 @@ export default function Presentation({ plan, me }) {
           <Button startIcon={<PaletteIcon />} onClick={() => setBrandOpen(true)}>Deck pictures</Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setNewOpen(true)}>New presentation</Button>
         </Box>
+        <Tabs value={view} onChange={(_e, v) => setView(v)} sx={{ mb: 2, minHeight: 36 }}>
+          <Tab value="decks" label="Decks" sx={{ minHeight: 36 }} />
+          <Tab value="initiatives" label="Initiatives" sx={{ minHeight: 36 }} />
+        </Tabs>
+        {view === 'initiatives' && <InitiativesEditor projects={projects} />}
+        {view === 'decks' && (
+        <>
         {listError && <Alert severity="error" sx={{ mb: 2 }}>{listError}</Alert>}
         {(!decks || opening) && !listError && <Loading label={opening ? 'Opening the deck…' : 'Loading the decks…'} />}
         {decks && !opening && !decks.length && (
@@ -246,7 +275,9 @@ export default function Presentation({ plan, me }) {
             ))}
           </Box>
         )}
-        {newOpen && <NewDeckDialog open projects={projects} aiOn={aiOn} onClose={() => setNewOpen(false)} onCreate={create} />}
+        </>
+        )}
+        {newOpen && <NewDeckDialog open projects={projects} initiatives={initiatives} aiOn={aiOn} onClose={() => setNewOpen(false)} onCreate={create} />}
         {brandOpen && <BrandEditor brand={brand} isAdmin={isAdmin} onBrand={setBrand} onClose={() => setBrandOpen(false)} />}
         <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)}>
           {toast ? <Alert severity={toast.severity} onClose={() => setToast(null)}>{toast.msg}</Alert> : undefined}
@@ -307,6 +338,7 @@ function Editor({ initial, brand, onBrand, projects, byKey, me, aiOn, onClose, t
   const [conflict, setConflict] = useState(null)
   const [toast, setToast] = useState(null)
   const [picker, setPicker] = useState(null) // { title, single, onPick }
+  const [initPicker, setInitPicker] = useState(null) // { title, items, resolve }
   const [aiOpen, setAiOpen] = useState(false)
   const [brandOpen, setBrandOpen] = useState(false)
   const [present, setPresent] = useState(null)
@@ -438,11 +470,33 @@ function Editor({ initial, brand, onBrand, projects, byKey, me, aiOn, onClose, t
   }
 
   const pick = (opts) => new Promise((resolve) => setPicker({ ...opts, resolve }))
+  const pickInitiatives = async (title) => {
+    const r = await api.getInitiatives()
+    const items = r.items || []
+    const chosen = await new Promise((resolve) => setInitPicker({ title, items, resolve }))
+    return chosen ? { items, chosen } : null
+  }
 
   const addSlide = async (kind) => {
     closeMenus()
     const hasLogo = !!brand.logo
-    if (kind === 'updates') {
+    if (kind === 'initCards') {
+      const r = await pickInitiatives('Initiatives to put on cards')
+      if (r) {
+        const fin = r.chosen.filter((x) => x.team !== 'Accounting')
+        const acc = r.chosen.filter((x) => x.team === 'Accounting')
+        insertSlides([
+          ...(fin.length ? initiativeCardsSlides(r.items, fin, byKey, 'Finance') : []),
+          ...(acc.length ? initiativeCardsSlides(r.items, acc, byKey, 'Accounting') : []),
+        ])
+      }
+    } else if (kind === 'initRoadmap') {
+      const r = await pickInitiatives('Initiatives on the roadmap')
+      if (r) insertSlides([initiativeRoadmap(r.items, r.chosen, { byKey, year: Number(String(deck.date || '').slice(0, 4)) || undefined, hasBrand: !!brand.logo })])
+    } else if (kind === 'initAgenda') {
+      const r = await pickInitiatives('Initiatives on the agenda')
+      if (r) insertSlides([initiativeAgenda(r.items, r.chosen)])
+    } else if (kind === 'updates') {
       const keys = await pick({ title: 'Projects for the update cards (six to a slide)' })
       if (keys) insertSlides(await withFacts(updatesSlides(projectsTeam(keys), keys.map((k) => cardFromProject(byKey[k])))))
     } else if (kind === 'roadmap') {
@@ -569,6 +623,17 @@ function Editor({ initial, brand, onBrand, projects, byKey, me, aiOn, onClose, t
   /* ------------------------------------------------------- project data */
 
   const refreshCard = async (el, p = null) => {
+    if (!p && el.data?.initiativeId) {
+      try {
+        const r = await api.getInitiatives()
+        const it = (r.items || []).find((x) => x.id === el.data.initiativeId)
+        if (!it) { setToast({ severity: 'info', msg: 'That initiative is no longer on the list.' }); return }
+        const fresh = cardFromInitiative(it, r.items, it.projectKey ? byKey[it.projectKey] : null)
+        patchEls([el.id], (e) => ({ ...e, data: { ...e.data, ...fresh, impact: (e.data.impact || []).filter(Boolean).length ? e.data.impact : fresh.impact } }))
+        setToast({ severity: 'success', msg: `Refreshed from the initiative list: ${it.name}.` })
+      } catch (e) { setToast({ severity: 'error', msg: api.plainError(e) }) }
+      return
+    }
     const proj = p || byKey[el.data?.projectKey]
     if (!proj) return
     if (p) patchEls([el.id], (e) => ({ ...e, data: { ...e.data, ...cardFromProject(p) } }))
@@ -612,18 +677,27 @@ function Editor({ initial, brand, onBrand, projects, byKey, me, aiOn, onClose, t
     })
   }
 
-  const refreshRoadmap = (el) => patchEls([el.id], (e) => ({
-    ...e,
-    data: {
-      ...e.data,
-      rows: (e.data.rows || []).map((r) => {
-        const p = r.projectKey && byKey[r.projectKey]
-        if (!p) return r
-        return { ...r, status: deckStatus(p), start: p.start || r.start, end: p.actualEnd || p.adjustedDue || p.due || r.end }
-      }),
-    },
-  }))
-
+  const refreshRoadmap = async (el) => {
+    let list = []
+    if ((el.data?.rows || []).some((r) => r.initiativeId)) list = (await api.getInitiatives().catch(() => ({ items: [] }))).items || []
+    const byId = Object.fromEntries(list.map((x) => [x.id, x]))
+    patchEls([el.id], (e) => ({
+      ...e,
+      data: {
+        ...e.data,
+        rows: (e.data.rows || []).map((r) => {
+          const it = r.initiativeId && byId[r.initiativeId]
+          if (it) {
+            const t = targetDate(it.target)
+            return { ...r, status: pillOf(it.status) || r.status, end: t && t.slice(0, 4) === String(e.data.year) ? t : r.end }
+          }
+          const p = r.projectKey && byKey[r.projectKey]
+          if (!p) return r
+          return { ...r, status: deckStatus(p), start: p.start || r.start, end: p.actualEnd || p.adjustedDue || p.due || r.end }
+        }),
+      },
+    }))
+  }
   const reloadTasks = async (el, p = null) => {
     const proj = p || byKey[el.data?.projectKey]
     if (!proj) return
@@ -818,6 +892,8 @@ function Editor({ initial, brand, onBrand, projects, byKey, me, aiOn, onClose, t
 
       <Menu anchorEl={menus.slide} open={!!menus.slide} onClose={closeMenus}>
         {[
+          ['initCards', 'Initiative cards (from the list)'], ['initRoadmap', 'Initiative roadmap (from the list)'], ['initAgenda', 'Initiative agenda (from the list)'],
+          null,
           ['updates', 'Project update cards'], ['roadmap', 'Roadmap of the year'], ['tasks', 'Project task timeline'], ['agenda', 'Agenda'],
           null, ['cover', 'Cover'], ['finance', 'Section: Finance'], ['accounting', 'Section: Accounting'], ['image', 'Screenshot'], ['blank', 'Title only'], ['thanks', 'Thank you'],
         ].map((m, i) => (m ? <MenuItem key={m[0]} onClick={() => addSlide(m[0])}>{m[1]}</MenuItem> : <Divider key={i} />))}
@@ -934,6 +1010,13 @@ function Editor({ initial, brand, onBrand, projects, byKey, me, aiOn, onClose, t
           open projects={projects} title={picker.title} single={picker.single} initial={picker.initial}
           onClose={() => { picker.resolve(null); setPicker(null) }}
           onPick={(keys) => { picker.resolve(keys); setPicker(null) }}
+        />
+      )}
+      {initPicker && (
+        <InitiativePicker
+          open initiatives={initPicker.items} title={initPicker.title}
+          onClose={() => { initPicker.resolve(null); setInitPicker(null) }}
+          onPick={(xs) => { initPicker.resolve(xs); setInitPicker(null) }}
         />
       )}
       {aiOpen && (

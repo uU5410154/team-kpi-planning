@@ -907,6 +907,20 @@ app.get('/api/decks/project/:key', async (req, res) => {
   return res.json(r[key])
 })
 
+/* The IT governance initiative list: shared, like the decks. */
+app.get('/api/decks/initiatives', async (_req, res) => {
+  const r = await decks.getInitiatives()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r)
+})
+
+app.put('/api/decks/initiatives', async (req, res) => {
+  const r = await decks.saveInitiatives(req.body || {}, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return res.status(r.status || 400).json({ error: r.error, list: r.list })
+  return res.json(r)
+})
+
 /* The same, for many projects at once: a deck's worth of cards. */
 app.post('/api/decks/facts', async (req, res) => {
   const keys = [...new Set((Array.isArray(req.body?.keys) ? req.body.keys : []).map(String).filter((k) => /^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(k)))].slice(0, 80)

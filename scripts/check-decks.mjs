@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs'
 import { cleanDeck } from '../server/decks.js'
 import { cardParts, roadmapParts, tasksParts, monthsBetween, partsOf } from '../src/presentation/layout.js'
 import { deckStatus, cardFromFacts, standardDeck, updatesSlides } from '../src/presentation/templates.js'
+import { parseInitiatives, linkAll, pillOf, targetDate, cardFromInitiative, initiativeRoadmap } from '../src/presentation/initiatives.js'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -64,6 +65,40 @@ const ps = Array.from({ length: 8 }, (_v, i) => ({ key: `FNP-${i + 1}`, summary:
 check('SEVEN CARDS ARE TWO SLIDES (six to a slide)', updatesSlides('Finance', ps.slice(0, 7).map((p) => ({ projectKey: p.key, title: p.summary }))).length === 2)
 const std = standardDeck(ps, { title: 'IT Gov', date: '2026-11-13', hasBrand: {} })
 check('THE MEETING DECK: cover, agenda, updates, roadmap, thank you', JSON.stringify(std.map((s) => s.kind)) === JSON.stringify(['cover', 'agenda', 'updates', 'updates', 'updates', 'roadmap', 'thanks']), std.map((s) => s.kind).join(','))
+
+console.log('\n--- the initiative list, pasted from Excel ---')
+const pasted = [
+  'Project \tMile Stone\tStatus\tUsers\tTarget', '\t\t\t\t',
+  'AI Sales Forecast\t\t\tFin - Retail\t',
+  '\tAI Sales forecast Phase 1\tGO LIVE\tFin - Retail\tDec 2026',
+  '\tAI Sales forecast Phase 2\tin-progress\tFin - Retail\tTBC (2027)',
+  'PowerBI report - MALL\t\t\tFin - MALL\tDec 2026', '\t....\tin-progress\tFin - MALL\t',
+  'LOI Autocheck', '\t\tGO LIVE\tAcc - AR\t',
+  'Lease Master\t\tGO LIVE\tAcc - AP\t',
+  'Supplier Inquiry system\t\tRequirement Gathering\tAcc - AP\tTBC (2027)',
+].join('\n')
+const items = parseInitiatives(pasted)
+const tops = items.filter((x) => !x.parentId)
+check('THE HEADER AND EMPTY ROWS ARE SKIPPED; FIVE INITIATIVES', tops.map((x) => x.name).join('|') === 'AI Sales Forecast|PowerBI report - MALL|LOI Autocheck|Lease Master|Supplier Inquiry system', tops.map((x) => x.name).join('|'))
+check('  a milestone row goes under the initiative above it', items.filter((x) => x.parentId === tops[0].id).map((x) => x.name).join('|') === 'AI Sales forecast Phase 1|AI Sales forecast Phase 2')
+check('  a "...." placeholder is not a milestone', !items.some((x) => /^\.+$/.test(x.name)))
+check('  A NAME EXCEL WRAPPED ONTO ITS OWN LINE KEEPS ITS STATUS AND USERS', (() => { const l = items.find((x) => x.name === 'LOI Autocheck'); return l && l.status === 'GO LIVE' && l.users === 'Acc - AR' })())
+check('  "Acc - …" users are Accounting, the rest Finance', items.find((x) => x.name === 'Lease Master').team === 'Accounting' && tops[0].team === 'Finance')
+check('STATUS WORDS BECOME THE DECK\'S PILLS', ['GO LIVE', 'in-progress', 'UAT', 'Planning', 'Requirement Gathering'].map(pillOf).join('|') === 'GO LIVE|On Track|UAT|Planning|Req. Gathering')
+check('TARGETS: "Dec 2026" is the 31st, "TBC (2027)" is 2027, "TBC" is no date', targetDate('Dec 2026') === '2026-12-31' && targetDate('Nov 2026') === '2026-11-30' && targetDate('TBC (2027)') === '2027-12-31' && targetDate('TBC') === null)
+const reg = [
+  { key: 'NEW-61', summary: 'Lease Master Phase 2' }, { key: 'FNP-865', summary: 'Shrinkage Automation (Dashboard) — Actual & Forecast' },
+  { key: 'NEW-23', summary: 'Billing Transformation Phase 2 [DELETED]' }, { key: 'FNP-267', summary: 'Supplier Portal' },
+]
+const linked = linkAll(parseInitiatives('Lease Master\t\tGO LIVE\tAcc - AP\t\nShrinkage Automation\t\tin-progress\tFin\t\nBilling Transformation\t\tGO LIVE\tAcc - AP\t\nSupplier Portal OCR - Trade\t\tGO LIVE\tAcc - AP\t'), reg)
+check('LINKED ONLY WHEN THE NAME PLAINLY IS THE PROJECT', linked.map((x) => x.projectKey || '-').join('|') === '-|FNP-865|-|-', linked.map((x) => x.projectKey || '-').join('|'))
+const c1 = cardFromInitiative(tops[0], items)
+check('AN INITIATIVE CARD: live milestones are the accomplishment, the rest next, with their target', JSON.stringify(c1.accomplishment) === '["AI Sales forecast Phase 1"]' && JSON.stringify(c1.next) === '["AI Sales forecast Phase 2 (TBC (2027))"]' && c1.status === 'On Track')
+const rmap = initiativeRoadmap(items, tops, { year: 2026 }).elements.find((e) => e.type === 'roadmap').data.rows
+const withKids = [{ id: 'P', parentId: null, name: 'Channel', status: 'in-progress', target: 'Dec 2026', team: 'Finance' }, { id: 'K', parentId: 'P', name: 'Net margin', projectKey: 'FNP-1065', target: 'Dec 2026', team: 'Finance' }]
+const r2 = initiativeRoadmap(withKids, [withKids[0]], { year: 2026, byKey: { 'FNP-1065': { key: 'FNP-1065', start: '2026-05-04' } } }).elements.find((e) => e.type === 'roadmap').data.rows[1]
+check('THE ROADMAP STARTS AN INITIATIVE WHEN ITS MILESTONES\' PROJECTS STARTED', r2.start === '2026-05-04' && r2.end === '2026-12-31', `${r2.start} → ${r2.end}`)
+check('THE ROADMAP: no dates, no bar; TBC (2027) runs to December and says so', !rmap.find((r) => r.label === 'LOI Autocheck').end && rmap.find((r) => r.label === 'Supplier Inquiry system').bar === '→ 2027')
 
 console.log('\n--- what the server keeps ---')
 const dirty = cleanDeck({
@@ -200,6 +235,16 @@ try {
   check('  written from the project\'s facts and its Jira tasks', /FNP-379/.test(sent) && /Reconcile the Q4 forecast/.test(sent))
   const pl = await call('POST', '/api/decks/ai', { mode: 'plan', request: 'IT Gov deck', projects: [{ key: 'FNP-379', summary: 'PL Forecast', team: 'Finance' }] }, kade)
   check('BUILD: the slides come back, with only real project keys and kinds', pl.status === 200 && pl.body.slides.length === 2 && JSON.stringify(pl.body.slides[1].projectKeys) === '["FNP-379"]', JSON.stringify(pl.body))
+
+  console.log('\n--- the initiative list on the server ---')
+  check('THE LIST STARTS EMPTY', (await call('GET', '/api/decks/initiatives', undefined, kade)).body.items?.length === 0)
+  const l1 = await call('PUT', '/api/decks/initiatives', { items, rev: 0 }, kade)
+  check('A MEMBER CAN FILL IT', l1.status === 200 && l1.body.items.length === items.length && l1.body.rev === 1, `${l1.status} ${l1.body.error || ''}`)
+  check('  and everybody reads the same list', (await call('GET', '/api/decks/initiatives', undefined, james)).body.items[0].name === 'AI Sales Forecast')
+  const l2 = await call('PUT', '/api/decks/initiatives', { items: items.slice(0, 2), rev: 0 }, james)
+  check('A SAVE FROM AN OLDER COPY IS REFUSED, with the newer list', l2.status === 409 && l2.body.list?.items?.length === items.length)
+  const l3 = await call('PUT', '/api/decks/initiatives', { items: [{ name: 'Orphan', parentId: 'gone12', status: 'x' }, { name: '' }], rev: 1 }, james)
+  check('  a milestone whose initiative is gone becomes an initiative; a nameless line is dropped', l3.status === 200 && l3.body.items.length === 1 && l3.body.items[0].parentId === null)
 
   console.log('\n--- deleting ---')
   check('THE MAKER CAN DELETE THEIR DECK', (await call('DELETE', `/api/decks/${id}`, undefined, james)).body.deleted === 1)

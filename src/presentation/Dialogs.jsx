@@ -80,11 +80,12 @@ export function ProjectPicker({ open, projects, title = 'Choose projects', singl
 
 /* --------------------------------------------------------------- new deck */
 
-export function NewDeckDialog({ open, projects, aiOn, onClose, onCreate }) {
+export function NewDeckDialog({ open, projects, initiatives = [], aiOn, onClose, onCreate }) {
   const today = new Date().toISOString().slice(0, 10)
   const [title, setTitle] = useState('IT Finance Governance')
   const [date, setDate] = useState(today)
-  const [kind, setKind] = useState('standard')
+  const tops = initiatives.filter((x) => !x.parentId)
+  const [kind, setKind] = useState(tops.length ? 'initiatives' : 'standard')
   const [ask, setAsk] = useState('')
   const [picking, setPicking] = useState(false)
   const [keys, setKeys] = useState(null)
@@ -113,11 +114,24 @@ export function NewDeckDialog({ open, projects, aiOn, onClose, onCreate }) {
           <TextField size="small" type="date" label="Meeting date" InputLabelProps={{ shrink: true }} value={date} onChange={(e) => setDate(e.target.value)} />
         </Box>
         <RadioGroup value={kind} onChange={(e) => setKind(e.target.value)}>
+          {!!tops.length && (
+            <FormControlLabel
+              value="initiatives" control={<Radio size="small" />}
+              label={(
+                <Box sx={{ py: 0.5 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>Meeting deck from the initiative list</Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Cover, agenda, a card for each of the {tops.length} initiatives (Finance, then Accounting), the roadmap and thank you.
+                  </Typography>
+                </Box>
+              )}
+            />
+          )}
           <FormControlLabel
             value="standard" control={<Radio size="small" />}
             label={(
               <Box sx={{ py: 0.5 }}>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>Meeting deck from the projects</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>Meeting deck from the register&rsquo;s projects</Typography>
                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Cover, agenda, Finance and Accounting project updates, the roadmap and thank you — in the IT Gov format.
                 </Typography>
@@ -301,6 +315,48 @@ export function BrandDialog({ open, brand, isAdmin, onClose, onUpload, onClear }
         ))}
       </DialogContent>
       <DialogActions><Button onClick={onClose}>Done</Button></DialogActions>
+    </Dialog>
+  )
+}
+
+/* ------------------------------------------------------- initiative picker */
+
+/** Pick initiatives from the list (top level), for cards or a roadmap. */
+export function InitiativePicker({ open, initiatives, title = 'Choose initiatives', onClose, onPick }) {
+  const tops = initiatives.filter((x) => !x.parentId)
+  const [chosen, setChosen] = useState(() => new Set(tops.map((x) => x.id)))
+  const toggle = (id) => setChosen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent dividers>
+        {!tops.length && <Typography variant="body2">The initiative list is empty. Fill it on the Initiatives tab first.</Typography>}
+        {['Finance', 'Accounting'].map((team) => {
+          const xs = tops.filter((x) => x.team === team)
+          if (!xs.length) return null
+          return (
+            <Box key={team} sx={{ mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Typography variant="overline" sx={{ flex: 1 }}>{team}</Typography>
+                <Button size="small" onClick={() => setChosen((s) => new Set([...s, ...xs.map((x) => x.id)]))}>All</Button>
+                <Button size="small" onClick={() => setChosen((s) => new Set([...s].filter((id) => !xs.some((x) => x.id === id))))}>None</Button>
+              </Box>
+              <List dense disablePadding>
+                {xs.map((x) => (
+                  <ListItemButton key={x.id} dense onClick={() => toggle(x.id)}>
+                    <ListItemIcon sx={{ minWidth: 36 }}><Checkbox edge="start" size="small" checked={chosen.has(x.id)} tabIndex={-1} disableRipple /></ListItemIcon>
+                    <ListItemText primary={x.name} secondary={[x.status, x.users, x.target].filter(Boolean).join(' · ')} />
+                  </ListItemButton>
+                ))}
+              </List>
+            </Box>
+          )
+        })}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" disabled={!chosen.size} onClick={() => onPick(tops.filter((x) => chosen.has(x.id)))}>Add {chosen.size}</Button>
+      </DialogActions>
     </Dialog>
   )
 }

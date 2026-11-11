@@ -23,6 +23,7 @@ import * as llm from './llm.js'
 const cfg = () => ({
   decks: process.env.MONGODB_DECKS_COLLECTION || 'kpi_decks',
   assets: process.env.MONGODB_DECK_ASSETS_COLLECTION || 'kpi_deck_assets',
+  initiatives: process.env.MONGODB_INITIATIVES_COLLECTION || 'kpi_initiatives',
 })
 
 let colls = null
@@ -31,7 +32,7 @@ async function c() {
   if (!db) return null
   if (!colls) {
     const d = db.s.db
-    colls = { decks: d.collection(cfg().decks), assets: d.collection(cfg().assets) }
+    colls = { decks: d.collection(cfg().decks), assets: d.collection(cfg().assets), initiatives: d.collection(cfg().initiatives) }
     await colls.decks.createIndex({ updatedAt: -1 })
   }
   return colls
@@ -84,6 +85,7 @@ function cleanData(type, d = {}) {
       impact: lines(d.impact),
       next: lines(d.next),
       target: str(d.target, 60),
+      initiativeId: /^[A-Za-z0-9_-]{1,64}$/.test(String(d.initiativeId || '')) ? String(d.initiativeId) : undefined,
       labels: d.labels && typeof d.labels === 'object'
         ? Object.fromEntries(['accomplishment', 'impact', 'next', 'target'].map((k) => [k, str(d.labels[k] ?? '', 40)]).filter(([, v]) => v))
         : undefined,
@@ -97,6 +99,7 @@ function cleanData(type, d = {}) {
         id: id(r.id),
         group: r.group ? str(r.group, 60) : undefined,
         projectKey: KEY.test(String(r.projectKey || '')) ? String(r.projectKey) : null,
+        initiativeId: /^[A-Za-z0-9_-]{1,64}$/.test(String(r.initiativeId || '')) ? String(r.initiativeId) : undefined,
         label: str(r.label, 120),
         status: str(r.status, 30),
         bar: str(r.bar, 80),
@@ -395,4 +398,71 @@ export async function plan({ request, projects } = {}) {
   }))
   if (!slides.length) return { status: 502, error: 'The AI did not return a deck plan the app can use. Try again.' }
   return { title: clip(j.title, 160), subtitle: clip(j.subtitle, 160), slides }
+}
+
+/* ------------------------------------------------------------- initiatives */
+
+/*
+ * THE IT GOVERNANCE INITIATIVE LIST: what the team presents, as the team
+ * describes it — each initiative and its milestones, with a status, the users
+ * it serves and a target ("Dec 2026", "TBC (2027)"). Not the project register:
+ * that is the KPI model's, and is left alone. An initiative may name the
+ * register project it is, so a slide can open that project's details.
+ *
+ * One shared list, edited by anybody on the team, saved whole with a `rev`
+ * like a deck.
+ */
+const LIST_ID = 'list'
+
+function cleanItem(it) {
+  if (!it || typeof it !== 'object') return null
+  const name = str(it.name, 200).trim()
+  if (!name) return null
+  return {
+    id: id(it.id),
+    parentId: it.parentId ? id(it.parentId) : null,
+    name,
+    status: str(it.status, 40).trim(),
+    users: str(it.users, 80).trim(),
+    target: str(it.target, 40).trim(),
+    team: it.team === 'Accounting' ? 'Accounting' : 'Finance',
+    projectKey: KEY.test(String(it.projectKey || '')) ? String(it.projectKey) : null,
+    note: str(it.note, 1000),
+  }
+}
+
+export function cleanInitiatives(items) {
+  const out = (Array.isArray(items) ? items : []).slice(0, 400).map(cleanItem).filter(Boolean)
+  // A milestone whose initiative is gone becomes an initiative of its own.
+  const ids = new Set(out.filter((x) => !x.parentId).map((x) => x.id))
+  return out.map((x) => (x.parentId && !ids.has(x.parentId) ? { ...x, parentId: null } : x))
+}
+
+export async function getInitiatives() {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const d = await k.initiatives.findOne({ _id: LIST_ID })
+  return { items: d?.items || [], rev: d?.rev || 0, updatedAt: d?.updatedAt || null, updatedBy: d?.updatedBy || null }
+}
+
+export async function saveInitiatives({ items, rev } = {}, by) {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const clean = cleanInitiatives(items)
+  const at = new Date().toISOString()
+  const want = Number(rev) || 0
+  if (want === 0) {
+    // The first save makes the list; a second "first save" is a conflict.
+    try {
+      await k.initiatives.insertOne({ _id: LIST_ID, items: clean, rev: 1, updatedAt: at, updatedBy: by })
+      return getInitiatives()
+    } catch (e) {
+      if (e.code !== 11000) throw e
+    }
+  } else {
+    const r = await k.initiatives.updateOne({ _id: LIST_ID, rev: want }, { $set: { items: clean, updatedAt: at, updatedBy: by }, $inc: { rev: 1 } })
+    if (r.matchedCount) return getInitiatives()
+  }
+  const now = await getInitiatives()
+  return { status: 409, error: `${now.updatedBy || 'Somebody'} saved the initiative list after you opened it.`, list: now }
 }

@@ -404,3 +404,12 @@ export const addDeckAsset = async (dataUrl, name) => j(await sendJson('POST', '/
 export const deckProject = async (key) => j(await fetch(`/api/decks/project/${encodeURIComponent(key)}`))
 export const deckAi = async (body) => j(await sendJson('POST', '/api/decks/ai', body))
 export const deckFacts = async (keys) => (await j(await sendJson('POST', '/api/decks/facts', { keys }))).facts || {}
+export const getInitiatives = async () => j(await fetch('/api/decks/initiatives'))
+/** Save the whole list; a 409 carries the newer list as `err.list`. */
+export async function saveInitiatives(items, rev) {
+  const res = await sendJson('PUT', '/api/decks/initiatives', { items, rev })
+  const body = await res.json().catch(() => ({}))
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+  if (!res.ok) { const e = new Error(body.error || `Saving failed (${res.status})`); e.status = res.status; e.list = body.list || null; throw e }
+  return body
+}

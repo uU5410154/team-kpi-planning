@@ -49,9 +49,11 @@ export const STATUS = {
   Planning: { fill: '#E6F0FC', text: '#2A4D88', border: '#9DBDEA' },
   Delayed: { fill: '#FDECEC', text: '#B42318', border: '#F0A9A9' },
   'On Hold': { fill: '#EEF1F5', text: '#5B6B80', border: '#C3CCD8' },
+  UAT: { fill: '#FFF4DB', text: '#8A6212', border: '#F2C66B' },
+  'Req. Gathering': { fill: '#F1ECFB', text: '#5B3FA0', border: '#C7B6EC' },
   Done: { fill: '#3DDC84', text: '#064E3B', border: '#FFFFFF' },
 }
-export const STATUS_NAMES = ['GO LIVE', 'On Track', 'Planning', 'Delayed', 'On Hold']
+export const STATUS_NAMES = ['GO LIVE', 'On Track', 'UAT', 'Planning', 'Req. Gathering', 'Delayed', 'On Hold']
 export const statusStyle = (s) => STATUS[s] || STATUS[Object.keys(STATUS).find((k) => k.toLowerCase() === String(s || '').toLowerCase())] || STATUS['On Track']
 
 /* Roadmap bars: the deck uses blue, yellow and (for live work) green. */

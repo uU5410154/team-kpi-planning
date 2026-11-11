@@ -104,6 +104,43 @@ async function addImage(slide, el, brand, cache) {
   slide.addImage({ data, x: IN(el.x + (el.w - w) / 2), y: IN(el.y + (el.h - h) / 2), w: IN(w), h: IN(h) })
 }
 
+/*
+ * The thank-you art's chevrons and smile, as one picture: PowerPoint's own arc
+ * and chevron shapes are drawn differently by every viewer (some not at all),
+ * and this is decoration, not text anybody edits. The background and
+ * "THANK YOU" stay real shapes.
+ */
+function artPicture(el, parts) {
+  const k = 2
+  const cv = document.createElement('canvas')
+  cv.width = Math.round(el.w * k)
+  cv.height = Math.round(el.h * k)
+  const g = cv.getContext('2d')
+  g.scale(k, k)
+  g.translate(-el.x, -el.y)
+  for (const p of parts) {
+    if (p.k === 'chevron') {
+      const pts = p.dir === 'left'
+        ? [[100, 0], [45, 50], [100, 100], [55, 100], [0, 50], [55, 0]]
+        : [[0, 0], [55, 0], [100, 50], [55, 100], [0, 100], [55, 50]]
+      g.beginPath()
+      pts.forEach(([px, py], i) => { const X = p.x + (px / 100) * p.w; const Y = p.y + (py / 100) * p.h; if (i) g.lineTo(X, Y); else g.moveTo(X, Y) })
+      g.closePath()
+      g.fillStyle = p.fill
+      g.fill()
+    } else if (p.k === 'arc') {
+      const bw = p.borderWidth || 10
+      g.beginPath()
+      g.ellipse(p.x + p.w / 2, p.y + bw, p.w / 2 - bw, p.h - bw * 2, 0, 0, Math.PI)
+      g.strokeStyle = p.border
+      g.lineWidth = bw
+      g.lineCap = 'round'
+      g.stroke()
+    }
+  }
+  return cv.toDataURL('image/png')
+}
+
 /** Build the .pptx and hand it to the browser to save. */
 export async function downloadPptx(deck, brand, { onProgress } = {}) {
   const { default: PptxGenJS } = await import('pptxgenjs')
@@ -127,6 +164,12 @@ export async function downloadPptx(deck, brand, { onProgress } = {}) {
     }
     for (const el of s.elements || []) {
       const parts = partsOf(el)
+      if (parts && el.type === 'thanks') {
+        for (const p of parts.filter((q) => q.k === 'rect')) addPart(pptx, slide, p)
+        slide.addImage({ data: artPicture(el, parts), x: IN(el.x), y: IN(el.y), w: IN(el.w), h: IN(el.h) })
+        for (const p of parts.filter((q) => q.k === 'text')) addPart(pptx, slide, p)
+        continue
+      }
       if (parts) { for (const p of parts) addPart(pptx, slide, p); continue }
       const st = el.style || {}
       if (el.type === 'text') {
