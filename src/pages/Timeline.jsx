@@ -688,6 +688,12 @@ export default function Timeline({
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
+  /*
+   * TEAM AND SUB TEAM, the register's own (Finance › Channel, Accounting ›
+   * AP…), in one dropdown so the toolbar stays one line: 'all', a whole team
+   * ('t|Finance') or one of its sub teams ('s|Finance|Channel').
+   */
+  const [fTeam, setFTeam] = useState('all')
   const [ours, setOurs] = useState(true)
   // The administrator's own word on what is being worked on now. Read by the
   // manager dashboard; nothing becomes active by itself.
@@ -719,7 +725,7 @@ export default function Timeline({
   // Sent here by the header search: that project, whatever was filtered before.
   useEffect(() => {
     if (!jump?.q) return
-    setQ(jump.q); setFPic('all'); setFState('all'); setOurs(false); setOnlyActive(false)
+    setQ(jump.q); setFPic('all'); setFState('all'); setFTeam('all'); setOurs(false); setOnlyActive(false)
   }, [jump?.n])
 
   const rows = useMemo(() => {
@@ -730,6 +736,12 @@ export default function Timeline({
       .filter((p) => (onlyActive ? activeKeys.has(p.key) : true))
       .filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd || p.timeline.actualStart)
       .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
+      .filter((p) => {
+        if (fTeam === 'all') return true
+        const [kind, team, sub] = fTeam.split('|')
+        if ((p.team || 'none') !== team) return false
+        return kind === 't' || (p.subTeam || 'none') === sub
+      })
       .filter((p) => {
         if (fState === 'all') return true
         if (fState === 'late') return (p.timeline.lateBy ?? 0) > 0
@@ -754,7 +766,23 @@ export default function Timeline({
         if (sortBy === 'name') return String(a.summary || '').localeCompare(String(b.summary || ''))
         return byStart
       })
-  }, [plan.projects, q, fPic, fState, ours, onlyActive, activeKeys, sortBy])
+  }, [plan.projects, q, fPic, fState, fTeam, ours, onlyActive, activeKeys, sortBy])
+
+  /* The teams and sub teams the register uses, each sub team under its team. */
+  const teamTree = useMemo(() => {
+    const live = plan.projects.filter((p) => !p.deleted)
+    return [...new Set(live.map((p) => p.team || 'none'))].sort().map((team) => ({
+      team,
+      subs: [...new Set(live.filter((p) => (p.team || 'none') === team).map((p) => p.subTeam || 'none'))]
+        .sort((a, b) => (a === 'none') - (b === 'none') || a.localeCompare(b)),
+    }))
+  }, [plan.projects])
+  const teamLabel = (v) => {
+    if (v === 'all') return 'All'
+    const [kind, team, sub] = v.split('|')
+    const t = team === 'none' ? 'No team' : team
+    return kind === 't' ? t : `${t} › ${sub === 'none' ? 'no sub team' : sub}`
+  }
 
   /*
    * ONE BAR PER TICKET.
@@ -1468,7 +1496,7 @@ export default function Timeline({
    * The figures follow the search box and the filters: they describe the bars
    * on screen, and the line says whether that is everything or a part of it.
    */
-  const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || !ours || onlyActive
+  const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || fTeam !== 'all' || !ours || onlyActive
   // Undated projects are never on the chart; how many there are is the register's figure.
   const t = { ...timelinessOf(rows), noDates: filtering ? 0 : plan.totals.timeliness.noDates }
   const stats = [
@@ -1490,7 +1518,7 @@ export default function Timeline({
 
   // Narrow, how many filters are away from their defaults — on the button
   // that hides them, so a short list is never a mystery.
-  const changed = [fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
+  const changed = [fTeam !== 'all', fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
 
   // Small, quiet controls: a toolbar, not a form.
   const jiraBtn = { fontSize: '0.75rem', px: 1, minWidth: 0 }
@@ -1498,13 +1526,27 @@ export default function Timeline({
   const switchLabel = { m: 0, gap: 0.25, '& .MuiFormControlLabel-label': { fontSize: '0.8rem', whiteSpace: 'nowrap' } }
   const filters = (
     <>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 120 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 108 }, maxWidth: { sm: 200 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
+        <InputLabel>Team</InputLabel>
+        <Select label="Team" value={fTeam} onChange={(e) => setFTeam(e.target.value)} renderValue={teamLabel} data-timeline-team>
+          <MenuItem value="all">All teams</MenuItem>
+          {teamTree.flatMap(({ team, subs }) => [
+            <MenuItem key={`t|${team}`} value={`t|${team}`} sx={{ fontWeight: 700 }}>{team === 'none' ? 'No team' : team} — all</MenuItem>,
+            ...subs.map((sub) => (
+              <MenuItem key={`s|${team}|${sub}`} value={`s|${team}|${sub}`} sx={{ pl: 4, fontSize: '0.85rem' }}>
+                {sub === 'none' ? 'No sub team' : sub}
+              </MenuItem>
+            )),
+          ])}
+        </Select>
+      </FormControl>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 104 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
         <InputLabel>PIC</InputLabel>
         <Select label="PIC" value={fPic} onChange={(e) => setFPic(e.target.value)}>
           {picks.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
         </Select>
       </FormControl>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 150 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 122 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
         <InputLabel>State</InputLabel>
         <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
           <MenuItem value="all">Everything</MenuItem>
@@ -1517,7 +1559,7 @@ export default function Timeline({
           <MenuItem value="not started">Not started</MenuItem>
         </Select>
       </FormControl>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 130 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 116 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
         <InputLabel>Sort</InputLabel>
         <Select label="Sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-timeline-sort>
           <MenuItem value="start">Start date</MenuItem>
@@ -1536,7 +1578,7 @@ export default function Timeline({
         control={<Switch size="small" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} inputProps={{ 'aria-label': 'active projects only' }} />}
         label={(
           <Tooltip title="Active this week: its dates cover this week, Jira work under it does, somebody sent an update on it this week, or a decision on it is open — or an administrator set it to always active">
-            <span>Active only ({activeList.length})</span>
+            <span>Active ({activeList.length})</span>
           </Tooltip>
         )}
       />
@@ -1642,7 +1684,7 @@ export default function Timeline({
           placeholder="Search key, project, programme"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          sx={{ flex: '1 1 160px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
+          sx={{ flex: '1 1 90px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18 }} /></InputAdornment> }}
         />
         {narrow ? (
@@ -1658,7 +1700,8 @@ export default function Timeline({
             Filters{changed ? ` (${changed})` : ''}
           </Button>
         ) : filters}
-        <Box sx={{ flex: 1, minWidth: 0 }} />
+        {/* The room left over goes to the search box, not to empty space. */}
+        <Box sx={{ flex: narrow ? 1 : '0 0 0px', minWidth: 0 }} />
         <ToggleButtonGroup
           size="small"
           exclusive
