@@ -369,3 +369,38 @@ export const newJiraProject = async (body) => send('POST', '/api/jira/projects',
 export const decisions = async (status = 'open') => jp(await fetch(vq(`/api/decisions?status=${encodeURIComponent(status)}`)))
 export const jiraCoverage = async (week) => jp(await fetch(`/api/jira/coverage/${encodeURIComponent(week)}`))
 export const decide = async (id, note) => send('POST', `/api/decisions/${encodeURIComponent(id)}/decide`, { note })
+
+/* ------------------------------------------------------------ presentations */
+
+const sendJson = (method, url, body) => fetch(url, {
+  method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+})
+
+export const listDecks = async () => (await j(await fetch('/api/decks'))).decks || []
+export const getDeck = async (id) => (await j(await fetch(`/api/decks/${encodeURIComponent(id)}`))).deck
+export const createDeck = async (deck) => (await j(await sendJson('POST', '/api/decks', deck))).deck
+export const deleteDeck = async (id) => j(await sendJson('DELETE', `/api/decks/${encodeURIComponent(id)}`))
+
+/**
+ * Save a whole deck. A 409 means somebody saved it after it was opened; the
+ * error then carries their deck (`err.deck`) so the page can offer it.
+ */
+export async function saveDeck(id, deck) {
+  const res = await sendJson('PUT', `/api/decks/${encodeURIComponent(id)}`, deck)
+  const body = await res.json().catch(() => ({}))
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
+  if (!res.ok) {
+    const e = new Error(body.error || `Saving failed (${res.status})`)
+    e.status = res.status
+    e.deck = body.deck || null
+    throw e
+  }
+  return body.deck
+}
+
+export const deckBrand = async () => (await j(await fetch('/api/decks/brand'))).brand || {}
+export const setDeckBrand = async (patch) => (await j(await sendJson('PUT', '/api/decks/brand', patch))).brand
+export const addDeckAsset = async (dataUrl, name) => j(await sendJson('POST', '/api/decks/assets', { dataUrl, name }))
+export const deckProject = async (key) => j(await fetch(`/api/decks/project/${encodeURIComponent(key)}`))
+export const deckAi = async (body) => j(await sendJson('POST', '/api/decks/ai', body))
+export const deckFacts = async (keys) => (await j(await sendJson('POST', '/api/decks/facts', { keys }))).facts || {}

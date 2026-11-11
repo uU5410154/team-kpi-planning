@@ -53,6 +53,8 @@ import People from './pages/People.jsx'
 import Team from './pages/Team.jsx'
 import Timeline from './pages/Timeline.jsx'
 import Apps from './pages/Apps.jsx'
+import Presentation from './pages/Presentation.jsx'
+import SlideshowIcon from '@mui/icons-material/SlideshowOutlined'
 import Settings from './pages/Settings.jsx'
 import SignIn from './pages/SignIn.jsx'
 import Users from './pages/Users.jsx'
@@ -99,6 +101,11 @@ const TABS = [
   // Beside the register rather than inside it: the register answers what a
   // project is worth, this answers when it was supposed to land.
   { id: 'timeline', label: 'Timeline', icon: TimelineIcon, roles: ['admin', 'user'] },
+  /*
+   * Decks for meetings, in the IT governance format. Everybody's, as agreed:
+   * a member presents their projects too, and a deck may carry any project.
+   */
+  { id: 'presentation', label: 'Presentation', icon: SlideshowIcon, roles: ['admin', 'user'] },
   { id: 'apps', label: 'Apps', icon: AppsIcon, roles: ['admin', 'user'] },
   { id: 'settings', label: 'Model', icon: TuneIcon, roles: ['admin'] },
   { id: 'users', label: 'Access', icon: AdminIcon, roles: ['admin'] },
@@ -1492,6 +1499,7 @@ export default function App() {
             />
           )}
           {allowed && tab === 'team' && <Team plan={shown} own={member} />}
+          {allowed && tab === 'presentation' && <Presentation plan={plan} me={me} />}
           {allowed && tab === 'apps' && <Apps apps={state.apps || []} onChange={updateApps} loading={appsLoading || sharedLoading} />}
           {allowed && tab === 'timeline' && (
             <Timeline

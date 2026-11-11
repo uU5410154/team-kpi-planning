@@ -345,7 +345,7 @@ try {
     const memberTabs = await tabs()
     check('A TEAM MEMBER GETS WHAT THE TEAM IS CARRYING, AND WHEN IT LANDS',
       // Weekly first: it is the one page a member comes to do something on.
-      JSON.stringify(memberTabs) === JSON.stringify(['Weekly', 'My scorecard', 'Timeline', 'Apps']),
+      JSON.stringify(memberTabs) === JSON.stringify(['Weekly', 'My scorecard', 'Timeline', 'Presentation', 'Apps']),
       memberTabs.join(' | '))
     check('  and NOT the register, where the numbers are typed',
       !memberTabs.includes('Projects'))

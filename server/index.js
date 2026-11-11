@@ -14,6 +14,7 @@ import * as llm from './llm.js'
 import * as ai from './ai.js'
 import * as manager from './manager.js'
 import * as jiraWeek from './jiraWeek.js'
+import * as decks from './decks.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -815,6 +816,165 @@ app.delete('/api/ai/chats/:id', adminOnly, async (req, res) => {
 })
 
 /* ----------------------------- accounts ----------------------------- */
+
+/* -------------------------------- presentations -------------------------------- */
+
+/*
+ * THE TEAM'S SLIDE DECKS. One shared list, as agreed: administrators and team
+ * members alike open and edit any deck, and may put any project on a slide —
+ * a deck is shown in a meeting, so it carries the whole team's work. Deleting
+ * a deck is for whoever made it, or an administrator.
+ */
+const deckFail = (res, r) => res.status(r.status || 400).json({ error: r.error, ...(r.deck ? { deck: r.deck } : {}) })
+
+app.get('/api/decks', async (_req, res) => {
+  const r = await decks.list()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ decks: r })
+})
+
+app.post('/api/decks', async (req, res) => {
+  const r = await decks.create(req.body || {}, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ deck: r })
+})
+
+app.get('/api/decks/brand', async (_req, res) => {
+  const r = await decks.getBrand()
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ brand: r })
+})
+
+app.put('/api/decks/brand', adminOnly, async (req, res) => {
+  const r = await decks.setBrand(req.body || {}, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return deckFail(res, r)
+  return res.json({ brand: r })
+})
+
+app.post('/api/decks/assets', async (req, res) => {
+  const r = await decks.addAsset(req.body || {}, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return deckFail(res, r)
+  return res.json(r)
+})
+
+app.get('/api/decks/assets/:id', async (req, res) => {
+  const r = await decks.getAsset(req.params.id)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (!r) return res.status(404).json({ error: 'No such picture.' })
+  // A picture never changes under its id, so the browser may keep it.
+  res.set('Cache-Control', 'private, max-age=31536000, immutable')
+  res.type(r.mime)
+  return res.send(r.data)
+})
+
+/*
+ * ONE PROJECT, AS A SLIDE NEEDS IT: its last eight weeks of updates, open
+ * blockers and date proposals, for drilling into a card while presenting and
+ * for drafting the card. Any signed-in person may ask — see above.
+ */
+const projectFacts = async (keys) => {
+  const [byProject, scenario] = await Promise.all([weekly.byProject({}), store.getScenario(process.env.JIRA_SYNC_SCENARIO || 'Baseline')])
+  if (byProject === store.UNAVAILABLE || scenario === store.UNAVAILABLE) return store.UNAVAILABLE
+  const ro = await weekly.roster()
+  const nick = Object.fromEntries((ro === store.UNAVAILABLE ? [] : ro.people).map((p) => [p.id, p.nick]))
+  const projects = scenario?.payload?.projects || []
+  const out = {}
+  for (const key of keys) {
+    const p = projects.find((x) => x.key === key && !x.deleted) || null
+    const w = byProject[key] || { history: [], blockers: [], proposals: [] }
+    out[key] = {
+      project: p && {
+        key: p.key, summary: p.summary, team: p.team, subTeam: p.subTeam, program: p.program, status: p.status, hold: p.hold || null,
+        start: p.start, due: p.due, actualStart: p.actualStart, actualEnd: p.actualEnd, adjustedDue: p.adjustedDue, adjustedCause: p.adjustedCause,
+        savingHours: p.savingHours, notes: p.notes, softBenefits: p.softBenefits, pic: nick[p.pic] || p.pic, jiraKey: p.jiraKey,
+        tasksTotal: p.tasksTotal, tasksDone: p.tasksDone,
+      },
+      history: w.history.map((x) => ({ ...x, nick: nick[x.person] || x.person })),
+      blockers: w.blockers.map((x) => ({ ...x, nick: nick[x.person] || x.person })),
+      proposals: (w.proposals || []).map((x) => ({ week: x.week, status: x.status, from: x.from, to: x.to, reason: x.reason, projectKey: x.projectKey })),
+    }
+  }
+  return out
+}
+
+app.get('/api/decks/project/:key', async (req, res) => {
+  const key = String(req.params.key || '')
+  if (!/^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(key)) return res.status(400).json({ error: 'Not a project key.' })
+  const r = await projectFacts([key])
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json(r[key])
+})
+
+/* The same, for many projects at once: a deck's worth of cards. */
+app.post('/api/decks/facts', async (req, res) => {
+  const keys = [...new Set((Array.isArray(req.body?.keys) ? req.body.keys : []).map(String).filter((k) => /^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(k)))].slice(0, 80)
+  const r = await projectFacts(keys)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ facts: r })
+})
+
+app.post('/api/decks/ai', async (req, res) => {
+  if (!llm.allow(req.me.email)) return res.status(429).json({ error: 'That is a lot of requests in a minute. Wait a moment and try again.' })
+  const { mode } = req.body || {}
+  try {
+    let r
+    if (mode === 'rewrite') r = await decks.rewrite(req.body)
+    else if (mode === 'plan') r = await decks.plan(req.body)
+    else if (mode === 'draft') {
+      const keys = (Array.isArray(req.body.keys) ? req.body.keys : []).map(String).filter((k) => /^[A-Za-z][A-Za-z0-9_]*-\d+$/.test(k)).slice(0, 12)
+      const facts = await projectFacts(keys)
+      if (facts === store.UNAVAILABLE) return unavailable(res)
+      // What the AI is given: the facts, trimmed to what a card can say.
+      const projects = keys.map((k) => {
+        const f = facts[k]
+        return {
+          key: k,
+          name: f.project?.summary || k,
+          status: f.project?.status,
+          dates: [f.project?.start, f.project?.due].filter(Boolean).join(' → '),
+          notes: String(f.project?.notes || '').slice(0, 400),
+          benefits: f.project?.softBenefits,
+          savingHoursPerMonth: f.project?.savingHours || undefined,
+          updates: f.history.slice(0, 12).map((h) => [h.week, h.title, h.done === true ? 'done' : h.done === false ? 'not done' : '', h.progress, h.blocker].filter(Boolean).join(' · ').slice(0, 300)),
+          blockers: f.blockers.slice(0, 4).map((b) => b.blocker),
+          tasks: (Array.isArray(req.body.tasks?.[k]) ? req.body.tasks[k] : []).slice(0, 20).map((t) => String(t).slice(0, 160)),
+        }
+      })
+      r = await decks.draftCards({ projects, instruction: req.body.instruction })
+    } else return res.status(400).json({ error: 'Unknown AI request.' })
+    if (r.error) return res.status(r.status || 400).json({ error: r.error })
+    return res.json(r)
+  } catch (e) {
+    return aiFailed(res, e)
+  }
+})
+
+app.get('/api/decks/:id', async (req, res) => {
+  const r = await decks.get(req.params.id)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (!r) return res.status(404).json({ error: 'That deck does not exist (any more).' })
+  return res.json({ deck: r })
+})
+
+app.put('/api/decks/:id', async (req, res) => {
+  const r = await decks.save(req.params.id, req.body || {}, req.me.email)
+  if (r === store.UNAVAILABLE) return unavailable(res)
+  if (r.error) return deckFail(res, r)
+  return res.json(r)
+})
+
+app.delete('/api/decks/:id', async (req, res) => {
+  const d = await decks.get(req.params.id)
+  if (d === store.UNAVAILABLE) return unavailable(res)
+  if (!d) return res.json({ deleted: 0 })
+  if (req.me.role !== 'admin' && d.createdBy !== req.me.email) {
+    return res.status(403).json({ error: 'Only the person who made this deck, or an administrator, can delete it.' })
+  }
+  const r = await decks.remove(req.params.id)
+  return res.json(r)
+})
 
 app.get('/api/auth/config', (_req, res) => res.json({
   ...auth.status(),

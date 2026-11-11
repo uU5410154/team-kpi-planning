@@ -388,7 +388,7 @@ try {
     await a.waitForFunction(() => document.body.innerText.includes('Viewing as a team member'), { timeout: 8000 }).catch(() => {})
     const tabsNow = await a.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim()))
     check('SWITCHED TO A MEMBER’S VIEW: A MEMBER’S PAGES, AND NO OTHERS',
-      JSON.stringify(tabsNow) === JSON.stringify(['Weekly', 'My scorecard', 'Timeline', 'Apps']), tabsNow.join(' | '))
+      JSON.stringify(tabsNow) === JSON.stringify(['Weekly', 'My scorecard', 'Timeline', 'Presentation', 'Apps']), tabsNow.join(' | '))
     check('  landed on their week, since a member has no Dashboard', (await selected()) === 'Weekly')
     await a.waitForFunction(() => document.body.innerText.includes('My week'), { timeout: 10000 }).catch(() => {})
     const asText = await a.evaluate(() => document.body.innerText)
@@ -397,10 +397,10 @@ try {
     check('  and it says so, with the way back', asText.includes('Viewing as a team member') && asText.includes('Back to administrator'))
     await a.reload({ waitUntil: 'networkidle0' })
     await a.waitForSelector('[role="tab"]', { timeout: 15000 })
-    check('  REMEMBERED ACROSS A RELOAD', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 4)
+    check('  REMEMBERED ACROSS A RELOAD', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 5)
     await a.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Back to administrator')?.click())
-    await a.waitForFunction(() => document.querySelectorAll('[role="tab"]').length > 4, { timeout: 8000 }).catch(() => {})
-    check('“BACK TO ADMINISTRATOR” BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 9)
+    await a.waitForFunction(() => document.querySelectorAll('[role="tab"]').length > 5, { timeout: 8000 }).catch(() => {})
+    check('“BACK TO ADMINISTRATOR” BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 10)
 
     console.log('\n--- the member, on a phone ---')
     const m = await as(james, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
