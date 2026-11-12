@@ -15,6 +15,7 @@ import * as ai from './ai.js'
 import * as manager from './manager.js'
 import * as jiraWeek from './jiraWeek.js'
 import * as decks from './decks.js'
+import { statusPatch } from '../src/lib/projectStatus.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -707,6 +708,29 @@ app.put('/api/projects/columns', adminOnly, async (req, res) => {
 })
 
 /* The Projects page's blocks and figures, as an administrator arranged them for everybody. */
+/*
+ * A PROJECT'S STATUS, set by whoever holds it. An administrator's browser
+ * saves the whole plan as usual; a team member cannot, so their choice comes
+ * here and is written into the shared plan for the projects they hold — as
+ * PIC or as a contributor, and no others.
+ */
+app.put('/api/projects/:key/status', async (req, res) => {
+  const key = String(req.params.key || '')
+  const patch = statusPatch(String(req.body?.status || ''), req.me.email)
+  if (!patch) return res.status(400).json({ error: 'A status is Not Start, In Progress, On Hold or Done.' })
+  const name = process.env.JIRA_SYNC_SCENARIO || 'Baseline'
+  const doc = await store.getScenario(name)
+  if (doc === store.UNAVAILABLE) return unavailable(res)
+  const p = (doc?.payload?.projects || []).find((x) => x.key === key && !x.deleted)
+  if (!p) return res.status(404).json({ error: `No project ${key} in the register.` })
+  const mine = !!req.me.person && (p.pic === req.me.person || (p.contributors || []).some((c) => c?.person === req.me.person))
+  if (req.me.role !== 'admin' && !mine) return res.status(403).json({ error: 'Only the project\'s PIC or a contributor, or an administrator, can change its status.' })
+  const projects = doc.payload.projects.map((x) => (x.key === key ? { ...x, ...patch } : x))
+  const saved = await store.saveScenario(name, { ...doc.payload, projects }, `${req.me.email} (status)`)
+  if (saved === store.UNAVAILABLE) return unavailable(res)
+  return res.json({ project: { key, ...patch } })
+})
+
 app.get('/api/projects/layout', async (_req, res) => {
   const r = await manager.getProjectLayout()
   if (r === store.UNAVAILABLE) return unavailable(res)

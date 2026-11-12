@@ -16,6 +16,7 @@ import {
 import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import { ToggleButton, ToggleButtonGroup } from '@mui/material'
+import StatusPicker from '../components/StatusPicker.jsx'
 import * as api from '../lib/api.js'
 import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
@@ -48,7 +49,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * keystroke: a half-typed year is not a date, and this one is pushed to a real
  * ticket that other people are looking at.
  */
-function PlanEditor({ row, onSave, onHold, saving, jira }) {
+function PlanEditor({ row, onSave, onHold, saving, jira, status = null }) {
   const [start, setStart] = useState(row.timeline.plannedStart || '')
   const [due, setDue] = useState(row.timeline.plannedEnd || '')
   const bad = !!start && !!due && start > due
@@ -61,6 +62,15 @@ function PlanEditor({ row, onSave, onHold, saving, jira }) {
 
   return (
     <Box sx={{ p: 2, width: 290 }}>
+      {status && (
+        <>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>Status</Typography>
+            {status}
+          </Box>
+          <Divider sx={{ mb: 1.5 }} />
+        </>
+      )}
       <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>Planned dates</Typography>
       <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5 }}>
         {row.jiraKey
@@ -174,7 +184,7 @@ function PlanEditor({ row, onSave, onHold, saving, jira }) {
  */
 export default function Timeline({
   plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false, jump = null, note = null,
-  onOpenWeekly,
+  onOpenWeekly, onStatus,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -722,6 +732,21 @@ export default function Timeline({
   const activeList = useMemo(() => activeUnits(plan.projects, thisWeek, signals), [plan.projects, thisWeek, signals])
   const activeKeys = useMemo(() => new Set(activeList.flatMap((u) => u.keys)), [activeList])
   const projectOf = useMemo(() => Object.fromEntries(plan.projects.map((p) => [p.key, p])), [plan.projects])
+  /*
+   * A BAR'S STATUS, and the way to change it: one status for every register
+   * line behind the bar, as with "active". Everybody who can see a project
+   * here holds it (a team member is shown only their own), so everybody may.
+   */
+  const statusOf = (row) => {
+    const keys = (row?.projectKeys || [row?.projectKey]).filter((k) => k && projectOf[k])
+    if (!keys.length) return null
+    return (
+      <StatusPicker
+        project={projectOf[keys[0]]}
+        onPick={onStatus ? async (c) => { for (const k of keys) await onStatus(k, c) } : undefined}
+      />
+    )
+  }
   // Sent here by the header search: that project, whatever was filtered before.
   useEffect(() => {
     if (!jump?.q) return
@@ -1926,12 +1951,15 @@ export default function Timeline({
           ])
           return (
             <>
-              <DialogTitle sx={{ pb: 0.5 }}>
+              <DialogTitle sx={{ pb: 0.5, display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
                 {story.title}
                 <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
                   {[story.jiraKey, `due ${fmtD(story.timeline.plannedEnd)}`].filter(Boolean).join(' · ')}
                   {readOnly ? ' · only your own weeks are shown' : ' · the weekly check-ins, last eight weeks'}
                 </Typography>
+                </Box>
+                {statusOf(story)}
               </DialogTitle>
               <DialogContent dividers sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {wk.pending.length > 0 && (
@@ -2079,7 +2107,7 @@ export default function Timeline({
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       >
         {editing && (
-          <PlanEditor row={editing.row} onSave={savePlan} onHold={holdFinish} saving={saving} jira={jira} />
+          <PlanEditor row={editing.row} onSave={savePlan} onHold={holdFinish} saving={saving} jira={jira} status={statusOf(editing.row)} />
         )}
       </Popover>
 

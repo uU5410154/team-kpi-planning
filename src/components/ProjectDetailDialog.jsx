@@ -15,7 +15,7 @@ import Project from '../pages/Project.jsx'
  * wider. Esc closes it.
  */
 export default function ProjectDetailDialog({
-  projectKey, plan, canWrite, phone, onUpdate, onClose, onCostSheet, onShowTimeline,
+  projectKey, plan, canWrite, phone, onUpdate, onStatus, onClose, onCostSheet, onShowTimeline,
 }) {
   const p = projectKey == null ? null : plan.projects.find((x) => x.key === projectKey)
   const open = !!projectKey
@@ -72,6 +72,7 @@ export default function ProjectDetailDialog({
               projectKey={projectKey}
               canWrite={canWrite}
               onUpdate={onUpdate}
+              onStatus={onStatus}
               onBack={onClose}
               onShowTimeline={(k) => { onClose(); onShowTimeline?.(k) }}
               inDialog

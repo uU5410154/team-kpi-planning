@@ -413,3 +413,8 @@ export async function saveInitiatives(items, rev) {
   if (!res.ok) { const e = new Error(body.error || `Saving failed (${res.status})`); e.status = res.status; e.list = body.list || null; throw e }
   return body
 }
+
+/** A team member's status change on a project they hold (an administrator saves the plan instead). */
+export const setProjectStatus = async (key, status) => j(await fetch(`/api/projects/${encodeURIComponent(key)}/status`, {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+}))

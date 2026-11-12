@@ -16,6 +16,7 @@ import {
 import {
   Pill, IconTile, PAGE_COLOR, personColor, statusTone,
 } from '../components/Brand.jsx'
+import StatusPicker from '../components/StatusPicker.jsx'
 import FollowUp, { ago } from '../components/FollowUp.jsx'
 import Loading from '../components/Loading.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
@@ -99,7 +100,7 @@ function TaskLine({ t }) {
 }
 
 export default function Project({
-  plan, projectKey, canWrite, onUpdate, onBack, onShowTimeline, inDialog = false, actions = null,
+  plan, projectKey, canWrite, onUpdate, onStatus, onBack, onShowTimeline, inDialog = false, actions = null,
 }) {
   const p = plan.projects.find((x) => x.key === projectKey)
     || plan.projects.find((x) => String(x.jiraKey || '').toUpperCase() === String(projectKey || '').toUpperCase())
@@ -193,15 +194,22 @@ export default function Project({
                     </Link>
                   )
                   : <Typography variant="body2" sx={{ fontWeight: 600 }}>{jiraKey}</Typography>)}
-                {held
+                {onStatus
                   ? (
-                    <Pill
-                      label="On Hold"
-                      tone="warn"
-                      title={heldInJira ? `On hold in Jira (${heldInJira}). Its tasks are left out of the weekly update.` : 'Put on hold from a weekly update. Its tasks are left out of the weekly update.'}
-                    />
+                    <span title={held ? (heldInJira ? `On hold in Jira (${heldInJira}). Its tasks are left out of the weekly update.` : 'On hold. Its tasks are left out of the weekly update.') : 'Change the status'}>
+                      {/* Every register line behind this page is the same work: one status for all of them. */}
+                      <StatusPicker project={p} onPick={async (c) => { for (const k of keys) await onStatus(k, c) }} />
+                    </span>
                   )
-                  : (p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
+                  : held
+                    ? (
+                      <Pill
+                        label="On Hold"
+                        tone="warn"
+                        title={heldInJira ? `On hold in Jira (${heldInJira}). Its tasks are left out of the weekly update.` : 'Put on hold from a weekly update. Its tasks are left out of the weekly update.'}
+                      />
+                    )
+                    : (p.srcStatus || p.status) && <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />}
                 {signalsReady
                   ? (
                     <Box component="span" data-active-pill={active ? 'on' : 'off'} data-active-why={why} sx={{ display: 'inline-flex' }}>

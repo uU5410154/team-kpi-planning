@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { Pill, statusTone } from '../components/Brand.jsx'
+import StatusPicker from '../components/StatusPicker.jsx'
 import { projectOnHold } from '../lib/hold.js'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
@@ -464,7 +465,7 @@ function PhoneList({ rows, assignees, onOpen }) {
 export default function Projects({
   plan, onUpdate, onBulk, onAdd, onDelete, onImport,
   onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo, jump = null,
-  canWrite = true, onShowTimeline,
+  canWrite = true, onShowTimeline, onStatus,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -1904,11 +1905,13 @@ export default function Projects({
                   <TableCell>
                     {/* A pill, coloured by where the work is; the word is on it
                         too. Whatever Jira calls it is shown as it is. */}
-                    {projectOnHold(p)
-                      ? <Pill label="On Hold" tone="warn" />
-                      : (p.srcStatus || p.status)
-                      ? <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />
-                      : <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>}
+                    {onStatus
+                      ? <StatusPicker project={p} onPick={(c) => onStatus(p.key, c)} />
+                      : projectOnHold(p)
+                        ? <Pill label="On Hold" tone="warn" />
+                        : (p.srcStatus || p.status)
+                          ? <Pill label={p.srcStatus || p.status} tone={statusTone(p.status || p.srcStatus)} />
+                          : <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>}
                     {p.pastDue && (
                       // The date lives in the tooltip: spelled out here it was
                       // the widest thing in the column and pushed ROI off-screen.
@@ -1992,6 +1995,7 @@ export default function Projects({
         canWrite={canWrite}
         phone={phone}
         onUpdate={onUpdate}
+        onStatus={onStatus}
         onClose={() => setDetailKey(null)}
         onCostSheet={(k) => setCostKey(k)}
         onShowTimeline={onShowTimeline}

@@ -54,6 +54,7 @@ import Team from './pages/Team.jsx'
 import Timeline from './pages/Timeline.jsx'
 import Apps from './pages/Apps.jsx'
 import Presentation from './pages/Presentation.jsx'
+import { statusPatch } from './lib/projectStatus.js'
 import SlideshowIcon from '@mui/icons-material/SlideshowOutlined'
 import Settings from './pages/Settings.jsx'
 import SignIn from './pages/SignIn.jsx'
@@ -1128,6 +1129,24 @@ export default function App() {
    * browser's next automatic save carries the new date instead of quietly
    * putting the old one back.
    */
+  /*
+   * A PROJECT'S STATUS. An administrator's choice is an edit to the plan like
+   * any other and saves with it; a team member's goes to the server, which
+   * writes it for the projects they hold, and comes back here.
+   */
+  const setProjectStatus = async (key, choice) => {
+    try {
+      if (canWrite) {
+        const patch = statusPatch(choice, me?.email || null)
+        if (patch) updateProject(key, patch)
+        return
+      }
+      const r = await api.setProjectStatus(key, choice)
+      applyServerProjects([r.project])
+    } catch (e) {
+      setToast({ severity: 'error', msg: `The status was not changed: ${api.plainError(e)}` })
+    }
+  }
   const applyServerProjects = (changed) => {
     const by = Object.fromEntries((changed || []).map((x) => [x.key, x]))
     if (!Object.keys(by).length) return
@@ -1463,6 +1482,7 @@ export default function App() {
               projectKey={hashArg.page === 'project' ? hashArg.key : null}
               canWrite={canWrite}
               onUpdate={updateProject}
+              onStatus={canWrite ? setProjectStatus : undefined}
               onBack={() => (window.history.length > 1 ? window.history.back() : setTab('dashboard'))}
               onShowTimeline={showOnTimeline}
             />
@@ -1484,6 +1504,7 @@ export default function App() {
               onGoTo={setTab}
               jump={jump?.tab === 'projects' ? jump : null}
               canWrite={canWrite}
+              onStatus={canWrite ? setProjectStatus : undefined}
               onShowTimeline={showOnTimeline}
             />
           )}
@@ -1506,6 +1527,7 @@ export default function App() {
               plan={shown}
               settings={plan.settings}
               onUpdate={updateProject}
+              onStatus={setProjectStatus}
               onAddProjects={addProjects}
               onReplaceProjects={replaceProjects}
               rawProjects={state.projects}
