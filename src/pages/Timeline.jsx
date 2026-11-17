@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Chip, TextField, Select, MenuItem, FormControl, InputLabel,
   FormControlLabel, Switch, Tooltip, InputAdornment, Button, Alert, LinearProgress, useMediaQuery, Collapse,
+  ListSubheader,
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import FilterListIcon from '@mui/icons-material/FilterList'
@@ -699,11 +700,12 @@ export default function Timeline({
   const [fPic, setFPic] = useState('all')
   const [fState, setFState] = useState('all')
   /*
-   * TEAM AND SUB TEAM, the register's own (Finance › Channel, Accounting ›
-   * AP…), in one dropdown so the toolbar stays one line: 'all', a whole team
-   * ('t|Finance') or one of its sub teams ('s|Finance|Channel').
+   * TEAM AND SUB TEAM, the register's own, each a list of ticks: nothing
+   * ticked is everything. A sub team is held as "team|sub", because the same
+   * name ("Mall") can belong to two teams.
    */
-  const [fTeam, setFTeam] = useState('all')
+  const [fTeams, setFTeams] = useState([])
+  const [fSubs, setFSubs] = useState([])
   const [ours, setOurs] = useState(true)
   // The administrator's own word on what is being worked on now. Read by the
   // manager dashboard; nothing becomes active by itself.
@@ -750,7 +752,7 @@ export default function Timeline({
   // Sent here by the header search: that project, whatever was filtered before.
   useEffect(() => {
     if (!jump?.q) return
-    setQ(jump.q); setFPic('all'); setFState('all'); setFTeam('all'); setOurs(false); setOnlyActive(false)
+    setQ(jump.q); setFPic('all'); setFState('all'); setFTeams([]); setFSubs([]); setOurs(false); setOnlyActive(false)
   }, [jump?.n])
 
   const rows = useMemo(() => {
@@ -761,12 +763,8 @@ export default function Timeline({
       .filter((p) => (onlyActive ? activeKeys.has(p.key) : true))
       .filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd || p.timeline.actualStart)
       .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
-      .filter((p) => {
-        if (fTeam === 'all') return true
-        const [kind, team, sub] = fTeam.split('|')
-        if ((p.team || 'none') !== team) return false
-        return kind === 't' || (p.subTeam || 'none') === sub
-      })
+      .filter((p) => !fTeams.length || fTeams.includes(p.team || 'none'))
+      .filter((p) => !fSubs.length || fSubs.includes(`${p.team || 'none'}|${p.subTeam || 'none'}`))
       .filter((p) => {
         if (fState === 'all') return true
         if (fState === 'late') return (p.timeline.lateBy ?? 0) > 0
@@ -791,7 +789,7 @@ export default function Timeline({
         if (sortBy === 'name') return String(a.summary || '').localeCompare(String(b.summary || ''))
         return byStart
       })
-  }, [plan.projects, q, fPic, fState, fTeam, ours, onlyActive, activeKeys, sortBy])
+  }, [plan.projects, q, fPic, fState, fTeams, fSubs, ours, onlyActive, activeKeys, sortBy])
 
   /* The teams and sub teams the register uses, each sub team under its team. */
   const teamTree = useMemo(() => {
@@ -802,12 +800,17 @@ export default function Timeline({
         .sort((a, b) => (a === 'none') - (b === 'none') || a.localeCompare(b)),
     }))
   }, [plan.projects])
-  const teamLabel = (v) => {
-    if (v === 'all') return 'All'
-    const [kind, team, sub] = v.split('|')
-    const t = team === 'none' ? 'No team' : team
-    return kind === 't' ? t : `${t} › ${sub === 'none' ? 'no sub team' : sub}`
-  }
+  const teamName = (t) => (t === 'none' ? 'No team' : t)
+  const subName = (v) => { const sub = v.split('|')[1]; return sub === 'none' ? 'No sub team' : sub }
+  // The sub teams on offer: those of the ticked teams, or of every team.
+  const subGroups = teamTree.filter(({ team }) => !fTeams.length || fTeams.includes(team))
+  // Ticking teams drops the sub teams that no longer belong to them.
+  useEffect(() => {
+    if (!fTeams.length) return
+    setFSubs((xs) => { const kept = xs.filter((v) => fTeams.includes(v.split('|')[0])); return kept.length === xs.length ? xs : kept })
+  }, [fTeams])
+  // "All", the one ticked, or "2 of 9" — short enough for the narrow box.
+  const ticked = (list, name, of) => (!list.length ? 'All' : list.length === 1 ? name(list[0]) : `${list.length} of ${of}`)
 
   /*
    * ONE BAR PER TICKET.
@@ -1521,7 +1524,7 @@ export default function Timeline({
    * The figures follow the search box and the filters: they describe the bars
    * on screen, and the line says whether that is everything or a part of it.
    */
-  const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || fTeam !== 'all' || !ours || onlyActive
+  const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || fTeams.length > 0 || fSubs.length > 0 || !ours || onlyActive
   // Undated projects are never on the chart; how many there are is the register's figure.
   const t = { ...timelinessOf(rows), noDates: filtering ? 0 : plan.totals.timeliness.noDates }
   const stats = [
@@ -1543,7 +1546,7 @@ export default function Timeline({
 
   // Narrow, how many filters are away from their defaults — on the button
   // that hides them, so a short list is never a mystery.
-  const changed = [fTeam !== 'all', fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
+  const changed = [fTeams.length > 0, fSubs.length > 0, fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
 
   // Small, quiet controls: a toolbar, not a form.
   const jiraBtn = { fontSize: '0.75rem', px: 1, minWidth: 0 }
@@ -1551,27 +1554,55 @@ export default function Timeline({
   const switchLabel = { m: 0, gap: 0.25, '& .MuiFormControlLabel-label': { fontSize: '0.8rem', whiteSpace: 'nowrap' } }
   const filters = (
     <>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 108 }, maxWidth: { sm: 200 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
-        <InputLabel>Team</InputLabel>
-        <Select label="Team" value={fTeam} onChange={(e) => setFTeam(e.target.value)} renderValue={teamLabel} data-timeline-team>
-          <MenuItem value="all">All teams</MenuItem>
-          {teamTree.flatMap(({ team, subs }) => [
-            <MenuItem key={`t|${team}`} value={`t|${team}`} sx={{ fontWeight: 700 }}>{team === 'none' ? 'No team' : team} — all</MenuItem>,
-            ...subs.map((sub) => (
-              <MenuItem key={`s|${team}|${sub}`} value={`s|${team}|${sub}`} sx={{ pl: 4, fontSize: '0.85rem' }}>
-                {sub === 'none' ? 'No sub team' : sub}
-              </MenuItem>
-            )),
-          ])}
+      <FormControl size="small" sx={{ width: { sm: 94 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+        <InputLabel shrink>Team</InputLabel>
+        <Select
+          multiple displayEmpty notched label="Team" value={fTeams} data-timeline-team
+          onChange={(e) => { const v = [].concat(e.target.value); setFTeams(v.includes('__clear') ? [] : v.filter(Boolean)) }}
+          renderValue={(v) => ticked(v, teamName, teamTree.length)}
+        >
+          {teamTree.map(({ team }) => (
+            <MenuItem key={team} value={team} dense>
+              <Checkbox size="small" checked={fTeams.includes(team)} sx={{ p: 0.5, mr: 1 }} />
+              <ListItemText primary={teamName(team)} />
+            </MenuItem>
+          ))}
+          {fTeams.length > 0 && <Divider />}
+          {fTeams.length > 0 && <MenuItem dense value="__clear" sx={{ color: 'primary.main', fontSize: '0.8rem' }}>Clear — all teams</MenuItem>}
         </Select>
       </FormControl>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 104 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+      <FormControl size="small" sx={{ width: { sm: 108 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+        <InputLabel shrink>Sub team</InputLabel>
+        <Select
+          multiple displayEmpty notched label="Sub team" value={fSubs} data-timeline-subteam
+          onChange={(e) => { const v = [].concat(e.target.value); setFSubs(v.includes('__clear') ? [] : v.filter((x) => x && x.includes('|'))) }}
+          renderValue={(v) => ticked(v, subName, subGroups.reduce((a, g) => a + g.subs.length, 0))}
+          MenuProps={{ PaperProps: { sx: { maxHeight: 460 } } }}
+        >
+          {subGroups.flatMap(({ team, subs }) => [
+            // A heading per team when more than one is on offer.
+            ...(subGroups.length > 1 ? [<ListSubheader key={`h|${team}`} sx={{ lineHeight: '30px', fontSize: '0.72rem', fontWeight: 700 }}>{teamName(team)}</ListSubheader>] : []),
+            ...subs.map((sub) => {
+              const v = `${team}|${sub}`
+              return (
+                <MenuItem key={v} value={v} dense>
+                  <Checkbox size="small" checked={fSubs.includes(v)} sx={{ p: 0.5, mr: 1 }} />
+                  <ListItemText primary={sub === 'none' ? 'No sub team' : sub} />
+                </MenuItem>
+              )
+            }),
+          ])}
+          {fSubs.length > 0 && <Divider />}
+          {fSubs.length > 0 && <MenuItem dense value="__clear" sx={{ color: 'primary.main', fontSize: '0.8rem' }}>Clear — all sub teams</MenuItem>}
+        </Select>
+      </FormControl>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 96 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
         <InputLabel>PIC</InputLabel>
         <Select label="PIC" value={fPic} onChange={(e) => setFPic(e.target.value)}>
           {picks.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
         </Select>
       </FormControl>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 122 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 112 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
         <InputLabel>State</InputLabel>
         <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
           <MenuItem value="all">Everything</MenuItem>
@@ -1584,7 +1615,7 @@ export default function Timeline({
           <MenuItem value="not started">Not started</MenuItem>
         </Select>
       </FormControl>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 116 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 106 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
         <InputLabel>Sort</InputLabel>
         <Select label="Sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-timeline-sort>
           <MenuItem value="start">Start date</MenuItem>
@@ -1702,14 +1733,14 @@ export default function Timeline({
       <Paper
         variant="outlined"
         data-timeline="filters"
-        sx={{ px: 1, py: 0.75, display: 'flex', gap: 1, rowGap: 0.75, flexWrap: 'wrap', alignItems: 'center', borderRadius: 2.5 }}
+        sx={{ px: 1, py: 0.75, display: 'flex', gap: 0.75, rowGap: 0.75, flexWrap: 'wrap', alignItems: 'center', borderRadius: 2.5 }}
       >
         <TextField
           size="small"
           placeholder="Search key, project, programme"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          sx={{ flex: '1 1 90px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
+          sx={{ flex: '1 1 84px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18 }} /></InputAdornment> }}
         />
         {narrow ? (
@@ -1732,7 +1763,7 @@ export default function Timeline({
           exclusive
           value={scale}
           onChange={(_e, v) => v && setScale(v)}
-          sx={{ '& .MuiToggleButton-root': { py: 0.4, px: 1.25, fontSize: '0.75rem', lineHeight: 1.4 } }}
+          sx={{ '& .MuiToggleButton-root': { py: 0.4, px: 1, fontSize: '0.75rem', lineHeight: 1.4 } }}
         >
           <ToggleButton value="day">Day</ToggleButton>
           <ToggleButton value="week">Week</ToggleButton>
