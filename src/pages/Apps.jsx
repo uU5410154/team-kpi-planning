@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions,
   TextField, IconButton, Tooltip, ToggleButton, ToggleButtonGroup, MenuItem, Select, FormControl,
-  InputLabel, Autocomplete,
+  InputLabel, Autocomplete, InputAdornment,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import SearchIcon from '@mui/icons-material/Search'
 import CloseIcon from '@mui/icons-material/Close'
 import DoneIcon from '@mui/icons-material/Done'
 import EditIcon from '@mui/icons-material/Edit'
@@ -77,11 +78,21 @@ export default function Apps({ apps, onChange, loading = false }) {
    */
   const [status, setStatus] = useState('all')
   const [dept, setDept] = useState('all')
-  const flat = useMemo(() => items.flatMap((it) => (isFolder(it) ? (it.items || []) : [it])), [items])
+  const [query, setQuery] = useState('')
+  // Apps inside folders are searched too; a folder's name finds what is in it.
+  const flat = useMemo(() => items.flatMap((it) => (isFolder(it)
+    ? (it.items || []).map((a) => ({ ...a, folderName: it.name }))
+    : [it])), [items])
   const departments = useMemo(() => [...new Set(flat.map((a) => a.department).filter(Boolean))].sort(), [flat])
-  const inDept = flat.filter((a) => dept === 'all' || a.department === dept)
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const matches = (a) => {
+    if (!words.length) return true
+    const hay = [a.name, a.department, statusOf(a.status)?.label, a.note, a.url, a.folderName].filter(Boolean).join(' ').toLowerCase()
+    return words.every((w) => hay.includes(w))
+  }
+  const inDept = flat.filter((a) => (dept === 'all' || a.department === dept) && matches(a))
   const countOf = (id) => inDept.filter((a) => a.status === id).length
-  const filtering = status !== 'all' || dept !== 'all'
+  const filtering = status !== 'all' || dept !== 'all' || words.length > 0
   const filtered = filtering ? inDept.filter((a) => status === 'all' || a.status === status) : null
 
   const folder = !filtering && openFolder ? items.find((it) => it.id === openFolder) : null
@@ -299,7 +310,7 @@ export default function Apps({ apps, onChange, loading = false }) {
           {editing ? (
             <Button variant="contained" startIcon={<DoneIcon />} onClick={() => setEditing(false)}>Done</Button>
           ) : (
-            <Button variant="outlined" startIcon={<EditIcon />} onClick={() => { setStatus('all'); setDept('all'); setEditing(true) }}>Arrange</Button>
+            <Button variant="outlined" startIcon={<EditIcon />} onClick={() => { setStatus('all'); setDept('all'); setQuery(''); setEditing(true) }}>Arrange</Button>
           )}
           <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setDialog({ mode: 'new' })}>
             Add app
@@ -328,8 +339,27 @@ export default function Apps({ apps, onChange, loading = false }) {
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
+        <TextField
+          size="small"
+          placeholder="Search apps"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setEditing(false) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setQuery('') }}
+          inputProps={{ 'aria-label': 'search apps', 'data-app-search': true }}
+          InputProps={{
+            startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18 }} /></InputAdornment>,
+            endAdornment: query ? (
+              <InputAdornment position="end">
+                <IconButton size="small" aria-label="clear search" onClick={() => setQuery('')} edge="end">
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </InputAdornment>
+            ) : null,
+          }}
+          sx={{ width: { xs: '100%', sm: 240 }, ml: { sm: 'auto' } }}
+        />
         {departments.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 190, ml: { sm: 'auto' } }}>
+          <FormControl size="small" sx={{ minWidth: 190 }}>
             <InputLabel id="app-dept">Department</InputLabel>
             <Select
               labelId="app-dept"
@@ -371,7 +401,9 @@ export default function Apps({ apps, onChange, loading = false }) {
                 ? <Loading label="Loading your apps…" />
                 : (
                   <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                    {filtering ? 'No app matches this status and department.' : 'Nothing here yet — add the first app.'}
+                    {filtering
+                      ? (words.length ? `No app matches “${query.trim()}”${status !== 'all' || dept !== 'all' ? ' with this status and department' : ''}.` : 'No app matches this status and department.')
+                      : 'Nothing here yet — add the first app.'}
                   </Typography>
                 )}
             </Box>

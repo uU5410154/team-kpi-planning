@@ -342,6 +342,22 @@ const opened = await page.evaluate(() => {
 })
 check('a tap follows the link', opened === 'https://jira.test/', String(opened))
 
+/* The search box: finds apps by name (and department, note, link, folder). */
+const searchFor = async (text) => {
+  await page.click('[data-app-search]', { count: 3 })
+  await page.keyboard.press('Backspace')
+  if (text) await page.type('[data-app-search]', text)
+  await new Promise((r) => setTimeout(r, 300))
+  return (await tiles()).map((x) => x.name).join('|')
+}
+check('THE APPS PAGE HAS ITS OWN SEARCH BOX', await page.evaluate(() => !!document.querySelector('[data-app-search]')))
+check('  "margin" finds the one app', (await searchFor('margin')) === 'Power BI Margin')
+check('  "power bi" finds both, every word must match', (await searchFor('power bi')) === 'Power BI Sales|Power BI Margin')
+check('  it searches the link too', (await searchFor('jira.test')) === 'Jira')
+check('  nothing matching says so', (await searchFor('zzz')) === ''
+  && await page.evaluate(() => document.body.textContent.includes('No app matches “zzz”')))
+check('  emptying it brings the whole screen back', (await searchFor('')).split('|').length === 3)
+
 /* The numbers this page must not touch. */
 const numbers = await page.evaluate(() => {
   const s2 = JSON.parse(localStorage.getItem('fa-tech-kpi-2026'))
