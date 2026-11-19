@@ -436,11 +436,6 @@ export default function Apps({ apps, onChange, loading = false }) {
                   zIndex: dragging ? 20 : 1,
                   cursor: 'pointer',
                   filter: dragging ? 'drop-shadow(0 12px 22px rgba(0,0,0,.45))' : 'none',
-                  animation: editing && !dragging ? 'wiggle 320ms ease-in-out infinite alternate' : 'none',
-                  '@keyframes wiggle': {
-                    from: { rotate: '-1.6deg' },
-                    to: { rotate: '1.6deg' },
-                  },
                 }}
               >
                 <Box sx={{ position: 'relative' }}>
