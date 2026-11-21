@@ -434,6 +434,9 @@ export const DEFAULT_SETTINGS = {
   // The source workbook's column is "Saving hrs/mth", and the 2025 plan was
   // also stated per month (1,823 hrs/month), so monthly is the right basis.
   savingBasis: 'monthly',
+  // Management's confirmation of that basis ({ by, at }), or null while it is
+  // an assumption. ROI rests on it, so the Management overview asks for it.
+  savingBasisApproval: null,
   finance: { ...DEFAULT_FINANCE },
   roleWeights: { ...DEFAULT_ROLE_WEIGHTS },
   // Whether "stretch" projects are shown inside the headline number.

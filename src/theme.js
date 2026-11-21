@@ -9,9 +9,9 @@ import { createTheme, alpha } from '@mui/material/styles'
  * those were validated for colour-blind contrast and a mood board is not a
  * reason to undo that.
  *
- * Dark is the mode the app opens in and the one this was designed for. Light
- * is the same palette turned over — lavender-white surfaces, the same blue —
- * so switching modes reads as the same product rather than a different one.
+ * LIGHT is the mode the app opens in, since November 2026 at management's
+ * request: white and soft blue (see SURFACE.light). Dark is still one click
+ * away on the header's sun/moon button, for whoever prefers it.
  */
 
 // Kept under its old name: the Excel export and a few pages import it, and the
@@ -44,17 +44,23 @@ export const SURFACE = {
     // violet at the far corner.
     sheen: 'linear-gradient(160deg, rgba(120,130,240,0.06) 0%, rgba(120,130,240,0) 45%)',
   },
+  /*
+   * LIGHT, as management asked (November 2026): white panels on a pale
+   * blue-grey page, soft grey hairlines, and the CP AXTRA blue for what can be
+   * pressed — the look of the finance Power BI reports, calm rather than
+   * bright. No violet glow: a faint blue wash at the top only.
+   */
   light: {
-    page: '#efeffb',
+    page: '#f3f6fa',
     panel: '#ffffff',
-    raised: '#f8f8ff',
+    raised: '#ffffff',
     rail: '#ffffff',
-    stage: 'rgba(255, 255, 255, 0.62)',
-    edge: 'rgba(30, 35, 90, 0.10)',
-    glow: 'rgba(139, 61, 255, 0.20)',
-    glow2: 'rgba(59, 91, 255, 0.14)',
-    glow3: 'rgba(168, 85, 247, 0.12)',
-    sheen: 'linear-gradient(155deg, rgba(99,102,241,0.06) 0%, rgba(255,255,255,0) 45%, rgba(168,85,247,0.04) 100%)',
+    stage: 'rgba(255, 255, 255, 0.94)',
+    edge: 'rgba(32, 58, 100, 0.13)',
+    glow: 'rgba(48, 111, 199, 0.07)',
+    glow2: 'rgba(48, 111, 199, 0.04)',
+    glow3: 'rgba(67, 147, 143, 0.03)',
+    sheen: 'none',
   },
 }
 
@@ -62,6 +68,9 @@ export const SURFACE = {
 // electric blue, so a primary button stands out without glaring.
 const BLUE = '#5468e0'
 const BLUE_DEEP = '#4256c4'
+// The light theme's blue: CP AXTRA blue (48, 111, 199), and a deeper shade.
+const AXTRA = '#306fc7'
+const AXTRA_DEEP = '#255aa3'
 
 const shared = (mode) => {
   const s = SURFACE[mode]
@@ -122,7 +131,7 @@ const shared = (mode) => {
           root: { textTransform: 'none', fontWeight: 650, borderRadius: 10 },
           containedPrimary: {
             boxShadow: 'none',
-            '&:hover': { boxShadow: 'none', backgroundColor: BLUE_DEEP },
+            '&:hover': { boxShadow: 'none', backgroundColor: dark ? BLUE_DEEP : AXTRA_DEEP },
           },
           outlined: { borderColor: s.edge },
         },
@@ -151,7 +160,7 @@ const shared = (mode) => {
             lineHeight: 1.5,
             maxWidth: 320,
             borderRadius: 8,
-            backgroundColor: dark ? '#1c2257' : '#1e2350',
+            backgroundColor: dark ? '#1c2257' : '#25344d',
             border: `1px solid ${dark ? s.edge : 'transparent'}`,
           },
         },
@@ -206,14 +215,14 @@ export const buildTheme = (mode) => {
           }
         : {
             mode: 'light',
-            primary: { main: BLUE_DEEP, dark: '#2b3fc4', light: BLUE, contrastText: '#ffffff' },
-            secondary: { main: '#7c3aed' },
+            primary: { main: AXTRA, dark: AXTRA_DEEP, light: '#6a98da', contrastText: '#ffffff' },
+            secondary: { main: '#43938f' },
             background: { default: s.page, paper: s.panel },
-            text: { primary: '#13163a', secondary: '#575c84' },
+            text: { primary: '#1f2a3d', secondary: '#5b6a80', disabled: 'rgba(31, 42, 61, 0.38)' },
             divider: s.edge,
             action: {
-              hover: 'rgba(58, 82, 232, 0.05)',
-              selected: 'rgba(58, 82, 232, 0.10)',
+              hover: 'rgba(48, 111, 199, 0.05)',
+              selected: 'rgba(48, 111, 199, 0.10)',
             },
           },
   })

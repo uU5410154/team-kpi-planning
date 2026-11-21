@@ -135,10 +135,12 @@ export function WelcomeBanner({
       overflow: 'hidden',
       borderRadius: '20px',
       color: '#fff',
-      // Deep indigo rather than bright violet: it marks the top of the page
-      // without being the brightest thing on it.
-      background: 'linear-gradient(135deg, #12153a 0%, #1b1a4a 55%, #2a2163 100%)',
-      border: '1px solid rgba(150, 140, 230, 0.18)',
+      // Deep indigo in dark mode; in light, a muted CP AXTRA blue — it marks
+      // the top of the page without being the brightest thing on it.
+      background: (t) => (t.palette.mode === 'dark'
+        ? 'linear-gradient(135deg, #12153a 0%, #1b1a4a 55%, #2a2163 100%)'
+        : 'linear-gradient(135deg, #2f63ad 0%, #2a5797 60%, #244b84 100%)'),
+      border: (t) => (t.palette.mode === 'dark' ? '1px solid rgba(150, 140, 230, 0.18)' : '1px solid rgba(48, 111, 199, 0.35)'),
       display: 'flex',
       flexDirection: 'column',
       // Fills its row, so beside two lists it is as tall as they are and the
@@ -157,12 +159,12 @@ export function WelcomeBanner({
         }}
       >
         {[60, 95, 130, 165, 200, 235].map((r) => (
-          <circle key={r} cx="300" cy="300" r={r} fill="none" stroke="#c4b5fd" strokeWidth="1" />
+          <Box component="circle" key={r} cx="300" cy="300" r={r} fill="none" strokeWidth="1" sx={{ stroke: (t) => (t.palette.mode === 'dark' ? '#c4b5fd' : '#cfe0f7') }} />
         ))}
       </Box>
       <Box sx={{
         position: 'absolute', top: -80, left: -60, width: 260, height: 260, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(99,102,241,0.22), transparent 70%)', pointerEvents: 'none',
+        background: (t) => (t.palette.mode === 'dark' ? 'radial-gradient(circle, rgba(99,102,241,0.22), transparent 70%)' : 'radial-gradient(circle, rgba(255,255,255,0.12), transparent 70%)'), pointerEvents: 'none',
       }}
       />
 

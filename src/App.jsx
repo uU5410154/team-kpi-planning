@@ -54,6 +54,10 @@ import Team from './pages/Team.jsx'
 import Timeline from './pages/Timeline.jsx'
 import Apps from './pages/Apps.jsx'
 import Presentation from './pages/Presentation.jsx'
+import Overview from './pages/Overview.jsx'
+import DataQuality from './pages/DataQuality.jsx'
+import InsightsIcon from '@mui/icons-material/InsightsOutlined'
+import FactCheckIcon from '@mui/icons-material/FactCheckOutlined'
 import { statusPatch } from './lib/projectStatus.js'
 import SlideshowIcon from '@mui/icons-material/SlideshowOutlined'
 import Settings from './pages/Settings.jsx'
@@ -77,6 +81,13 @@ import { memberView, memberProgress } from './lib/memberView.js'
  */
 const TABS = [
   { id: 'dashboard', label: 'Dashboard', icon: SpaceDashboardIcon, roles: ['admin'] },
+  /*
+   * Management's view (design summary, November 2026): the portfolio's
+   * delivery, capacity, cost and value on one screen, every figure with its
+   * definition and source, and the data checks it rests on beside it.
+   */
+  { id: 'overview', label: 'Management', icon: InsightsIcon, roles: ['admin'] },
+  { id: 'quality', label: 'Data quality', icon: FactCheckIcon, roles: ['admin'] },
   /*
    * The register and the individual scorecards are ADMIN ONLY.
    *
@@ -169,7 +180,8 @@ const OPENED_ON_PURPOSE = (() => {
 export default function App() {
   // Dark unless this browser has been told otherwise. A choice already made
   // here is still honoured — the toggle would be pointless if a reload undid it.
-  const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode') || 'dark')
+  // A new key, so everyone opens in the light theme once; a later switch to dark sticks.
+  const [mode, setMode] = useState(() => localStorage.getItem('fa-kpi-mode-2') || 'light')
   const [tab, setTab] = useState(tabFromHash)
   // The week the Dashboard shows, chosen in the top bar; null is this week.
   const [dashWeek, setDashWeek] = useState(null)
@@ -403,7 +415,7 @@ export default function App() {
     return () => { stop = true }
     // Once per sign-in: the name does not change without a reload.
   }, [signedInAs])
-  useEffect(() => { localStorage.setItem('fa-kpi-mode', mode) }, [mode])
+  useEffect(() => { localStorage.setItem('fa-kpi-mode-2', mode) }, [mode])
 
   /*
    * A browser that has never held a plan takes the shared one.
@@ -1475,6 +1487,18 @@ export default function App() {
               planLoading={sharedLoading}
             />
           )}
+          {allowed && tab === 'overview' && (
+            <Overview
+              plan={plan}
+              lastSaved={lastSaved}
+              canWrite={canWrite}
+              me={me}
+              onSettings={updateSettings}
+              onOpenProject={openProject}
+              onGoTo={setTab}
+            />
+          )}
+          {allowed && tab === 'quality' && <DataQuality plan={plan} onOpenProject={openProject} />}
           {allowed && tab === 'project' && (
             <Project
               key={hashArg.page === 'project' ? hashArg.key : ''}

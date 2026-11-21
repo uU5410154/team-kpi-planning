@@ -400,7 +400,7 @@ try {
     check('  REMEMBERED ACROSS A RELOAD', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 5)
     await a.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Back to administrator')?.click())
     await a.waitForFunction(() => document.querySelectorAll('[role="tab"]').length > 5, { timeout: 8000 }).catch(() => {})
-    check('“BACK TO ADMINISTRATOR” BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 10)
+    check('“BACK TO ADMINISTRATOR” BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 12)  // ten, plus Management and Data quality
 
     console.log('\n--- the member, on a phone ---')
     const m = await as(james, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })

@@ -106,6 +106,9 @@ export const jiraIssues = async (keys) =>
 export const jiraSyncShared = async () =>
   j(await fetch('/api/jira/sync', { method: 'POST' }))
 
+/** The server's last scheduled Jira sync: { at, ok, ... }, at null if none yet. */
+export const jiraLastRun = async () => j(await fetch('/api/jira/sync'))
+
 /**
  * The shared home screen, read and written on its own.
  *
