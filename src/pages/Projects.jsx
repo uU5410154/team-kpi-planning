@@ -5,7 +5,7 @@ import { projectOnHold } from '../lib/hold.js'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
-  FormControl, InputLabel, TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
+  TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
   Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery,
 } from '@mui/material'
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
@@ -49,6 +49,26 @@ import ImportDialog from '../components/ImportDialog.jsx'
 import Loading from '../components/Loading.jsx'
 import { exportFiltered, readProjectsFile, planImport } from '../lib/projectIO.js'
 import { useTheme, alpha } from '@mui/material/styles'
+import CheckFilter from '../components/CheckFilter.jsx'
+
+/* The Data gap and FTE choices, each a test a row passes or not. */
+const GAP_CHOICES = [
+  { value: 'saving', label: 'Missing saving hrs', test: (p) => p.savingHours == null },
+  { value: 'nokey', label: 'Missing Jira key', test: (p) => !p.jiraKey },
+  { value: 'pic', label: 'Missing PIC', test: (p) => !p.pic },
+  { value: 'manday', label: 'No effort estimate', test: (p) => !(p.manday > 0) },
+  { value: 'gate', label: 'Below the ROI gate', test: (p) => p.gate === 'fail' },
+  { value: 'pastdue', label: 'Past due, not done', test: (p) => !!p.pastDue },
+]
+const GAP_TEST = Object.fromEntries(GAP_CHOICES.map((g) => [g.value, g.test]))
+const FTE_CHOICES = [
+  { value: 'some', label: 'Has FTE (> 0)', test: (f) => f > 0 },
+  { value: 'none', label: 'No FTE', test: (f) => f <= 0 },
+  { value: 'gte0.5', label: '0.5 FTE or more', test: (f) => f >= 0.5 },
+  { value: 'gte1', label: '1 FTE or more', test: (f) => f >= 1 },
+  { value: 'gte3', label: '3 FTE or more', test: (f) => f >= 3 },
+]
+const FTE_TEST = Object.fromEntries(FTE_CHOICES.map((h) => [h.value, h.test]))
 
 const COMMIT_COLOR = {
   commit: STATUS.good,
@@ -480,30 +500,38 @@ export default function Projects({
   // scorecard. Their hours fall to the team lead.
   const assignees = plan.assignees || people
 
-  const [q, setQ] = useState('')
-  const [fObj, setFObj] = useState('all')
-  // A LIST, and empty means everyone. Cutting the register by one person at a
-  // time made "these three between them" impossible to look at, which is the
-  // question anyone asks before moving work around.
-  const [fPic, setFPic] = useState([])
-  const [fCommit, setFCommit] = useState('all')
-  const [fGap, setFGap] = useState('all')
-  const [fTeam, setFTeam] = useState('all')
   /*
-   * A LIST, like the PIC filter and for the same reason: the question anyone
-   * asks of a register this size is "what do these two sub teams hold between
-   * them", and one at a time cannot answer it. Empty means all.
+   * EVERY FILTER IS A LIST OF TICKED CHOICES, and an empty list means all.
+   * Cutting the register one choice at a time made "these three between them"
+   * impossible to look at, which is the question anyone asks of it.
+   *
+   * The PIC filter alone has a default: everyone but the partners who carry no
+   * scorecard (User and IT). Their projects are on the register but not the
+   * team's commitment, so they start unticked. `null` is that default.
    */
+  const [q, setQ] = useState('')
+  const [fObj, setFObj] = useState([])
+  const [fPic, setFPic] = useState(null)
+  const [fCommit, setFCommit] = useState([])
+  const [fGap, setFGap] = useState([])
+  const [fTeam, setFTeam] = useState([])
   const [fSub, setFSub] = useState([])
-  const [fHc, setFHc] = useState('all')
+  const [fHc, setFHc] = useState([])
+  const partnerIds = useMemo(() => assignees.filter((a) => a.scorecard === false).map((a) => a.id), [assignees])
+  const partnerNames = assignees.filter((a) => a.scorecard === false).map((a) => a.nick).join(', ')
+  const picIds = useMemo(() => ['none', ...assignees.map((a) => a.id)], [assignees])
+  const picTicked = fPic ?? picIds.filter((id) => !partnerIds.includes(id))
+  const resetFilters = (pic = null) => {
+    setQ(''); setFObj([]); setFPic(pic); setFCommit([]); setFGap([]); setFTeam([]); setFSub([]); setFHc([])
+  }
   /*
    * Sent here by the header search: show that project, and only that. Every
-   * other filter is cleared too — a project hidden by a filter somebody set an
-   * hour ago would read as the search having found nothing.
+   * other filter is cleared too, the partners' projects included — a project
+   * hidden by a filter would read as the search having found nothing.
    */
   useEffect(() => {
     if (!jump?.q) return
-    setQ(jump.q); setFObj('all'); setFPic([]); setFCommit('all'); setFGap('all'); setFTeam('all'); setFSub([]); setFHc('all')
+    resetFilters([]); setQ(jump.q)
   }, [jump?.n])
   const [sort, setSort] = useState({ by: 'savingHours', dir: 'desc' })
   const [sel, setSel] = useState(() => new Set())
@@ -696,25 +724,19 @@ export default function Projects({
     let out = projects.filter((p) => {
       const hay = `${p.key} ${p.jiraKey ?? ''} ${p.summary} ${p.program ?? ''} ${p.team ?? ''} ${p.subTeam ?? ''} ${p.assignee ?? ''}`
       if (needle && !hay.toLowerCase().includes(needle)) return false
-      if (fObj !== 'all' && p.objective !== fObj) return false
-      if (fPic.length && !fPic.includes(p.pic ?? 'none')) return false
-      if (fCommit !== 'all' && p.commitLevel !== fCommit) return false
-      if (fGap === 'saving' && p.savingHours != null) return false
-      if (fGap === 'pic' && !!p.pic) return false
-      if (fGap === 'manday' && p.manday > 0) return false
-      if (fGap === 'gate' && p.gate !== 'fail') return false
-      if (fGap === 'pastdue' && !p.pastDue) return false
-      if (fGap === 'nokey' && p.jiraKey) return false
-      if (fTeam !== 'all' && (p.team || '') !== fTeam) return false
+      if (fObj.length && !fObj.includes(p.objective)) return false
+      // The default hides only the partners' rows: a PIC the roster no longer
+      // knows still shows, as it did before there was a default.
+      if (fPic === null) { if (p.pic && partnerIds.includes(p.pic)) return false }
+      else if (fPic.length && fPic.length < picIds.length && !fPic.includes(p.pic ?? 'none')) return false
+      if (fCommit.length && !fCommit.includes(p.commitLevel)) return false
+      // Ticking several gaps shows the rows with ANY of them.
+      if (fGap.length && !fGap.some((g) => GAP_TEST[g]?.(p))) return false
+      if (fTeam.length && !fTeam.includes(p.team || '')) return false
       // Blank sub team is a real answer, not a missing one — it is how most of
       // the register reads, so it has to be selectable rather than unfindable.
       if (fSub.length && !fSub.includes(p.subTeam || 'none')) return false
-      if (fHc !== 'all') {
-        const fte = p.fte || 0
-        if (fHc === 'some' && fte <= 0) return false
-        if (fHc === 'none' && fte > 0) return false
-        if (fHc.startsWith('gte') && fte < Number(fHc.slice(3))) return false
-      }
+      if (fHc.length && !fHc.some((h) => FTE_TEST[h]?.(p.fte || 0))) return false
       return true
     })
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -731,7 +753,7 @@ export default function Projects({
       return String(va).localeCompare(String(vb)) * dir
     })
     return out
-  }, [projects, q, fObj, fPic, fCommit, fGap, fTeam, fSub, fHc, sort])
+  }, [projects, q, fObj, fPic, fCommit, fGap, fTeam, fSub, fHc, sort, partnerIds, picIds])
 
   // What the exported file says it is. A working file with no idea which
   // slice of the register it holds is one nobody can check.
@@ -745,18 +767,20 @@ export default function Projects({
    */
   const filterParts = useMemo(() => {
     const bits = []
-    if (fPic.length) {
+    if (fPic === null) {
+      if (partnerNames) bits.push(`without ${partnerNames.replace(/, /g, '+')}`)
+    } else if (fPic.length && fPic.length < picIds.length) {
       bits.push(fPic.map((id) => (id === 'none' ? 'unassigned' : (assignees.find((x) => x.id === id)?.nick || id))).join('+'))
     }
-    if (fObj !== 'all') bits.push(`Obj ${OBJ_BY_ID[fObj]?.no} ${OBJ_BY_ID[fObj]?.short || fObj}`)
-    if (fTeam !== 'all') bits.push(fTeam)
+    if (fObj.length) bits.push(`Obj ${fObj.map((id) => OBJ_BY_ID[id]?.no ?? id).join('+')}${fObj.length === 1 ? ` ${OBJ_BY_ID[fObj[0]]?.short || ''}`.trimEnd() : ''}`)
+    if (fTeam.length) bits.push(fTeam.join('+'))
     if (fSub.length) bits.push(fSub.map((t) => (t === 'none' ? 'no sub team' : t)).join('+'))
-    if (fCommit !== 'all') bits.push(fCommit)
-    if (fGap !== 'all') bits.push(`gap ${fGap}`)
-    if (fHc !== 'all') bits.push(`FTE ${fHc}`)
+    if (fCommit.length) bits.push(fCommit.join('+'))
+    if (fGap.length) bits.push(`gap ${fGap.join('+')}`)
+    if (fHc.length) bits.push(`FTE ${fHc.join('+')}`)
     if (q.trim()) bits.push(`"${q.trim()}"`)
     return bits
-  }, [q, fObj, fPic, fCommit, fTeam, fSub, fGap, fHc, assignees])
+  }, [q, fObj, fPic, fCommit, fTeam, fSub, fGap, fHc, assignees, partnerNames, picIds])
 
   const describeFilter = useMemo(
     () => (filterParts.length ? filterParts.join(', ') : 'the whole register'),
@@ -764,27 +788,36 @@ export default function Projects({
   )
   // How many of the dropdown filters are set — the count on a phone's
   // Filters button, where the dropdowns themselves are folded away.
-  const dropdownsOn = (fPic.length > 0) + (fSub.length > 0)
-    + [fObj, fCommit, fGap, fTeam, fHc].filter((f) => f !== 'all').length
+  const picCut = fPic === null ? partnerIds.length > 0 : (fPic.length > 0 && fPic.length < picIds.length)
+  const dropdownsOn = picCut + [fObj, fCommit, fGap, fTeam, fSub, fHc].filter((f) => f.length > 0).length
 
   const teams = useMemo(
     () => [...new Set(projects.map((p) => p.team).filter(Boolean))].sort(),
     [projects],
   )
   /*
-   * Narrowed by the team already chosen. Offering every sub team in the book
+   * Narrowed by the teams already ticked. Offering every sub team in the book
    * against a team that holds four of them is a list of dead ends.
    */
   const subTeams = useMemo(
     () => [...new Set(projects
-      .filter((p) => fTeam === 'all' || (p.team || '') === fTeam)
+      .filter((p) => !fTeam.length || fTeam.includes(p.team || ''))
       .map((p) => p.subTeam)
       .filter(Boolean))].sort(),
     [projects, fTeam],
   )
-  const filtersOn =
-    q.trim() !== '' || fPic.length > 0 || fSub.length > 0
-    || [fObj, fCommit, fGap, fTeam, fHc].some((f) => f !== 'all')
+  // A sub team ticked under a team since unticked would leave an empty table
+  // and no visible reason for it.
+  useEffect(() => {
+    setFSub((s) => {
+      const keep = s.filter((t) => t === 'none' || subTeams.includes(t))
+      return keep.length === s.length ? s : keep
+    })
+  }, [subTeams])
+  // The default PIC cut is not "a filter somebody set", so it does not show
+  // Clear filters on its own; the line under the filters says it instead.
+  const filtersOn = q.trim() !== '' || fPic !== null
+    || [fObj, fCommit, fGap, fTeam, fSub, fHc].some((f) => f.length > 0)
 
   const head = (id, label, align = 'left', minWidth) => (
     <TableCell align={align} sortDirection={sort.by === id ? sort.dir : false} sx={minWidth ? { minWidth } : undefined} {...stick(id, true)}>
@@ -1102,126 +1135,92 @@ export default function Projects({
               '& .MuiFormControl-root': { flex: { xs: '1 1 140px', lg: '0 0 auto' } },
             }}
           >
-          <FormControl size="small" sx={{ minWidth: 170 }}>
-            <InputLabel>Objective</InputLabel>
-            <Select label="Objective" value={fObj} onChange={(e) => setFObj(e.target.value)}>
-              <MenuItem value="all">All objectives</MenuItem>
-              {OBJECTIVES.map((o) => <MenuItem key={o.id} value={o.id}>{o.no}. {o.short}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            {/* shrink + notched: with displayEmpty the box is never empty to
-                the reader, but MUI reads the VALUE, so the label stayed put
-                and printed itself over "All PICs". */}
-            <InputLabel shrink id="pic-filter-label">PIC</InputLabel>
-            <Select
-              multiple
-              notched
-              labelId="pic-filter-label"
-              label="PIC"
-              value={fPic}
-              onChange={(e) => setFPic(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-              displayEmpty
-              renderValue={(sel) => (sel.length === 0
-                ? 'All PICs'
-                : sel.map((id) => (id === 'none' ? 'Unassigned' : (assignees.find((x) => x.id === id)?.nick || id))).join(', '))}
-            >
-              <MenuItem value="none">Unassigned</MenuItem>
-              {/* assignees, not people: IT and any other partner team own
-                  delivery on real projects and have to be filterable, even
-                  though they carry no scorecard. */}
-              {assignees.map((p) => (
-                <MenuItem key={p.id} value={p.id}>
-                  {p.nick}
-                  {p.scorecard === false && (
-                    <Typography component="span" variant="caption" sx={{ ml: 0.75, color: 'text.secondary' }}>
-                      no scorecard
-                    </Typography>
-                  )}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 128 }}>
-            <InputLabel>Team</InputLabel>
-            <Select
-              label="Team"
-              value={fTeam}
-              onChange={(e) => {
-                setFTeam(e.target.value)
-                // A sub team belongs to a team. Keeping a selection that the
-                // new team does not contain leaves an empty table and no
-                // visible reason for it.
-                setFSub([])
-              }}
-            >
-              <MenuItem value="all">All teams</MenuItem>
-              {teams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel shrink id="subteam-filter-label">Sub team</InputLabel>
-            <Select
-              multiple
-              notched
-              labelId="subteam-filter-label"
-              label="Sub team"
-              value={fSub}
-              onChange={(e) => setFSub(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-              displayEmpty
-              renderValue={(sel) => (sel.length === 0
-                ? 'All sub teams'
-                : sel.map((t) => (t === 'none' ? 'None' : t)).join(', '))}
-            >
-              <MenuItem value="none"><em>No sub team</em></MenuItem>
-              {subTeams.map((t) => <MenuItem key={t} value={t}>{t}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 158 }}>
-            <InputLabel>FTE</InputLabel>
-            <Select label="FTE" value={fHc} onChange={(e) => setFHc(e.target.value)}>
-              <MenuItem value="all">Any FTE</MenuItem>
-              <MenuItem value="some">Has FTE (&gt; 0)</MenuItem>
-              <MenuItem value="none">No FTE</MenuItem>
-              <MenuItem value="gte0.5">0.5 FTE or more</MenuItem>
-              <MenuItem value="gte1">1 FTE or more</MenuItem>
-              <MenuItem value="gte3">3 FTE or more</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel>Commit</InputLabel>
-            <Select label="Commit" value={fCommit} onChange={(e) => setFCommit(e.target.value)}>
-              <MenuItem value="all">All levels</MenuItem>
-              {COMMIT_LEVELS.map((c) => <MenuItem key={c.id} value={c.id}>{c.label}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 165 }}>
-            <InputLabel>Data gap</InputLabel>
-            <Select label="Data gap" value={fGap} onChange={(e) => setFGap(e.target.value)}>
-              <MenuItem value="all">Everything</MenuItem>
-              <MenuItem value="saving">Missing saving hrs</MenuItem>
-              <MenuItem value="nokey">Missing Jira key</MenuItem>
-              <MenuItem value="pic">Missing PIC</MenuItem>
-              <MenuItem value="manday">No effort estimate</MenuItem>
-              <MenuItem value="gate">Below the ROI gate</MenuItem>
-              <MenuItem value="pastdue">Past due, not done</MenuItem>
-            </Select>
-          </FormControl>
+          <CheckFilter
+            label="Objective"
+            allLabel="All objectives"
+            minWidth={170}
+            value={fObj}
+            onChange={setFObj}
+            options={OBJECTIVES.map((o) => ({ value: o.id, label: `${o.no}. ${o.short}` }))}
+            data-filter="objective"
+          />
+          {/* assignees, not people: IT and any other partner team own delivery
+              on real projects and have to be filterable, even though they
+              carry no scorecard. They start unticked. */}
+          <CheckFilter
+            label="PIC"
+            allLabel="All PICs"
+            minWidth={150}
+            value={picTicked}
+            onChange={setFPic}
+            summary={() => (fPic === null && partnerNames ? `All but ${partnerNames}` : null)}
+            actions={partnerNames ? [{ label: `Without ${partnerNames} (default)`, run: () => setFPic(null) }] : []}
+            options={[
+              { value: 'none', label: 'Unassigned' },
+              ...assignees.map((p) => ({ value: p.id, label: p.nick, hint: p.scorecard === false ? 'no scorecard' : null })),
+            ]}
+            data-filter="pic"
+          />
+          <CheckFilter
+            label="Team"
+            allLabel="All teams"
+            minWidth={128}
+            value={fTeam}
+            onChange={setFTeam}
+            options={teams.map((t) => ({ value: t, label: t }))}
+            data-filter="team"
+          />
+          <CheckFilter
+            label="Sub team"
+            allLabel="All sub teams"
+            minWidth={150}
+            value={fSub}
+            onChange={setFSub}
+            options={[{ value: 'none', label: 'No sub team' }, ...subTeams.map((t) => ({ value: t, label: t }))]}
+            data-filter="subteam"
+          />
+          <CheckFilter
+            label="FTE"
+            allLabel="Any FTE"
+            minWidth={140}
+            value={fHc}
+            onChange={setFHc}
+            options={FTE_CHOICES}
+            data-filter="fte"
+          />
+          <CheckFilter
+            label="Commit"
+            allLabel="All levels"
+            minWidth={130}
+            value={fCommit}
+            onChange={setFCommit}
+            options={COMMIT_LEVELS.map((c) => ({ value: c.id, label: c.label }))}
+            data-filter="commit"
+          />
+          <CheckFilter
+            label="Data gap"
+            allLabel="Everything"
+            minWidth={150}
+            value={fGap}
+            onChange={setFGap}
+            options={GAP_CHOICES}
+            data-filter="gap"
+          />
           </Box>
         </Box>
 
         <Stack direction="row" spacing={{ xs: 1, sm: 2 }} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
             Showing {rows.length} of {projects.length} projects
+            {fPic === null && partnerNames ? ` · ${partnerNames} unticked in PIC` : ''}
           </Typography>
+          {fPic === null && partnerNames && (
+            <Button size="small" onClick={() => setFPic([])} data-show-partners>
+              Show {partnerNames} too
+            </Button>
+          )}
           {filtersOn && (
-            <Button
-              size="small"
-              onClick={() => {
-                setQ(''); setFObj('all'); setFPic([]); setFCommit('all')
-                setFGap('all'); setFTeam('all'); setFSub([]); setFHc('all')
-              }}
-            >
+            <Button size="small" onClick={() => resetFilters()}>
               Clear filters
             </Button>
           )}

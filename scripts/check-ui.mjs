@@ -1911,10 +1911,20 @@ try {
     [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()))
   check('IT IS SELECTABLE AS A PIC', picOptions.some((o) => /^IT/.test(o)), picOptions.join(' | '))
   check('and so is unassigned', picOptions.some((o) => /^Unassigned/.test(o)))
+  const ticks = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[role="option"]')]
+    .filter((o) => o.querySelector('input[type="checkbox"]'))
+    .map((o) => [o.textContent.trim().replace(/no scorecard$/, ''), o.querySelector('input').checked])))
+  check('EVERY PIC HAS A CHECKBOX; BY DEFAULT IT IS UNTICKED AND THE TEAM TICKED',
+    ticks.IT === false && ticks.Kade === true && ticks.Unassigned === true, JSON.stringify(ticks))
+
+  // "Clear — show all" brings IT's projects back.
+  check('Clear shows everyone', await pickOption('Clear'))
+  const everyone = await picRows()
+  check('  which is more than the default showed', everyone > picAll, `${picAll} -> ${everyone}`)
 
   check('picking one filters the table', await pickOption('Kade'))
   const oneRows = await picRows()
-  check('one PIC narrows it', oneRows > 0 && oneRows < picAll, `${picAll} -> ${oneRows}`)
+  check('one PIC narrows it', oneRows > 0 && oneRows < everyone, `${everyone} -> ${oneRows}`)
 
   check('a SECOND PIC can be picked without clearing the first', await pickOption('IT'))
   await page.evaluate(() => {
@@ -1924,13 +1934,41 @@ try {
   })
   await new Promise((r) => setTimeout(r, 700))
   const twoRows = await picRows()
-  check('TWO PICS SHOW MORE THAN ONE', twoRows > oneRows && twoRows < picAll,
-    `${oneRows} -> ${twoRows} of ${picAll}`)
+  check('TWO PICS SHOW MORE THAN ONE', twoRows > oneRows && twoRows < everyone,
+    `${oneRows} -> ${twoRows} of ${everyone}`)
   const chipText = await page.evaluate(() => {
     const label = [...document.querySelectorAll('label')].find((l) => l.innerText.trim() === 'PIC')
     return label.closest('.MuiFormControl-root').innerText.replace(/\n/g, ' ')
   })
   check('and the control names both', /Kade/.test(chipText) && /IT/.test(chipText), chipText)
+
+  /* Every other filter takes several ticks too. */
+  const openFilter = async (name) => {
+    await page.evaluate((n) => {
+      document.querySelector(`[data-filter="${n}"] [role="combobox"]`).dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    }, name)
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  const shutMenu = async () => {
+    await page.keyboard.press('Escape')
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  for (const f of ['objective', 'team', 'subteam', 'fte', 'commit', 'gap']) {
+    await openFilter(f)
+    const boxes = await page.evaluate(() => [...document.querySelectorAll('[role="option"]')].filter((o) => o.querySelector('input[type="checkbox"]')).length)
+    check(`the ${f} filter is a checkbox list`, boxes >= 2, `${boxes} checkboxes`)
+    await shutMenu()
+  }
+  await openFilter('pic'); await pickOption('Clear'); await shutMenu()
+  const gapAll = await picRows()
+  await openFilter('gap')
+  await pickOption('Missing Jira key')
+  const gapOne = await picRows()
+  await pickOption('Missing PIC')
+  const gapTwo = await picRows()
+  await shutMenu()
+  check('TWO DATA GAPS TICKED SHOW THE ROWS WITH EITHER', gapOne > 0 && gapTwo >= gapOne && gapTwo <= gapAll, `${gapOne} -> ${gapTwo} of ${gapAll}`)
+  check('  and the box names both', /Missing Jira key, Missing PIC/.test(await page.evaluate(() => document.querySelector('[data-filter="gap"]').innerText)))
 
 
   /* ---------- a new row lands at the top, and stays there ---------- */
