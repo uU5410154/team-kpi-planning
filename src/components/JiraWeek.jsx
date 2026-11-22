@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Paper, Typography, Button, TextField, Alert, ToggleButton, ToggleButtonGroup, Checkbox, FormControlLabel,
-  Autocomplete, CircularProgress, IconButton, Link, MenuItem, Collapse, ButtonBase, Dialog,
+  Autocomplete, CircularProgress, IconButton, Link, MenuItem, Collapse, ButtonBase, Dialog, Tooltip,
 } from '@mui/material'
+import { keyframes } from '@emotion/react'
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
 import CheckIcon from '@mui/icons-material/Check'
@@ -705,8 +706,15 @@ function NewProject({ week, onDone, onCancel, writable }) {
  * it is done with. What was just posted from it is confirmed inside it, so the
  * card that left for "Already updated" does not vanish without a word.
  */
+const slideIn = (dx) => keyframes`
+  from { opacity: 0; transform: translateX(${dx}px); }
+  to   { opacity: 1; transform: none; }
+`
+const SLIDE = { next: slideIn(56), prev: slideIn(-56) }
+
 function ProjectGroup({
   name, projectKey, rows, allRows = rows, planning, writable, flashes = [], onDismiss, children, hidden = false, footer = null,
+  nav = null, enter = null,
 }) {
   // Counted over all of the project's tasks, not just the ones the filter
   // shows: under "Already updated" a block with tasks still to do must not
@@ -722,14 +730,51 @@ function ProjectGroup({
       sx={(t) => ({
         display: hidden ? 'none' : 'flex',
         flexDirection: 'column',
+        // In the slide, a project comes in from the side it was asked for.
+        animation: enter && SLIDE[enter] ? `${SLIDE[enter]} .32s cubic-bezier(.2, .7, .3, 1)` : 'none',
+        '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+        boxShadow: nav ? '0 1px 3px rgba(31, 42, 61, 0.08), 0 6px 18px rgba(31, 42, 61, 0.08)' : 'none',
+        bgcolor: nav ? 'background.paper' : alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.04 : 0.02),
         borderRadius: 2,
         overflow: 'hidden',
         border: 1,
         borderColor: alpha(t.palette.primary.main, 0.35),
         borderLeft: `4px solid ${t.palette.primary.main}`,
-        bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.04 : 0.02),
       })}
     >
+      {nav ? (
+        // In the slide there is one project on screen: nothing to fold away,
+        // and the header says where in the week it is.
+        <Box
+          data-project-head
+          sx={(t) => ({
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 1.25,
+            px: { xs: 1.25, sm: 1.75 },
+            py: 1.25,
+            borderBottom: `1px solid ${alpha(t.palette.primary.main, 0.25)}`,
+            bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.13 : 0.07),
+          })}
+        >
+          <FolderIcon sx={{ color: 'primary.light', fontSize: 22, flexShrink: 0 }} />
+          <Box sx={{ flex: 1, minWidth: 180 }}>
+            {projectKey && (
+              <Typography variant="caption" sx={{ color: 'primary.light', fontWeight: 700, letterSpacing: 0.4, display: 'block', lineHeight: 1.3 }}>
+                {projectKey}
+              </Typography>
+            )}
+            <Typography variant="h4" sx={{ fontWeight: 700, fontSize: { xs: '1rem', sm: '1.1rem' } }}>{name}</Typography>
+          </Box>
+          {nav}
+          {planning
+            ? rows.length > 0 && <Pill label={`${rows.length} task${rows.length === 1 ? '' : 's'}`} tone="neutral" />
+            : left
+              ? <Pill label={`${left} to update`} tone="warn" />
+              : <Pill label="All updated" tone="good" />}
+        </Box>
+      ) : (
       <ButtonBase
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -761,7 +806,8 @@ function ProjectGroup({
             : <Pill label="All updated" tone="good" />}
         <ExpandMoreIcon sx={{ color: 'text.secondary', transition: 'transform .2s', transform: open ? 'rotate(180deg)' : 'none', flexShrink: 0 }} />
       </ButtonBase>
-      <Collapse in={open} unmountOnExit={false}>
+      )}
+      <Collapse in={open || !!nav} unmountOnExit={false}>
         <Box data-project-body sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, p: { xs: 1, sm: 1.5 } }}>
           {flashes.map((f) => (
             <Alert
@@ -781,6 +827,50 @@ function ProjectGroup({
         </Box>
       </Collapse>
     </Box>
+  )
+}
+
+function SideArrow({ dir, onClick, label, ...rest }) {
+  return (
+    <ButtonBase
+      onClick={onClick}
+      aria-label={label}
+      {...rest}
+      sx={(t) => ({
+        // On a phone the side strips would squeeze the cards: the arrows sit in the header there.
+        display: { xs: 'none', sm: 'inline-flex' },
+        width: 48,
+        flexShrink: 0,
+        alignItems: 'flex-start',
+        borderRadius: 2,
+        color: 'primary.main',
+        '&:hover': { bgcolor: alpha(t.palette.primary.main, 0.06) },
+        '&:hover > span': { bgcolor: 'primary.main', color: 'primary.contrastText', borderColor: 'primary.main' },
+        '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.light', outlineOffset: 2 },
+      })}
+    >
+      <Box
+        component="span"
+        sx={(t) => ({
+          position: 'sticky',
+          top: 'calc(50vh - 22px)',
+          mt: 2,
+          width: 42,
+          height: 42,
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'background.paper',
+          border: 1,
+          borderColor: alpha(t.palette.primary.main, 0.4),
+          boxShadow: '0 2px 8px rgba(31, 42, 61, 0.14)',
+          transition: 'background-color .15s, color .15s',
+        })}
+      >
+        {dir < 0 ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+      </Box>
+    </ButtonBase>
   )
 }
 
@@ -905,15 +995,25 @@ export default function JiraWeek({
    */
   const leftIn = (key) => rows.filter((r) => groupKeyOf(r.t) === key && needsUpdate(r.t, writable)).length
   const [at, setAt] = useState(null)
+  // Which way the last move went, so the project slides in from that side.
+  const [dir, setDir] = useState(null)
+  const touch = useRef(null)
   const shownKey = groups.some((g) => g.key === at) ? at
     : (groups.find((g) => !planning && leftIn(g.key) > 0) || groups[0])?.key ?? null
   const shownIdx = Math.max(0, groups.findIndex((g) => g.key === shownKey))
   const go = (n) => {
     if (!groups.length) return
     const i = (shownIdx + n + groups.length) % groups.length
+    setDir(n > 0 ? 'next' : 'prev')
     setAt(groups[i].key)
     document.querySelector('[data-project-nav]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+  const pick = (i) => {
+    if (i === shownIdx || !groups[i]) return
+    setDir(i > shownIdx ? 'next' : 'prev')
+    setAt(groups[i].key)
+  }
+  const withWork = groups.filter((g) => leftIn(g.key) > 0).length
   const nextWithWork = () => {
     for (let n = 1; n < groups.length; n++) {
       const g = groups[(shownIdx + n) % groups.length]
@@ -931,6 +1031,7 @@ export default function JiraWeek({
     const next = nextWithWork()
     if (!next) return undefined
     const t = setTimeout(() => {
+      setDir('next')
       setAt(next.key)
       document.querySelector('[data-project-nav]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 1800)
@@ -941,7 +1042,7 @@ export default function JiraWeek({
   useEffect(() => {
     if (!focusKey) return
     const g = groups.find((x) => x.key === focusKey || x.rows.some((r) => r.t.project?.key === focusKey))
-    if (g) setAt(g.key)
+    if (g) { setDir(null); setAt(g.key) }
   }, [focusKey])
   useEffect(() => {
     const onShow = (e) => {
@@ -949,6 +1050,7 @@ export default function JiraWeek({
       const r = rows.find((x) => x.t.key === key)
       if (!r) return
       if (filter !== 'all' && !shown.some((x) => x.t.key === key)) setFilter('all')
+      setDir(null)
       setAt(groupKeyOf(r.t))
     }
     window.addEventListener('jira-week-show', onShow)
@@ -1025,68 +1127,60 @@ export default function JiraWeek({
       </Box>
       {note && <Alert severity={note.tone} variant="outlined" sx={{ py: 0 }} onClose={() => setNote(null)}>{note.text}</Alert>}
 
-      {groups.length > 1 && (
-        <Paper
-          variant="outlined"
-          data-project-nav
-          sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 1 }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <IconButton onClick={() => go(-1)} aria-label="previous project" data-project-prev sx={{ border: 1, borderColor: 'divider' }}>
-              <ChevronLeftIcon />
+      {(() => {
+        const many = groups.length > 1
+        // Where this project is in the week: "2 of 6", and a dot for each
+        // project (yellow: something left, green: all updated) to jump to it.
+        const navFor = (i) => (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.25 }}>
+            <Typography variant="caption" data-project-pos sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+              Project {i + 1} of {groups.length}{!planning && ` · ${withWork} with something to update`}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <IconButton size="small" onClick={() => go(-1)} aria-label="previous project" sx={{ display: { xs: 'inline-flex', sm: 'none' }, border: 1, borderColor: 'divider' }}>
+              <ChevronLeftIcon fontSize="small" />
             </IconButton>
-            <Box sx={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }} data-project-pos>
-                Project {shownIdx + 1} of {groups.length}
-                {!planning && ` · ${groups.filter((g) => leftIn(g.key) > 0).length} with something to update`}
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {groups[shownIdx]?.name}
-              </Typography>
+            <Box role="tablist" aria-label="your projects this week" sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {groups.map((g, j) => {
+                const left = leftIn(g.key)
+                const on = j === i
+                const what = planning ? '' : left ? ` · ${left} to update` : ' · all updated'
+                return (
+                  <Tooltip key={g.key || 'none'} title={`${g.name}${what}`}>
+                    <ButtonBase
+                      role="tab"
+                      aria-selected={on}
+                      aria-label={`${g.name}${what}`}
+                      onClick={() => pick(j)}
+                      data-project-chip={g.key || 'none'}
+                      sx={{ p: '5px 3px', borderRadius: 1, '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.light' } }}
+                    >
+                      <Box
+                        component="span"
+                        sx={(t) => ({
+                          display: 'block',
+                          width: on ? 22 : 10,
+                          height: 10,
+                          borderRadius: '999px',
+                          transition: 'width .2s',
+                          bgcolor: on ? 'primary.main'
+                            : planning ? alpha(t.palette.text.primary, 0.2)
+                              : left ? 'rgb(246, 194, 74)' : 'success.main',
+                          opacity: on ? 1 : 0.8,
+                        })}
+                      />
+                    </ButtonBase>
+                  </Tooltip>
+                )
+              })}
             </Box>
-            <IconButton onClick={() => go(1)} aria-label="next project" data-project-next sx={{ border: 1, borderColor: 'divider' }}>
-              <ChevronRightIcon />
+            <IconButton size="small" onClick={() => go(1)} aria-label="next project" sx={{ display: { xs: 'inline-flex', sm: 'none' }, border: 1, borderColor: 'divider' }}>
+              <ChevronRightIcon fontSize="small" />
             </IconButton>
+            </Box>
           </Box>
-          {/* Every project, to jump straight to one: how many are left on each, or a tick. */}
-          <Box sx={{ display: 'flex', gap: 0.75, overflowX: 'auto', pb: 0.25 }} role="tablist" aria-label="your projects this week">
-            {groups.map((g, i) => {
-              const left = leftIn(g.key)
-              const on = i === shownIdx
-              return (
-                <ButtonBase
-                  key={g.key || 'none'}
-                  role="tab"
-                  aria-selected={on}
-                  onClick={() => setAt(g.key)}
-                  data-project-chip={g.key || 'none'}
-                  sx={(t) => ({
-                    flexShrink: 0,
-                    maxWidth: 220,
-                    gap: 0.75,
-                    px: 1.25,
-                    py: 0.5,
-                    borderRadius: '999px',
-                    border: 1,
-                    borderColor: on ? 'primary.main' : 'divider',
-                    bgcolor: on ? alpha(t.palette.primary.main, 0.1) : 'transparent',
-                    '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.light', outlineOffset: 2 },
-                  })}
-                >
-                  <Typography variant="caption" sx={{ fontWeight: on ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {g.name}
-                  </Typography>
-                  {!planning && (left
-                    ? <Pill label={String(left)} tone="warn" />
-                    : <CheckIcon sx={{ fontSize: 14, color: 'success.main' }} />)}
-                </ButtonBase>
-              )
-            })}
-          </Box>
-        </Paper>
-      )}
-
-      {groups.map((g, i) => (
+        )
+        const els = groups.map((g, i) => (
         <ProjectGroup
           key={g.key || 'none'}
           name={g.name}
@@ -1098,7 +1192,9 @@ export default function JiraWeek({
           flashes={flashes.filter((f) => f.group === g.key)}
           onDismiss={dismiss}
           hidden={i !== shownIdx}
-          footer={groups.length > 1 ? (
+          nav={many ? navFor(i) : null}
+          enter={i === shownIdx ? dir : null}
+          footer={many ? (
             <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', pt: 0.5 }}>
               <Button size="small" startIcon={<ChevronLeftIcon />} onClick={() => go(-1)} sx={focusRingSx}>Previous project</Button>
               <Button size="small" variant={!planning && leftIn(g.key) === 0 ? 'contained' : 'outlined'} endIcon={<ChevronRightIcon />} onClick={() => go(1)} sx={focusRingSx} data-project-next-bottom>
@@ -1125,7 +1221,35 @@ export default function JiraWeek({
             />
           ))}
         </ProjectGroup>
-      ))}
+        ))
+        if (!many) return els
+        // ONE PROJECT ON SCREEN, arrows down either side; swipe works on a phone.
+        return (
+          <Box data-project-nav sx={{ display: 'flex', alignItems: 'stretch', gap: { xs: 0.5, sm: 1 }, scrollMarginTop: 12 }}>
+            <SideArrow dir={-1} onClick={() => go(-1)} label={`previous project: ${groups[(shownIdx - 1 + groups.length) % groups.length]?.name}`} data-project-prev />
+            <Box
+              data-project-slide
+              sx={{ flex: 1, minWidth: 0, overflowX: 'clip' }}
+              onTouchStart={(e) => {
+                const p = e.touches[0]
+                touch.current = e.target.closest?.('input, textarea, [contenteditable="true"]') || !p ? null : { x: p.clientX, y: p.clientY }
+              }}
+              onTouchEnd={(e) => {
+                const st = touch.current
+                touch.current = null
+                const p = e.changedTouches[0]
+                if (!st || !p) return
+                const dx = p.clientX - st.x
+                const dy = p.clientY - st.y
+                if (Math.abs(dx) > 70 && Math.abs(dx) > 2 * Math.abs(dy)) go(dx < 0 ? 1 : -1)
+              }}
+            >
+              {els}
+            </Box>
+            <SideArrow dir={1} onClick={() => go(1)} label={`next project: ${groups[(shownIdx + 1) % groups.length]?.name}`} data-project-next />
+          </Box>
+        )
+      })()}
       {!planning && canWrite && (readyCount > 0 || bulk) && (
         <Paper
           variant="outlined"
