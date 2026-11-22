@@ -58,6 +58,17 @@ import DataQuality from './pages/DataQuality.jsx'
 import CostRoi from './pages/CostRoi.jsx'
 import Capacity from './pages/Capacity.jsx'
 import CostsSetup from './pages/CostsSetup.jsx'
+import Benefits from './pages/Benefits.jsx'
+import Raid from './pages/Raid.jsx'
+import History from './pages/History.jsx'
+import Evidence from './pages/Evidence.jsx'
+import Pack from './pages/Pack.jsx'
+import SummarizeIcon from '@mui/icons-material/SummarizeOutlined'
+import PlanMerge from './components/PlanMerge.jsx'
+import SavingsIcon from '@mui/icons-material/SavingsOutlined'
+import GavelIcon from '@mui/icons-material/GavelOutlined'
+import HistoryIcon from '@mui/icons-material/HistoryOutlined'
+import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremiumOutlined'
 import PaidIcon from '@mui/icons-material/PaidOutlined'
 import SpeedIcon from '@mui/icons-material/SpeedOutlined'
 import PriceChangeIcon from '@mui/icons-material/PriceChangeOutlined'
@@ -97,6 +108,11 @@ const TABS = [
   // and the team's capacity against what is planned and logged.
   { id: 'cost', label: 'Cost & ROI', icon: PaidIcon, roles: ['admin'] },
   { id: 'capacity', label: 'Capacity & sprint', icon: SpeedIcon, roles: ['admin'] },
+  // Priority 2: value and people, on evidence.
+  { id: 'benefits', label: 'Benefits', icon: SavingsIcon, roles: ['admin'] },
+  { id: 'raid', label: 'Decisions & RAID', icon: GavelIcon, roles: ['admin'] },
+  { id: 'evidence', label: 'Performance evidence', icon: WorkspacePremiumIcon, roles: ['admin'] },
+  { id: 'pack', label: 'Management Pack', icon: SummarizeIcon, roles: ['admin'] },
   /*
    * The register and the individual scorecards are ADMIN ONLY.
    *
@@ -131,6 +147,7 @@ const TABS = [
   { id: 'settings', label: 'Model', icon: TuneIcon, roles: ['admin'] },
   // Role rates, budgets and cost lines: typed in by an administrator, never shown to members.
   { id: 'rates', label: 'Costs & rates', icon: PriceChangeIcon, roles: ['admin'] },
+  { id: 'history', label: 'Change history', icon: HistoryIcon, roles: ['admin'] },
   { id: 'users', label: 'Access', icon: AdminIcon, roles: ['admin'] },
   /*
    * One project in full. Not in the menu — reached from a project's name on
@@ -441,6 +458,9 @@ export default function App() {
    * told the database has a newer one and is left alone.
    */
   const [dbNotice, setDbNotice] = useState(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  // The state object last taken whole from the server (see the dirty watcher).
+  const takenState = useRef(null)
   const [loadingShared, setLoadingShared] = useState(false)
   /*
    * Read during the FIRST RENDER, not inside the effect.
@@ -489,6 +509,7 @@ export default function App() {
       // Stamped as agreeing with the database, so the next visit can tell
       // "untouched since the last sync" from "somebody has been working".
       taken = next
+      takenState.current = next
       return taken
     })
     pendingSync.current = entry.updatedAt
@@ -604,6 +625,11 @@ export default function App() {
    */
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
+    // A plan just taken from the server is what the server holds, not an
+    // edit: this is what put a stray "Leave site?" up after every load.
+    const t = takenState.current
+    takenState.current = null
+    if (t && SHARED_KEYS.every((k) => t[k] === state[k]) && t.scenarioName === state.scenarioName) return
     setDirty(true)
   }, [...SHARED_KEYS.map((k) => state[k]), state.scenarioName])
 
@@ -647,7 +673,18 @@ export default function App() {
         // here by hand is what left the Apps page on one machine.
         sharedPayload(state),
         localStorage.getItem('fa-kpi-author') || '',
+        // The version this browser holds; past the warning above, on purpose.
+        { baseUpdatedAt: lastSaved, force: !!dbNotice },
       )
+      // Somebody else had saved too, on other fields: take the merged plan.
+      if (r.merged && r.payload) {
+        setState((s) => {
+          const next = repairState({ ...applyShared(s, r.payload), scenarioName: name })
+          // What was just taken is what is saved: not an edit to save again.
+          takenState.current = next
+          return next
+        })
+      }
       setDirty(false)
       setLastSaved(r.updatedAt)
       setSavedHere(true)
@@ -658,11 +695,12 @@ export default function App() {
       setState((s) => ({ ...s }))
       setToast({ severity: 'success', msg: `Saved "${name}" to the database.` })
     } catch (e) {
+      if (e.conflict) setDbNotice({ name, updatedAt: e.conflict.updatedAt, updatedBy: e.conflict.updatedBy, knowsOfEdits: true })
       setToast({ severity: 'error', msg: `${e.message} Your work is still safe in this browser.` })
     } finally {
       setSaving(false)
     }
-  }, [state, plan.invalid, dbNotice])
+  }, [state, plan.invalid, dbNotice, lastSaved])
 
   /*
    * Work reaches the database on its own.
@@ -714,7 +752,18 @@ export default function App() {
           name,
           sharedPayload(state),
           localStorage.getItem('fa-kpi-author') || '',
+          // Never over a newer shared plan: the server refuses, and the
+          // notice below offers to compare the two field by field.
+          { baseUpdatedAt: lastSaved },
         )
+        if (r.merged && r.payload) {
+        setState((s) => {
+          const next = repairState({ ...applyShared(s, r.payload), scenarioName: name })
+          // What was just taken is what is saved: not an edit to save again.
+          takenState.current = next
+          return next
+        })
+      }
         setDirty(false)
         setLastSaved(r.updatedAt)
         setSavedHere(true)
@@ -724,13 +773,15 @@ export default function App() {
         // read its own work as somebody else's and asked about it.
         pendingSync.current = r.updatedAt
         setState((cur) => ({ ...cur }))
-      } catch {
-        // Offline, or the database is down. The browser copy stands and the
-        // Save button still says there is something to send.
+      } catch (e) {
+        // Somebody saved the shared plan since this browser had it: say so,
+        // and offer the field-by-field comparison. Otherwise offline, or the
+        // database is down — the browser copy stands either way.
+        if (e?.conflict) setDbNotice({ name, updatedAt: e.conflict.updatedAt, updatedBy: e.conflict.updatedBy, knowsOfEdits: true })
       }
     }, 4000)
     return () => clearTimeout(autoSaveTimer.current)
-  }, [dirty, state, plan.invalid.length, dbNotice, canWrite])
+  }, [dirty, state, plan.invalid.length, dbNotice, canWrite, lastSaved])
 
   // Keep the tab in the URL hash so a view can be linked or bookmarked.
   useEffect(() => {
@@ -1517,6 +1568,11 @@ export default function App() {
           {allowed && tab === 'cost' && <CostRoi plan={plan} onOpenProject={openProject} onGoTo={setTab} />}
           {allowed && tab === 'capacity' && <Capacity plan={plan} onOpenProject={openProject} onGoTo={setTab} />}
           {allowed && tab === 'rates' && <CostsSetup plan={plan} />}
+          {allowed && tab === 'benefits' && <Benefits plan={plan} onOpenProject={openProject} />}
+          {allowed && tab === 'raid' && <Raid plan={plan} onOpenProject={openProject} />}
+          {allowed && tab === 'evidence' && <Evidence plan={plan} />}
+          {allowed && tab === 'pack' && <Pack plan={plan} lastSaved={lastSaved} />}
+          {allowed && tab === 'history' && <History onOpenProject={openProject} />}
           {allowed && tab === 'project' && (
             <Project
               key={hashArg.page === 'project' ? hashArg.key : ''}
@@ -1665,6 +1721,9 @@ export default function App() {
                 >
                   Keep a copy
                 </Button>
+                <Button color="inherit" size="small" sx={{ ml: 1 }} onClick={() => setMergeOpen(true)} data-compare-plan>
+                  Compare field by field
+                </Button>
                 <Button
                   color="inherit"
                   size="small"
@@ -1691,6 +1750,18 @@ export default function App() {
               : 'This browser cannot tell whether it holds anything of its own, so it is asking rather than guessing. Keep a copy first if you are unsure — it downloads in a second and can be opened again from the menu.'}
           </Alert>
         </Snackbar>
+
+        <PlanMerge
+          open={mergeOpen}
+          name={(state.scenarioName || dbNotice?.name || 'Baseline').trim()}
+          mine={sharedPayload(state)}
+          author={localStorage.getItem('fa-kpi-author') || me?.email || ''}
+          onClose={() => setMergeOpen(false)}
+          onMerged={async (entry) => {
+            setMergeOpen(false)
+            try { await takeShared(entry, 'Merged with', { announce: true }) } catch (e) { setToast({ severity: 'error', msg: e.message }) }
+          }}
+        />
 
         <Snackbar
           open={!!toast}

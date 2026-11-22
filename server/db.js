@@ -90,7 +90,25 @@ export async function saveScenario(name, payload, updatedBy) {
     payload,
   }
   await c.updateOne({ name }, { $set: doc }, { upsert: true })
+  // The last twenty versions, kept so a later save from a browser that
+  // started from one of them can be merged field by field (see index.js).
+  try {
+    const v = c.s.db.collection(process.env.MONGODB_VERSIONS_COLLECTION || 'kpi_scenario_versions')
+    await v.insertOne({ name, updatedAt: doc.updatedAt, updatedBy: doc.updatedBy, payload })
+    const old = await v.find({ name }, { projection: { _id: 1 } }).sort({ updatedAt: -1 }).skip(20).toArray()
+    if (old.length) await v.deleteMany({ _id: { $in: old.map((x) => x._id) } })
+  } catch (e) {
+    console.warn(`[versions] ${e.message}`)
+  }
   return { name: doc.name, updatedAt: doc.updatedAt, updatedBy: doc.updatedBy }
+}
+
+/** One earlier version of a scenario, by when it was saved; null if not kept. */
+export async function getVersion(name, updatedAt) {
+  const c = await connect()
+  if (!c) return UNAVAILABLE
+  return c.s.db.collection(process.env.MONGODB_VERSIONS_COLLECTION || 'kpi_scenario_versions')
+    .findOne({ name, updatedAt: String(updatedAt) }, { projection: { _id: 0 } })
 }
 
 export async function deleteScenario(name) {

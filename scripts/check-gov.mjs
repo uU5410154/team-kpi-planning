@@ -17,6 +17,7 @@ import puppeteer from 'puppeteer-core'
 import { rateFor, projectCostOf, costContext, portfolioCosts, capacityOf } from '../src/lib/costs.js'
 import { dataQuality, overviewOf } from '../src/lib/governance.js'
 import { diffPlan, cleanProject } from '../server/governance.js'
+import { planDiff, mergePlan, diffId, merge3 } from '../src/lib/planMerge.js'
 
 let failures = 0
 const check = (name, ok, detail = '') => {
@@ -102,6 +103,31 @@ console.log('\n--- the arithmetic ---')
   const d = diffPlan({ projects: [{ key: 'A', due: '2026-01-01' }], people: [], settings: { x: 1 } }, { projects: [{ key: 'A', due: '2026-02-01' }, { key: 'B' }], people: [], settings: { x: 2 } }, 'boss')
   check('A PLAN SAVE IS DIFFED FIELD BY FIELD', d.some((x) => x.key === 'A' && x.field === 'due' && x.from === '"2026-01-01"' && x.to === '"2026-02-01"')
     && d.some((x) => x.key === 'B' && x.field === 'added') && d.some((x) => x.kind === 'plan.settings' && x.field === 'x'))
+}
+
+console.log('\n--- two copies of the plan, field by field ---')
+{
+  const theirs = { projects: [{ key: 'A', due: '2026-02-01', pic: 'kade' }, { key: 'C', summary: 'New there' }], people: [{ id: 'gun', nick: 'Gun' }], settings: { sprintDays: 14, x: 1 }, apps: [1] }
+  const mine = { projects: [{ key: 'A', due: '2026-01-01', pic: 'kade', manday: 5 }, { key: 'B', summary: 'New here' }], people: [{ id: 'gun', nick: 'Gunn' }], settings: { sprintDays: 10, x: 1 }, apps: [1] }
+  const d = planDiff(mine, theirs)
+  const ids = d.map(diffId).sort()
+  check('EVERY FIELD THE TWO DISAGREE ON, AND ONLY THOSE', ids.join() === ['people|gun|nick', 'projects|A|due', 'projects|A|manday', 'projects|B|(whole record)', 'projects|C|(whole record)', 'settings||sprintDays'].sort().join(), ids.join())
+  const kept = mergePlan(theirs, d, {})
+  check('  nothing chosen: the shared plan, untouched', JSON.stringify(kept) === JSON.stringify(theirs))
+  const m = mergePlan(theirs, d, { 'projects|A|manday': 'mine', 'projects|B|(whole record)': 'mine', 'settings||sprintDays': 'mine', 'projects|C|(whole record)': 'mine' })
+  const A = m.projects.find((p) => p.key === 'A')
+  check('  "mine" takes exactly that field; the rest stays shared', A.manday === 5 && A.due === '2026-02-01' && m.settings.sprintDays === 10 && m.people[0].nick === 'Gun')
+  check('  a record only here is added; one only there is removed when mine is chosen', m.projects.some((p) => p.key === 'B') && !m.projects.some((p) => p.key === 'C'))
+
+  const base = { projects: [{ key: 'A', due: '2026-01-01', manday: 1 }, { key: 'D', due: '2026-05-01' }], settings: { sprintDays: 14 } }
+  const t2 = { projects: [{ key: 'A', due: '2026-03-01', manday: 1 }, { key: 'D', due: '2026-06-01' }], settings: { sprintDays: 14 } }
+  const m2 = { projects: [{ key: 'A', due: '2026-01-01', manday: 9 }], settings: { sprintDays: 7 } }
+  const x = merge3(base, t2, m2)
+  const xa = x.merged.projects.find((p) => p.key === 'A')
+  check('THREE-WAY: EACH SIDE’S OWN FIELDS ARE KEPT — their date, my mandays and my setting', xa.due === '2026-03-01' && xa.manday === 9 && x.merged.settings.sprintDays === 7)
+  check('  deleting a record the other side edited is a conflict, not a silent loss', x.conflicts.length === 1 && x.conflicts[0].id === 'D' && x.merged.projects.some((p) => p.key === 'D'), JSON.stringify(x.conflicts))
+  const y = merge3(base, t2, { ...base, projects: [{ key: 'A', due: '2026-02-01', manday: 1 }, base.projects[1]] })
+  check('  the same field changed differently on both sides is a conflict', y.conflicts.length === 1 && y.conflicts[0].field === 'due' && y.conflicts[0].mine === '2026-02-01' && y.conflicts[0].theirs === '2026-03-01')
 }
 
 /* ------------------------------------------------------------ fake Jira */
@@ -258,6 +284,20 @@ try {
   moved.projects.find((p) => p.key === 'FNP-379').due = '2026-12-24'
   const ok = await call('PUT', '/api/scenarios/Baseline', { payload: moved, updatedBy: 'x', baseUpdatedAt: first.body.updatedAt }, boss)
   check('  one that is up to date can', ok.status === 200)
+  // Two browsers both started from that save. One moves FNP-379's PIC; the other, a different project's mandays.
+  const v1 = JSON.parse(JSON.stringify(moved))
+  v1.projects.find((p) => p.key === 'FNP-379').savingHours = 99
+  const s1 = await call('PUT', '/api/scenarios/Baseline', { payload: v1, updatedBy: 'a', baseUpdatedAt: ok.body.updatedAt }, boss)
+  const v2 = JSON.parse(JSON.stringify(moved))
+  v2.projects.find((p) => p.key === 'FNP-88').manday = 42
+  const s2 = await call('PUT', '/api/scenarios/Baseline', { payload: v2, updatedBy: 'b', baseUpdatedAt: ok.body.updatedAt }, boss2)
+  const both = (await call('GET', '/api/scenarios/Baseline', undefined, boss)).body.payload
+  check('TWO SAVES FROM THE SAME VERSION, ON DIFFERENT FIELDS, ARE MERGED — neither is lost', s1.status === 200 && s2.status === 200 && s2.body.merged === true
+    && both.projects.find((p) => p.key === 'FNP-379').savingHours === 99 && both.projects.find((p) => p.key === 'FNP-88').manday === 42, `${s1.status} ${s2.status} ${JSON.stringify(s2.body).slice(0, 120)}`)
+  const v3 = JSON.parse(JSON.stringify(moved))
+  v3.projects.find((p) => p.key === 'FNP-379').savingHours = 7
+  const s3 = await call('PUT', '/api/scenarios/Baseline', { payload: v3, updatedBy: 'c', baseUpdatedAt: ok.body.updatedAt }, boss)
+  check('  the SAME field changed on both sides is refused, naming it', s3.status === 409 && s3.body.conflicts?.some((c) => c.id === 'FNP-379' && c.field === 'savingHours' && c.theirs === '99' && c.mine === '7'), JSON.stringify(s3.body).slice(0, 200))
   await sleep(300)
   const ph = (await call('GET', '/api/gov/audit?kind=plan.project&key=FNP-379', undefined, boss)).body.rows || []
   check('  AND THE CHANGE IS IN THE HISTORY', ph.some((x) => x.field === 'due' && x.to === '"2026-12-24"' && x.by === 'boss@lotuss.com'), JSON.stringify(ph[0]))
@@ -293,6 +333,25 @@ try {
       && await pg.evaluate(() => document.querySelector('[data-effort-row="FNP-379"]')?.innerText.includes('33')))
     const ov = await open('overview', '[data-metric="budget"]')
     check('THE MANAGEMENT OVERVIEW NOW STATES BUDGET VARIANCE', await pg.evaluate(() => /฿/.test(document.querySelector('[data-metric="budget"]')?.textContent || '')), ov.slice(0, 120))
+    const ben = await open('benefits', '[data-benefit-row="FNP-379"]')
+    check('BENEFITS: FIVE STATES, AND FNP-379 VALIDATED WITH ITS 30 HOURS', /Post-stabilisation validated/i.test(ben)
+      && await pg.evaluate(() => /30/.test(document.querySelector('[data-benefit-row="FNP-379"]')?.innerText || '') && /validated/i.test(document.querySelector('[data-benefit-row="FNP-379"]')?.innerText || '')))
+    await pg.click('[data-open-benefit="FNP-379"]')
+    await pg.waitForSelector('[data-benefit-dialog]', { timeout: 5000 }).catch(() => {})
+    await pg.click('[data-save-benefit]')
+    await sleep(400)
+    const probs = await pg.evaluate(() => document.querySelector('[data-benefit-problems]')?.innerText || '')
+    check('  a validated benefit with no validator, owner or baseline is refused, saying what it needs', /validated/i.test(probs) && /owner/i.test(probs) && /validation date/i.test(probs), probs)
+    await pg.keyboard.press('Escape')
+    await sleep(300)
+    const raidT = await open('raid', '[data-raid-row]')
+    check('DECISIONS & RAID: THE RISK, WITH ITS VALUE AT RISK', /Vendor late/.test(raidT) && await pg.evaluate(() => /฿/.test(document.querySelector('[data-stat="atRisk"]')?.textContent || '')))
+    const histT = await open('history', '[data-audit-row]')
+    check('CHANGE HISTORY: WHO CHANGED WHAT', await pg.evaluate(() => document.querySelectorAll('[data-audit-row]').length) > 5 && /budget\.approved/.test(histT) && /boss2@lotuss\.com/.test(histT))
+    const evT = await open('evidence', '[data-page="evidence"]')
+    check('PERFORMANCE EVIDENCE: THE SEVEN DIMENSIONS, NO RANKING', /Delivery/i.test(evT) && /Forecasting/i.test(evT) && /Collaboration/i.test(evT) && !/\brank\b/i.test(evT.replace(/no rank|not rank|never rank/gi, '')), evT.slice(0, 200).replace(/\n/g, ' | '))
+    const packT = await open('pack', '[data-pack]')
+    check('MANAGEMENT PACK: SUMMARY, DECISIONS, DATA LIMITS, AND HOW TO ISSUE IT', /Management Pack/i.test(packT) && /decision/i.test(packT) && /confidence/i.test(packT) && /Issue this pack/i.test(packT), packT.slice(0, 200).replace(/\n/g, ' | '))
     const wide = await pg.evaluate(() => document.documentElement.scrollWidth)
     check('  nothing spills sideways', wide <= 1440, String(wide))
   }

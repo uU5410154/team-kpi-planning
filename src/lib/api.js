@@ -64,14 +64,25 @@ export const listScenarios = async () => j(await fetch('/api/scenarios'))
 export const loadScenario = async (name) =>
   j(await fetch(`/api/scenarios/${encodeURIComponent(name)}`))
 
-export const saveScenario = async (name, payload, updatedBy) =>
-  j(
-    await fetch(`/api/scenarios/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payload, updatedBy }),
-    }),
-  )
+/*
+ * Saving the shared plan names the version this browser last had
+ * (`baseUpdatedAt`). If the shared plan has moved on since, the server
+ * refuses with 409 and the error carries `conflict`, so the app can compare
+ * the two field by field instead of one replacing the other. `force` is for
+ * the Save button after its warning has been read and accepted.
+ */
+export async function saveScenario(name, payload, updatedBy, { baseUpdatedAt = null, force = false } = {}) {
+  const res = await fetch(`/api/scenarios/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload, updatedBy, ...(baseUpdatedAt ? { baseUpdatedAt } : {}), ...(force ? { force: true } : {}) }),
+  })
+  if (res.status === 409) {
+    const body = await res.json().catch(() => ({}))
+    throw Object.assign(new Error(body.error || 'The shared plan has moved on since this browser had it.'), { conflict: body })
+  }
+  return j(res)
+}
 
 export const deleteScenario = async (name) =>
   j(await fetch(`/api/scenarios/${encodeURIComponent(name)}`, { method: 'DELETE' }))
@@ -448,4 +459,5 @@ export async function raidSave(id, item, seen = null, force = []) {
 export const auditLog = async ({ kind = '', key = '', limit = 300, before = '' } = {}) => j(await fetch(`/api/gov/audit?${new URLSearchParams(Object.fromEntries(Object.entries({ kind, key, limit, before }).filter(([, v]) => v)))}`))
 export const snapshotList = async (kind) => j(await fetch(`/api/gov/snapshots/${kind}`))
 export const snapshotSave = async (kind, body) => j(await fetch(`/api/gov/snapshots/${kind}`, govBody('POST', body)))
+export const govActivity = async () => j(await fetch('/api/gov/activity'))
 export const snapshotGet = async (id) => j(await fetch(`/api/gov/snapshot/${encodeURIComponent(id)}`))

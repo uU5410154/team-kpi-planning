@@ -80,6 +80,11 @@ export const PAGE_COLOR = {
   cost: '#c8961f',
   capacity: '#43938f',
   rates: '#306fc7',
+  benefits: '#43938f',
+  raid: '#da3832',
+  evidence: '#306fc7',
+  history: '#9095b8',
+  pack: '#c8961f',
 }
 
 /*

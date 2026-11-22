@@ -491,3 +491,44 @@ export async function auditPlan(before, after, by) {
   if (!k || !before) return
   try { await record(k, diffPlan(before, after, by)) } catch (e) { console.warn(`[audit] ${e.message}`) }
 }
+
+/* --------------------------------------------- weekly activity, per member */
+
+/**
+ * What each member did in the weekly check-in, for Performance evidence:
+ * the weeks they planned and reported (a report, or any task update that
+ * week), every task update, blockers raised and decisions asked. `weeks` is
+ * the team's calendar: every week anybody has an entry for.
+ */
+export async function activityByPerson() {
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const db = (await connect()).s.db
+  const entries = await db.collection(process.env.MONGODB_WEEKLY_COLLECTION || 'kpi_weekly')
+    .find({}, { projection: { week: 1, person: 1, planSubmittedAt: 1, reportSubmittedAt: 1 } }).limit(20000).toArray()
+  const updates = await k.updates.find({}, { projection: { week: 1, person: 1, blocker: 1, hold: 1, decision: 1, submittedAt: 1 } }).limit(50000).toArray()
+  const weeks = new Set(entries.map((e) => e.week).filter(Boolean))
+  const by = {}
+  const of = (p) => (by[p] ||= { planned: new Set(), reported: new Set(), updates: 0, blockers: 0, decisions: 0 })
+  for (const e of entries) {
+    if (!e.person) continue
+    const a = of(e.person)
+    if (e.planSubmittedAt) a.planned.add(e.week)
+    if (e.reportSubmittedAt) a.reported.add(e.week)
+  }
+  for (const u of updates) {
+    if (!u.person || !u.submittedAt) continue
+    const a = of(u.person)
+    a.updates += 1
+    a.reported.add(u.week)
+    weeks.add(u.week)
+    if (u.blocker || u.hold) a.blockers += 1
+    if (u.decision === true) a.decisions += 1
+  }
+  return {
+    activity: Object.fromEntries(Object.entries(by).map(([p, a]) => [p, {
+      weeks: weeks.size, weeksPlanned: a.planned.size, weeksReported: a.reported.size,
+      updates: a.updates, blockers: a.blockers, decisions: a.decisions,
+    }])),
+  }
+}

@@ -17,6 +17,7 @@ import * as jiraWeek from './jiraWeek.js'
 import * as decks from './decks.js'
 import * as gov from './governance.js'
 import { statusPatch } from '../src/lib/projectStatus.js'
+import { merge3, showValue } from '../src/lib/planMerge.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
 
@@ -241,6 +242,7 @@ app.put('/api/gov/raid/:id', adminOnly, govWrap((req) => gov.raidSave(req.params
 app.get('/api/gov/audit', adminOnly, govWrap((req) => gov.auditLog({ kind: req.query.kind || null, key: req.query.key || null, limit: req.query.limit, before: req.query.before || null })))
 app.get('/api/gov/snapshots/:kind', adminOnly, govWrap((req) => gov.snapshotList(req.params.kind)))
 app.post('/api/gov/snapshots/:kind', adminOnly, govWrap((req) => gov.snapshotSave(req.params.kind, req.body, req.me.email)))
+app.get('/api/gov/activity', adminOnly, govWrap(() => gov.activityByPerson()))
 app.get('/api/gov/snapshot/:id', adminOnly, govWrap((req) => gov.snapshotGet(req.params.id)))
 
 /** What the last sync did, whoever or whatever started it. */
@@ -361,17 +363,36 @@ app.put('/api/scenarios/:name', adminOnly, async (req, res) => {
   const before = await store.getScenario(name)
   if (before === store.UNAVAILABLE) return unavailable(res)
   const base = req.body?.baseUpdatedAt
+  let toSave = payload
+  let merged = false
   if (base && before?.updatedAt && String(base) !== String(before.updatedAt) && req.body?.force !== true) {
-    return res.status(409).json({
-      error: `The shared "${name}" was saved by ${before.updatedBy || 'somebody'} at ${before.updatedAt}, after this browser last had it.`,
-      conflict: true, updatedAt: before.updatedAt, updatedBy: before.updatedBy,
+    /*
+     * Somebody saved in between. Merge field by field from the version this
+     * browser started from: what only one side changed is kept as that side
+     * has it. Only a field both changed differently is refused.
+     */
+    const from = await store.getVersion(name, base)
+    const refuse = (conflicts) => res.status(409).json({
+      error: `The shared "${name}" was saved by ${before.updatedBy || 'somebody'} at ${before.updatedAt}, after this browser last had it`
+        + `${conflicts ? `, and ${conflicts.length} field${conflicts.length === 1 ? '' : 's'} were changed on both sides` : ''}.`,
+      conflict: true,
+      updatedAt: before.updatedAt,
+      updatedBy: before.updatedBy,
+      conflicts: conflicts ? conflicts.slice(0, 200).map((x) => ({ ...x, mine: showValue(x.mine), theirs: showValue(x.theirs) })) : null,
     })
+    if (from === store.UNAVAILABLE) return unavailable(res)
+    if (!from?.payload) return refuse(null)
+    const m = merge3(from.payload, before.payload, payload)
+    if (m.conflicts.length) return refuse(m.conflicts)
+    toSave = m.merged
+    merged = true
   }
-  const saved = await store.saveScenario(name, payload, updatedBy)
+  const saved = await store.saveScenario(name, toSave, updatedBy)
   if (saved === store.UNAVAILABLE) return unavailable(res)
   // Who changed what, field by field, for the change history.
-  gov.auditPlan(before?.payload, payload, req.me?.email || updatedBy || 'unknown')
-  res.json(saved)
+  gov.auditPlan(before?.payload, toSave, req.me?.email || updatedBy || 'unknown')
+  // Merged: the browser takes the merged plan, so it holds what was saved.
+  res.json(merged ? { ...saved, merged: true, payload: toSave } : saved)
 })
 
 /*
