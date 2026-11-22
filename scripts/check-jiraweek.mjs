@@ -494,13 +494,11 @@ try {
       (await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task]')].map((x) => x.getAttribute('data-jira-task')))).join() === 'FNP-2010')
     const head = await pg.evaluate(() => {
       const g = document.querySelector('[data-jira-task="FNP-2010"]')?.closest('[data-project-group]')
-      const nx = document.querySelector('[data-next-step]')
-      const btn = document.querySelector('[data-next-action]')
-      return {
+            return {
         group: g?.getAttribute('data-project-group'),
         header: g?.querySelector('button')?.innerText.replace(/\s+/g, ' '),
-        next: nx?.innerText.replace(/\s+/g, ' '),
-        anim: btn ? getComputedStyle(btn).animationName : null,
+        nextCard: !!document.querySelector('[data-next-step]'),
+        box: g?.querySelector('[data-jira-task="FNP-2010"] [data-update-box]')?.innerText.replace(/\s+/g, ' ') || '',
         hello: document.body.innerText.includes('Hello'),
         // One framed block: the header and the card share the same border.
         framed: !!g && getComputedStyle(g).borderLeftWidth === '4px' && getComputedStyle(g.querySelector('button')).borderLeftWidth === '0px'
@@ -509,12 +507,10 @@ try {
     })
     check('  each task sits under its project header, saying how many are left', !!head.group && /to update/i.test(head.header || ''), head.header)
     check('  the project and its tasks are one framed block', head.framed)
-    check('  the next step names the task to update, on a pulsing button', /Update 1 task/.test(head.next || '') && /FNP-2010/.test(head.next || '') && !!head.anim && head.anim !== 'none' && !head.hello, `${head.next} · ${head.anim}`)
+    check('  NO NEXT-STEP CARD ABOVE: THE PROJECT CARD IS THE THING, ITS UPDATE BOX MARKED REQUIRED', !head.nextCard && /Write your update for this week/.test(head.box) && /required/i.test(head.box) && !head.hello, head.box)
     // The button takes them to that task's progress box.
-    await pg.click('[data-next-action]')
-    await sleep(700)
-    check('  and pressing it puts them in that task\'s progress box',
-      await pg.evaluate(() => document.activeElement?.closest('[data-jira-task]')?.getAttribute('data-jira-task') === 'FNP-2010'))
+    await pg.focus('[data-jira-task="FNP-2010"] [data-update-box] textarea')
+    await sleep(200)
     // Writing "hold" picks On hold for them; taking it out un-picks it.
     await pg.keyboard.type('This project is hold')
     await sleep(250)
@@ -674,9 +670,9 @@ try {
     await pg.goto(`${base}/#weekly`, { waitUntil: 'networkidle0' })
     await pg.waitForSelector('[data-jira-task], [data-next-step]', { timeout: 15000 }).catch(() => {})
     for (let i = 0; i < 2; i++) {
-      const was = await pg.evaluate(() => document.querySelector('[data-next-step]')?.parentElement?.innerText || '')
+      const was = await pg.evaluate(() => document.querySelector('[aria-label="previous week"]')?.parentElement?.innerText || '')
       await pg.click('[aria-label="previous week"]')
-      await pg.waitForFunction((w) => (document.querySelector('[data-next-step]')?.parentElement?.innerText || '') !== w && !/Reading your Jira|Loading week/.test(document.body.innerText), { timeout: 10000 }, was).catch(() => {})
+      await pg.waitForFunction((w) => (document.querySelector('[aria-label="previous week"]')?.parentElement?.innerText || '') !== w && !/Reading your Jira|Loading week/.test(document.body.innerText), { timeout: 10000 }, was).catch(() => {})
     }
     await sleep(500)
     const shut = await pg.evaluate(() => document.body.innerText)
@@ -699,7 +695,7 @@ try {
       }
     })
     check('A FAILED JIRA POST STAYS UNDER "NOT UPDATED YET", SAYS WHY, WITH RETRY POSTING', /NOT posted to FNP-2017 in Jira/.test(fail.warn) && /maintenance|503/.test(fail.warn) && fail.retry, JSON.stringify(fail))
-    check('  the Next step and the project block count it as to do', /Update 1 task/.test(fail.next) && /FNP-2017/.test(fail.next) && /1 to update/i.test(fail.group), `${fail.next} · ${fail.group}`)
+    check('  the project block counts it as to do', /1 to update/i.test(fail.group), fail.group)
     failComment.delete('FNP-2017')
     await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task="FNP-2017"] button')].find((b) => b.textContent.trim() === 'Retry posting')?.click())
     await pg.waitForSelector('[data-posted="FNP-2017"]', { timeout: 10000 }).catch(() => {})

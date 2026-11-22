@@ -1,5 +1,4 @@
 import WeekSwitcher from './components/WeekSwitcher.jsx'
-import ViewAsBanner from './components/ViewAsBanner.jsx'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import {
   ThemeProvider, CssBaseline, Box, Typography,
@@ -1263,6 +1262,7 @@ export default function App() {
           onSignOut={signOut}
           previewing={previewing}
           onToggleView={me?.role === 'admin' ? toggleView : null}
+          viewAs={previewing ? { people: state.people, person: previewPerson, self: me?.person || null, onPick: pickPreview } : null}
           coverage={member ? memberProgress(shown) : {
             total: Math.round(plan.totals.totalHours),
             target: plan.totals.target,
@@ -1467,9 +1467,6 @@ export default function App() {
         {/* Keyed on the view, so switching it rebuilds the page and every page
             asks the server again under the new rules. */}
         <Box key={previewing ? `member:${previewPerson || ''}` : 'admin'} sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
-          {previewing && (
-            <ViewAsBanner people={state.people} person={previewPerson} self={me?.person || null} onPick={pickPreview} onBack={() => toggleView(false)} />
-          )}
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.

@@ -12,6 +12,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import EventIcon from '@mui/icons-material/EventOutlined'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import FolderIcon from '@mui/icons-material/FolderOutlined'
+import EditNoteIcon from '@mui/icons-material/EditNoteOutlined'
 import { alpha } from '@mui/material/styles'
 import * as api from '../lib/api.js'
 import { addWeeks, weekNo, weekTitle } from '../lib/weekly.js'
@@ -391,18 +392,47 @@ function TaskCard({
               Your unsent draft, kept in this browser — not posted yet.
             </Typography>
           )}
-          <TextField
-            label="This week's progress"
-            value={progress}
-            onChange={(e) => setProgress(e.target.value)}
-            disabled={!canWrite}
-            multiline
-            minRows={2}
-            maxRows={10}
-            fullWidth
-            error={!!shownProblems.progress}
-            helperText={shownProblems.progress || (canWrite ? 'What you did on it. Links are fine. Paste a picture here (Ctrl/Cmd+V), drop one on the card, or attach it below.' : undefined)}
-          />
+          {/* WHERE THE UPDATE GOES: a framed, tinted box with its own heading,
+              so nobody has to guess that this is the part to fill in. Strong
+              while empty, calmer once something is written. */}
+          <Box
+            data-update-box={progress.trim() ? 'written' : 'empty'}
+            sx={(t) => ({
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1,
+              p: { xs: 1, sm: 1.5 },
+              borderRadius: 2,
+              border: `2px solid ${alpha(t.palette.primary.main, progress.trim() ? 0.3 : 0.75)}`,
+              bgcolor: alpha(t.palette.primary.main, t.palette.mode === 'dark' ? 0.1 : 0.045),
+              transition: 'border-color .2s',
+            })}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <EditNoteIcon sx={{ color: 'primary.main', fontSize: 22 }} />
+              <Typography variant="body1" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                Write your update for this week
+              </Typography>
+              {progress.trim()
+                ? <Pill label="Written" tone="good" />
+                : <Pill label="Required" tone="warn" />}
+            </Box>
+            <TextField
+              label="What did you do on it this week?"
+              placeholder="e.g. Mapped the asset classes. Waiting for IT to open the SAP extract."
+              value={progress}
+              onChange={(e) => setProgress(e.target.value)}
+              disabled={!canWrite}
+              required
+              multiline
+              minRows={3}
+              maxRows={12}
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+              error={!!shownProblems.progress}
+              helperText={shownProblems.progress || (canWrite ? 'Links are fine. Paste a picture here (Ctrl/Cmd+V), drop one on the card, or attach it below.' : undefined)}
+              sx={{ '& .MuiOutlinedInput-root': { bgcolor: 'background.paper', fontSize: '1rem' } }}
+            />
           {canWrite && (
             <VoiceUpdate
               aiOn={aiOn}
@@ -428,6 +458,7 @@ function TaskCard({
               status: hold ? 'On hold' : done === true ? 'Finished' : done === false ? 'Not finished' : '',
             }}
           />
+          </Box>
           {canWrite && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <Button

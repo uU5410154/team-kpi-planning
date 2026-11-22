@@ -1,5 +1,5 @@
 import {
-  Box, Drawer, Typography, Tooltip, IconButton, Button, LinearProgress, ButtonBase, Avatar, Switch,
+  Box, Drawer, Typography, Tooltip, IconButton, Button, LinearProgress, ButtonBase, Avatar, Switch, MenuItem, TextField,
 } from '@mui/material'
 import PreviewIcon from '@mui/icons-material/VisibilityOutlined'
 import { alpha, useTheme } from '@mui/material/styles'
@@ -78,7 +78,7 @@ function NavItem({
 }
 
 function NavBody({
-  tabs, tab, onTab, mini, onFold, phone, onClose, me, onSignOut, coverage, previewing, onToggleView,
+  tabs, tab, onTab, mini, onFold, phone, onClose, me, onSignOut, coverage, previewing, onToggleView, viewAs = null,
 }) {
   const theme = useTheme()
   const roleWord = me?.local ? 'Local copy'
@@ -164,7 +164,7 @@ function NavBody({
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.3 }}>View as a team member</Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.3, display: 'block' }}>
-              {previewing ? 'On — what your team sees' : 'See the app as your team does'}
+              {previewing ? 'On — read only, what they see' : 'See the app as your team does'}
             </Typography>
           </Box>
           <Switch
@@ -175,6 +175,23 @@ function NavBody({
           />
         </Box>
       ))}
+      {/* Which member is being looked at: here, so the page itself is all theirs. */}
+      {viewAs && !mini && (
+        <TextField
+          select
+          size="small"
+          label="View as"
+          value={viewAs.person || ''}
+          onChange={(e) => viewAs.onPick?.(e.target.value || null)}
+          data-view-as={viewAs.person || ''}
+          inputProps={{ 'aria-label': 'view as which member' }}
+          sx={{ mt: -1 }}
+        >
+          {(viewAs.people || []).filter((p) => p && p.id && !p.deleted).map((p) => (
+            <MenuItem key={p.id} value={p.id}>{p.nick || p.name || p.id}{p.id === viewAs.self ? ' (you)' : ''}</MenuItem>
+          ))}
+        </TextField>
+      )}
 
       <Box>
         {!mini && (

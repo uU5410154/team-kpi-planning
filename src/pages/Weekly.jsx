@@ -1103,10 +1103,18 @@ export default function Weekly({
     return { label: 'All in for this week — thank you', sub: 'You can still edit until it locks.' }
   })()
 
+  // Updating a week from Jira, the project card is the next step: no card above it saying so.
+  const quiet = !!(jwReady && data.person && !data.locked && data.week <= data.current)
+  const dueLine = (
+    <Typography variant="caption" sx={{ color: 'text.secondary', ...(quiet ? { flex: 1, minWidth: 240 } : { mt: -1.5 }) }}>
+      Plan due <strong>Monday 08:00</strong> · update due <strong>Friday 15:00</strong> (Sunday 15:00 is the second chance)
+      · a week stays editable until the next Monday 08:00. Bangkok time.
+    </Typography>
+  )
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-        {next && <NextStep next={next} />}
+        {quiet ? dueLine : next && <NextStep next={next} />}
         {data && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <IconButton onClick={() => go(-1)} aria-label="previous week"><ChevronLeftIcon /></IconButton>
@@ -1132,10 +1140,7 @@ export default function Weekly({
           </Box>
         )}
       </Box>
-      <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1.5 }}>
-        Plan due <strong>Monday 08:00</strong> · update due <strong>Friday 15:00</strong> (Sunday 15:00 is the second chance)
-        · a week stays editable until the next Monday 08:00. Bangkok time.
-      </Typography>
+      {!quiet && dueLine}
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
       {/* Here as well as under My week: an administrator with no week of

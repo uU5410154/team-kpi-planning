@@ -385,7 +385,7 @@ try {
       .find((t) => t.getAttribute('aria-selected') === 'true')?.textContent.trim())
     check('AN ADMINISTRATOR OPENS THE APP ON THE DASHBOARD', (await selected()) === 'Dashboard', await selected())
     await a.evaluate(() => document.querySelector('input[aria-label="view as a team member"]').click())
-    await a.waitForFunction(() => document.body.innerText.includes('Viewing as a team member'), { timeout: 8000 }).catch(() => {})
+    await a.waitForFunction(() => document.body.innerText.includes('read only, what they see'), { timeout: 8000 }).catch(() => {})
     const tabsNow = await a.evaluate(() => [...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim()))
     check('SWITCHED TO A MEMBER’S VIEW: A MEMBER’S PAGES, AND NO OTHERS',
       JSON.stringify(tabsNow) === JSON.stringify(['Weekly', 'My scorecard', 'Timeline', 'Presentation', 'Apps']), tabsNow.join(' | '))
@@ -394,13 +394,13 @@ try {
     const asText = await a.evaluate(() => document.body.innerText)
     check('  with no decision panel and no colleague’s blockers', !asText.includes('Waiting for your decision')
       && !asText.includes('Blocker:') && asText.includes('My week'))
-    check('  and it says so, with the way back', asText.includes('Viewing as a team member') && asText.includes('Back to administrator'))
+    check('  and it says so, with the way back', asText.includes('read only, what they see') && !!(await a.$('[data-view-as]')))
     await a.reload({ waitUntil: 'networkidle0' })
     await a.waitForSelector('[role="tab"]', { timeout: 15000 })
     check('  REMEMBERED ACROSS A RELOAD', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 5)
-    await a.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Back to administrator')?.click())
+    await a.evaluate(() => document.querySelector('input[aria-label="view as a team member"]').click())
     await a.waitForFunction(() => document.querySelectorAll('[role="tab"]').length > 5, { timeout: 8000 }).catch(() => {})
-    check('“BACK TO ADMINISTRATOR” BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 12)  // ten, plus Management and Data quality
+    check('SWITCHING IT OFF BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 12)  // ten, plus Management and Data quality
 
     console.log('\n--- the member, on a phone ---')
     const m = await as(james, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })
