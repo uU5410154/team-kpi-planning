@@ -752,7 +752,8 @@ app.delete('/api/projects/layout', adminOnly, async (_req, res) => {
 app.post('/api/followups', adminOnly, async (req, res) => {
   const key = String(req.body?.projectKey || '').trim().slice(0, 40)
   if (!key) return res.status(400).json({ error: 'Which project?' })
-  const r = await manager.followUp(key, req.me.email)
+  const person = typeof req.body?.person === 'string' ? req.body.person.trim().slice(0, 40) : null
+  const r = await manager.followUp(key, req.me.email, Date.now(), { person })
   if (r === store.UNAVAILABLE) return unavailable(res)
   if (r.error) return res.status(r.status || 400).json(r)
   return res.json(r)

@@ -95,6 +95,49 @@ export async function write({ kind, field, text, task } = {}) {
     const same = (a) => a.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
     return { text, unchanged: same(text) === same(body) }
   }
+  /*
+   * A SPOKEN UPDATE. The browser turns the member's voice into text (the
+   * Lotus model takes no audio: it answered "At most 0 audio(s)", 2026-11-22)
+   * and sends the transcript; this turns it into the card's fields for the
+   * member to check before anything is sent. Nothing is posted from here.
+   */
+  if (kind === 'voice') {
+    const about = [
+      task?.title && `Item: ${clip(task.title, 200)}`,
+      task?.project && `Project: ${clip(task.project, 200)}`,
+      task?.dates && `Dates: ${clip(task.dates, 60)}`,
+    ].filter(Boolean).join('\n')
+    const out = await llm.chat([
+      {
+        role: 'system',
+        content: 'You turn a spoken weekly update from a finance technology team member into the fields of their update form. '
+          + 'The text is a speech-to-text transcript, so fix obvious recognition slips and drop filler words, but keep every fact, name and number and invent nothing. '
+          + 'Answer with JSON only, no other text: '
+          + '{"progress": "what was done this week, one to three plain sentences", '
+          + '"status": "finished" | "not_finished" | "on_hold" | null, '
+          + '"reason": "why it is not finished or why it is on hold, or empty", '
+          + '"blocker": "who or what is stopping the work, only if one is named, or empty", '
+          + '"decision": true | false, "decisionText": "the decision needed and from whom, or empty"}. '
+          + 'Use null for status when the speaker does not say whether it is finished. '
+          + `Write every text field ${SAME_LANGUAGE.toLowerCase()}`,
+      },
+      { role: 'user', content: `${about ? `${about}\n\n` : ''}Transcript:\n---\n${body}` },
+    ], { temperature: 0.1, maxTokens: 600 })
+    const j = llm.jsonFrom(out)
+    if (!j) return { status: 502, error: 'The AI did not return the update in a form the page can use. Try again, or type it.' }
+    const s = (v, n) => String(v || '').trim().slice(0, n)
+    const status = ['finished', 'not_finished', 'on_hold'].includes(j.status) ? j.status : null
+    return {
+      fields: {
+        progress: s(j.progress, 4000) || body.slice(0, 4000),
+        status,
+        reason: s(j.reason, 2000),
+        blocker: s(j.blocker, 2000),
+        decision: j.decision === true && !!s(j.decisionText, 2000),
+        decisionText: s(j.decisionText, 2000),
+      },
+    }
+  }
   if (kind === 'blocker') {
     const out = await llm.chat([
       {

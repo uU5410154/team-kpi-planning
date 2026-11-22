@@ -159,7 +159,10 @@ export default function Project({
   const byWeek = {}
   for (const t of story.history) (byWeek[t.week] = byWeek[t.week] || []).push(t)
   const weeks = Object.keys(byWeek).sort().reverse()
-  const latest = story.history.map((t) => t.updatedAt).filter(Boolean).sort().pop()
+  // A real update, not a task only planned into a week (that has no answer yet).
+  const latest = story.history
+    .filter((t) => t.reportedAt || t.done === true || t.done === false || t.hold)
+    .map((t) => t.reportedAt || t.updatedAt).filter(Boolean).sort().pop()
   const lastFollow = follow.filter((f) => keys.includes(f.projectKey)).sort((a, b) => b.sentAt.localeCompare(a.sentAt))[0] || null
 
   const owner = plan.assignees?.find((x) => x.id === p.pic) || plan.people.find((x) => x.id === p.pic)

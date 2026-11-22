@@ -15,6 +15,7 @@ import { alpha } from '@mui/material/styles'
 import * as api from '../lib/api.js'
 import { addWeeks, weekNo, weekTitle } from '../lib/weekly.js'
 import AiAssist from './AiAssist.jsx'
+import VoiceUpdate from './VoiceUpdate.jsx'
 import { Pill } from './Brand.jsx'
 import { ago } from './FollowUp.jsx'
 import { mentionsHold, isHoldStatus } from '../lib/hold.js'
@@ -107,7 +108,7 @@ const span = (task) => {
 }
 
 function TaskCard({
-  task, week, person, planning, canWrite, writable, aiOn, highlight, onSaved, onPosted, grouped = false,
+  task, week, person, planning, canWrite, writable, aiOn, highlight, onSaved, onPosted, grouped = false, register,
 }) {
   const u = task.update
   const editing = canWrite && !planning
@@ -226,7 +227,8 @@ function TaskCard({
   // member is told so before it goes (QA, 2026-11-07).
   const contradictsDone = editing && task.done && done !== null && done !== true
 
-  const post = async (body) => {
+  // `quiet`: one of several sent by "Submit all" — the page reloads once, at the end.
+  const post = async (body, { quiet = false } = {}) => {
     setBusy(true)
     setMsg(null)
     setServerProblems([])
@@ -235,19 +237,47 @@ function TaskCard({
       clearDraft(person, week, task.key)
       setImages([])
       onPosted?.(task, r.update)
-      onSaved?.()
+      if (!quiet) onSaved?.()
+      return 'sent'
     } catch (e) {
       setMsg({ tone: 'error', text: e.message })
       setServerProblems(e.problems || [])
+      return 'failed'
     } finally {
       setBusy(false)
     }
   }
-  const submit = () => {
+  const submit = (opts) => {
     setTried(true)
-    if (incomplete) return
-    post({
+    if (incomplete) return Promise.resolve('incomplete')
+    return post({
       progress, done, hold, reason, blocker, decision, decisionText, images,
+    }, opts)
+  }
+
+  /*
+   * SUBMIT ALL: the page sends every card with an unsent update on it, one
+   * after another. Each card says here whether it has one, and how to send it.
+   */
+  const self = useRef(null)
+  self.current = { key: task.key, ready: editing && dirty && !busy, submit }
+  useEffect(() => (register ? register(task.key, self) : undefined), [register, task.key])
+  useEffect(() => { register?.ping?.() }, [register, dirty])
+
+  // Spoken: the AI's reading of it, into the fields, to be checked before Submit.
+  const fromVoice = (f, _heard, byAi) => {
+    if (f.progress) setProgress((cur) => (cur.trim() && !byAi ? `${cur.trim()}\n${f.progress}` : f.progress))
+    if (f.status === 'finished') choose('yes')
+    else if (f.status === 'not_finished') choose('no')
+    else if (f.status === 'on_hold') choose('hold')
+    if (f.reason) setReason(f.reason)
+    if (f.blocker) setBlocker(f.blocker)
+    if (f.decision && f.decisionText) { setDecision(true); setDecisionText(f.decisionText) }
+    setMsg({
+      tone: 'info',
+      text: byAi
+        ? 'Filled in from what you said. Check each field, change anything that is wrong, then Submit.'
+        : 'What you said is in the progress box. Pick finished or not, then Submit.',
     })
   }
   // The update kept here, sent again as it was: for a post Jira did not take.
@@ -370,6 +400,18 @@ function TaskCard({
             error={!!shownProblems.progress}
             helperText={shownProblems.progress || (canWrite ? 'What you did on it. Links are fine. Paste a picture here (Ctrl/Cmd+V), drop one on the card, or attach it below.' : undefined)}
           />
+          {canWrite && (
+            <VoiceUpdate
+              aiOn={aiOn}
+              disabled={busy}
+              task={{
+                title: `${task.key} ${task.summary}${task.epic ? ' (project epic)' : ''}`,
+                project: task.epic ? '' : project,
+                dates: `${task.start || task.sprintStart || '?'} to ${task.due || task.sprintEnd || '?'}`,
+              }}
+              onFields={fromVoice}
+            />
+          )}
           <AiAssist
             available={aiOn}
             disabled={!canWrite}
@@ -483,7 +525,17 @@ function TaskCard({
               helperText={shownProblems.reason}
             />
           )}
-          <TextField size="small" label="Blocker (optional)" value={blocker} onChange={(e) => setBlocker(e.target.value)} disabled={!canWrite} multiline maxRows={4} fullWidth />
+          <TextField
+            size="small"
+            label="Blocked by — who or what is stopping it? (optional)"
+            value={blocker}
+            onChange={(e) => setBlocker(e.target.value)}
+            disabled={!canWrite}
+            multiline
+            maxRows={4}
+            fullWidth
+            helperText={canWrite ? 'Only if something outside your control is in the way — a person, a team, a system or data. Your manager sees it separately from why it is not finished.' : undefined}
+          />
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
             <FormControlLabel
               sx={{ alignSelf: 'flex-start', mr: 0 }}
@@ -740,6 +792,35 @@ export default function JiraWeek({
   onProjectAdded, onDatesSaved, addSignal = 0,
 }) {
   const [filter, setFilter] = useState('todo')
+  /*
+   * Every card on the page, by Jira key, with whether it has an unsent update
+   * and how to send it — for "Submit all". `ping` re-counts when a card's
+   * draft changes.
+   */
+  const cards = useRef(new Map())
+  const [readyCount, setReadyCount] = useState(0)
+  const [bulk, setBulk] = useState(null)
+  const recount = () => setReadyCount([...cards.current.values()].filter((r) => r.current?.ready).length)
+  const register = useMemo(() => {
+    const fn = (key, ref) => { cards.current.set(key, ref); recount(); return () => { cards.current.delete(key); recount() } }
+    fn.ping = () => setTimeout(recount, 0)
+    return fn
+  }, [])
+  const submitAll = async () => {
+    const list = [...cards.current.values()].map((r) => r.current).filter((c) => c?.ready)
+    if (!list.length) return
+    setBulk({ running: true, total: list.length, sent: 0, left: [] })
+    let sent = 0
+    const left = []
+    for (const c of list) {
+      const r = await c.submit({ quiet: true })
+      if (r === 'sent') sent++
+      else left.push(c.key)
+      setBulk({ running: true, total: list.length, sent, left: [...left] })
+    }
+    setBulk({ running: false, total: list.length, sent, left })
+    onReload?.()
+  }
   const [adding, setAdding] = useState(false)
   const [addingProject, setAddingProject] = useState(false)
   const [note, setNote] = useState(null)
@@ -906,10 +987,53 @@ export default function JiraWeek({
               onSaved={(x) => { if (x?.dates) onDatesSaved?.(); onReload?.() }}
               onPosted={onPosted}
               grouped
+              register={register}
             />
           ))}
         </ProjectGroup>
       ))}
+      {!planning && canWrite && (readyCount > 0 || bulk) && (
+        <Paper
+          variant="outlined"
+          data-submit-all-bar
+          sx={(t) => ({
+            position: 'sticky',
+            bottom: 12,
+            zIndex: 5,
+            p: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+            flexWrap: 'wrap',
+            borderColor: alpha(t.palette.primary.main, 0.4),
+            boxShadow: '0 6px 20px rgba(31, 42, 61, 0.14)',
+          })}
+        >
+          <Typography variant="body2" sx={{ flex: 1, minWidth: 200 }}>
+            {bulk?.running
+              ? `Sending ${bulk.sent + bulk.left.length + 1} of ${bulk.total}…`
+              : bulk && !readyCount
+                ? `${bulk.sent} of ${bulk.total} sent to Jira${bulk.left.length ? ` · ${bulk.left.length} still need something: ${bulk.left.join(', ')} — see the marked fields on ${bulk.left.length === 1 ? 'that card' : 'those cards'}` : '.'}`
+                : `${readyCount} update${readyCount === 1 ? '' : 's'} written and not sent yet.`}
+          </Typography>
+          {readyCount > 0 && (
+            <Button
+              variant="contained"
+              onClick={submitAll}
+              disabled={!!bulk?.running}
+              startIcon={bulk?.running ? <CircularProgress size={14} color="inherit" /> : <CheckIcon />}
+              data-submit-all
+              sx={focusRingSx}
+            >
+              Submit all {readyCount}
+            </Button>
+          )}
+          {bulk && !bulk.running && (
+            <Button size="small" onClick={() => setBulk(null)} sx={focusRingSx}>Dismiss</Button>
+          )}
+        </Paper>
+      )}
+
       {shown.length === 0 && (
         <Typography variant="body2" sx={{ color: 'text.secondary', py: 1 }}>
           {rows.length === 0

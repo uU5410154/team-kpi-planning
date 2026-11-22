@@ -264,11 +264,14 @@ export const saveProjectLayout = async (layout) => j(await fetch('/api/projects/
   body: JSON.stringify({ layout }),
 }))
 
-/** Ask a project's owner for an update, by email. */
-export const followUp = async (projectKey) => j(await fetch('/api/followups', {
+/**
+ * Ask a project's owner for an update, by email. `person` only for a project
+ * with no PIC in the register: whoever on the team holds its Jira work.
+ */
+export const followUp = async (projectKey, person = null) => j(await fetch('/api/followups', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ projectKey }),
+  body: JSON.stringify(person ? { projectKey, person } : { projectKey }),
 }))
 /** This week's follow-ups by default; `null` for every week. */
 export const followups = async (week = 'current') => j(await fetch(week ? `/api/followups?week=${encodeURIComponent(week)}` : '/api/followups'))

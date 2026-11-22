@@ -30,7 +30,7 @@ export const ago = (iso, now = Date.now()) => {
 }
 
 export default function FollowUp({
-  projectKey, followup, onSent, compact = false, owner = null, summary = '', note = null, off = null,
+  projectKey, followup, onSent, compact = false, owner = null, summary = '', note = null, off = null, person = null,
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -41,7 +41,7 @@ export default function FollowUp({
     setBusy(true)
     setError(null)
     try {
-      const r = await api.followUp(projectKey)
+      const r = await api.followUp(projectKey, person)
       onSent?.(r.followup)
       setAt(null)
     } catch (e) {

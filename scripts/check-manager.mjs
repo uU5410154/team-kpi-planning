@@ -186,7 +186,21 @@ try {
       counts.forced === 4 && counts.active === activeUnits(plan.projects, WEEK).length && counts.active === counts.forced + counts.byDates
       && counts.total === workUnits(plan.projects).length && counts.lines === plan.projects.filter((p) => !p.deleted).length, JSON.stringify(counts))
     const up = updatedCount(plan.projects, now)
-    check('UPDATED THIS WEEK: one of the active has a task on it', up.updated === 1 && up.active === activeNow.length, JSON.stringify(up))
+    // Owner's rule (2026-11-22): a task only planned is not an update.
+    check('UPDATED THIS WEEK: A TASK ONLY PLANNED IS NOT AN UPDATE', up.updated === 0 && up.active === activeNow.length, JSON.stringify(up))
+    const reported = {
+      ...now,
+      team: now.team.map((r) => (r.entry ? { ...r, entry: { ...r.entry, tasks: r.entry.tasks.map((t) => ({ ...t, done: false, reason: 'Waiting on FP&A' })) } } : r)),
+    }
+    const up2 = updatedCount(plan.projects, reported)
+    check('  once that task is reported on, its project is updated', up2.updated === 1 && up2.active === activeNow.length, JSON.stringify(up2))
+    const owed = {
+      'FNP-379': [{ key: 'FNP-9100', summary: 'Second task', holder: 'James', assignee: 'Pipat Singhasiri', status: 'In Progress', update: null }],
+    }
+    const up3 = updatedCount(plan.projects, reported, null, { jira: owed, people: plan.assignees })
+    check('  BUT NOT WHILE ANOTHER JIRA TASK ON IT, HELD BY THE TEAM, HAS NO UPDATE — it is partly updated', up3.updated === 0 && up3.partly === 1, JSON.stringify(up3))
+    const itOwed = { 'FNP-379': [{ ...owed['FNP-379'][0], holder: 'IT', assignee: 'IT' }] }
+    check('  a task held outside the team (IT) is not chased', updatedCount(plan.projects, reported, null, { jira: itOwed, people: plan.assignees }).updated === 1)
     const groups = ownerRows({ projects: plan.projects, people: plan.assignees, now, prev })
     const jg = groups.find((g) => g.person === 'james')
     const f379 = jg?.projects.find((p) => p.key === 'FNP-379')
@@ -301,7 +315,8 @@ try {
     check(`ACTIVE PROJECTS: ${nActive} (4 switched on, the rest by their dates), of every project in the register`,
       new RegExp(`\\b${nActive}\\b`).test(act) && act.includes(`of ${total}`) && act.includes('4 switched on'), act.replace(/\n/g, ' | '))
     const upd = await sect(a, 'Updated this week')
-    check(`UPDATED THIS WEEK: 2 of ${nActive}`, /\b2\b/.test(upd) && upd.includes(`of ${nActive} active`), upd.replace(/\n/g, ' | '))
+    // Both of James's tasks this week are planned, not reported: not updates.
+    check(`UPDATED THIS WEEK: 0 of ${nActive} — planned tasks are not updates`, /\n0\n/.test(`\n${upd}\n`) && upd.includes(`of ${nActive} active`) && /not fully updated/.test(upd), upd.replace(/\n/g, ' | '))
     // No card is left blank: each says something under its title.
     const blank = await a.evaluate(() => [...document.querySelectorAll('[data-card]')]
       .filter((c) => c.innerText.trim().split('\n').filter((l) => l.trim()).length < 2).map((c) => c.getAttribute('data-card')))
@@ -313,7 +328,7 @@ try {
       own.includes('James') && own.includes('PL Forecast') && own.includes('Build the forecast model') && /NOT DONE · 60%/i.test(own)
       && own.includes('Validate the forecast with FP&A'), own.slice(0, 400).replace(/\n/g, ' | '))
     check('  EACH TASK SHOWS WHAT THE MEMBER WROTE ABOUT IT, NOT JUST ITS NAME', own.includes('Built the driver tree for three regions')
-      && /In the way: Waiting on IT/.test(own), own.slice(0, 500).replace(/\n/g, ' | '))
+      && /Blocked by: Waiting on IT/.test(own), own.slice(0, 500).replace(/\n/g, ' | '))
     check('  THE ANSWERED FOLLOW-UP SAYS SO', /UPDATED .*AGO|UPDATED JUST NOW/i.test(own))
     check('  a project with no owner cannot be followed up', own.includes('No owner to ask'))
     // The week switcher in the top bar: any week, and straight back.
@@ -346,7 +361,8 @@ try {
     await a.evaluate(() => [...document.querySelectorAll('section[aria-label="who holds what"] button')].find((b) => b.textContent.trim() === 'Not updated')?.click())
     await sleep(300)
     const stale = await sect(a, 'who holds what')
-    check('"NOT UPDATED" LEAVES ONLY THE PROJECTS WITHOUT A TASK THIS WEEK', !stale.includes('PL Forecast') && stale.includes('Supplier Portal'))
+    // PL Forecast has a task this week, but only planned: it is not updated.
+    check('"NOT UPDATED" LISTS EVERY PROJECT NOT FULLY REPORTED — one only planned included', stale.includes('PL Forecast') && stale.includes('Supplier Portal'))
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/manager-dashboard.png` })
 
     console.log('\n--- the project page ---')

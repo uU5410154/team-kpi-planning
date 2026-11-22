@@ -289,6 +289,9 @@ try {
     const a = await as(boss, { width: 1440, height: 900 })
     await a.goto(`${base}/`, { waitUntil: 'networkidle0' })
     await ready(a)
+    // The card opens on "Needs attention"; every active project is under "All".
+    await a.evaluate(() => document.querySelector('[data-owners-filter="all"]')?.click())
+    await sleep(300)
     const act = await sect(a, 'Active projects')
     const shown = Number((act.match(/\n(\d+)\n/) || act.match(/(\d+)\s*\n?\s*of \d+/) || [])[1])
     const own = await sect(a, 'who holds what')

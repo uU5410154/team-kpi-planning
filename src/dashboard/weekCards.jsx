@@ -18,7 +18,7 @@ import {
 } from '../lib/weekly.js'
 import {
   projectCounts, updatedCount, ownerRows, reportedWeek, blockersByType, slipping, workload, submissionTrend,
-  activeWords, ACTIVE_WHY,
+  activeWords, ACTIVE_WHY, blockerOf,
 } from '../lib/manager.js'
 import CardFrame from './CardFrame.jsx'
 import { plainError } from '../lib/api.js'
@@ -97,7 +97,9 @@ export function ActiveCard({ ctx, f }) {
 
 export function UpdatedCard({ ctx, f }) {
   const { now } = ctx
-  const { updated, active } = updatedCount(ctx.plan.projects, now, ctx.signals)
+  const { updated, partly, active } = updatedCount(ctx.plan.projects, now, ctx.signals, {
+    jira: ctx.nowJira || null, people: ctx.plan.assignees || ctx.plan.people,
+  })
   const planDue = now?.deadlines?.planDue
   const early = !now || now.now < planDue
   const share = active ? updated / active : 0
@@ -114,9 +116,9 @@ export function UpdatedCard({ ctx, f }) {
           unit={`of ${active} active`}
           tone={early || !active ? undefined : share >= 1 ? 'good' : share >= 0.5 ? 'warning' : 'critical'}
           context={now
-            ? `${Math.max(0, active - updated)} not updated yet · ${weekTitle(now.week)}`
+            ? `${Math.max(0, active - updated)} not fully updated${partly ? ` (${partly} partly)` : ''} · ${weekTitle(now.week)}`
             : 'The weekly check-ins could not be read'}
-          help="An active project counts as updated when somebody sent an update on a task under it that week (or, in the form, saved a task linked to it). Follow up from “Who holds what” to ask for one."
+          help="An active project counts as updated when EVERY task owed an update on it that week has one: each task in somebody’s week, and each Jira task under it held by a team member. A plan confirmed on Monday is not an update. “Partly” means some tasks are in and some are not. Follow up from “Who holds what” to ask for the rest."
         />
       )}
     </CardFrame>
@@ -167,7 +169,9 @@ function TaskList({ tasks, empty, kind }) {
         // Answered: a report came in (or, last week, Jira already says Done).
         const answered = t.done != null || !!t.reportedAt || !!t.progress
         const hold = t.hold || (t.done === false && /^on hold$/i.test(String(t.blocker || '').trim()))
-        const why = t.done === false ? (t.reason || t.blocker || '') : ''
+        // Why it is not finished, and — separately — what is in the way.
+        const why = t.done === false ? (t.reason || '') : ''
+        const blocked = t.done === false ? blockerOf(t) : ''
         return (
           <Box key={`${t.person}.${t.id}`} sx={{ minWidth: 0 }} data-week-task={t.jiraKey || t.id}>
             <Typography variant="body2" sx={{ lineHeight: 1.35 }}>{t.title}</Typography>
@@ -178,7 +182,9 @@ function TaskList({ tasks, empty, kind }) {
               {hold && <Pill label="On hold" tone="warn" />}
               {!hold && t.done === true && <Pill label="Done" tone="good" />}
               {!hold && t.done === false && <Pill label={`Not done${t.pct != null ? ` · ${t.pct}%` : ''}`} tone="warn" />}
-              {!hold && t.done == null && (kind === 'last' || !answered) && <Pill label={kind === 'last' ? 'No answer' : 'Planned'} tone="neutral" />}
+              {!hold && t.done == null && (kind === 'last' || !answered) && (
+                <Pill label={kind === 'last' ? 'No answer' : 'No update yet'} tone={kind === 'last' ? 'neutral' : 'warn'} />
+              )}
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 {t.nick}
                 {kind === 'this' && t.expected ? ` · expected ${fmtDay(t.expected)}` : ''}
@@ -190,7 +196,17 @@ function TaskList({ tasks, empty, kind }) {
             {t.progress && <UpdateText text={t.progress} />}
             {why && !/^on hold$/i.test(why.trim()) && (
               <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
-                {hold ? 'Why on hold' : 'In the way'}: {why}
+                {hold ? 'Why on hold' : 'Why not finished'}: {why}
+              </Typography>
+            )}
+            {blocked && !hold && (
+              <Typography variant="caption" sx={{ color: 'warning.main', display: 'block', mt: 0.25, fontWeight: 600 }} data-blocker>
+                Blocked by: <Box component="span" sx={{ color: 'text.primary', fontWeight: 400 }}>{blocked}</Box>
+              </Typography>
+            )}
+            {t.decision && t.decisionText && t.done === false && (
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
+                Decision asked: {t.decisionText}
               </Typography>
             )}
           </Box>
@@ -202,7 +218,7 @@ function TaskList({ tasks, empty, kind }) {
 
 /** The follow-up for one row, or why there is none. */
 function RowFollowUp({ ctx, g, p, compact = true }) {
-  if (!g.person) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>No owner to ask</Typography>
+  if (!g.person) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>No owner to ask — set a PIC on the Projects page</Typography>
   // Does the owner hold any Jira work under it this week? If not, the email says to add a task.
   const theirs = (p.keys || [p.key]).flatMap((k) => ctx.nowJira?.[k] || []).filter((t) => t.holder === g.nick || t.update?.nick === g.nick)
   const note = ctx.nowJira && !theirs.length && !p.thisWeek.some((t) => t.person === g.person)
@@ -211,7 +227,17 @@ function RowFollowUp({ ctx, g, p, compact = true }) {
   const off = p.onHold ? 'On hold — no update needed'
     : ctx.isCurrent === false ? 'Follow-ups ask about this week' : null
   return (
-    <FollowUp compact={compact} projectKey={p.key} followup={p.followup} onSent={ctx.onFollowSent} owner={g.nick} summary={p.summary} note={note} off={off} />
+    <FollowUp
+      compact={compact}
+      projectKey={p.key}
+      followup={p.followup}
+      onSent={ctx.onFollowSent}
+      owner={g.nick}
+      person={p.ownerFrom === 'jira' ? g.person : null}
+      summary={p.summary}
+      note={p.ownerFrom === 'jira' ? `${p.key} has no PIC in the register; ${g.nick} holds its Jira work this week, so the email goes to them.` : note}
+      off={off}
+    />
   )
 }
 
@@ -223,12 +249,24 @@ function RowFacts({ p }) {
       {p.why && p.why !== 'dates' ? ` · ${ACTIVE_WHY[p.why]}` : ''}
       {p.lines > 1 ? ` · ${p.lines} register lines` : ''}
       {p.onHold ? ' · on hold' : ''}
+      {(p.overdue || p.report?.total > 0 || p.ownerFrom === 'jira') && (
+        <Box component="span" sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', mt: 0.5 }}>
+          {p.overdue && <Pill label="Overdue" tone="bad" />}
+          {p.report?.total > 0 && (
+            <Pill
+              label={p.report.complete ? `All ${p.report.total} reported` : `${p.report.reported} of ${p.report.total} reported`}
+              tone={p.report.complete ? 'good' : p.report.reported ? 'warn' : 'bad'}
+            />
+          )}
+          {p.ownerFrom === 'jira' && <Pill label="No PIC — Jira holder" tone="neutral" />}
+        </Box>
+      )}
     </Typography>
   )
 }
 
 export function OwnersCard({ ctx, f }) {
-  const [only, setOnly] = useState('all')
+  const [only, setOnly] = useState('attention')
   const groups = ownerRows({
     projects: ctx.plan.projects,
     people: ctx.plan.assignees || ctx.plan.people,
@@ -237,11 +275,17 @@ export function OwnersCard({ ctx, f }) {
     followups: ctx.followups,
     prevJira: ctx.prevJira || null,
     signals: ctx.signals,
+    nowJira: ctx.nowJira || null,
   })
   // Last week comes from Jira a moment after the rest: a spinner until it does.
   const lastLoading = ctx.prevJira === undefined
   const shown = groups
-    .map((g) => ({ ...g, projects: only === 'stale' ? g.projects.filter((p) => !p.thisWeek.length) : g.projects }))
+    .map((g) => ({
+      ...g,
+      projects: only === 'stale' ? g.projects.filter((p) => !p.report.complete && !p.onHold)
+        : only === 'attention' ? g.projects.filter((p) => p.attention && !p.onHold)
+          : g.projects,
+    }))
     .filter((g) => g.projects.length)
   const count = groups.reduce((a, g) => a + g.projects.length, 0)
   const past = ctx.isCurrent === false
@@ -258,8 +302,9 @@ export function OwnersCard({ ctx, f }) {
       sub={ctx.now && !loading ? `${count} active project${count === 1 ? '' : 's'} by owner, ${past ? `week ${weekNo(ctx.now.week)}` : 'this week'} — the week before, the week, and a follow-up a click away` : undefined}
       action={(
         <ToggleButtonGroup size="small" exclusive value={only} onChange={(_e, v) => v && setOnly(v)}>
-          <ToggleButton value="all" sx={{ textTransform: 'none', px: 1.5 }}>All</ToggleButton>
-          <ToggleButton value="stale" sx={{ textTransform: 'none', px: 1.5 }}>Not updated</ToggleButton>
+          <ToggleButton value="attention" sx={{ textTransform: 'none', px: 1.5 }} data-owners-filter="attention">Needs attention</ToggleButton>
+          <ToggleButton value="stale" sx={{ textTransform: 'none', px: 1.5 }} data-owners-filter="stale">Not updated</ToggleButton>
+          <ToggleButton value="all" sx={{ textTransform: 'none', px: 1.5 }} data-owners-filter="all">All</ToggleButton>
         </ToggleButtonGroup>
       )}
     >
@@ -286,7 +331,11 @@ export function OwnersCard({ ctx, f }) {
             </Typography>
           )}
           {count > 0 && shown.length === 0 && (
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Every active project has an update {past ? 'that week' : 'this week'}.</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {only === 'attention'
+                ? `Nothing needs attention ${past ? 'that week' : 'this week'}: every active project is fully reported, nothing is blocked or waiting for a decision, and nothing is overdue.`
+                : `Every task on every active project has an update ${past ? 'that week' : 'this week'}.`}
+            </Typography>
           )}
           {shown.length > 0 && f.fill === false && (
             /* On a phone: one card per project, the weeks one under the other. */
@@ -485,7 +534,7 @@ function TaskDecision({ d, onDecide }) {
             {d.nick} asks: “{d.text}”
           </Typography>
         </Box>
-        {!open && <Button size="small" onClick={() => setOpen(true)}>Decided</Button>}
+        {!open && <Button size="small" onClick={() => setOpen(true)}>Mark decided</Button>}
       </Box>
       {open && (
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>

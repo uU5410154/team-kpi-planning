@@ -225,6 +225,21 @@ export function entriesOf(week) {
   }).filter(Boolean)
 }
 
+/*
+ * REPORTED, NOT ONLY PLANNED. Confirming Monday's plan copies every task into
+ * the week with no answer on it; that is a plan, not an update (POC,
+ * 2026-11-22: a member who sent one update out of nine had all six of her
+ * projects counted "updated, just now"). A task is reported once somebody said
+ * whether it is finished, put it on hold, or sent its update from Jira.
+ */
+export const isReported = (t) => !!t && (t.done === true || t.done === false || !!t.hold || !!t.reportedAt)
+
+/**
+ * When a task was reported: its own time (an update sent from Jira), else the
+ * time that person's week was reported or saved. Null for a task only planned.
+ */
+export const reportedTimeOf = (t) => (isReported(t) ? t.reportedAt || t.reportSubmittedAt || t.updatedAt || null : null)
+
 /** Every task in a week, by the project it is linked to. */
 export function tasksByProject(week) {
   const out = {}
@@ -232,18 +247,110 @@ export function tasksByProject(week) {
     for (const t of e.tasks || []) {
       if (!t.projectKey) continue
       ;(out[t.projectKey] = out[t.projectKey] || []).push({
-        ...t, person: e.person, nick: e.nick, updatedAt: e.updatedAt || null, planIn: !!e.planSubmittedAt, reportIn: !!e.reportSubmittedAt,
+        ...t,
+        person: e.person,
+        nick: e.nick,
+        updatedAt: e.updatedAt || null,
+        reportSubmittedAt: e.reportSubmittedAt || null,
+        planIn: !!e.planSubmittedAt,
+        reportIn: !!e.reportSubmittedAt,
       })
     }
   }
   return out
 }
 
-/** How many ACTIVE projects (pieces of work) have a task on them in this week's check-ins. */
-export function updatedCount(projects, week, signals = null) {
+const HOLD_STATUS = /hold|pause|suspend/i
+
+/**
+ * Jira work under a project this week that a team member holds but has not
+ * put in their week yet — owed an update just the same. From the
+ * GET /api/jira/coverage/:week answer; on-hold items need no update, and
+ * items held by somebody outside the team (IT, a user) are not chased here.
+ */
+function owedFromJira(keys, jiraNow, people, already) {
+  if (!jiraNow) return []
+  const team = people.filter((p) => p.scorecard !== false)
+  const byName = new Map()
+  for (const p of team) for (const n of [p.nick, p.name, ...(p.jiraNames || [])].filter(Boolean)) byName.set(String(n).toLowerCase(), p)
+  const out = []
+  const seen = new Set(already)
+  for (const k of keys) {
+    for (const t of jiraNow[k] || []) {
+      const key = String(t.key || '').toUpperCase()
+      if (!key || seen.has(key)) continue
+      const who = byName.get(String(t.holder || '').toLowerCase()) || byName.get(String(t.assignee || '').toLowerCase())
+      if (!who) continue
+      if (!t.update && (t.done || HOLD_STATUS.test(t.status || ''))) continue
+      seen.add(key)
+      out.push({
+        id: key,
+        jiraKey: key,
+        title: `${key} ${t.summary || ''}`.trim(),
+        person: who.id,
+        nick: who.nick || who.name,
+        expected: t.due || null,
+        // Sent from Jira but not in the week's copy (it can lag a moment).
+        done: t.update ? t.update.done === true : null,
+        hold: !!t.update?.hold,
+        progress: t.update?.progress || '',
+        reason: t.update?.reason || '',
+        blocker: t.update?.blocker || '',
+        reportedAt: t.update?.submittedAt || null,
+        fromJira: true,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * Where one piece of work stands this week: every task owed an update on it
+ * (in somebody's week, or held in Jira by a team member) and how many are in.
+ * `complete` — every one of them reported — is what "updated" means.
+ */
+export function reportOf(tasks = []) {
+  const total = tasks.length
+  const reported = tasks.filter(isReported).length
+  return { total, reported, complete: total > 0 && reported === total, partial: reported > 0 && reported < total }
+}
+
+/** Every register line behind one epic, read together: its tasks once. */
+function gatherTasks(by, keys) {
+  const seen = new Set()
+  const out = []
+  for (const k of keys) {
+    for (const t of by[k] || []) {
+      const id = String(t.jiraKey || `${t.person}.${t.id}`).toUpperCase()
+      if (!seen.has(id)) { seen.add(id); out.push(t) }
+    }
+  }
+  return out
+}
+
+/** This week's tasks on one piece of work: in the check-ins, then owed from Jira. */
+function weekTasks(keys, byTask, jiraNow, people) {
+  const tw = gatherTasks(byTask, keys)
+  const owed = owedFromJira(keys, jiraNow, people, tw.map((t) => String(t.jiraKey || '').toUpperCase()).filter(Boolean))
+  return [...tw, ...owed]
+}
+
+/**
+ * How many ACTIVE projects (pieces of work) are UPDATED this week: every task
+ * owed an update on them reported (owner's rule, 2026-11-22). `partly` counts
+ * those with some but not all in.
+ */
+export function updatedCount(projects, week, signals = null, { jira = null, people = [] } = {}) {
   const by = tasksByProject(week)
   const active = activeUnits(projects, week?.week, signals)
-  return { updated: active.filter((u) => u.keys.some((k) => by[k]?.length)).length, active: active.length }
+  let updated = 0
+  let partly = 0
+  for (const u of active) {
+    const r = reportOf(weekTasks(u.keys, by, jira, people))
+    if (r.complete) updated++
+    else if (r.partial) partly++
+  }
+  return { updated, partly, active: active.length }
 }
 
 /**
@@ -281,57 +388,93 @@ export function lastWeekFromJira(byProject = {}, prev = null) {
   return out
 }
 
-const latestOf = (tasks) => tasks.map((t) => t.updatedAt).filter(Boolean).sort().pop() || null
+/** The newest REPORTED time among tasks — a plan alone is not an update. */
+export const latestOf = (tasks) => tasks.map(reportedTimeOf).filter(Boolean).sort().pop() || null
+
+/**
+ * What is IN THE WAY of a task, as its holder named it — not the reason it is
+ * not finished. A week run from Jira copies the reason into `blocker` when no
+ * blocker was given (so the older cards still had something to show); that
+ * copy, and the "On hold" marker, are not a blocker.
+ */
+export const blockerOf = (t) => {
+  const b = String(t?.blocker || '').trim()
+  if (!b || /^on hold$/i.test(b) || b === String(t?.reason || '').trim()) return ''
+  return b
+}
+
+const isDoneStatus = (s) => /^(done|complete|completed|closed|resolved)$/i.test(String(s || '').trim())
 
 /**
  * WHO HOLDS WHICH ACTIVE PROJECT, and where each one stands: last week's
- * tasks and whether they finished, this week's, the latest update, and the
- * newest follow-up sent about it.
+ * tasks and whether they finished, this week's (every task owed an update,
+ * reported or not), how many are in, the latest real update, and the newest
+ * follow-up sent about it.
+ *
+ * A project with no PIC in the register is listed under whoever on the team
+ * holds its Jira work this week, marked `ownerFrom: 'jira'`, so somebody can
+ * still be asked about it.
  */
 export function ownerRows({
-  projects = [], people = [], now = null, prev = null, followups = [], prevJira = null, signals = null,
+  projects = [], people = [], now = null, prev = null, followups = [], prevJira = null, signals = null, nowJira = null, asOf = null,
 }) {
   const nick = Object.fromEntries(people.map((p) => [p.id, p.nick || p.name || p.id]))
   const thisWeek = tasksByProject(now)
   const lastWeek = prevJira ? lastWeekFromJira(prevJira, prev) : tasksByProject(prev)
   const asked = {}
   for (const f of followups) if (!asked[f.projectKey] || f.sentAt > asked[f.projectKey].sentAt) asked[f.projectKey] = f
-  // Every register line behind one epic, read together: one row, its tasks once.
-  const gather = (by, keys) => {
-    const seen = new Set()
-    const out = []
-    for (const k of keys) {
-      for (const t of by[k] || []) {
-        const id = `${t.person}.${t.jiraKey || t.id}`
-        if (!seen.has(id)) { seen.add(id); out.push(t) }
-      }
-    }
-    return out
-  }
+  const today = asOf || (now?.now ? new Date(now.now).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10))
   const groups = {}
   for (const u of activeUnits(projects, now?.week, signals)) {
     const { p } = u
-    const owner = p.pic || null
+    const tw = weekTasks(u.keys, thisWeek, nowJira, people)
+    const reportedNow = new Set(tw.filter(isReported).map((t) => String(t.jiraKey || '').toUpperCase()).filter(Boolean))
+    /*
+     * Last week's "status today" is Jira's status NOW. Where the same task was
+     * reported this week, that status is this week's news, not last week's:
+     * shown as no answer then, rather than "Done" in the wrong week.
+     */
+    const lw = gatherTasks(lastWeek, u.keys).map((t) => (t.statusToday && reportedNow.has(String(t.jiraKey || '').toUpperCase())
+      ? { ...t, done: null, hold: false, statusToday: false }
+      : t))
+    // No PIC in the register: whoever on the team holds the work this week.
+    let owner = p.pic || null
+    let ownerFrom = owner ? 'register' : null
+    if (!owner) {
+      const counts = {}
+      for (const t of tw) if (t.person && nick[t.person]) counts[t.person] = (counts[t.person] || 0) + 1
+      const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+      if (top) { owner = top[0]; ownerFrom = 'jira' }
+    }
     const g = groups[owner || ''] = groups[owner || ''] || {
       person: owner, nick: owner ? (nick[owner] || owner) : 'No owner', projects: [],
     }
-    const tw = gather(thisWeek, u.keys)
-    const lw = gather(lastWeek, u.keys)
     const fu = u.keys.map((k) => asked[k]).filter(Boolean).sort((a, b) => String(b.sentAt).localeCompare(String(a.sentAt)))[0] || null
+    const due = u.lines.map((x) => x.due).filter(Boolean).sort().pop() || null
+    const done = u.lines.every((x) => isDoneStatus(x.status))
     g.projects.push({
       key: p.key,
       keys: u.keys,
       lines: u.keys.length,
       jiraKey: p.jiraKey || null,
       summary: p.summary || '',
-      due: u.lines.map((x) => x.due).filter(Boolean).sort().pop() || null,
+      due,
+      // Still being worked on after its due date, and not done.
+      overdue: !!due && due < today && !done,
       status: p.status || null,
       // Why it is on the list: by its dates, its Jira work, an update, a decision.
       why: u.source,
       onHold: u.lines.some(projectOnHold),
+      ownerFrom,
       thisWeek: tw,
       lastWeek: lw,
+      report: reportOf(tw),
       latest: latestOf([...tw, ...lw]),
+      // Something for the manager to act on: not fully reported, blocked, a
+      // decision asked for, or past its due date.
+      attention: !reportOf(tw).complete
+        || tw.some((t) => t.done === false && !t.hold && (blockerOf(t) || t.decision))
+        || (!!due && due < today && !done),
       followup: fu,
     })
   }
@@ -426,4 +569,36 @@ export function submissionTrend(weeks = []) {
     return { week: w.week, ontime: n('ontime'), late: n('late'), missing: n('missing'), open: n('open') }
   })
   return { weeks: order.map((w) => w.week), people: Object.values(people), plan: tally('plan'), report: tally('report') }
+}
+
+/**
+ * THE WEEKLY CHECK-IN, IN ONE LINE FOR MANAGEMENT: whose plan and report are
+ * in, how many active projects are fully reported, what is blocked, which
+ * decisions are waiting, and what is still being worked on past its due date.
+ * From the same functions as the dashboard, so the two never disagree.
+ */
+export function weeklyPulse({
+  projects = [], people = [], week = null, jira = null, decisions = null, signals = null,
+}) {
+  if (!week) return null
+  const required = (week.team || []).filter((r) => r.required)
+  const u = updatedCount(projects, week, signals, { jira, people })
+  const rows = ownerRows({
+    projects, people, now: week, signals, nowJira: jira,
+  }).flatMap((g) => g.projects)
+  const blocked = rows.filter((p) => p.thisWeek.some((t) => t.done === false && !t.hold && blockerOf(t)))
+  return {
+    week: week.week,
+    required: required.length,
+    plansIn: required.filter((r) => r.entry?.planSubmittedAt).length,
+    reportsIn: required.filter((r) => r.entry?.reportSubmittedAt).length,
+    missing: required.filter((r) => !r.entry?.reportSubmittedAt).map((r) => r.nick || r.person),
+    active: u.active,
+    updated: u.updated,
+    partly: u.partly,
+    rate: u.active ? u.updated / u.active : null,
+    blocked: blocked.map((p) => ({ key: p.key, summary: p.summary })),
+    overdue: rows.filter((p) => p.overdue).map((p) => ({ key: p.key, summary: p.summary, due: p.due })),
+    decisions: decisions ? decisions.length : null,
+  }
 }

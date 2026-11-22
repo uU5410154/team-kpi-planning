@@ -8,6 +8,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import * as api from '../lib/api.js'
 import { METRICS, METRIC_BY_ID, COST_COVERAGE_GATE, dataQuality, overviewOf } from '../lib/governance.js'
 import { fmtMoneyShort, fmtRoi, fmtPct, SAVING_BASIS } from '../lib/model.js'
+import { activitySignals, reportedWeek, weeklyPulse } from '../lib/manager.js'
+import { addWeeks, weekNo } from '../lib/weekly.js'
 
 /* CP AXTRA colours for the few marks that carry meaning. */
 export const TONE = { good: '#43938f', warn: '#c8961f', bad: '#da3832', blue: '#306fc7' }
@@ -77,12 +79,37 @@ const stamp = (iso) => (iso ? new Date(iso).toLocaleString() : null)
 export default function Overview({ plan, lastSaved, canWrite, me, onSettings, onOpenProject, onGoTo }) {
   const [jira, setJira] = useState(null)
   const [dictOpen, setDictOpen] = useState(false)
+  // The weekly check-in: the latest week whose report is due (this week after
+  // Friday 15:00, else last week), with its Jira work and open decisions.
+  const [wk, setWk] = useState(undefined)
   useEffect(() => {
     let live = true
     api.jiraLastRun().then((r) => { if (live) setJira(r) }).catch(() => { if (live) setJira(null) })
+    ;(async () => {
+      try {
+        const now = await api.loadWeek('current')
+        const prev = await api.loadWeek(addWeeks(now.week, -1)).catch(() => null)
+        const week = reportedWeek(now, prev)
+        const [cov, dec] = await Promise.all([
+          api.jiraCoverage(week.week).catch(() => null),
+          week === now ? api.decisions().catch(() => null) : Promise.resolve(null),
+        ])
+        if (live) setWk({ week, jira: cov?.jira === 'on' ? cov.byProject || {} : null, decisions: dec?.decisions || null })
+      } catch {
+        if (live) setWk(null)
+      }
+    })()
     return () => { live = false }
   }, [])
-  const quality = useMemo(() => dataQuality(plan, { jira }), [plan, jira])
+  const people = plan.assignees || plan.people || []
+  const pulse = useMemo(() => {
+    if (!wk) return null
+    const signals = activitySignals({ projects: plan.projects, week: wk.week, jira: wk.jira, decisions: wk.decisions })
+    return weeklyPulse({
+      projects: plan.projects, people, week: wk.week, jira: wk.jira, decisions: wk.decisions, signals,
+    })
+  }, [wk, plan.projects, people])
+  const quality = useMemo(() => dataQuality(plan, { jira, weekly: pulse }), [plan, jira, pulse])
   const o = useMemo(() => overviewOf(plan, quality), [plan, quality])
   const sym = plan.finance?.symbol || '฿'
   const h = o.headline
@@ -213,7 +240,7 @@ export default function Overview({ plan, lastSaved, canWrite, me, onSettings, on
           {[
             ['Completeness', conf.parts.completeness],
             ['Validity', conf.parts.validity],
-            ['Freshness (Jira sync)', conf.parts.freshness],
+            ['Freshness (Jira sync, weekly check-in)', conf.parts.freshness],
             ['Assumptions confirmed', conf.parts.assumptions],
           ].map(([k, v]) => (
             <Box key={k} sx={{ mb: 1 }}>
@@ -239,6 +266,54 @@ export default function Overview({ plan, lastSaved, canWrite, me, onSettings, on
           </Box>
         </Section>
       </Box>
+
+      <Section
+        title={pulse ? `Weekly check-in · week ${weekNo(pulse.week)}` : 'Weekly check-in'}
+        action={<Button size="small" onClick={() => onGoTo('dashboard')} data-open-dashboard>Open the dashboard</Button>}
+      >
+        {wk === undefined ? (
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>Reading the week…</Typography>
+        ) : !pulse ? (
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>The weekly check-in could not be read.</Typography>
+        ) : (
+          <Box data-weekly-pulse>
+            <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 1.25 }}>
+              {[
+                ['Reports in', `${pulse.reportsIn} of ${pulse.required}`, pulse.reportsIn === pulse.required ? TONE.good : TONE.warn],
+                ['Projects fully reported', `${pulse.updated} of ${pulse.active}`, pulse.rate >= 0.9 ? TONE.good : pulse.rate >= 0.6 ? TONE.warn : TONE.bad],
+                ['Partly reported', String(pulse.partly), pulse.partly ? TONE.warn : null],
+                ['Blocked', String(pulse.blocked.length), pulse.blocked.length ? TONE.bad : null],
+                ['Decisions waiting', pulse.decisions == null ? '—' : String(pulse.decisions), pulse.decisions ? TONE.warn : null],
+                ['Worked on past due date', String(pulse.overdue.length), pulse.overdue.length ? TONE.bad : null],
+              ].map(([k, v, tone]) => (
+                <Box key={k} data-pulse={k}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>{k}</Typography>
+                  <Typography variant="h3" sx={{ color: tone || 'text.primary', fontVariantNumeric: 'tabular-nums' }}>{v}</Typography>
+                </Box>
+              ))}
+            </Box>
+            {pulse.missing.length > 0 && (
+              <Typography variant="body2" sx={{ mb: 0.75 }}>
+                <b>Report still missing:</b> {pulse.missing.join(', ')}.
+              </Typography>
+            )}
+            {pulse.blocked.length > 0 && (
+              <Typography variant="body2" sx={{ mb: 0.75 }}>
+                <b>Blocked:</b>{' '}
+                {pulse.blocked.map((b, i) => (
+                  <span key={b.key}>
+                    {i ? ', ' : ''}
+                    <Link component="button" onClick={() => onOpenProject(b.key)} sx={{ verticalAlign: 'baseline' }}>{b.summary || b.key}</Link>
+                  </span>
+                ))}
+              </Typography>
+            )}
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              A project counts as reported only when every task owed an update on it that week has one; a confirmed plan is not an update.
+            </Typography>
+          </Box>
+        )}
+      </Section>
 
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
         <Section title="Capacity" info={<MetricInfo id="capacity" refreshed={refreshed} />}>

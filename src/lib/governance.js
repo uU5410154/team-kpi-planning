@@ -99,7 +99,7 @@ export const METRICS = [
     id: 'confidence',
     label: 'Reporting confidence',
     definition: 'Completeness, validity and freshness of the data the figures rest on.',
-    formula: 'Average of: completeness (owner, due date, saving hours, effort and cost filled in), validity (no invalid dates or duplicate keys), freshness (Jira sync succeeded in the last 24 hours) and assumptions (saving-hours basis confirmed).',
+    formula: 'Average of: completeness (owner, due date, saving hours, effort and cost filled in), validity (no invalid dates or duplicate keys), freshness (Jira sync succeeded in the last 24 hours, and the share of active projects fully reported in the latest weekly check-in) and assumptions (saving-hours basis confirmed).',
     includes: 'The team\'s own projects.',
     source: 'The checks on the Data quality page.',
     decision: 'Judge whether the dashboard is decision-ready.',
@@ -146,8 +146,10 @@ export function dateProblem(p, asOf) {
  * matters, so a reader can fix the record rather than argue with the total.
  *
  * `jira` is the last Jira sync ({ at, ok, error }) or null when unknown.
+ * `weekly` is the latest reported week's check-in (lib/manager weeklyPulse),
+ * or null when it has not been read.
  */
-export function dataQuality(plan, { jira = null, now = Date.now() } = {}) {
+export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null } = {}) {
   const asOf = plan.settings?.asOfDate
   const all = (plan.projects || []).filter(live)
   const book = all.filter(inBook)
@@ -201,6 +203,16 @@ export function dataQuality(plan, { jira = null, now = Date.now() } = {}) {
         : `Counted ${(SAVING_BASIS[plan.settings?.savingBasis]?.label || 'per month').toLowerCase()}, but not yet confirmed by management. ROI depends on it (12× between monthly and annual).`,
     },
   ]
+  if (weekly && weekly.active) {
+    global.push({
+      id: 'weekly',
+      label: 'Weekly check-in',
+      ok: weekly.rate >= 0.9,
+      text: `${weekly.updated} of ${weekly.active} active projects fully reported for the week of ${weekly.week}`
+        + `${weekly.partly ? ` (${weekly.partly} partly)` : ''}; reports in from ${weekly.reportsIn} of ${weekly.required} people`
+        + `${weekly.missing?.length ? ` — still missing: ${weekly.missing.join(', ')}` : ''}.`,
+    })
+  }
 
   // Reporting confidence, out of 1.
   const fields = [
@@ -210,7 +222,12 @@ export function dataQuality(plan, { jira = null, now = Date.now() } = {}) {
   const completeness = book.length ? book.reduce((a, p) => a + fields.filter((f) => f(p)).length, 0) / (book.length * fields.length) : null
   const invalid = new Set([...badDates.map((x) => x.p.key), ...dupes.map((p) => p.key)])
   const validity = all.length ? 1 - all.filter((p) => invalid.has(p.key)).length / all.length : null
-  const freshness = global[0].unknown ? null : (global[0].ok ? 1 : syncFailed ? 0 : 0.5)
+  // Jira sync and the weekly check-in, each where it is known.
+  const fresh = [
+    global[0].unknown ? null : (global[0].ok ? 1 : syncFailed ? 0 : 0.5),
+    weekly && weekly.active ? weekly.rate : null,
+  ].filter((v) => v != null)
+  const freshness = fresh.length ? fresh.reduce((a, v) => a + v, 0) / fresh.length : null
   const assumptions = basis ? 1 : 0
   const parts = { completeness, validity, freshness, assumptions }
   const known = Object.values(parts).filter((v) => v != null)

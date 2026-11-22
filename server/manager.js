@@ -177,18 +177,24 @@ const AGAIN_AFTER = 10 * 60_000
  * so the update lands where every other update does and counts toward the
  * dashboard's "updated this week".
  */
-export async function followUp(projectKey, by, now = Date.now()) {
+export async function followUp(projectKey, by, now = Date.now(), { person = null } = {}) {
   const k = await c()
   if (!k) return UNAVAILABLE
   const r = await weekly.roster()
   if (r === UNAVAILABLE) return UNAVAILABLE
   const project = r.projects.find((p) => p.key === projectKey)
   if (!project) return { error: 'There is no such project in the register.', status: 404 }
-  if (!project.pic) return { error: `${projectKey} has no owner (PIC) in the register, so there is nobody to ask.`, status: 409 }
-  const owner = r.people.find((p) => p.id === project.pic)
-  const nick = owner?.nick || project.pic
+  /*
+   * The register's PIC, always, when there is one. With none, whoever the
+   * dashboard named — the team member holding its Jira work this week — so a
+   * project nobody owns on paper can still be asked about.
+   */
+  const askee = project.pic || (person && r.people.some((p) => p.id === person) ? person : null)
+  if (!askee) return { error: `${projectKey} has no owner (PIC) in the register, so there is nobody to ask.`, status: 409 }
+  const owner = r.people.find((p) => p.id === askee)
+  const nick = owner?.nick || askee
   const accounts = await activeAccounts()
-  const to = accounts.filter((a) => a.person === project.pic).map((a) => a.email)
+  const to = accounts.filter((a) => a.person === askee).map((a) => a.email)
   if (!to.length) {
     return { error: `No account is linked to ${nick} yet. Link one on the Access tab, then follow up again.`, status: 409 }
   }
@@ -205,7 +211,7 @@ export async function followUp(projectKey, by, now = Date.now()) {
     week,
     projectKey,
     projectSummary: project.summary,
-    person: project.pic,
+    person: askee,
     nick,
     to,
     by,
