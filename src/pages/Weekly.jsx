@@ -1111,11 +1111,7 @@ export default function Weekly({
       · a week stays editable until the next Monday 08:00. Bangkok time.
     </Typography>
   )
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-        {quiet ? dueLine : next && <NextStep next={next} />}
-        {data && (
+  const weekNav = data && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <IconButton onClick={() => go(-1)} aria-label="previous week"><ChevronLeftIcon /></IconButton>
             <Box sx={{ textAlign: 'center', minWidth: 150 }}>
@@ -1138,8 +1134,15 @@ export default function Weekly({
             )}
             {switching && <Box sx={{ ml: 1 }}><Loading label={`Loading week ${weekNo(week)}…`} /></Box>}
           </Box>
-        )}
+  )
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: quiet ? 1.5 : 2.5 }}>
+      {(!quiet || !draft) && (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+        {next && <NextStep next={next} />}
+        {data && weekNav}
       </Box>
+      )}
       {!quiet && dueLine}
 
       {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
@@ -1214,16 +1217,32 @@ export default function Weekly({
 
       {/* ---------------------------------------------------- my week */}
       {data && draft && (
-        <Paper ref={myWeekRef} variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 96 }}>
+        <Paper
+          ref={myWeekRef}
+          variant="outlined"
+          sx={quiet
+            // Updating the week: no frame, no padding — the project card is the page.
+            ? { p: 0, border: 0, boxShadow: 'none', bgcolor: 'transparent', display: 'flex', flexDirection: 'column', gap: 1.25, scrollMarginTop: 96 }
+            : { p: { xs: 1.5, sm: 2.5 }, display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 96 }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <Typography variant="h3" sx={{ mr: 1 }}>My week</Typography>
             <StandingChip label="Plan" value={data.mineStanding?.plan} />
             <StandingChip label="Report" value={data.mineStanding?.report} />
             {data.locked && <Chip size="small" icon={<LockIcon />} label="Locked" />}
+            {quiet && (
+              <Typography variant="caption" sx={{ color: 'text.secondary', ml: 1 }}>
+                Update due {bangkokTime(d.reportDue)} · Sunday 15:00 is the second chance · locks {bangkokTime(d.locksAt)}
+              </Typography>
+            )}
+            {quiet && <Box sx={{ flex: 1 }} />}
+            {quiet && draft && weekNav}
           </Box>
+          {!quiet && (
           <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1 }}>
             Plan due {bangkokTime(d.planDue)} · report due {bangkokTime(d.reportDue)} · locks {bangkokTime(d.locksAt)}
           </Typography>
+          )}
 
           {!jiraMode && !jwLoading && mine?.draft && draft.tasks.length > 0 && (
             <Alert severity="info" sx={{ py: 0 }}>

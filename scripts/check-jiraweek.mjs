@@ -489,7 +489,7 @@ try {
     const txt = await pg.evaluate(() => document.body.innerText)
     check('THE PAGE SHOWS THEIR JIRA TASKS, NOT THE MONDAY FORM', txt.includes('FNP-2010') && !txt.includes('This week I\'m focused on'))
     check('  with the filter between not-updated and updated', /Not updated yet \(1\)/.test(txt) && /Already updated \(2\)/.test(txt), (txt.match(/Not updated yet \(\d+\)|Already updated \(\d+\)/g) || []).join(' '))
-    check('  and the reminder to plan next week', /Don’t forget next week’s plan|Don't forget next week's plan/.test(txt))
+    check('  and the reminder to plan next week', /Plan week \d+ before Mon 08:00/.test(txt))
     check('  only the not-updated one is open to start with',
       (await pg.evaluate(() => [...document.querySelectorAll('[data-jira-task]')].map((x) => x.getAttribute('data-jira-task')))).join() === 'FNP-2010')
     const head = await pg.evaluate(() => {

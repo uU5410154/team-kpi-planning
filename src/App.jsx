@@ -1466,7 +1466,13 @@ export default function App() {
 
         {/* Keyed on the view, so switching it rebuilds the page and every page
             asks the server again under the new rules. */}
-        <Box key={previewing ? `member:${previewPerson || ''}` : 'admin'} sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}>
+        {/* The Weekly page is a workspace, not a report: it takes the whole width. */}
+        <Box
+          key={previewing ? `member:${previewPerson || ''}` : 'admin'}
+          sx={tab === 'weekly'
+            ? { maxWidth: 'none', px: { xs: 1, sm: 1.5 }, py: { xs: 1, sm: 1.5 } }
+            : { maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}
+        >
           {/*
             * `allowed` gates every panel, not just the tab strip. The strip is
             * what somebody clicks; this is what a bookmarked hash reaches.

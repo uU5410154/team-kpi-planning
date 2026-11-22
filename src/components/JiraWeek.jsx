@@ -870,7 +870,7 @@ function SideArrow({ dir, onClick, label, ...rest }) {
       sx={(t) => ({
         // On a phone the side strips would squeeze the cards: the arrows sit in the header there.
         display: { xs: 'none', sm: 'inline-flex' },
-        width: 48,
+        width: 40,
         flexShrink: 0,
         alignItems: 'flex-start',
         borderRadius: 2,
@@ -886,8 +886,8 @@ function SideArrow({ dir, onClick, label, ...rest }) {
           position: 'sticky',
           top: 'calc(50vh - 22px)',
           mt: 2,
-          width: 42,
-          height: 42,
+          width: 36,
+          height: 36,
           borderRadius: '50%',
           display: 'flex',
           alignItems: 'center',
@@ -1117,14 +1117,30 @@ export default function JiraWeek({
               <ToggleButton value="all" disableFocusRipple sx={focusRingSx}>All ({rows.length})</ToggleButton>
             </ToggleButtonGroup>
           )}
-          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            The Jira epics and tasks with you ({jw.account}) as PIC whose timeline covers {weekTitle(week)}.
-          </Typography>
+          {planning && (
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              The Jira epics and tasks with you ({jw.account}) as PIC whose timeline covers {weekTitle(week)}.
+            </Typography>
+          )}
         </Box>
         {/* Planning prompts only where planning can still happen: the week
             ahead, or this week's reminder about it. A past or closed week has
             none. */}
-        {canWrite && (planning || isCurrent) && (
+        {/* This week: next week's plan is one small reminder at the end of
+            the filter line, not a card taking room from the projects. */}
+        {canWrite && !planning && isCurrent && (
+          <Button
+            size="small"
+            variant={todo.length === 0 ? 'contained' : 'outlined'}
+            startIcon={<EventIcon fontSize="small" />}
+            onClick={() => onGoWeek(1)}
+            data-plan-box
+            sx={[{ alignSelf: 'center', whiteSpace: 'nowrap' }, focusRingSx]}
+          >
+            Plan week {weekNo(addWeeks(week, 1))} before Mon 08:00 →
+          </Button>
+        )}
+        {canWrite && planning && (
           <Paper variant="outlined" sx={{ p: 1.5, minWidth: 240, maxWidth: { sm: 340 }, display: 'flex', flexDirection: 'column', gap: 0.75 }} data-plan-box>
             {planning ? (
               <>
@@ -1256,7 +1272,7 @@ export default function JiraWeek({
         if (!many) return els
         // ONE PROJECT ON SCREEN, arrows down either side; swipe works on a phone.
         return (
-          <Box data-project-nav sx={{ display: 'flex', alignItems: 'stretch', gap: { xs: 0.5, sm: 1 }, scrollMarginTop: 12 }}>
+          <Box data-project-nav sx={{ display: 'flex', alignItems: 'stretch', gap: 0.5, scrollMarginTop: 12 }}>
             <SideArrow dir={-1} onClick={() => go(-1)} label={`previous project: ${groups[(shownIdx - 1 + groups.length) % groups.length]?.name}`} data-project-prev />
             <Box
               data-project-slide
