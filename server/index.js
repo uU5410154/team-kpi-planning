@@ -15,6 +15,7 @@ import * as ai from './ai.js'
 import * as manager from './manager.js'
 import * as jiraWeek from './jiraWeek.js'
 import * as decks from './decks.js'
+import * as gov from './governance.js'
 import { statusPatch } from '../src/lib/projectStatus.js'
 import { isWeek, weekOf, deadlines, isLocked, canWriteWeek } from '../src/lib/weekly.js'
 import { runSync, lastRun, startSchedule } from './jiraSync.js'
@@ -215,6 +216,33 @@ app.post('/api/jira/sync', adminOnly, async (_req, res) => {
   }
 })
 
+/* ------------------------------------------------- governance records
+ *
+ * Role rates, budgets, cost lines, benefit validation, RAID, snapshots and
+ * the change history: administrators only, read and write. None of it is in
+ * the shared plan, which every member can read.
+ */
+const govWrap = (fn) => async (req, res) => {
+  try {
+    const r = await fn(req)
+    if (r === store.UNAVAILABLE) return unavailable(res)
+    if (r?.error) return res.status(r.status || 400).json(r)
+    return res.json(r)
+  } catch (e) {
+    return res.status(500).json({ error: e.message || 'Could not do that.' })
+  }
+}
+app.get('/api/gov', adminOnly, govWrap(() => gov.all()))
+app.patch('/api/gov/records/:id', adminOnly, govWrap((req) => gov.save(req.params.id, req.body?.changes, req.me.email, { force: req.body?.force || [], reason: req.body?.reason || '' })))
+app.post('/api/gov/worklogs/sync', adminOnly, govWrap(() => gov.syncWorklogs({ trigger: 'manual' })))
+app.get('/api/gov/raid', adminOnly, govWrap(() => gov.raidList()))
+app.post('/api/gov/raid', adminOnly, govWrap((req) => gov.raidSave(null, req.body, req.me.email)))
+app.put('/api/gov/raid/:id', adminOnly, govWrap((req) => gov.raidSave(req.params.id, req.body, req.me.email)))
+app.get('/api/gov/audit', adminOnly, govWrap((req) => gov.auditLog({ kind: req.query.kind || null, key: req.query.key || null, limit: req.query.limit, before: req.query.before || null })))
+app.get('/api/gov/snapshots/:kind', adminOnly, govWrap((req) => gov.snapshotList(req.params.kind)))
+app.post('/api/gov/snapshots/:kind', adminOnly, govWrap((req) => gov.snapshotSave(req.params.kind, req.body, req.me.email)))
+app.get('/api/gov/snapshot/:id', adminOnly, govWrap((req) => gov.snapshotGet(req.params.id)))
+
 /** What the last sync did, whoever or whatever started it. */
 app.get('/api/jira/sync', (_req, res) => res.json(lastRun() || { at: null, ok: null }))
 
@@ -323,8 +351,26 @@ app.put('/api/scenarios/:name', adminOnly, async (req, res) => {
   if (!payload || !Array.isArray(payload.projects) || !Array.isArray(payload.people)) {
     return res.status(400).json({ error: 'Payload must contain projects and people arrays.' })
   }
+  /*
+   * NEVER SILENTLY OVER NEWER WORK. A browser says which save it last had
+   * (`baseUpdatedAt`); if the shared plan has moved on since, nothing is
+   * written and the browser is told, so the two can be compared field by
+   * field instead of one replacing the other. A save that names no base (an
+   * older browser, a script) is let through as before.
+   */
+  const before = await store.getScenario(name)
+  if (before === store.UNAVAILABLE) return unavailable(res)
+  const base = req.body?.baseUpdatedAt
+  if (base && before?.updatedAt && String(base) !== String(before.updatedAt) && req.body?.force !== true) {
+    return res.status(409).json({
+      error: `The shared "${name}" was saved by ${before.updatedBy || 'somebody'} at ${before.updatedAt}, after this browser last had it.`,
+      conflict: true, updatedAt: before.updatedAt, updatedBy: before.updatedBy,
+    })
+  }
   const saved = await store.saveScenario(name, payload, updatedBy)
   if (saved === store.UNAVAILABLE) return unavailable(res)
+  // Who changed what, field by field, for the change history.
+  gov.auditPlan(before?.payload, payload, req.me?.email || updatedBy || 'unknown')
   res.json(saved)
 })
 
@@ -1148,7 +1194,17 @@ app.listen(port, async () => {
   )
   // Armed after the port is open, so a slow Jira cannot delay the app coming
   // up. Silent when Jira is not configured — there would be nothing to sync.
-  if (jira.status().configured) startSchedule()
+  if (jira.status().configured) {
+    startSchedule()
+    // Actual effort: Jira's worklogs, read a few minutes after start and then daily.
+    if (store.isConfigured()) {
+      const runLogs = () => gov.syncWorklogs({ trigger: 'schedule' })
+        .then((r) => console.log(`[worklogs] ${r?.worklogs?.ok ? `${r.worklogs.entries} entries` : r?.worklogs?.error || r?.error || 'unavailable'}`))
+        .catch((e) => console.log(`[worklogs] failed: ${e.message}`))
+      setTimeout(runLogs, 3 * 60_000).unref?.()
+      setInterval(runLogs, 24 * 3600_000).unref?.()
+    }
+  }
   // The weekly emails. Only with a database: without one there are no
   // accounts, no weeks and nobody to remind.
   if (store.isConfigured()) reminders.startSchedule()

@@ -77,6 +77,9 @@ export const PAGE_COLOR = {
   apps: '#d98a62',
   settings: '#9095b8',
   users: '#d27373',
+  cost: '#c8961f',
+  capacity: '#43938f',
+  rates: '#306fc7',
 }
 
 /*

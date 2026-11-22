@@ -55,6 +55,12 @@ import Apps from './pages/Apps.jsx'
 import Presentation from './pages/Presentation.jsx'
 import Overview from './pages/Overview.jsx'
 import DataQuality from './pages/DataQuality.jsx'
+import CostRoi from './pages/CostRoi.jsx'
+import Capacity from './pages/Capacity.jsx'
+import CostsSetup from './pages/CostsSetup.jsx'
+import PaidIcon from '@mui/icons-material/PaidOutlined'
+import SpeedIcon from '@mui/icons-material/SpeedOutlined'
+import PriceChangeIcon from '@mui/icons-material/PriceChangeOutlined'
 import InsightsIcon from '@mui/icons-material/InsightsOutlined'
 import FactCheckIcon from '@mui/icons-material/FactCheckOutlined'
 import { statusPatch } from './lib/projectStatus.js'
@@ -87,6 +93,10 @@ const TABS = [
    */
   { id: 'overview', label: 'Management', icon: InsightsIcon, roles: ['admin'] },
   { id: 'quality', label: 'Data quality', icon: FactCheckIcon, roles: ['admin'] },
+  // Management's first release (design summary, Priority 1): spend and return,
+  // and the team's capacity against what is planned and logged.
+  { id: 'cost', label: 'Cost & ROI', icon: PaidIcon, roles: ['admin'] },
+  { id: 'capacity', label: 'Capacity & sprint', icon: SpeedIcon, roles: ['admin'] },
   /*
    * The register and the individual scorecards are ADMIN ONLY.
    *
@@ -119,6 +129,8 @@ const TABS = [
   { id: 'presentation', label: 'Presentation', icon: SlideshowIcon, roles: ['admin', 'user'] },
   { id: 'apps', label: 'Apps', icon: AppsIcon, roles: ['admin', 'user'] },
   { id: 'settings', label: 'Model', icon: TuneIcon, roles: ['admin'] },
+  // Role rates, budgets and cost lines: typed in by an administrator, never shown to members.
+  { id: 'rates', label: 'Costs & rates', icon: PriceChangeIcon, roles: ['admin'] },
   { id: 'users', label: 'Access', icon: AdminIcon, roles: ['admin'] },
   /*
    * One project in full. Not in the menu — reached from a project's name on
@@ -1502,6 +1514,9 @@ export default function App() {
             />
           )}
           {allowed && tab === 'quality' && <DataQuality plan={plan} onOpenProject={openProject} />}
+          {allowed && tab === 'cost' && <CostRoi plan={plan} onOpenProject={openProject} onGoTo={setTab} />}
+          {allowed && tab === 'capacity' && <Capacity plan={plan} onOpenProject={openProject} onGoTo={setTab} />}
+          {allowed && tab === 'rates' && <CostsSetup plan={plan} />}
           {allowed && tab === 'project' && (
             <Project
               key={hashArg.page === 'project' ? hashArg.key : ''}

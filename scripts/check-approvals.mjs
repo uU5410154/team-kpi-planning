@@ -400,7 +400,7 @@ try {
     check('  REMEMBERED ACROSS A RELOAD', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 5)
     await a.evaluate(() => document.querySelector('input[aria-label="view as a team member"]').click())
     await a.waitForFunction(() => document.querySelectorAll('[role="tab"]').length > 5, { timeout: 8000 }).catch(() => {})
-    check('SWITCHING IT OFF BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 12)  // ten, plus Management and Data quality
+    check('SWITCHING IT OFF BRINGS EVERY PAGE BACK', (await a.evaluate(() => document.querySelectorAll('[role="tab"]').length)) === 15)  // ten, plus Management, Data quality, Cost & ROI, Capacity, Costs & rates
 
     console.log('\n--- the member, on a phone ---')
     const m = await as(james, { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 })

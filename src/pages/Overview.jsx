@@ -10,6 +10,7 @@ import { METRICS, METRIC_BY_ID, COST_COVERAGE_GATE, dataQuality, overviewOf } fr
 import { fmtMoneyShort, fmtRoi, fmtPct, SAVING_BASIS } from '../lib/model.js'
 import { activitySignals, reportedWeek, weeklyPulse } from '../lib/manager.js'
 import { addWeeks, weekNo } from '../lib/weekly.js'
+import { portfolioCosts, capacityOf } from '../lib/costs.js'
 
 /* CP AXTRA colours for the few marks that carry meaning. */
 export const TONE = { good: '#43938f', warn: '#c8961f', bad: '#da3832', blue: '#306fc7' }
@@ -109,8 +110,17 @@ export default function Overview({ plan, lastSaved, canWrite, me, onSettings, on
       projects: plan.projects, people, week: wk.week, jira: wk.jira, decisions: wk.decisions, signals,
     })
   }, [wk, plan.projects, people])
-  const quality = useMemo(() => dataQuality(plan, { jira, weekly: pulse }), [plan, jira, pulse])
-  const o = useMemo(() => overviewOf(plan, quality), [plan, quality])
+  // The administrator's cost records: budgets, rates, worklogs, benefits.
+  const [gov, setGov] = useState(null)
+  useEffect(() => {
+    let live = true
+    api.govAll().then((g) => { if (live) setGov(g) }).catch(() => {})
+    return () => { live = false }
+  }, [])
+  const money = useMemo(() => (gov ? portfolioCosts(plan, gov) : null), [plan, gov])
+  const cap = useMemo(() => (gov ? capacityOf(plan, gov) : null), [plan, gov])
+  const quality = useMemo(() => dataQuality(plan, { jira, weekly: pulse, gov }), [plan, jira, pulse, gov])
+  const o = useMemo(() => overviewOf(plan, quality, money, cap), [plan, quality, money, cap])
   const sym = plan.finance?.symbol || '฿'
   const h = o.headline
   const s = plan.settings || {}
@@ -165,12 +175,15 @@ export default function Overview({ plan, lastSaved, canWrite, me, onSettings, on
         <Tile id="active" value={h.active.value} note={h.active.note} refreshed={refreshed} />
         <Tile id="reliability" value={h.reliability.value == null ? null : fmtPct(h.reliability.value)} note={h.reliability.note} gap={h.reliability.gap} refreshed={refreshed}
           tone={h.reliability.value == null ? null : h.reliability.value >= (s.onTimeGate ?? 0.8) ? TONE.good : TONE.bad} />
-        <Tile id="capacity" value={null} gap={h.capacity.gap} note={h.capacity.note} refreshed={refreshed} />
+        <Tile id="capacity" value={h.capacity.value == null ? null : `${h.capacity.value > 0 ? '+' : ''}${Math.round(h.capacity.value).toLocaleString()} md`} gap={h.capacity.gap} note={h.capacity.note} refreshed={refreshed}
+          tone={h.capacity.value == null ? null : h.capacity.value > 0 ? TONE.bad : TONE.good} />
         <Tile id="eac" value={h.eac.value == null ? null : fmtMoneyShort(h.eac.value, sym)} note={h.eac.note} gap={h.eac.gap} refreshed={refreshed} />
-        <Tile id="budget" value={null} gap={h.budget.gap} refreshed={refreshed} />
+        <Tile id="budget" value={h.budget.value == null ? null : `${h.budget.value > 0 ? '+' : ''}${fmtMoneyShort(h.budget.value, sym)}`} gap={h.budget.gap} note={h.budget.note} refreshed={refreshed}
+          tone={h.budget.value == null ? null : h.budget.value > 0 ? TONE.bad : TONE.good} />
         <Tile id="projectedRoi" value={h.projectedRoi.value == null ? null : fmtRoi(h.projectedRoi.value)} note={h.projectedRoi.note} gap={h.projectedRoi.gap} refreshed={refreshed}
           tone={h.projectedRoi.value == null || !h.projectedRoi.scored ? 'text.disabled' : h.projectedRoi.value >= 0 ? TONE.good : TONE.bad} />
-        <Tile id="actualRoi" value={null} gap={h.actualRoi.gap} refreshed={refreshed} />
+        <Tile id="actualRoi" value={h.actualRoi.value == null ? null : fmtRoi(h.actualRoi.value)} gap={h.actualRoi.gap} note={h.actualRoi.note} refreshed={refreshed}
+          tone={h.actualRoi.value == null ? null : h.actualRoi.value >= 0 ? TONE.good : TONE.bad} />
         <Tile id="confidence" value={conf.score == null ? null : fmtPct(conf.score)} note={conf.verdict} tone={confTone} refreshed={refreshed} />
       </Box>
 
@@ -324,11 +337,14 @@ export default function Overview({ plan, lastSaved, canWrite, me, onSettings, on
           <LinearProgress variant="determinate" value={Math.min(100, o.capacity.capacity ? (o.capacity.planned / o.capacity.capacity) * 100 : 0)}
             sx={{ height: 8, bgcolor: 'action.hover', '& .MuiLinearProgress-bar': { bgcolor: o.capacity.planned > o.capacity.capacity ? TONE.bad : TONE.blue } }} />
           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 1 }}>
-            {o.capacity.noEffort} projects have no effort estimate. Actual effort is not recorded yet, so capacity
-            variance, carry-over and blocked days need actual man-days (Jira worklogs) before they can be shown.
+            {o.capacity.noEffort} projects have no effort estimate.{' '}
+            {cap?.totals.actual != null
+              ? `Logged so far: ${Math.round(cap.totals.actual / (plan.finance?.hoursPerManday || 8)).toLocaleString()} man-days; ${cap.totals.repeatReplans} projects replanned twice or more; ${cap.totals.blockedDays} blocked days; ${cap.people.filter((x) => x.warning === 'over').length} people over capacity in the next 12 weeks.`
+              : 'Actual effort comes from Jira worklogs, read on Costs & rates.'}
           </Typography>
+          {onGoTo && <Link component="button" onClick={() => onGoTo('capacity')} sx={{ mt: 0.5 }}>Open Capacity &amp; sprint</Link>}
         </Section>
-        <Section title="Cost and ROI" info={<MetricInfo id="projectedRoi" refreshed={refreshed} />}>
+        <Section title="Cost and ROI" info={<MetricInfo id="projectedRoi" refreshed={refreshed} />} action={onGoTo && <Link component="button" onClick={() => onGoTo('cost')}>Open Cost &amp; ROI</Link>}>
           <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 1 }}>
             <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Forecast cost (EAC)</Typography><Typography sx={{ fontWeight: 700 }}>{o.cost.eac == null ? '—' : fmtMoneyShort(o.cost.eac, sym)}</Typography></Box>
             <Box><Typography variant="caption" sx={{ color: 'text.secondary' }}>Expected net benefit, {o.cost.horizon} months</Typography><Typography sx={{ fontWeight: 700 }}>{fmtMoneyShort(o.cost.benefit, sym)}</Typography></Box>

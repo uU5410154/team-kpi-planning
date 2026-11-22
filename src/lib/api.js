@@ -424,3 +424,28 @@ export async function saveInitiatives(items, rev) {
 export const setProjectStatus = async (key, status) => j(await fetch(`/api/projects/${encodeURIComponent(key)}/status`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
 }))
+
+/* ------------------------------------------------- governance records */
+
+const govBody = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+export const govAll = async () => j(await fetch('/api/gov'))
+/**
+ * Change one record field by field. A 409 is not an error to throw: it comes
+ * back as { conflicts } so the page can show both values and let them choose.
+ */
+export async function govSave(id, changes, { force = [], reason = '' } = {}) {
+  const res = await fetch(`/api/gov/records/${encodeURIComponent(id)}`, govBody('PATCH', { changes, force, reason }))
+  if (res.status === 409) return res.json()
+  return j(res)
+}
+export const govSyncWorklogs = async () => j(await fetch('/api/gov/worklogs/sync', { method: 'POST' }))
+export const raidList = async () => j(await fetch('/api/gov/raid'))
+export async function raidSave(id, item, seen = null, force = []) {
+  const res = await fetch(id ? `/api/gov/raid/${encodeURIComponent(id)}` : '/api/gov/raid', govBody(id ? 'PUT' : 'POST', { item, seen, force }))
+  if (res.status === 409) return res.json()
+  return j(res)
+}
+export const auditLog = async ({ kind = '', key = '', limit = 300, before = '' } = {}) => j(await fetch(`/api/gov/audit?${new URLSearchParams(Object.fromEntries(Object.entries({ kind, key, limit, before }).filter(([, v]) => v)))}`))
+export const snapshotList = async (kind) => j(await fetch(`/api/gov/snapshots/${kind}`))
+export const snapshotSave = async (kind, body) => j(await fetch(`/api/gov/snapshots/${kind}`, govBody('POST', body)))
+export const snapshotGet = async (id) => j(await fetch(`/api/gov/snapshot/${encodeURIComponent(id)}`))

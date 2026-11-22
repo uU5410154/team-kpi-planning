@@ -24,7 +24,13 @@ export default function DataQuality({ plan, onOpenProject }) {
     api.jiraLastRun().then((r) => { if (live) setJira(r) }).catch(() => {})
     return () => { live = false }
   }, [])
-  const q = useMemo(() => dataQuality(plan, { jira }), [plan, jira])
+  const [gov, setGov] = useState(null)
+  useEffect(() => {
+    let live = true
+    api.govAll().then((g) => { if (live) setGov(g) }).catch(() => {})
+    return () => { live = false }
+  }, [])
+  const q = useMemo(() => dataQuality(plan, { jira, gov }), [plan, jira, gov])
   const people = useMemo(() => Object.fromEntries((plan.assignees || plan.people || []).map((p) => [p.id, p.nick])), [plan])
   const toggle = (id) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const conf = q.confidence

@@ -1065,3 +1065,100 @@ export async function markDone(key) {
   cache.delete(k)
   return { moved: true, status: to.to?.name || 'Done' }
 }
+
+/* ======================================================================
+ * ACTUAL EFFORT, FROM JIRA WORKLOGS (management design summary, Priority 1).
+ *
+ * Every epic on the register, its issues one level down, and the time logged
+ * on each: who logged it, on which day, how long. Plus each issue's original
+ * and remaining estimate, its status, and how many sprints it has been in —
+ * a task in more than one sprint was carried over.
+ *
+ * Read only. Aggregated here, per project × person × week, because the pages
+ * need totals and a portfolio's raw worklogs run to thousands of rows.
+ * ====================================================================== */
+
+const mondayOf = (iso) => {
+  const d = new Date(`${iso}T00:00:00Z`)
+  const back = (d.getUTCDay() + 6) % 7
+  d.setUTCDate(d.getUTCDate() - back)
+  return d.toISOString().slice(0, 10)
+}
+
+export async function worklogsOf(epicKeys) {
+  const c = conf()
+  if (!status().configured) return UNAVAILABLE
+  const epics = [...new Set((epicKeys || []).map((k) => String(k || '').trim().toUpperCase()).filter((k) => KEY.test(k)))]
+  const byProject = {}
+  for (const k of epics) {
+    byProject[k] = {
+      hours: 0, estimateHours: 0, remainingHours: 0, issues: 0, open: 0, inProgress: 0, carried: 0, done: 0, byPerson: {}, byWeek: {}, wip: {},
+    }
+  }
+  if (!epics.length) return { byProject, at: new Date().toISOString(), entries: 0, skipped: [] }
+
+  const fields = ['summary', 'status', 'parent', 'assignee', 'timeoriginalestimate', 'timeestimate', 'timespent', 'worklog', c.sprintField]
+  let entries = 0
+  const skipped = []
+  const addLog = (agg, author, started, seconds) => {
+    const h = (Number(seconds) || 0) / 3600
+    if (!(h > 0)) return
+    entries += 1
+    agg.hours += h
+    const who = author || 'Unknown'
+    agg.byPerson[who] = (agg.byPerson[who] || 0) + h
+    const wk = started ? mondayOf(String(started).slice(0, 10)) : 'unknown'
+    agg.byWeek[wk] ||= {}
+    agg.byWeek[wk][who] = (agg.byWeek[wk][who] || 0) + h
+  }
+
+  await eachBatch(epics, 20, async (batch) => {
+    let token = null
+    do {
+      const data = await call('/rest/api/3/search/jql', {
+        method: 'POST',
+        body: {
+          jql: `parent IN (${batch.join(',')}) OR key IN (${batch.join(',')})`,
+          fields,
+          maxResults: 100,
+          ...(token ? { nextPageToken: token } : {}),
+        },
+      })
+      for (const raw of data?.issues || []) {
+        const f = raw.fields || {}
+        const own = batch.includes(raw.key) ? raw.key : f.parent?.key
+        const agg = byProject[own]
+        if (!agg) continue
+        agg.issues += 1
+        const cat = f.status?.statusCategory?.key
+        if (cat === 'done') agg.done += 1
+        else if (cat === 'indeterminate') {
+          agg.inProgress += 1
+          const who = f.assignee?.displayName || 'Unassigned'
+          agg.wip[who] = (agg.wip[who] || 0) + 1
+        } else agg.open += 1
+        if (sprintWindow(f[c.sprintField]).count > 1 && cat !== 'done') agg.carried += 1
+        agg.estimateHours += (Number(f.timeoriginalestimate) || 0) / 3600
+        if (cat !== 'done') agg.remainingHours += (Number(f.timeestimate) || 0) / 3600
+        // The search carries the first twenty worklogs; the rest are asked for.
+        let logs = f.worklog?.worklogs || []
+        if ((f.worklog?.total || 0) > logs.length) {
+          const all = await call(`/rest/api/3/issue/${encodeURIComponent(raw.key)}/worklog?maxResults=5000`).catch(() => null)
+          if (all?.worklogs) logs = all.worklogs
+        }
+        for (const w of logs) addLog(agg, w.author?.displayName, w.started, w.timeSpentSeconds)
+      }
+      token = data?.nextPageToken || null
+    } while (token)
+  }, skipped)
+
+  const r1 = (n) => Math.round(n * 10) / 10
+  for (const agg of Object.values(byProject)) {
+    agg.hours = r1(agg.hours)
+    agg.estimateHours = r1(agg.estimateHours)
+    agg.remainingHours = r1(agg.remainingHours)
+    for (const k of Object.keys(agg.byPerson)) agg.byPerson[k] = r1(agg.byPerson[k])
+    for (const w of Object.values(agg.byWeek)) for (const k of Object.keys(w)) w[k] = r1(w[k])
+  }
+  return { byProject, at: new Date().toISOString(), entries, skipped }
+}

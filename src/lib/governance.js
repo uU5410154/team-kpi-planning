@@ -56,14 +56,14 @@ export const METRICS = [
     definition: 'Actual man-days minus planned man-days.',
     formula: 'Σ actual man-days − Σ planned man-days.',
     includes: 'The team\'s own projects.',
-    source: 'Planned: the register\'s Mandays column. Actual: not recorded yet (needs Jira worklogs or a time entry).',
+    source: 'Planned: the register\'s Mandays column, or the labour forecast on Costs & rates. Actual: Jira worklogs, read daily. Remaining: Jira\'s remaining estimate, else planned − logged.',
     decision: 'Identify overload or inaccurate planning.',
   },
   {
     id: 'eac',
     label: 'Estimate at completion',
     definition: 'Actual cost plus estimated remaining cost.',
-    formula: 'Today, with no actual spend recorded: Σ forecast build cost (man-days × developer day rate) + Σ CAPEX. OPEX is netted from the benefit, not added here.',
+    formula: 'Actual labour (logged hours × role rate) + actual other cost + remaining hours × rate + remaining other cost. Before any worklog or role rate exists: Σ forecast build cost (man-days × developer day rate) + Σ CAPEX.',
     includes: 'The team\'s own projects that have a cost recorded.',
     source: 'Register man-days and the project cost sheet; rates from the Model page.',
     decision: 'Forecast total spending.',
@@ -74,7 +74,7 @@ export const METRICS = [
     definition: 'Estimate at completion minus approved budget.',
     formula: 'EAC − approved budget.',
     includes: 'Projects with an approved budget.',
-    source: 'Approved budgets: not recorded yet (Finance or approved project cost records).',
+    source: 'Approved budgets entered on Costs & rates from Finance\'s approval.',
     decision: 'Identify financial exposure.',
   },
   {
@@ -92,7 +92,7 @@ export const METRICS = [
     definition: 'Validated benefit relative to actual cost.',
     formula: '(Validated realised benefit − actual total cost) ÷ actual total cost.',
     includes: 'Projects whose benefit has been validated after go-live.',
-    source: 'Benefit validation: not recorded yet.',
+    source: 'The Benefits page: actual saved hours confirmed after go-live, by the benefit validator.',
     decision: 'Confirm realised value.',
   },
   {
@@ -149,7 +149,7 @@ export function dateProblem(p, asOf) {
  * `weekly` is the latest reported week's check-in (lib/manager weeklyPulse),
  * or null when it has not been read.
  */
-export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null } = {}) {
+export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null, gov = null } = {}) {
   const asOf = plan.settings?.asOfDate
   const all = (plan.projects || []).filter(live)
   const book = all.filter(inBook)
@@ -179,6 +179,21 @@ export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null
   add('saving', 'Missing saving hours', 'medium', 'No benefit: it adds nothing to the target or the ROI.',
     book.filter((p) => p.savingHours == null))
 
+  // What the administrator's cost records add, once they are read.
+  const recs = gov?.projects || {}
+  const wl = gov?.worklogs || null
+  const hasBudget = (p) => recs[p.key]?.budget?.approved != null
+  if (gov) {
+    add('budget', 'Missing approved budget', 'medium', 'With no approved budget there is no budget variance, and over-spend cannot be seen.',
+      book.filter((p) => !hasBudget(p) && p.status !== 'Done'))
+    if (wl?.byProject) {
+      add('actualEffort', 'No actual effort logged', 'medium', 'Started in Jira but nobody logged time on it: no actual cost, no capacity variance.',
+        book.filter((p) => p.jiraKey && /progress|done/i.test(p.status || '') && !(wl.byProject[String(p.jiraKey).toUpperCase()]?.hours > 0)))
+    }
+    add('benefitValidation', 'Delivered, benefit not validated', 'medium', 'Finished, but nobody has confirmed the saving after go-live, so it has no validated ROI.',
+      book.filter((p) => p.status === 'Done' && p.savingHours != null && !['validated', 'realized'].includes(recs[p.key]?.benefit?.state)))
+  }
+
   // The two that are about the whole register, not a row.
   const jiraAge = jira?.at ? (now - Date.parse(jira.at)) / 3600000 : null
   const syncFailed = jira && jira.ok === false
@@ -203,6 +218,18 @@ export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null
         : `Counted ${(SAVING_BASIS[plan.settings?.savingBasis]?.label || 'per month').toLowerCase()}, but not yet confirmed by management. ROI depends on it (12× between monthly and annual).`,
     },
   ]
+  if (gov) {
+    const age = wl?.at ? (now - Date.parse(wl.at)) / 3600000 : null
+    global.push({
+      id: 'worklogs',
+      label: wl?.ok === false ? 'Last worklog read failed' : 'Jira worklogs',
+      ok: !!wl && wl.ok !== false && age != null && age <= 48,
+      unknown: !wl,
+      text: !wl ? 'Not read yet: actual effort and actual cost are unknown.'
+        : wl.ok === false ? `Failed${wl.failedAt ? ` ${new Date(wl.failedAt).toLocaleString()}` : ''}: ${wl.error}.`
+          : `Read ${new Date(wl.at).toLocaleString()} (${Math.round(age)} h ago): ${(wl.entries || 0).toLocaleString()} entries.`,
+    })
+  }
   if (weekly && weekly.active) {
     global.push({
       id: 'weekly',
@@ -218,6 +245,7 @@ export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null
   const fields = [
     (p) => !!p.pic, (p) => isDate(p.due) || p.status === 'Done', (p) => p.savingHours != null,
     (p) => p.manday > 0, (p) => p.investment != null || p.savingHours == null,
+    ...(gov ? [(p) => hasBudget(p) || p.status === 'Done'] : []),
   ]
   const completeness = book.length ? book.reduce((a, p) => a + fields.filter((f) => f(p)).length, 0) / (book.length * fields.length) : null
   const invalid = new Set([...badDates.map((x) => x.p.key), ...dupes.map((p) => p.key)])
@@ -226,6 +254,7 @@ export function dataQuality(plan, { jira = null, now = Date.now(), weekly = null
   const fresh = [
     global[0].unknown ? null : (global[0].ok ? 1 : syncFailed ? 0 : 0.5),
     weekly && weekly.active ? weekly.rate : null,
+    gov && wl ? (wl.ok === false ? 0 : global.find((g) => g.id === 'worklogs')?.ok ? 1 : 0.5) : null,
   ].filter((v) => v != null)
   const freshness = fresh.length ? fresh.reduce((a, v) => a + v, 0) / fresh.length : null
   const assumptions = basis ? 1 : 0
@@ -253,7 +282,7 @@ const median = (xs) => {
  * The Management overview's figures. Each headline is { value, gap?, ... }:
  * a null value always carries the gap that explains it.
  */
-export function overviewOf(plan, quality) {
+export function overviewOf(plan, quality, money = null, cap = null) {
   const s = plan.settings || {}
   const asOf = s.asOfDate
   const tolerance = s.sprintDays ?? 14
@@ -283,7 +312,7 @@ export function overviewOf(plan, quality) {
   const roiScored = costCoverage != null && costCoverage >= COST_COVERAGE_GATE
   const belowGate = book.filter((p) => isCounted(p) && p.gate === 'fail')
 
-  return {
+  const base = {
     asOf,
     tolerance,
     book,
@@ -305,6 +334,7 @@ export function overviewOf(plan, quality) {
       actualRoi: { value: null, gap: 'No benefit has been validated after go-live yet.' },
       confidence: { value: quality.confidence.score, note: quality.confidence.verdict },
     },
+    ...withMoney(money, cap, { planned, people, capacity, costed, withBenefit, roiScored, fin }),
     delivery: {
       scored: scored.length,
       onTime,
@@ -318,4 +348,41 @@ export function overviewOf(plan, quality) {
     capacity: { planned, capacity, people, noEffort: book.filter((p) => !(p.manday > 0)).length },
     cost: { eac, benefit, costed: costed.length, withBenefit: withBenefit.length, costCoverage, belowGate, roiScored, horizon: fin.horizonMonths || 12 },
   }
+  if (money || cap) base.headline = { ...base.headline, ...base.moneyHeadline }
+  delete base.moneyHeadline
+  return base
+}
+
+/*
+ * The headlines the cost records make possible (lib/costs portfolioCosts and
+ * capacityOf). Each replaces the register-only figure only where it can be
+ * stated; otherwise it keeps saying what is missing.
+ */
+function withMoney(money, cap, { planned, people, capacity, costed, withBenefit, roiScored, fin }) {
+  if (!money && !cap) return {}
+  const h = {}
+  const hpd = fin.hoursPerManday || 8
+  if (cap) {
+    const t = cap.totals
+    h.capacity = t.variance == null
+      ? { value: null, gap: t.actual == null ? 'No actual effort yet: read the worklogs on Costs & rates.' : 'No project has both planned and logged effort yet.', note: `Planned ${Math.round(planned).toLocaleString()} man-days against about ${capacity.toLocaleString()} available in a year (${people} people).` }
+      : { value: t.variance / hpd, unit: 'md', note: `Logged + remaining against planned, over the ${t.varianceProjects} project${t.varianceProjects === 1 ? '' : 's'} with both.` }
+  }
+  if (money) {
+    const t = money.totals
+    const c = money.coverage
+    h.eac = t.eac == null
+      ? { value: null, gap: 'No project has a cost recorded.' }
+      : { value: t.eac, note: c.withActual ? `Actual cost on ${c.withActual} projects + the remaining estimate.` : 'Forecast only: no worklogs read yet.' }
+    h.budget = c.budgeted
+      ? { value: t.variance, note: `${c.overBudget} of ${c.budgeted} budgeted projects over budget.` }
+      : { value: null, gap: 'No approved budgets recorded yet. Add them on Costs & rates.' }
+    h.projectedRoi = t.projectedRoi == null
+      ? { value: null, gap: 'No project has a cost recorded.' }
+      : { value: t.projectedRoi, scored: roiScored, note: roiScored ? `Expected benefit against EAC, ${costed.length} of ${withBenefit.length} projects costed.` : `Not scored: too few projects have a cost (needs ${Math.round(COST_COVERAGE_GATE * 100)}%).` }
+    h.actualRoi = t.actualRoi == null
+      ? { value: null, gap: 'No benefit has been validated after go-live yet.' }
+      : { value: t.actualRoi, note: `${c.validated} project${c.validated === 1 ? '' : 's'} with a validated benefit.` }
+  }
+  return { moneyHeadline: h }
 }
