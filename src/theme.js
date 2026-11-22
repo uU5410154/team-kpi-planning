@@ -61,6 +61,7 @@ export const SURFACE = {
     glow2: 'rgba(48, 111, 199, 0.04)',
     glow3: 'rgba(67, 147, 143, 0.03)',
     sheen: 'none',
+    shadow: '0 1px 3px rgba(31, 42, 61, 0.08), 0 6px 18px rgba(31, 42, 61, 0.08)',
   },
 }
 
@@ -122,6 +123,9 @@ const shared = (mode) => {
             // Lit glass rather than a flat cut-out: a soft blue sheen from
             // the top left, as on the reference's cards.
             backgroundImage: s.sheen,
+            // Light: a soft drop shadow, so a white card stands clear of the
+            // pale page (management asked for clearer cards, Nov 2026).
+            boxShadow: s.shadow,
           },
         },
       },

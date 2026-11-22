@@ -65,7 +65,10 @@ export default function CardFrame({
         component="section"
         aria-label={label || title}
         sx={{
-          position: 'relative', height: fill ? '100%' : 'auto', overflow: fill ? 'auto' : 'visible', borderRadius: '16px', ...outline,
+          // Pushed 8px out on every side and padded back in, so the tiles'
+          // drop shadow is not cut off at the edge of this scroll box.
+          position: 'relative', m: '-8px', p: '8px', boxSizing: 'border-box',
+          height: fill ? 'calc(100% + 16px)' : 'auto', overflow: fill ? 'auto' : 'visible', borderRadius: '16px', ...outline,
           ...(editing ? { display: 'flex', flexDirection: 'column', gap: 0.5 } : {}),
         }}
       >
