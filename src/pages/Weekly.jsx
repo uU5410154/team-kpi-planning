@@ -1017,10 +1017,14 @@ export default function Weekly({
   const jwReady = jiraMode && data && jw.week === data.week
   const jiraTodo = jwReady ? [...(jw.overdue || []), ...(jw.tasks || [])].filter((t) => needsUpdate(t, jw.writable)) : []
   const toTask = (key) => {
-    const card = document.querySelector(`[data-jira-task="${key}"]`)
-    if (!card) { toMyWeek(); return }
-    card.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setTimeout(() => card.querySelector('textarea')?.focus({ preventScroll: true }), 400)
+    // The week shows one project at a time: bring the task's project up first.
+    window.dispatchEvent(new CustomEvent('jira-week-show', { detail: { taskKey: key } }))
+    setTimeout(() => {
+      const card = document.querySelector(`[data-jira-task="${key}"]`)
+      if (!card) { toMyWeek(); return }
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setTimeout(() => card.querySelector('textarea')?.focus({ preventScroll: true }), 400)
+    }, 80)
   }
   // To the tasks with no dates, or else the new-task form.
   const toPlanning = () => {

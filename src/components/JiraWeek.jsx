@@ -16,6 +16,8 @@ import * as api from '../lib/api.js'
 import { addWeeks, weekNo, weekTitle } from '../lib/weekly.js'
 import AiAssist from './AiAssist.jsx'
 import VoiceUpdate from './VoiceUpdate.jsx'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { Pill } from './Brand.jsx'
 import { ago } from './FollowUp.jsx'
 import { mentionsHold, isHoldStatus } from '../lib/hold.js'
@@ -704,7 +706,7 @@ function NewProject({ week, onDone, onCancel, writable }) {
  * card that left for "Already updated" does not vanish without a word.
  */
 function ProjectGroup({
-  name, projectKey, rows, allRows = rows, planning, writable, flashes = [], onDismiss, children,
+  name, projectKey, rows, allRows = rows, planning, writable, flashes = [], onDismiss, children, hidden = false, footer = null,
 }) {
   // Counted over all of the project's tasks, not just the ones the filter
   // shows: under "Already updated" a block with tasks still to do must not
@@ -716,8 +718,9 @@ function ProjectGroup({
       component="section"
       data-project-group={projectKey || 'none'}
       aria-label={`project ${name}`}
+      aria-hidden={hidden || undefined}
       sx={(t) => ({
-        display: 'flex',
+        display: hidden ? 'none' : 'flex',
         flexDirection: 'column',
         borderRadius: 2,
         overflow: 'hidden',
@@ -774,6 +777,7 @@ function ProjectGroup({
             </Alert>
           ))}
           {children}
+          {footer}
         </Box>
       </Collapse>
     </Box>
@@ -891,6 +895,66 @@ export default function JiraWeek({
     return [...by.values()].sort((a, b) => at(a.key) - at(b.key))
   }, [shown, flashes])
 
+  /*
+   * ONE PROJECT AT A TIME (owner, 2026-11-22): the member works through their
+   * week project by project, with arrows between them, instead of scrolling
+   * one long page. Every project stays on the page, only hidden, so a draft
+   * typed in one is kept on the way to another and "Submit all" still sends
+   * them all. Once a project has nothing left to update, the next one that
+   * does comes up by itself.
+   */
+  const leftIn = (key) => rows.filter((r) => groupKeyOf(r.t) === key && needsUpdate(r.t, writable)).length
+  const [at, setAt] = useState(null)
+  const shownKey = groups.some((g) => g.key === at) ? at
+    : (groups.find((g) => !planning && leftIn(g.key) > 0) || groups[0])?.key ?? null
+  const shownIdx = Math.max(0, groups.findIndex((g) => g.key === shownKey))
+  const go = (n) => {
+    if (!groups.length) return
+    const i = (shownIdx + n + groups.length) % groups.length
+    setAt(groups[i].key)
+    document.querySelector('[data-project-nav]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const nextWithWork = () => {
+    for (let n = 1; n < groups.length; n++) {
+      const g = groups[(shownIdx + n) % groups.length]
+      if (leftIn(g.key) > 0) return g
+    }
+    return null
+  }
+  // Finished one: on to the next with something to update, after a moment to read the confirmation.
+  const shownLeft = shownKey == null ? 0 : leftIn(shownKey)
+  const lastLeft = useRef({ key: null, left: null })
+  useEffect(() => {
+    const prev = lastLeft.current
+    lastLeft.current = { key: shownKey, left: shownLeft }
+    if (planning || prev.key !== shownKey || !(prev.left > 0) || shownLeft !== 0) return undefined
+    const next = nextWithWork()
+    if (!next) return undefined
+    const t = setTimeout(() => {
+      setAt(next.key)
+      document.querySelector('[data-project-nav]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 1800)
+    return () => clearTimeout(t)
+    // nextWithWork reads the groups of this render.
+  }, [shownKey, shownLeft, planning])
+  // Asked to show a project (an email link) or a task ("Update next task").
+  useEffect(() => {
+    if (!focusKey) return
+    const g = groups.find((x) => x.key === focusKey || x.rows.some((r) => r.t.project?.key === focusKey))
+    if (g) setAt(g.key)
+  }, [focusKey])
+  useEffect(() => {
+    const onShow = (e) => {
+      const key = e.detail?.taskKey
+      const r = rows.find((x) => x.t.key === key)
+      if (!r) return
+      if (filter !== 'all' && !shown.some((x) => x.t.key === key)) setFilter('all')
+      setAt(groupKeyOf(r.t))
+    }
+    window.addEventListener('jira-week-show', onShow)
+    return () => window.removeEventListener('jira-week-show', onShow)
+  }, [rows, shown, filter])
+
   // An unsent draft on any card: the tab asks before it closes. (The draft is
   // kept in this browser either way; this is so nobody thinks it was sent.)
   useEffect(() => {
@@ -961,7 +1025,68 @@ export default function JiraWeek({
       </Box>
       {note && <Alert severity={note.tone} variant="outlined" sx={{ py: 0 }} onClose={() => setNote(null)}>{note.text}</Alert>}
 
-      {groups.map((g) => (
+      {groups.length > 1 && (
+        <Paper
+          variant="outlined"
+          data-project-nav
+          sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 1 }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <IconButton onClick={() => go(-1)} aria-label="previous project" data-project-prev sx={{ border: 1, borderColor: 'divider' }}>
+              <ChevronLeftIcon />
+            </IconButton>
+            <Box sx={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }} data-project-pos>
+                Project {shownIdx + 1} of {groups.length}
+                {!planning && ` · ${groups.filter((g) => leftIn(g.key) > 0).length} with something to update`}
+              </Typography>
+              <Typography variant="body1" sx={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {groups[shownIdx]?.name}
+              </Typography>
+            </Box>
+            <IconButton onClick={() => go(1)} aria-label="next project" data-project-next sx={{ border: 1, borderColor: 'divider' }}>
+              <ChevronRightIcon />
+            </IconButton>
+          </Box>
+          {/* Every project, to jump straight to one: how many are left on each, or a tick. */}
+          <Box sx={{ display: 'flex', gap: 0.75, overflowX: 'auto', pb: 0.25 }} role="tablist" aria-label="your projects this week">
+            {groups.map((g, i) => {
+              const left = leftIn(g.key)
+              const on = i === shownIdx
+              return (
+                <ButtonBase
+                  key={g.key || 'none'}
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => setAt(g.key)}
+                  data-project-chip={g.key || 'none'}
+                  sx={(t) => ({
+                    flexShrink: 0,
+                    maxWidth: 220,
+                    gap: 0.75,
+                    px: 1.25,
+                    py: 0.5,
+                    borderRadius: '999px',
+                    border: 1,
+                    borderColor: on ? 'primary.main' : 'divider',
+                    bgcolor: on ? alpha(t.palette.primary.main, 0.1) : 'transparent',
+                    '&.Mui-focusVisible': { outline: '2px solid', outlineColor: 'primary.light', outlineOffset: 2 },
+                  })}
+                >
+                  <Typography variant="caption" sx={{ fontWeight: on ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {g.name}
+                  </Typography>
+                  {!planning && (left
+                    ? <Pill label={String(left)} tone="warn" />
+                    : <CheckIcon sx={{ fontSize: 14, color: 'success.main' }} />)}
+                </ButtonBase>
+              )
+            })}
+          </Box>
+        </Paper>
+      )}
+
+      {groups.map((g, i) => (
         <ProjectGroup
           key={g.key || 'none'}
           name={g.name}
@@ -972,6 +1097,15 @@ export default function JiraWeek({
           writable={writable}
           flashes={flashes.filter((f) => f.group === g.key)}
           onDismiss={dismiss}
+          hidden={i !== shownIdx}
+          footer={groups.length > 1 ? (
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap', pt: 0.5 }}>
+              <Button size="small" startIcon={<ChevronLeftIcon />} onClick={() => go(-1)} sx={focusRingSx}>Previous project</Button>
+              <Button size="small" variant={!planning && leftIn(g.key) === 0 ? 'contained' : 'outlined'} endIcon={<ChevronRightIcon />} onClick={() => go(1)} sx={focusRingSx} data-project-next-bottom>
+                Next: {groups[(i + 1) % groups.length]?.name}
+              </Button>
+            </Box>
+          ) : null}
         >
           {g.rows.map(({ t }) => (
             <TaskCard
