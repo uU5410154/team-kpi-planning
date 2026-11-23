@@ -30,7 +30,7 @@ import { syncStatus } from '../lib/storage.js'
 import { alpha } from '@mui/material/styles'
 import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
 import HourglassIcon from '@mui/icons-material/HourglassTopOutlined'
-import { Pill } from '../components/Brand.jsx'
+import { Pill, statusTone } from '../components/Brand.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
 import { activitySignals, activeUnits } from '../lib/manager.js'
 import { weekOf, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
@@ -205,7 +205,9 @@ export default function Timeline({
   const narrow = phone || (boxW > 0 && boxW < 640)
   const NAME_W = narrow ? 160 : 280
   const SLIP_W = narrow ? 64 : 80
-  const PINNED_W = NAME_W + SLIP_W
+  // The project's status (Done, In Progress, Not Start…), pinned beside the slip. Not on a phone.
+  const STATUS_W = phone ? 0 : 118
+  const PINNED_W = NAME_W + STATUS_W + SLIP_W
   /*
    * THE CHART IS THE PAGE. Everything above it is one title line, one toolbar
    * and one line of figures, and the chart takes the rest of the window with
@@ -467,6 +469,7 @@ export default function Timeline({
       issue.sprintName || null,
     ].filter(Boolean).join(' · '),
     leaf: LEAF.test(issue.type || ''),
+    jiraStatus: issue.status || null,
     timeline: timelineOf({
       /*
        * THE SPRINT IS THE PLAN, where there is one.
@@ -1484,6 +1487,32 @@ export default function Timeline({
             )}
           </Box>
 
+          {STATUS_W > 0 && (
+            <Box
+              data-timeline-status
+              sx={{
+                width: STATUS_W,
+                flexShrink: 0,
+                px: 0.75,
+                alignSelf: 'stretch',
+                display: 'flex',
+                alignItems: 'center',
+                position: 'sticky',
+                right: SLIP_W,
+                bgcolor: depth ? 'background.default' : 'background.paper',
+                zIndex: 1,
+                borderLeft: 1,
+                borderColor: 'divider',
+                overflow: 'hidden',
+              }}
+            >
+              {depth === 0
+                ? (statusOf(row) || <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>)
+                : row.jiraStatus
+                  ? <Pill label={row.jiraStatus} tone={statusTone(row.jiraStatus)} />
+                  : <Typography variant="caption" sx={{ color: 'text.disabled' }}>—</Typography>}
+            </Box>
+          )}
           <Box sx={{
             width: SLIP_W,
             flexShrink: 0,
@@ -1972,6 +2001,23 @@ export default function Timeline({
                   <Typography variant="caption" sx={{ fontSize: '0.55rem', fontWeight: 700, color: STATUS.warning, lineHeight: 1.25, display: 'block' }}>Today</Typography>
                 </Box>
               </Box>
+              {STATUS_W > 0 && (
+                <Box sx={{
+                  width: STATUS_W,
+                  flexShrink: 0,
+                  px: 0.75,
+                  py: 0.5,
+                  position: 'sticky',
+                  right: SLIP_W,
+                  bgcolor: 'background.paper',
+                  zIndex: 2,
+                  borderLeft: 1,
+                  borderColor: 'divider',
+                }}
+                >
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>STATUS</Typography>
+                </Box>
+              )}
               <Box sx={{
                 width: SLIP_W,
                 flexShrink: 0,

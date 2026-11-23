@@ -506,11 +506,11 @@ if (!exe) {
     }, label)
     await new Promise((r) => setTimeout(r, 900))
     return page.evaluate(() => {
-      // The header row is the one carrying both column titles; the calendar is
-      // the box between them.
+      // The header row is the one carrying the column titles; the calendar is
+      // the box after the project column (then STATUS, then SLIP).
       const rows = [...document.querySelectorAll('div')].filter((d) => {
         const t = d.innerText || ''
-        return t.includes('PROJECT') && t.includes('SLIP') && d.children.length === 3
+        return t.includes('PROJECT') && t.includes('SLIP') && d.children.length >= 3 && d.children.length <= 4
       })
       const head = rows[rows.length - 1]
       const track = head && head.children[1]
