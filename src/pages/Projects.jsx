@@ -11,6 +11,7 @@ import {
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
 import FilterListIcon from '@mui/icons-material/FilterList'
+import FilterAltOffIcon from '@mui/icons-material/FilterAltOff'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ProjectDetailDialog from '../components/ProjectDetailDialog.jsx'
@@ -81,7 +82,7 @@ const COMMIT_COLOR = {
 }
 
 /** Free-text cell that only commits on blur. */
-function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false }) {
+function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false, selectAll = false }) {
   const [draft, setDraft] = useState(value ?? '')
   const [focused, setFocused] = useState(false)
   if (!focused && draft !== (value ?? '')) setDraft(value ?? '')
@@ -93,7 +94,7 @@ function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false
       value={draft}
       placeholder={placeholder}
       autoFocus={autoFocus}
-      onFocus={() => setFocused(true)}
+      onFocus={(e) => { setFocused(true); if (selectAll) e.target.select() }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         setFocused(false)
@@ -152,7 +153,14 @@ function ChoiceCell({ value, options, onChange, placeholder, width }) {
           {...params}
           variant="standard"
           placeholder={placeholder}
-          inputProps={{ ...params.inputProps, style: { fontSize: '0.8125rem' }, 'aria-label': placeholder }}
+          inputProps={{
+            ...params.inputProps,
+            style: { fontSize: '0.8125rem' },
+            'aria-label': placeholder,
+            // Tabbed into, the value is selected, so typing replaces it rather
+            // than adding to it (MUI selects only on a click).
+            onFocus: (e) => { params.inputProps.onFocus?.(e); const t = e.target; setTimeout(() => t.select?.(), 0) },
+          }}
         />
       )}
     />
@@ -216,12 +224,14 @@ function LayoutBlock({
  * THE PROJECT'S NAME: a link that opens its detail popup. The pencil beside it
  * turns it into an editable box for renaming; leaving the box turns it back.
  */
-function NameCell({ p, onOpen, onRename }) {
-  const [editing, setEditing] = useState(false)
+function NameCell({ p, onOpen, onRename, startEditing = false }) {
+  const [editing, setEditing] = useState(startEditing)
+  // A project just added opens with its name ready to type over.
+  useEffect(() => { if (startEditing) setEditing(true) }, [startEditing])
   if (editing) {
     return (
       <Box sx={{ flex: 1, minWidth: 0 }} onBlur={() => setEditing(false)} data-name-editing>
-        <TextCell value={p.summary} placeholder="Project name" onChange={onRename} bold autoFocus />
+        <TextCell value={p.summary} placeholder="Project name" onChange={onRename} bold autoFocus selectAll />
       </Box>
     )
   }
@@ -607,6 +617,30 @@ export default function Projects({
     if (!jump?.q) return
     resetFilters([]); setQ(jump.q)
   }, [jump?.n])
+  /*
+   * ADD A PROJECT AND SEE IT. A search or a filter in force used to hide the
+   * row just added, so "Add project" looked like it did nothing. Everything is
+   * cleared first; the new row is found, brought into view, and its name
+   * opened for typing.
+   */
+  const [fresh, setFresh] = useState(null)
+  const addKeys = useRef(null)
+  const addAndShow = () => {
+    addKeys.current = new Set(projects.map((x) => x.key))
+    resetFilters()
+    onAdd()
+  }
+  useEffect(() => {
+    if (!addKeys.current) return
+    const made = projects.find((x) => !addKeys.current.has(x.key))
+    if (!made) return
+    addKeys.current = null
+    setFresh(made.key)
+    setTimeout(() => {
+      document.querySelector(`[data-open-project="${CSS.escape(made.key)}"], [data-name-editing]`)?.closest('tr, [data-project-card]')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 60)
+  }, [projects])
   const [sort, setSort] = useState({ by: 'savingHours', dir: 'desc' })
   const [sel, setSel] = useState(() => new Set())
   const [bulkEl, setBulkEl] = useState(null)
@@ -1281,6 +1315,20 @@ export default function Projects({
             data-filter="gap"
           />
           </Box>
+          {/* One way back to everything: the search and every filter, the PIC default included. */}
+          <Button
+            size="small"
+            variant={filtersOn ? 'outlined' : 'text'}
+            startIcon={<FilterAltOffIcon sx={{ fontSize: 16 }} />}
+            onClick={() => resetFilters()}
+            disabled={!filtersOn}
+            data-projects-clear
+            aria-label="Clear the search and all filters"
+            title="Clear the search and all filters"
+            sx={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 0 }}
+          >
+            Clear
+          </Button>
         </Box>
 
         <Stack direction="row" spacing={{ xs: 1, sm: 2 }} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
@@ -1293,11 +1341,6 @@ export default function Projects({
               Show {partnerNames} too
             </Button>
           )}
-          {filtersOn && (
-            <Button size="small" onClick={() => resetFilters()}>
-              Clear filters
-            </Button>
-          )}
           <Box sx={{ flex: 1 }} />
           {uncosted.length > 0 && (
             <Tooltip title={`Spreads a year of the team's capacity — ${teamSize} people, about ${capacityMandays.toLocaleString()} mandays — across the ${uncosted.length} project${uncosted.length === 1 ? '' : 's'} in view that carry no effort, in proportion to how long each runs. A starting point to edit, not a measurement; every value stays marked as an estimate.`}>
@@ -1306,7 +1349,7 @@ export default function Projects({
               </Button>
             </Tooltip>
           )}
-          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={onAdd}>
+          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addAndShow} data-add-project>
             Add project
           </Button>
           {sel.size > 0 && (
@@ -1701,7 +1744,7 @@ export default function Projects({
                   <TableCell sx={{ maxWidth: 320, minWidth: 240 }} {...stick('summary')}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
                       {/* The way into the project: its name opens its detail, in a popup. */}
-                      <NameCell p={p} onOpen={setDetailKey} onRename={(v) => onUpdate(p.key, { summary: v || 'Untitled' })} />
+                      <NameCell p={p} onOpen={setDetailKey} startEditing={p.key === fresh} onRename={(v) => { if (p.key === fresh) setFresh(null); onUpdate(p.key, { summary: v || 'Untitled' }) }} />
                     </Box>
                     <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', mt: 0.25 }}>
                       <ChoiceCell
