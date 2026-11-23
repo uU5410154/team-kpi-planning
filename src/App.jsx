@@ -1654,6 +1654,7 @@ export default function App() {
                 : 'Your account is not linked to your name on the team yet, so no projects are shown. Ask an administrator to link it on the Access tab.'}
               jump={jump?.tab === 'timeline' ? jump : null}
               onOpenWeekly={() => setTab('weekly')}
+              onOpenProject={openProject}
             />
           )}
 

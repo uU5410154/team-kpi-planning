@@ -186,7 +186,7 @@ function PlanEditor({ row, onSave, onHold, saving, jira, status = null }) {
  */
 export default function Timeline({
   plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false, jump = null, note = null,
-  onOpenWeekly, onStatus,
+  onOpenWeekly, onStatus, onOpenProject,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -1642,6 +1642,36 @@ export default function Timeline({
   const jiraBtn = { fontSize: '0.75rem', px: 1, minWidth: 0 }
   const dense = { '& .MuiInputBase-input': { py: 0.6, fontSize: '0.8rem' }, '& .MuiInputLabel-root': { fontSize: '0.8rem' } }
   const switchLabel = { m: 0, gap: 0.25, '& .MuiFormControlLabel-label': { fontSize: '0.8rem', whiteSpace: 'nowrap' } }
+  /*
+   * THE SCALE, AND TODAY. They steer the chart, so on a wide page they sit in
+   * the chart's own header corner — which also keeps the toolbar to one row,
+   * where it had wrapped and left "Today" alone on a line of its own.
+   */
+  const scaleControls = (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }} data-timeline-scale>
+      <ToggleButtonGroup
+        size="small"
+        exclusive
+        value={scale}
+        onChange={(_e, v) => v && setScale(v)}
+        aria-label="scale"
+        sx={{ bgcolor: 'background.paper', '& .MuiToggleButton-root': { py: 0.25, px: 0.9, fontSize: '0.72rem', lineHeight: 1.4 } }}
+      >
+        <ToggleButton value="day">Day</ToggleButton>
+        <ToggleButton value="week">Week</ToggleButton>
+        <ToggleButton value="month">Month</ToggleButton>
+      </ToggleButtonGroup>
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => toToday(true)}
+        data-timeline-today
+        sx={{ flexShrink: 0, borderColor: 'divider', bgcolor: 'background.paper', py: 0.15, px: 0.9, minWidth: 0, fontSize: '0.72rem', lineHeight: 1.4 }}
+      >
+        Today
+      </Button>
+    </Box>
+  )
   const filters = (
     <>
       <FormControl size="small" sx={{ width: { sm: 94 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
@@ -1826,10 +1856,15 @@ export default function Timeline({
         </Alert>
       )}
       {jira && !jira.configured && (
-        <Alert severity="info" sx={{ py: 0, '& .MuiAlert-message': { fontSize: '0.8rem' } }}>
-          Jira is not connected on the server, so actual dates have to be typed in by hand. To connect it, set{' '}
-          <strong>JIRA_BASE_URL</strong>, <strong>JIRA_EMAIL</strong> and <strong>JIRA_API_TOKEN</strong> in the Render
-          dashboard under Environment — the token stays on the server and is never sent to this page.
+        <Alert
+          severity="info"
+          data-timeline-jira-off
+          sx={{ py: 0, '& .MuiAlert-icon': { py: 0.4, fontSize: 18 }, '& .MuiAlert-message': { fontSize: '0.78rem', py: 0.5 } }}
+        >
+          Jira is not connected, so actual dates are typed in by hand.{' '}
+          <Tooltip title="Set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in the Render dashboard under Environment. The token stays on the server and is never sent to this page.">
+            <Box component="span" sx={{ textDecoration: 'underline dotted', cursor: 'help' }}>How to connect it</Box>
+          </Tooltip>
         </Alert>
       )}
 
@@ -1844,7 +1879,7 @@ export default function Timeline({
           placeholder="Search key, project, programme"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          sx={{ flex: '1 1 84px', maxWidth: { sm: 240 }, minWidth: 0, ...dense }}
+          sx={{ flex: '1 1 140px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18 }} /></InputAdornment> }}
         />
         {narrow ? (
@@ -1861,21 +1896,8 @@ export default function Timeline({
           </Button>
         ) : filters}
         {/* The room left over goes to the search box, not to empty space. */}
-        <Box sx={{ flex: narrow ? 1 : '0 0 0px', minWidth: 0 }} />
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={scale}
-          onChange={(_e, v) => v && setScale(v)}
-          sx={{ '& .MuiToggleButton-root': { py: 0.4, px: 1, fontSize: '0.75rem', lineHeight: 1.4 } }}
-        >
-          <ToggleButton value="day">Day</ToggleButton>
-          <ToggleButton value="week">Week</ToggleButton>
-          <ToggleButton value="month">Month</ToggleButton>
-        </ToggleButtonGroup>
-        <Button size="small" variant="outlined" onClick={() => toToday(true)} sx={{ flexShrink: 0, borderColor: 'divider', py: 0.3 }} data-timeline-today>
-          Today
-        </Button>
+        {narrow && <Box sx={{ flex: 1, minWidth: 0 }} />}
+        {narrow && scaleControls}
         {narrow && (
           <Collapse in={showFilters} sx={{ flexBasis: '100%' }}>
             <Box sx={{ display: 'flex', gap: 1, rowGap: 1, flexWrap: 'wrap', alignItems: 'center', pt: 0.5 }}>
@@ -1945,17 +1967,22 @@ export default function Timeline({
               <Box sx={{
                 width: NAME_W,
                 flexShrink: 0,
-                px: 1.5,
-                py: 0.5,
+                px: narrow ? 1.5 : 1,
+                py: narrow ? 0.5 : 0.35,
                 position: 'sticky',
                 left: 0,
                 bgcolor: 'background.paper',
                 zIndex: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 1,
               }}
               >
-                <Typography variant="caption" sx={{ fontWeight: 700 }}>PROJECT</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 700, pl: narrow ? 0 : 0.5 }}>PROJECT</Typography>
+                {!narrow && scaleControls}
               </Box>
-              <Box sx={{ position: 'relative', flex: trackPx ? 'none' : 1, width: trackPx || 'auto', height: 26 }}>
+              <Box sx={{ position: 'relative', flex: trackPx ? 'none' : 1, width: trackPx || 'auto', minHeight: 26 }}>
                 {ticks.map((tk, i) => (
                   <Box
                     key={tk.ms}
@@ -1986,7 +2013,11 @@ export default function Timeline({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {tk.label}
+                      {/* A year in a month too narrow for four digits reads ’26, not "202". */}
+                      {/^\d{4}$/.test(String(tk.label)) && ticks[i + 1]
+                        && ((ticks[i + 1].ms - tk.ms) / (span.to - span.from)) * (trackPx || Math.max(0, boxW - PINNED_W)) < 34
+                        ? `’${String(tk.label).slice(2)}`
+                        : tk.label}
                     </Typography>
                   </Box>
                 ))}
@@ -2140,7 +2171,7 @@ export default function Timeline({
                         <Typography variant="body2" sx={{ flex: 1 }}>
                           <strong>{b.nick}</strong> · {b.title}
                           <Typography component="span" variant="caption" sx={{ display: 'block', color: 'text.secondary', whiteSpace: 'pre-wrap' }}>
-                            {b.blocker} · new date {fmtD(b.newDate)}
+                            {b.blocker}{b.newDate ? ` · new date ${fmtD(b.newDate)}` : ''}
                           </Typography>
                         </Typography>
                       </Box>
@@ -2173,24 +2204,44 @@ export default function Timeline({
                     <Box key={w} sx={{ mb: 1.25 }}>
                       <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>{weekTitle(w)}</Typography>
                       {byWeek[w].map((h) => (
-                        <Box key={`${h.person}${h.title}`} sx={{ display: 'flex', gap: 1, alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+                        <Box key={`${h.person}${h.title}`} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', mt: 0.75, flexWrap: 'wrap' }} data-story-task={h.jiraKey || h.title}>
                           <Pill
-                            label={h.done === true ? 'finished' : h.done === false ? `${h.pct ?? '?'}%` : 'planned'}
-                            tone={h.done === true ? 'good' : h.done === false ? 'warn' : 'neutral'}
+                            label={h.hold ? 'on hold' : h.done === true ? 'finished' : h.done === false ? (h.pct != null ? `${h.pct}%` : 'not finished') : 'planned'}
+                            tone={h.hold ? 'warn' : h.done === true ? 'good' : h.done === false ? 'warn' : 'neutral'}
                           />
-                          <Typography variant="body2" sx={{ flex: '1 1 200px' }}>
-                            <strong>{h.nick}</strong> · {h.title}
-                            <Typography component="span" variant="caption" sx={{ color: 'text.secondary' }}>
-                              {h.done === false && h.newDate ? ` · now ${fmtD(h.newDate)}` : h.expected ? ` · expected ${fmtD(h.expected)}` : ''}
+                          <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
+                            <Typography variant="body2">
+                              <strong>{h.nick}</strong> · {h.title}
+                              <Typography component="span" variant="caption" sx={{ color: 'text.secondary' }}>
+                                {h.done === false && h.newDate ? ` · now ${fmtD(h.newDate)}` : h.expected ? ` · expected ${fmtD(h.expected)}` : ''}
+                              </Typography>
                             </Typography>
-                          </Typography>
+                            {/* What they wrote, in their words. */}
+                            {h.progress && (
+                              <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'pre-wrap', borderLeft: 2, borderColor: 'divider', pl: 1, mt: 0.25 }}>
+                                {h.progress}
+                              </Typography>
+                            )}
+                            {h.done === false && h.reason && (
+                              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.25 }}>
+                                {h.hold ? 'Why on hold' : 'Why not finished'}: {h.reason}
+                              </Typography>
+                            )}
+                          </Box>
                         </Box>
                       ))}
                     </Box>
                   ))}
                 </Box>
               </DialogContent>
-              <DialogActions><Button onClick={() => setStory(null)}>Close</Button></DialogActions>
+              <DialogActions>
+                {onOpenProject && story.projectKeys?.[0] && (
+                  <Button onClick={() => { const k = story.projectKeys[0]; setStory(null); onOpenProject(k) }} data-story-open-project>
+                    Open the project page
+                  </Button>
+                )}
+                <Button onClick={() => setStory(null)}>Close</Button>
+              </DialogActions>
             </>
           )
         })()}
