@@ -6,6 +6,7 @@ import {
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import FilterListIcon from '@mui/icons-material/FilterList'
+import FilterAltOffIcon from '@mui/icons-material/FilterAltOff'
 import Loading from '../components/Loading.jsx'
 import SyncIcon from '@mui/icons-material/Sync'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -761,7 +762,6 @@ export default function Timeline({
       .filter((p) => p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded')
       .filter((p) => (ours ? !p.outsideTeam : true))
       .filter((p) => (onlyActive ? activeKeys.has(p.key) : true))
-      .filter((p) => p.timeline.plannedStart || p.timeline.plannedEnd || p.timeline.actualStart)
       .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
       .filter((p) => !fTeams.length || fTeams.includes(p.team || 'none'))
       .filter((p) => !fSubs.length || fSubs.includes(`${p.team || 'none'}|${p.subTeam || 'none'}`))
@@ -790,6 +790,23 @@ export default function Timeline({
         return byStart
       })
   }, [plan.projects, q, fPic, fState, fTeams, fSubs, ours, onlyActive, activeKeys, sortBy])
+
+  /*
+   * WHAT THE SWITCHES HIDE, of what the search and the team / PIC filters
+   * would otherwise show — so a project added on the Projects page is never
+   * simply missing here without a word.
+   */
+  const hidden = useMemo(() => {
+    const hay = q.trim().toLowerCase()
+    const near = plan.projects
+      .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
+      .filter((p) => !fTeams.length || fTeams.includes(p.team || 'none'))
+      .filter((p) => !fSubs.length || fSubs.includes(`${p.team || 'none'}|${p.subTeam || 'none'}`))
+      .filter((p) => !hay || `${p.jiraKey || ''} ${p.summary} ${p.program || ''}`.toLowerCase().includes(hay))
+    const outOfPlan = near.filter((p) => p.commitLevel === 'nextyear' || p.commitLevel === 'excluded')
+    const others = near.filter((p) => ours && p.outsideTeam && !outOfPlan.includes(p))
+    return { outOfPlan, others }
+  }, [plan.projects, q, fPic, fTeams, fSubs, ours])
 
   /* The teams and sub teams the register uses, each sub team under its team. */
   const teamTree = useMemo(() => {
@@ -1291,7 +1308,29 @@ export default function Timeline({
                 />
               </Tooltip>
             )}
-            {!planned && canEdit && (
+            {!planned && !depth && !tl.actualStart && (
+              canEdit ? (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<EditCalendarIcon sx={{ fontSize: 15 }} />}
+                  onClick={(e) => setEditing({ anchor: e.currentTarget, row })}
+                  aria-label={`set dates for ${row.rowKey}`}
+                  data-timeline-set-dates
+                  sx={{
+                    position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', py: 0, px: 1, minWidth: 0,
+                    fontSize: '0.72rem', lineHeight: 1.6, bgcolor: 'background.paper', whiteSpace: 'nowrap',
+                  }}
+                >
+                  No dates yet — set them
+                </Button>
+              ) : (
+                <Typography variant="caption" sx={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'text.disabled' }}>
+                  No dates yet
+                </Typography>
+              )
+            )}
+            {!planned && canEdit && !!(depth || tl.actualStart) && (
               <Tooltip title="No planned dates — click to set them">
                 <IconButton
                   size="small"
@@ -1525,8 +1564,8 @@ export default function Timeline({
    * on screen, and the line says whether that is everything or a part of it.
    */
   const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || fTeams.length > 0 || fSubs.length > 0 || !ours || onlyActive
-  // Undated projects are never on the chart; how many there are is the register's figure.
-  const t = { ...timelinessOf(rows), noDates: filtering ? 0 : plan.totals.timeliness.noDates }
+  // Undated projects sit at the bottom of the chart, with a button to set their dates.
+  const t = timelinessOf(rows)
   const stats = [
     <Typography key="scope" component="span" variant="caption" data-stat-scope={filtering ? 'filtered' : 'all'} sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
       {filtering ? 'Of those shown:' : 'All projects:'}
@@ -1541,12 +1580,34 @@ export default function Timeline({
         + 'and either a finish or a date already gone past.', t.onTime ? STATUS.good : 'text.secondary'),
     stat('slip', t.avgSlip == null ? '—' : `${t.avgSlip}d`, 'avg slip', 'Average slip, over the late ones only',
       t.avgSlip ? STATUS.warning : undefined),
-    t.noDates > 0 ? stat('undated', t.noDates, 'undated', 'No dates at all, so not on the chart', 'text.disabled') : null,
+    t.noDates > 0 ? stat('undated', t.noDates, 'undated', 'No dates yet: listed at the bottom of the chart, waiting for a start and a due date', 'text.disabled') : null,
+    hidden.others.length > 0 ? (
+      <Tooltip key="others" title={`Delivered by IT or the business, so hidden while "Ours only" is on: ${hidden.others.slice(0, 8).map((p) => p.summary).join(', ')}${hidden.others.length > 8 ? '…' : ''}`}>
+        <Typography
+          component="button" variant="caption" onClick={() => setOurs(false)} data-timeline-show-others
+          sx={{ border: 0, bgcolor: 'transparent', p: 0, font: 'inherit', fontSize: '0.75rem', lineHeight: 1.4, color: 'primary.main', cursor: 'pointer', whiteSpace: 'nowrap', '&:hover': { textDecoration: 'underline' } }}
+        >
+          +{hidden.others.length} not ours — show
+        </Typography>
+      </Tooltip>
+    ) : null,
+    hidden.outOfPlan.length > 0 ? (
+      <Tooltip key="outplan" title={`Set to Next year or Excluded on the Projects page, so not drawn: ${hidden.outOfPlan.slice(0, 8).map((p) => p.summary).join(', ')}${hidden.outOfPlan.length > 8 ? '…' : ''}`}>
+        <Typography component="span" variant="caption" data-timeline-out-of-plan sx={{ color: 'text.disabled', whiteSpace: 'nowrap', cursor: 'help' }}>
+          {hidden.outOfPlan.length} next year / excluded, not drawn
+        </Typography>
+      </Tooltip>
+    ) : null,
   ].filter(Boolean)
 
   // Narrow, how many filters are away from their defaults — on the button
   // that hides them, so a short list is never a mystery.
   const changed = [fTeams.length > 0, fSubs.length > 0, fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
+  // One click back to the defaults: the search box too.
+  const anyFilter = changed > 0 || !!q.trim()
+  const clearFilters = () => {
+    setQ(''); setFPic('all'); setFState('all'); setFTeams([]); setFSubs([]); setOurs(true); setOnlyActive(false); setSortBy('start')
+  }
 
   // Small, quiet controls: a toolbar, not a form.
   const jiraBtn = { fontSize: '0.75rem', px: 1, minWidth: 0 }
@@ -1638,6 +1699,20 @@ export default function Timeline({
           </Tooltip>
         )}
       />
+      <Button
+        size="small"
+        variant={anyFilter ? 'outlined' : 'text'}
+        color="primary"
+        startIcon={<FilterAltOffIcon sx={{ fontSize: 16 }} />}
+        disabled={!anyFilter}
+        onClick={clearFilters}
+        aria-label="Clear all filters"
+        title="Clear all filters and the search"
+        data-timeline-clear
+        sx={{ flexShrink: 0, fontSize: '0.75rem', py: 0.3, px: 0.75, minWidth: 0, whiteSpace: 'nowrap', '& .MuiButton-startIcon': { mr: 0.4 } }}
+      >
+        Clear
+      </Button>
     </>
   )
 
@@ -1740,7 +1815,7 @@ export default function Timeline({
           placeholder="Search key, project, programme"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          sx={{ flex: '1 1 84px', maxWidth: { sm: 280 }, minWidth: 0, ...dense }}
+          sx={{ flex: '1 1 84px', maxWidth: { sm: 240 }, minWidth: 0, ...dense }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 18 }} /></InputAdornment> }}
         />
         {narrow ? (
