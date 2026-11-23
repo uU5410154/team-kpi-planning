@@ -494,12 +494,33 @@ export function blockersByType(week) {
   const out = {}
   for (const e of entriesOf(week)) {
     for (const t of e.tasks || []) {
-      if (t.done !== false || !String(t.blocker || '').trim()) continue
+      // On hold is a pause, not a blocker; a reason copied into the blocker by the Jira mirror is not one either.
+      if (t.done !== false || t.hold || !blockerOf(t)) continue
       const k = t.blockerCategory || 'other'
       ;(out[k] = out[k] || []).push({ ...t, person: e.person, nick: e.nick })
     }
   }
   return out
+}
+
+/*
+ * WHAT IS IN THE WAY NOW: the reported week's blockers, with this week's
+ * updates laid over them — a task somebody updated this week speaks for
+ * itself (blocked still, or not any more), so a blocker raised on Tuesday
+ * shows on Tuesday rather than after Friday's deadline.
+ */
+export function currentBlockers(now, prev) {
+  const reported = reportedWeek(now, prev)
+  if (!reported || reported === now) return { by: blockersByType(now), weeks: now ? [now.week] : [] }
+  const fresh = blockersByType(now)
+  const seen = new Set()
+  for (const e of entriesOf(now)) for (const t of e.tasks || []) if (t.done != null || t.hold) seen.add(`${e.person}.${t.jiraKey || t.id}`)
+  const by = {}
+  for (const [k, list] of Object.entries(blockersByType(reported))) {
+    for (const t of list) if (!seen.has(`${t.person}.${t.jiraKey || t.id}`)) (by[k] = by[k] || []).push(t)
+  }
+  for (const [k, list] of Object.entries(fresh)) by[k] = [...list, ...(by[k] || [])]
+  return { by, weeks: [now.week, reported.week] }
 }
 
 /**

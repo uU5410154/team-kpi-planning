@@ -1567,6 +1567,7 @@ export default function App() {
               onAsk={askAi}
               onOpenProject={openProject}
               planLoading={sharedLoading}
+              onProjectsChanged={applyServerProjects}
             />
           )}
           {allowed && tab === 'overview' && (

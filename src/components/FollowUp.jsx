@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Box, Button, Typography, CircularProgress, Tooltip, Popover,
 } from '@mui/material'
@@ -37,7 +37,11 @@ export default function FollowUp({
   const [at, setAt] = useState(null)
   const f = followup
 
+  const sending = useRef(false)
   const send = async () => {
+    // A double click is one email: the second arrives before `busy` re-renders.
+    if (sending.current) return
+    sending.current = true
     setBusy(true)
     setError(null)
     try {
@@ -47,6 +51,7 @@ export default function FollowUp({
     } catch (e) {
       setError(e.message)
     } finally {
+      sending.current = false
       setBusy(false)
     }
   }
