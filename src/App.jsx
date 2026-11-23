@@ -569,7 +569,17 @@ export default function App() {
            * came back on every refresh after somebody had already answered it,
            * which teaches people to click past the one that matters.
            */
-          if (!isNewer) return
+          if (!isNewer) {
+            /*
+             * Agreeing with the database IS working on the shared plan. Left
+             * unlinked, a browser that reloaded never saved on its own again:
+             * a status or a date changed after a refresh sat in this browser
+             * until somebody pressed Save (QA, 2026-11-23).
+             */
+            linkedToDb.current = true
+            setLastSaved(latest.updatedAt)
+            return
+          }
           if (sync.untouched) {
             await takeShared(latest, 'Updated to')
             return
@@ -1638,6 +1648,7 @@ export default function App() {
                 : 'Your account is not linked to your name on the team yet, so no projects are shown. Ask an administrator to link it on the Access tab.'}
               jump={jump?.tab === 'timeline' ? jump : null}
               onOpenWeekly={() => setTab('weekly')}
+              onOpenProject={openProject}
             />
           )}
 

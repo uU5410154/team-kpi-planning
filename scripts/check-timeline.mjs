@@ -325,7 +325,7 @@ if (!exe) {
   console.log('\nSKIP — no Chromium-based browser found; the model checks above still ran')
 } else {
   console.log('\n--- and it draws ---')
-  const PORT = 5403
+  const PORT = Number(process.env.CHECK_PORT || 5403)
   const srv = spawn(process.execPath, ['server/index.js'], {
     env: { ...process.env, PORT: String(PORT), MONGODB_URI: '' },
     stdio: 'ignore',
