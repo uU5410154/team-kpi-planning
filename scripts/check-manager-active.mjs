@@ -321,6 +321,19 @@ try {
       && !(await a.$(`button[aria-label="follow up ${P_HELD.key}"]`)), `${P_HELD.key}: ${heldCell}`)
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/active-dashboard.png` })
 
+    // The member tabs stay at the top of the card while its list scrolls.
+    const stuck = await a.evaluate(() => {
+      const tabs = document.querySelector('section[aria-label="who holds what"] [data-owners-tabs]')
+      let box = tabs?.parentElement
+      while (box && !(box.scrollHeight > box.clientHeight + 20 && window.getComputedStyle(box).overflowY === 'auto')) box = box.parentElement
+      if (!tabs || !box) return { skipped: true }
+      box.scrollTop = 300
+      const d = Math.round(tabs.getBoundingClientRect().top - box.getBoundingClientRect().top)
+      box.scrollTop = 0
+      return { d }
+    })
+    check('THE MEMBER TABS STAY AT THE TOP OF THE CARD WHEN ITS LIST SCROLLS', stuck.skipped || Math.abs(stuck.d) <= 2, JSON.stringify(stuck))
+
     // A task or a project name on the card opens that project's page.
     const opened = await a.evaluate(() => {
       const t = document.querySelector('section[aria-label="who holds what"] [data-open-task]')

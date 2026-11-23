@@ -359,6 +359,8 @@ export function OwnersCard({ ctx, f }) {
               data-owners-tabs
               sx={{
                 minHeight: 38, mb: 1.25, borderBottom: 1, borderColor: 'divider',
+                // Pinned to the top of the card while its list scrolls underneath.
+                ...(f.fill !== false ? { position: 'sticky', top: 0, zIndex: 3, bgcolor: 'background.paper' } : {}),
                 '& .MuiTab-root': { minHeight: 38, textTransform: 'none', px: 1.5, py: 0.5, fontSize: '0.82rem', minWidth: 0 },
               }}
             >

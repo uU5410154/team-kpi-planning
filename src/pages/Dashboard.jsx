@@ -355,8 +355,8 @@ export default function Dashboard({
           layout={rgl}
           cols={12}
           rowHeight={30}
-          margin={[16, 16]}
-          containerPadding={[8, 0]}
+          margin={[12, 12]}
+          containerPadding={[0, 0]}
           isDraggable={editing}
           isResizable={editing}
           draggableHandle={`.${DRAG}`}

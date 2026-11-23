@@ -1533,7 +1533,7 @@ export default function App() {
             (Projects, Timeline) take the whole width. */}
         <Box
           key={previewing ? `member:${previewPerson || ''}` : 'admin'}
-          sx={['weekly', 'projects', 'timeline'].includes(tab)
+          sx={['dashboard', 'weekly', 'projects', 'timeline'].includes(tab)
             ? { maxWidth: 'none', px: { xs: 1, sm: 1.5 }, py: { xs: 1, sm: 1.5 } }
             : { maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}
         >
