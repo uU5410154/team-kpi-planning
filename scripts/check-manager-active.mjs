@@ -321,6 +321,23 @@ try {
       && !(await a.$(`button[aria-label="follow up ${P_HELD.key}"]`)), `${P_HELD.key}: ${heldCell}`)
     if (process.env.SHOT_DIR) await a.screenshot({ path: `${process.env.SHOT_DIR}/active-dashboard.png` })
 
+    // A task or a project name on the card opens that project's page.
+    const opened = await a.evaluate(() => {
+      const t = document.querySelector('section[aria-label="who holds what"] [data-open-task]')
+      const key = t?.closest('[data-project]')?.dataset.project
+      t?.click()
+      return { key, hash: decodeURIComponent(window.location.hash) }
+    })
+    check('CLICKING A TASK OPENS ITS PROJECT PAGE', !!opened.key && opened.hash === `#project/${opened.key}`, JSON.stringify(opened))
+    await a.goto(`${base}/`, { waitUntil: 'networkidle0' })
+    await ready(a)
+    const openedP = await a.evaluate(() => {
+      const t = document.querySelector('section[aria-label="who holds what"] [data-open-project]')
+      t?.click()
+      return { key: t?.dataset.openProject, hash: decodeURIComponent(window.location.hash) }
+    })
+    check('  AND SO DOES THE PROJECT NAME', !!openedP.key && openedP.hash === `#project/${openedP.key}`, JSON.stringify(openedP))
+
     const pill = async (key) => {
       await a.goto(`${base}/#project/${key}`, { waitUntil: 'networkidle0' })
       await a.waitForFunction(() => !!document.querySelector('[data-active-pill]'), { timeout: 15000 }).catch(() => {})

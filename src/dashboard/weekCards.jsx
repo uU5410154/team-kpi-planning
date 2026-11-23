@@ -4,6 +4,7 @@ import {
   Link, ToggleButton, ToggleButtonGroup, Tooltip, LinearProgress, TextField, Tabs, Tab,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { alpha } from '@mui/material/styles'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import EventRepeatIcon from '@mui/icons-material/EventRepeatOutlined'
@@ -54,10 +55,28 @@ function Waiting({ ctx, rows = 3 }) {
   return <Loading variant="block" label={rows > 3 ? 'Loading the week…' : 'Loading…'} />
 }
 
+/*
+ * A project's name that opens its page: blue on hover with an arrow, so it
+ * reads as something to click rather than a heading.
+ */
 const ProjectLink = ({ p, onOpen }) => (
-  <Link component="button" onClick={() => onOpen?.(p.key)} sx={{ fontWeight: 650, textAlign: 'left', color: 'text.primary' }} underline="hover">
-    {p.summary || p.key}
-  </Link>
+  <Tooltip title="Open the project page" placement="top-start" enterDelay={400}>
+    <Link
+      component="button"
+      onClick={() => onOpen?.(p.key)}
+      data-open-project={p.key}
+      underline="none"
+      sx={{
+        fontWeight: 650, textAlign: 'left', color: 'text.primary', display: 'inline-flex', alignItems: 'baseline', gap: 0.25,
+        '& .open-arrow': { opacity: 0.35, transition: 'opacity .15s, transform .15s' },
+        '&:hover, &:focus-visible': { color: 'primary.main', textDecoration: 'underline' },
+        '&:hover .open-arrow, &:focus-visible .open-arrow': { opacity: 1, transform: 'translateX(2px)' },
+      }}
+    >
+      <span>{p.summary || p.key}</span>
+      <ChevronRightIcon className="open-arrow" sx={{ fontSize: 18, alignSelf: 'center', flexShrink: 0 }} />
+    </Link>
+  </Tooltip>
 )
 
 /* --------------------------------------------------------------- counts */
@@ -163,7 +182,7 @@ function UpdateText({ text }) {
  * A project's tasks in one week: each with where it stands (Done, Not done,
  * On hold, or no answer yet), who holds it, and what they wrote about it.
  */
-function TaskList({ tasks, empty, kind }) {
+function TaskList({ tasks, empty, kind, onOpen }) {
   if (!tasks.length) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>{empty}</Typography>
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
@@ -176,7 +195,20 @@ function TaskList({ tasks, empty, kind }) {
         const blocked = t.done === false ? blockerOf(t) : ''
         return (
           <Box key={`${t.person}.${t.id}`} sx={{ minWidth: 0 }} data-week-task={t.jiraKey || t.id}>
-            <Typography variant="body2" sx={{ lineHeight: 1.35 }}>{t.title}</Typography>
+            {onOpen ? (
+              <Link
+                component="button"
+                onClick={onOpen}
+                underline="hover"
+                data-open-task={t.jiraKey || t.id}
+                title="Open the project page"
+                sx={{ display: 'block', textAlign: 'left', fontSize: '0.875rem', lineHeight: 1.35, color: 'text.primary', '&:hover, &:focus-visible': { color: 'primary.main' } }}
+              >
+                {t.title}
+              </Link>
+            ) : (
+              <Typography variant="body2" sx={{ lineHeight: 1.35 }}>{t.title}</Typography>
+            )}
             <Box sx={{
               display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap', mt: 0.25,
             }}
@@ -392,11 +424,11 @@ export function OwnersCard({ ctx, f }) {
                       </Box>
                       <Box>
                         <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6, display: 'block' }}>{lastHead}</Typography>
-                        {lastLoading ? <Loading label="Loading from Jira…" /> : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} />}
+                        {lastLoading ? <Loading label="Loading from Jira…" /> : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} onOpen={() => ctx.onOpenProject?.(p.key)} />}
                       </Box>
                       <Box>
                         <Typography variant="overline" sx={{ color: 'text.secondary', lineHeight: 1.6, display: 'block' }}>{thisHead}</Typography>
-                        <TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" />
+                        <TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" onOpen={() => ctx.onOpenProject?.(p.key)} />
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
                         <Typography variant="caption" sx={{ color: p.latest ? 'text.secondary' : 'text.disabled' }}>
@@ -444,9 +476,9 @@ export function OwnersCard({ ctx, f }) {
                         <TableCell>
                           {lastLoading
                             ? <Loading label="Loading from Jira…" />
-                            : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} />}
+                            : <TaskList tasks={p.lastWeek} kind="last" empty={lastEmpty} onOpen={() => ctx.onOpenProject?.(p.key)} />}
                         </TableCell>
-                        <TableCell><TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" /></TableCell>
+                        <TableCell><TaskList tasks={p.thisWeek} kind="this" empty="Not updated yet" onOpen={() => ctx.onOpenProject?.(p.key)} /></TableCell>
                         <TableCell>
                           <Typography variant="caption" sx={{ color: p.latest ? 'text.primary' : 'text.disabled' }}>
                             {p.latest ? ago(p.latest) : 'never'}
