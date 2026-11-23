@@ -484,6 +484,8 @@ try {
     await a.click(`${rowOf(P.key)} input[aria-label="Team"]`); await sleep(300)
     await a.keyboard.press('ArrowDown'); await a.keyboard.press('Enter'); await sleep(300)
     await a.evaluate(() => document.activeElement?.blur())
+    // The "Saved" still showing from the last edit is not this edit's: wait for this one to start saving first.
+    await a.waitForFunction(() => document.querySelector('[data-save-status]')?.dataset.saveStatus !== 'saved', { timeout: 8000 }).catch(() => {})
     const saved = await waitSaved(a)
     await open(a, 'timeline')
     await open(a, 'projects')

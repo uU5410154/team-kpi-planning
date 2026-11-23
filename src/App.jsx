@@ -436,9 +436,13 @@ export default function App() {
         api.saveApps(name, mine).catch(() => {})
         return
       }
-      setState((s) => (JSON.stringify(s.apps || []) === JSON.stringify(r.apps)
-        ? s
-        : { ...s, apps: r.apps }))
+      setState((s) => {
+        if (JSON.stringify(s.apps || []) === JSON.stringify(r.apps)) return s
+        // The server's icons, not an edit: no "Leave site?" and no save for them.
+        const next = { ...s, apps: r.apps }
+        takenState.current = next
+        return next
+      })
     }).catch(() => {}).finally(() => { if (!stop) setAppsLoading(false) })
     return () => { stop = true }
     // Once per sign-in: the name does not change without a reload.
@@ -640,12 +644,16 @@ export default function App() {
     setDirty(true)
   }, [...SHARED_KEYS.map((k) => state[k]), state.scenarioName])
 
-  // Don't let a closing tab silently drop unsaved edits.
+  // Don't let a closing tab silently drop unsaved edits. Read from a ref set
+  // while rendering: an effect re-registered after paint left a moment where
+  // "Saved" was on screen and leaving still asked "Leave site?" (QA, 2026-11-23).
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
   useEffect(() => {
-    const warn = (e) => { if (dirty) { e.preventDefault(); e.returnValue = '' } }
+    const warn = (e) => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = '' } }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [dirty])
+  }, [])
 
   /** Save the plan to the shared database under the current scenario name. */
   const saveToDb = useCallback(async () => {
