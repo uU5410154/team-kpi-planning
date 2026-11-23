@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box, Button, Typography, Menu, MenuItem, ListSubheader, Alert, useMediaQuery, CircularProgress,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import EditIcon from '@mui/icons-material/DashboardCustomizeOutlined'
 import AddIcon from '@mui/icons-material/Add'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import GridLayout, { WidthProvider } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -34,7 +35,7 @@ const Grid = WidthProvider(GridLayout)
 const known = (items) => (items || []).filter((it) => CARDS[it.type])
 
 export default function Dashboard({
-  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null, planLoading = false,
+  plan, onGoTo, hello = 'there', aiOn = false, onAsk, onOpenProject, week = null, planLoading = false, onProjectsChanged,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -118,6 +119,50 @@ export default function Dashboard({
     api.decisions('open').then((r) => { if (!stop) setDecisions(r.decisions || []) }).catch(() => { if (!stop) setDecisions(null) })
     return () => { stop = true }
   }, [])
+  /*
+   * KEPT FRESH WITHOUT A RELOAD. A member's update lands while the board is
+   * open: every two minutes while the tab is visible, whenever it comes back
+   * into view, and on the Refresh button, the week, its Jira work, the
+   * decisions and the follow-ups are read again — quietly, the cards keep
+   * what they show until the new answer is in, so nothing flickers to a
+   * spinner. Last week is history and is not re-read.
+   */
+  const [refreshedAt, setRefreshedAt] = useState(() => Date.now())
+  const [refreshing, setRefreshing] = useState(false)
+  const lastRefresh = useRef(0)
+  const refresh = useCallback(async () => {
+    if (refreshing) return
+    lastRefresh.current = Date.now()
+    setRefreshing(true)
+    try {
+      const w = await api.loadWeek(week || 'current').catch(() => null)
+      if (w) setNow(w)
+      await Promise.all([
+        w ? api.jiraCoverage(w.week).then((r) => {
+          if (r?.jira === 'on') { setNowJira(r.byProject || {}); setNowJiraError(null) }
+        }).catch(() => {}) : null,
+        api.proposals('pending').then((r) => setPending(r.proposals || [])).catch(() => {}),
+        api.decisions('open').then((r) => setDecisions(r.decisions || [])).catch(() => {}),
+        api.followups(week || 'current').then((r) => setFollowups(r.followups || [])).catch(() => {}),
+      ])
+      setRefreshedAt(Date.now())
+    } finally {
+      setRefreshing(false)
+    }
+  }, [week, refreshing])
+  useEffect(() => {
+    const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden'
+    const tick = setInterval(() => { if (visible()) refresh() }, 120_000)
+    // Back in view after more than half a minute away: read again.
+    const back = () => { if (visible() && Date.now() - lastRefresh.current > 30_000) refresh() }
+    window.addEventListener('focus', back)
+    document.addEventListener('visibilitychange', back)
+    return () => { clearInterval(tick); window.removeEventListener('focus', back); document.removeEventListener('visibilitychange', back) }
+  }, [refresh])
+  // "Refreshed 2 min ago" moves on by itself.
+  const [, setClock] = useState(0)
+  useEffect(() => { const t = setInterval(() => setClock((x) => x + 1), 30_000); return () => clearInterval(t) }, [])
+
   useEffect(() => {
     if (!aiOn || !now?.week) return undefined
     let stop = false
@@ -243,6 +288,19 @@ export default function Dashboard({
       setDecisions((list) => (list || []).filter((x) => x.id !== id))
       setDecided({ key: d?.jiraKey || '', note, jira: r?.jira || r?.decision?.jira || null, at: Date.now() })
     },
+    onProposal: async (kind, p, arg) => {
+      if (kind === 'approve') {
+        const r = await api.approveProposal(p.id, arg)
+        // This browser's plan moves too, so its next save does not put the old date back.
+        onProjectsChanged?.(r.projects || [])
+        setPending((list) => (list || []).filter((x) => x.id !== p.id))
+        setDecided({ key: p.projectKey, note: `now due ${r.proposal?.decidedDue || arg}${r.proposal?.jira?.written ? `, written to ${r.proposal.jira.key} in Jira too` : ''}`, at: Date.now(), kind: 'date' })
+      } else {
+        await api.rejectProposal(p.id, arg)
+        setPending((list) => (list || []).filter((x) => x.id !== p.id))
+        setDecided({ key: p.projectKey, note: `date change rejected — ${p.nick} sees your reason`, at: Date.now(), kind: 'date' })
+      }
+    },
     followups,
     summary,
     prevSummary,
@@ -290,6 +348,21 @@ export default function Dashboard({
               : saved.updatedBy ? `Layout arranged by ${saved.updatedBy}, ${ago(saved.updatedAt)} — the same for every administrator.`
                 : 'The default layout — the same for every administrator.'}
           </Typography>
+          <Typography variant="caption" sx={{ color: 'text.disabled', whiteSpace: 'nowrap' }} data-dash-refreshed>
+            {refreshing ? 'Refreshing…' : `Refreshed ${ago(new Date(refreshedAt).toISOString())}`}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={refreshing ? <CircularProgress size={14} /> : <RefreshIcon />}
+            onClick={refresh}
+            disabled={refreshing}
+            data-dash-refresh
+            title="Read the week again: new updates, decisions and follow-ups. It also refreshes by itself every two minutes."
+            sx={{ color: 'text.primary', borderColor: 'divider' }}
+          >
+            Refresh
+          </Button>
           {saved !== null && (
             <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={startEdit} sx={{ color: 'text.primary', borderColor: 'divider' }}>
               Edit layout

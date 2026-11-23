@@ -19,7 +19,7 @@ import {
   STATUS_LABEL, weekNo, weekTitle, bangkokTime, BLOCKER_CATEGORIES, addWeeks,
 } from '../lib/weekly.js'
 import {
-  projectCounts, updatedCount, ownerRows, reportedWeek, blockersByType, slipping, workload, submissionTrend,
+  projectCounts, updatedCount, ownerRows, currentBlockers, slipping, workload, submissionTrend,
   activeWords, ACTIVE_WHY, blockerOf,
 } from '../lib/manager.js'
 import CardFrame from './CardFrame.jsx'
@@ -250,6 +250,10 @@ function TaskList({ tasks, empty, kind, onOpen }) {
   )
 }
 
+/* A per-tab convenience only: never relied on, and silent when storage is blocked. */
+const remembered = (k, fallback) => { try { return window.sessionStorage.getItem(`dash.${k}`) || fallback } catch { return fallback } }
+const remember = (k, v) => { try { window.sessionStorage.setItem(`dash.${k}`, v) } catch { /* private window */ } }
+
 /** The follow-up for one row, or why there is none. */
 function RowFollowUp({ ctx, g, p, compact = true }) {
   if (!g.person) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>No owner to ask — set a PIC on the Projects page</Typography>
@@ -300,9 +304,12 @@ function RowFacts({ p }) {
 }
 
 export function OwnersCard({ ctx, f }) {
-  const [only, setOnly] = useState('attention')
+  // Remembered for this browser tab, so opening a project and coming Back finds the card as it was.
+  const [only, setOnlyRaw] = useState(() => remembered('owners.only', 'attention'))
   // Whose projects: one member, or everyone. A tab per member across the top.
-  const [who, setWho] = useState('all')
+  const [who, setWhoRaw] = useState(() => remembered('owners.who', 'all'))
+  const setOnly = (v) => { setOnlyRaw(v); remember('owners.only', v) }
+  const setWho = (v) => { setWhoRaw(v); remember('owners.who', v) }
   const groups = ownerRows({
     projects: ctx.plan.projects,
     people: ctx.plan.assignees || ctx.plan.people,
@@ -626,6 +633,62 @@ function TaskDecision({ d, onDecide }) {
   )
 }
 
+/*
+ * A request to move a project's due date, decided here: Approve moves the
+ * date (and writes it to Jira when the server may), Reject asks for the reason
+ * the member will read. No date proposed: picked on the Weekly page.
+ */
+function DateDecision({ p, onDecide, onMore }) {
+  const [rejecting, setRejecting] = useState(false)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState(null)
+  const go = async (kind, arg) => {
+    if (busy) return
+    setBusy(kind)
+    setError(null)
+    try { await onDecide?.(kind, p, arg) } catch (e) { setError(plainError(e)); setBusy(null) }
+  }
+  return (
+    <Box data-date-request={p.projectKey} sx={{ p: 1, borderRadius: '10px', border: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+        <IconTile icon={EventRepeatIcon} color="#a18ad9" size={30} />
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography variant="body2" noWrap sx={{ fontWeight: 600 }} title={p.projectSummary || p.projectKey}>
+            {p.projectKey}{p.projectSummary ? ` — ${p.projectSummary}` : ''}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+            {p.nick} asks to move it: {fmtDay(p.currentDue)} → {p.proposedDue ? fmtDay(p.proposedDue) : 'date to be picked'}
+            {p.disagree ? ' · dates and member disagree' : ''}
+          </Typography>
+        </Box>
+      </Box>
+      {!rejecting ? (
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          {p.proposedDue ? (
+            <Button size="small" variant="outlined" onClick={() => go('approve', p.proposedDue)} disabled={!!busy} data-date-approve>
+              {busy === 'approve' ? 'Approving…' : `Approve ${fmtDay(p.proposedDue)}`}
+            </Button>
+          ) : (
+            <Button size="small" variant="outlined" onClick={onMore}>Pick a date on Weekly</Button>
+          )}
+          <Button size="small" color="error" onClick={() => setRejecting(true)} disabled={!!busy} data-date-reject>Reject</Button>
+          <Button size="small" onClick={onMore} sx={{ ml: 'auto' }}>Details</Button>
+        </Box>
+      ) : (
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <TextField size="small" fullWidth label="Why not? The member sees this." value={reason} onChange={(e) => setReason(e.target.value)} />
+          <Button size="small" variant="outlined" color="error" onClick={() => go('reject', reason)} disabled={!!busy || !reason.trim()}>
+            {busy === 'reject' ? 'Rejecting…' : 'Reject'}
+          </Button>
+          <Button size="small" onClick={() => setRejecting(false)} disabled={!!busy}>Cancel</Button>
+        </Box>
+      )}
+      {error && <Typography variant="caption" sx={{ color: 'error.main' }}>{error}</Typography>}
+    </Box>
+  )
+}
+
 export function DecisionsCard({ ctx, f }) {
   const pending = ctx.pending || []
   const asked = ctx.decisions || []
@@ -642,36 +705,19 @@ export function DecisionsCard({ ctx, f }) {
       title="Waiting for your decision"
       sub={loading ? undefined : unread ? 'The waiting decisions could not be read just now.'
         : `${parts.length ? parts.join(' · ') : 'No date changes or decisions are waiting.'}${ctx.isCurrent === false ? ' · as of today, whichever week is shown' : ''}`}
-      action={pending.length > 0 && <Button size="small" onClick={() => ctx.onGoTo?.('weekly')}>Decide</Button>}
+      action={pending.length > 0 && <Button size="small" onClick={() => ctx.onGoTo?.('weekly')}>All on Weekly</Button>}
     >
       {loading && <Loading variant="block" label="Loading decisions…" />}
       {ctx.decided && (
         <Typography variant="caption" data-decided sx={{ color: 'text.secondary', display: 'block', mb: 0.75, pl: 1, borderLeft: 2, borderColor: 'divider' }}>
-          Decided{ctx.decided.key ? ` on ${ctx.decided.key}` : ''}: “{ctx.decided.note}”
-          {ctx.decided.key ? ' — written on the task in Jira, and the member can see it.' : '.'}
+          {ctx.decided.kind === 'date'
+            ? <>{ctx.decided.key}: {ctx.decided.note}.</>
+            : <>Decided{ctx.decided.key ? ` on ${ctx.decided.key}` : ''}: “{ctx.decided.note}”{ctx.decided.key ? ' — written on the task in Jira, and the member can see it.' : '.'}</>}
         </Typography>
       )}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
         {asked.map((d) => <TaskDecision key={d.id} d={d} onDecide={ctx.onDecide} />)}
-        {pending.map((p) => (
-          <Box
-            key={p.id}
-            sx={{
-              display: 'flex', alignItems: 'center', gap: 1.25, p: 1, borderRadius: '10px', border: 1, borderColor: 'divider',
-            }}
-          >
-            <IconTile icon={EventRepeatIcon} color="#a18ad9" size={30} />
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
-                {p.projectKey}{p.projectSummary ? ` — ${p.projectSummary}` : ''}
-              </Typography>
-              <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: 'block' }}>
-                {p.nick} · {fmtDay(p.currentDue)} → {p.proposedDue ? fmtDay(p.proposedDue) : 'date to be picked'}
-                {p.disagree ? ' · dates and member disagree' : ''}
-              </Typography>
-            </Box>
-          </Box>
-        ))}
+        {pending.map((p) => <DateDecision key={p.id} p={p} onDecide={ctx.onProposal} onMore={() => ctx.onGoTo?.('weekly')} />)}
       </Box>
     </CardFrame>
   )
@@ -775,8 +821,8 @@ export function AskCard({ ctx, f }) {
 
 export function BlockersCard({ ctx, f }) {
   // Which week is "reported" depends on last week too: wait for both.
-  const week = ctx.prev === undefined ? null : reportedWeek(ctx.now, ctx.prev)
-  const by = blockersByType(week)
+  const week = ctx.prev === undefined || !ctx.now ? null : ctx.now
+  const { by, weeks } = week ? currentBlockers(ctx.now, ctx.prev) : { by: {}, weeks: [] }
   const total = Object.values(by).reduce((a, l) => a + l.length, 0)
   const projectName = Object.fromEntries(ctx.plan.projects.map((p) => [p.key, p.summary || p.key]))
   return (
@@ -784,7 +830,7 @@ export function BlockersCard({ ctx, f }) {
       {...f}
       label="blockers by type"
       title="Blockers by type"
-      sub={week ? `${total} from the reports for ${weekTitle(week.week)}` : undefined}
+      sub={week ? `${total} in the way — ${weeks.length > 1 ? `this week’s updates, and the reports for ${weekTitle(weeks[1])}` : `from ${weekTitle(weeks[0])}`}` : undefined}
     >
       {!week ? <Waiting ctx={ctx} /> : total === 0 ? (
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>Nothing reported as in the way.</Typography>
