@@ -409,17 +409,19 @@ function TaskCard({
             })}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-              <EditNoteIcon sx={{ color: 'primary.main', fontSize: 22 }} />
-              <Typography variant="body1" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                Write your update for this week
+              <EditNoteIcon sx={{ color: canWrite ? 'primary.main' : 'text.disabled', fontSize: 22 }} />
+              <Typography variant="body1" sx={{ fontWeight: 700, color: canWrite ? 'primary.main' : 'text.secondary' }}>
+                {canWrite ? 'Write your update for this week' : 'The update for this week'}
               </Typography>
-              {progress.trim()
-                ? <Pill label="Written" tone="good" />
-                : <Pill label="Required" tone="warn" />}
+              {!canWrite
+                ? <Pill label={u ? 'Sent' : 'None sent'} tone="neutral" />
+                : progress.trim()
+                  ? <Pill label="Written" tone="good" />
+                  : <Pill label="Required" tone="warn" />}
             </Box>
             <TextField
               label="What did you do on it this week?"
-              placeholder="e.g. Mapped the asset classes. Waiting for IT to open the SAP extract."
+              placeholder={canWrite ? 'e.g. Mapped the asset classes. Waiting for IT to open the SAP extract.' : 'Nothing was sent.'}
               value={progress}
               onChange={(e) => setProgress(e.target.value)}
               disabled={!canWrite}
@@ -946,6 +948,16 @@ export default function JiraWeek({
     setBulk({ running: false, total: list.length, sent, left })
     onReload?.()
   }
+  // While the Submit-all bar floats at the bottom of the screen, a field being
+  // moved to (Tab, a click near the edge, "Update next task") is kept above it.
+  const barUp = !(week > current) && canWrite && (readyCount > 0 || !!bulk)
+  useEffect(() => {
+    if (!barUp) return undefined
+    const el = document.documentElement
+    const was = el.style.scrollPaddingBottom
+    el.style.scrollPaddingBottom = '96px'
+    return () => { el.style.scrollPaddingBottom = was }
+  }, [barUp])
   const [adding, setAdding] = useState(false)
   const [addingProject, setAddingProject] = useState(false)
   const [note, setNote] = useState(null)
@@ -1044,6 +1056,26 @@ export default function JiraWeek({
     setDir(i > shownIdx ? 'next' : 'prev')
     setAt(groups[i].key)
   }
+  /*
+   * THE ARROW KEYS move between projects too, as on any slide — unless the
+   * member is typing, or a menu or dialog has the keys.
+   */
+  const goRef = useRef(go)
+  goRef.current = go
+  const manyRef = useRef(false)
+  manyRef.current = groups.length > 1
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!manyRef.current || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const el = e.target
+      if (el?.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]')) return
+      e.preventDefault()
+      goRef.current(e.key === 'ArrowRight' ? 1 : -1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const withWork = groups.filter((g) => leftIn(g.key) > 0).length
   const nextWithWork = () => {
     for (let n = 1; n < groups.length; n++) {
@@ -1317,8 +1349,8 @@ export default function JiraWeek({
           <Typography variant="body2" sx={{ flex: 1, minWidth: 200 }}>
             {bulk?.running
               ? `Sending ${bulk.sent + bulk.left.length + 1} of ${bulk.total}…`
-              : bulk && !readyCount
-                ? `${bulk.sent} of ${bulk.total} sent to Jira${bulk.left.length ? ` · ${bulk.left.length} still need something: ${bulk.left.join(', ')} — see the marked fields on ${bulk.left.length === 1 ? 'that card' : 'those cards'}` : '.'}`
+              : bulk
+                ? `${bulk.sent} of ${bulk.total} sent to Jira${bulk.left.length ? ` · ${bulk.left.length} still need${bulk.left.length === 1 ? 's' : ''} something: ${bulk.left.join(', ')} — see the marked fields on ${bulk.left.length === 1 ? 'that card' : 'those cards'}` : '.'}`
                 : `${readyCount} update${readyCount === 1 ? '' : 's'} written and not sent yet.`}
           </Typography>
           {readyCount > 0 && (
@@ -1330,7 +1362,7 @@ export default function JiraWeek({
               data-submit-all
               sx={focusRingSx}
             >
-              Submit all {readyCount}
+              {bulk && !bulk.running ? `Submit the rest (${readyCount})` : `Submit all ${readyCount}`}
             </Button>
           )}
           {bulk && !bulk.running && (
@@ -1343,7 +1375,9 @@ export default function JiraWeek({
         <Typography variant="body2" sx={{ color: 'text.secondary', py: 1 }}>
           {rows.length === 0
             ? (canWrite
-              ? `Nothing in Jira with you as PIC covers ${weekTitle(week)} yet. ${planning ? 'Give a task below some dates, or add one.' : 'Add a task below, or give an undated one some dates.'}`
+              ? `Nothing in Jira with you as PIC covers ${weekTitle(week)} yet. ${(jw.undated || []).length
+                ? (planning ? 'Give a task below some dates, or add one.' : 'Add a task below, or give an undated one some dates.')
+                : 'Add a task below with “Add a task”, or start a new project.'}`
               : `Nothing in Jira with you as PIC covered ${weekTitle(week)}.`)
             : filter === 'todo' ? 'Every task this week has an update. Thank you.' : 'Nothing updated yet this week.'}
         </Typography>

@@ -818,9 +818,15 @@ export default function Weekly({
   // on a week ahead lets it move on to "My plan is set".
   const [addSignal, setAddSignal] = useState(0)
   const [datesSaved, setDatesSaved] = useState({})
+  // Only the newest request is shown: clicking through weeks fast must not
+  // leave an older week's answer, arriving last, on screen.
+  const jiraSeq = useRef(0)
   const loadJira = useCallback(async (w) => {
     if (!w || w === 'current') return
-    try { setJw(await api.jiraWeek(w)) } catch (e) { setJw({ jira: 'error', error: e.message }) }
+    const n = ++jiraSeq.current
+    let r
+    try { r = await api.jiraWeek(w) } catch (e) { r = { jira: 'error', error: e.message } }
+    if (n === jiraSeq.current) setJw(r)
   }, [])
   useEffect(() => {
     if (data?.week && data.person) { setJw(undefined); loadJira(data.week) } else if (data) setJw(null)
@@ -830,10 +836,13 @@ export default function Weekly({
   // rather than a flash of the Monday form that Jira then replaces.
   const jwLoading = !!data?.person && jw === undefined
 
+  const weekSeq = useRef(0)
   const load = useCallback(async (w) => {
     setError(null)
+    const n = ++weekSeq.current
     try {
       const r = await api.loadWeek(w)
+      if (n !== weekSeq.current) return
       setData(r)
       setDraft(r.mine ? cleanEntry(r.mine) : null)
       setDirty(false)
@@ -841,7 +850,7 @@ export default function Weekly({
       // The week the server resolved 'current' to, so the arrows count from it.
       if (w === 'current') setWeek(r.week)
     } catch (e) {
-      setError(e.message)
+      if (n === weekSeq.current) setError(e.message)
     }
   }, [])
 
@@ -979,7 +988,9 @@ export default function Weekly({
 
   const go = (n) => {
     if (dirty && !window.confirm('You have unsaved changes on this week. Leave them?')) return
-    setWeek(addWeeks(data.week, n))
+    // From the week being loaded, if one is: a second click while the first
+    // is still loading goes one further, rather than being lost.
+    setWeek((w) => addWeeks(w && w !== 'current' ? w : data.week, n))
   }
 
   if (!data && !error) {
@@ -1047,7 +1058,7 @@ export default function Weekly({
     if (!data.person) {
       return admin
         ? { label: `${plansIn} of ${required.length} plans in`, sub: 'Open anybody below to read their week.' }
-        : { label: 'Your account is not linked yet', sub: 'Ask an administrator to link it to your name on the Access tab.' }
+        : { label: 'Your account is not linked yet', sub: 'So the app cannot tell which week is yours. Ask an administrator to link it to your name on the Access tab.' }
     }
     // Whether the week is Jira's or the form's decides the step: wait for it.
     if (jwLoading || (jiraMode && !jwReady)) return { loading: true }
@@ -1150,7 +1161,7 @@ export default function Weekly({
           their own still needs to see that a decision went through. */}
       {notice && !draft && <Alert severity="success" onClose={() => setNotice(null)}>{notice}</Alert>}
 
-      {data && !data.person && (
+      {data && !data.person && admin && (
         <Alert severity="info">
           {admin
             ? 'Your account is not linked to anybody on the team, so there is no week of your own to fill in. Link it on the Access tab if you submit too.'
@@ -1231,12 +1242,11 @@ export default function Weekly({
             <StandingChip label="Report" value={data.mineStanding?.report} />
             {data.locked && <Chip size="small" icon={<LockIcon />} label="Locked" />}
             {quiet && (
-              <Typography variant="caption" sx={{ color: 'text.secondary', ml: 1 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', ml: 1, flex: '1 1 240px', minWidth: 0 }}>
                 Update due {bangkokTime(d.reportDue)} · Sunday 15:00 is the second chance · locks {bangkokTime(d.locksAt)}
               </Typography>
             )}
-            {quiet && <Box sx={{ flex: 1 }} />}
-            {quiet && draft && weekNav}
+            {quiet && draft && <Box sx={{ ml: 'auto' }} data-week-nav>{weekNav}</Box>}
           </Box>
           {!quiet && (
           <Typography variant="caption" sx={{ color: 'text.secondary', mt: -1 }}>
