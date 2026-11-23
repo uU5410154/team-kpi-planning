@@ -6,7 +6,7 @@ import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
   TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
-  Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery,
+  Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery, Autocomplete,
 } from '@mui/material'
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
@@ -105,6 +105,66 @@ function TextCell({ value, onChange, placeholder, width, bold, autoFocus = false
       sx={{ width }}
     />
   )
+}
+
+/**
+ * A CHOICE FROM THE REGISTER'S OWN LIST: team, sub team, programme. A
+ * dropdown of the values already used, so "Accounting" is never typed three
+ * ways; typing filters it, and a new value is added only on purpose
+ * ("Add …"), never by a typo.
+ */
+function ChoiceCell({ value, options, onChange, placeholder, width }) {
+  const [input, setInput] = useState('')
+  const NONE = '(none)'
+  const list = useMemo(() => [
+    ...(value ? [NONE] : []),
+    ...[...new Set([...(options || []), ...(value ? [value] : [])])].sort((a, b) => a.localeCompare(b)),
+  ], [options, value])
+  return (
+    <Autocomplete
+      size="small"
+      value={value || null}
+      options={list}
+      onChange={(_e, v) => {
+        const next = typeof v === 'string' && v !== NONE ? v.replace(/^Add "(.*)"$/, '$1').trim() || null : null
+        if (next !== (value ?? null)) onChange(next)
+      }}
+      inputValue={input}
+      onInputChange={(_e, v) => setInput(v)}
+      filterOptions={(opts, st) => {
+        const q = st.inputValue.trim().toLowerCase()
+        const hit = opts.filter((o) => !q || o.toLowerCase().includes(q))
+        if (q && q !== value?.toLowerCase() && !opts.some((o) => o.toLowerCase() === q)) hit.push(`Add "${st.inputValue.trim()}"`)
+        return hit
+      }}
+      renderOption={(props, o) => (
+        <li {...props} key={o} style={{ fontSize: '0.8125rem', ...(o.startsWith('Add "') ? { fontWeight: 600, color: '#306fc7' } : o === NONE ? { color: '#7b8aa0' } : {}) }}>{o}</li>
+      )}
+      onClick={(e) => e.stopPropagation()}
+      disableClearable
+      openOnFocus
+      autoHighlight
+      forcePopupIcon
+      sx={{ width, '& .MuiAutocomplete-inputRoot': { pr: '20px !important' }, '& .MuiAutocomplete-endAdornment': { right: 0 } }}
+      slotProps={{ popper: { sx: { minWidth: 200 } } }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          variant="standard"
+          placeholder={placeholder}
+          inputProps={{ ...params.inputProps, style: { fontSize: '0.8125rem' }, 'aria-label': placeholder }}
+        />
+      )}
+    />
+  )
+}
+
+/** Why a row is not in this year's figures, in words, or null. */
+export function notCountedWhy(p, nickOf = (id) => id) {
+  if (p.commitLevel === 'excluded') return { label: 'Excluded', why: 'Commit level is Excluded: kept on the register, never counted in any total.' }
+  if (p.commitLevel === 'nextyear') return { label: 'Next year', why: 'Commit level is Next year: deferred to 2027, so not in this year\'s totals.' }
+  if (p.outsideTeam) return { label: `Delivered by ${nickOf(p.pic)}`, why: `PIC is ${nickOf(p.pic)}: delivered outside the team, so not in the team's figures or anybody's scorecard.` }
+  return null
 }
 
 /**
@@ -499,6 +559,20 @@ export default function Projects({
   // Includes partner teams like IT, which can own delivery without holding a
   // scorecard. Their hours fall to the team lead.
   const assignees = plan.assignees || people
+  // Team, sub team and programme: the values the register already uses.
+  const choices = useMemo(() => {
+    const live = projects.filter((x) => !x.deleted)
+    const uniq = (xs) => [...new Set(xs.map((x) => String(x || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    const subByTeam = {}
+    for (const x of live) if (x.team && x.subTeam) (subByTeam[x.team] ||= new Set()).add(x.subTeam)
+    return {
+      teams: uniq(live.map((x) => x.team)),
+      subTeams: uniq(live.map((x) => x.subTeam)),
+      programs: uniq(live.map((x) => x.program)),
+      subByTeam: Object.fromEntries(Object.entries(subByTeam).map(([k, v]) => [k, [...v].sort((a, b) => a.localeCompare(b))])),
+    }
+  }, [projects])
+  const nickOf = (id) => (assignees.find((x) => x.id === id) || people.find((x) => x.id === id))?.nick || id
 
   /*
    * EVERY FILTER IS A LIST OF TICKED CHOICES, and an empty list means all.
@@ -1630,25 +1704,39 @@ export default function Projects({
                       <NameCell p={p} onOpen={setDetailKey} onRename={(v) => onUpdate(p.key, { summary: v || 'Untitled' })} />
                     </Box>
                     <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', mt: 0.25 }}>
-                      <TextCell
+                      <ChoiceCell
                         value={p.team}
+                        options={choices.teams}
                         placeholder="Team"
-                        width={58}
+                        width={92}
                         onChange={(v) => onUpdate(p.key, { team: v })}
                       />
-                      <TextCell
+                      <ChoiceCell
                         value={p.subTeam}
+                        // The sub teams of this team first; all of them if it has none yet.
+                        options={(p.team && choices.subByTeam[p.team]?.length) ? choices.subByTeam[p.team] : choices.subTeams}
                         placeholder="Sub team"
-                        width={66}
+                        width={100}
                         onChange={(v) => onUpdate(p.key, { subTeam: v })}
                       />
-                      <TextCell
+                      <ChoiceCell
                         value={p.program}
+                        options={choices.programs}
                         placeholder="Programme"
-                        width={76}
+                        width={110}
                         onChange={(v) => onUpdate(p.key, { program: v })}
                       />
                     </Box>
+                    {(() => {
+                      const off = notCountedWhy(p, nickOf)
+                      return off && (
+                        <Tooltip title={off.why}>
+                          <Box component="span" data-not-counted={p.key} sx={{ display: 'inline-block', mt: 0.5 }}>
+                            <Pill label={`Not counted · ${off.label}`} tone="neutral" />
+                          </Box>
+                        </Tooltip>
+                      )
+                    })()}
                   </TableCell>
                   {show('objective') && (
                   <TableCell>
