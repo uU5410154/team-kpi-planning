@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Box, Paper, Typography, Button, Grid, Link, Alert, Divider,
+  Box, Paper, Typography, Button, Grid, Link, Alert, Divider, IconButton, Tooltip, Popover, TextField,
 } from '@mui/material'
+import EditCalendarIcon from '@mui/icons-material/EditCalendarOutlined'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import TimelineIcon from '@mui/icons-material/ViewTimelineOutlined'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
@@ -99,6 +100,49 @@ function TaskLine({ t }) {
   )
 }
 
+/*
+ * THE PLANNED DATES, changed from here as from the Timeline: the register
+ * first (every line on the epic), then the Jira ticket when this server may
+ * write — and a refusal is said, never a silent half-write.
+ */
+function DatesEditor({ anchor, onClose, p, jira, onSave }) {
+  const [start, setStart] = useState(p.start || '')
+  const [due, setDue] = useState(p.due || '')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState(null)
+  const bad = !!(start && due && due < start)
+  const save = async () => {
+    setBusy(true); setNote(null)
+    try {
+      const r = await onSave({ start: start || null, due: due || null })
+      if (r?.error) setNote({ tone: 'error', text: r.error })
+      else onClose(r?.note || null)
+    } finally { setBusy(false) }
+  }
+  return (
+    <Popover open={!!anchor} anchorEl={anchor} onClose={() => onClose(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
+      <Box sx={{ p: 2, width: 300 }} data-dates-editor>
+        <Typography variant="body2" sx={{ fontWeight: 700, mb: 1.5 }}>Planned dates</Typography>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <TextField size="small" type="date" label="Start" value={start} onChange={(e) => setStart(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
+          <TextField size="small" type="date" label="Due" value={due} onChange={(e) => setDue(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth error={bad} />
+        </Box>
+        <Typography variant="caption" sx={{ display: 'block', mt: 0.75, color: bad ? 'error.main' : 'text.secondary' }}>
+          {bad ? 'The due date is before the start.'
+            : p.jiraKey && jira?.writable ? `Saved to the plan and written to ${p.jiraKey} in Jira.`
+              : p.jiraKey && jira?.configured ? `Saved to the plan. Not written to ${p.jiraKey}: this server does not write to Jira.`
+                : 'Saved to the plan.'}
+        </Typography>
+        {note && <Alert severity={note.tone} sx={{ mt: 1, py: 0 }}>{note.text}</Alert>}
+        <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', mt: 1.5 }}>
+          <Button size="small" onClick={() => onClose(null)} disabled={busy}>Cancel</Button>
+          <Button size="small" variant="contained" onClick={save} disabled={busy || bad}>{busy ? 'Saving…' : 'Save'}</Button>
+        </Box>
+      </Box>
+    </Popover>
+  )
+}
+
 export default function Project({
   plan, projectKey, canWrite, onUpdate, onStatus, onBack, onShowTimeline, inDialog = false, actions = null,
 }) {
@@ -116,7 +160,10 @@ export default function Project({
 
   const [weekly, setWeekly] = useState(undefined)
   const [follow, setFollow] = useState([])
-  const [jiraSite, setJiraSite] = useState(null)
+  const [jira, setJira] = useState(null)
+  const jiraSite = jira?.site || null
+  const [datesEl, setDatesEl] = useState(null)
+  const [datesNote, setDatesNote] = useState(null)
   // What makes it active this week beside its dates: Jira work, an open
   // decision (and an update, from `weekly`). Undefined while asked for.
   const [coverage, setCoverage] = useState(undefined)
@@ -126,7 +173,7 @@ export default function Project({
     let stop = false
     api.weeklyByProject().then((r) => { if (!stop) setWeekly(r.byProject || {}) }).catch(() => { if (!stop) setWeekly(null) })
     if (canWrite) api.followups(null).then((r) => { if (!stop) setFollow(r.followups || []) }).catch(() => {})
-    api.jiraStatus().then((s) => { if (!stop) setJiraSite(s?.site || null) }).catch(() => {})
+    api.jiraStatus().then((s) => { if (!stop) setJira(s || null) }).catch(() => {})
     if (canWrite) {
       api.jiraCoverage(thisWeek).then((r) => { if (!stop) setCoverage(r?.jira === 'on' ? r.byProject || {} : null) }).catch(() => { if (!stop) setCoverage(null) })
     } else setCoverage(null)
@@ -172,6 +219,24 @@ export default function Project({
   const active = unitActive(lines, thisWeek, signals)
   const hours = lines.reduce((a, x) => a + (x.savingHours || 0), 0)
   const jiraKey = String(p.jiraKey || '').trim()
+  // This week's Jira work under it, whoever holds it: the tasks, not the epic itself.
+  const jiraWork = (() => {
+    if (!coverage) return []
+    const seen = new Set()
+    return keys.flatMap((k) => coverage[k] || []).filter((t) => !t.epic && !seen.has(t.key) && seen.add(t.key))
+  })()
+  // Decisions a member asked for on it in a weekly update, still open.
+  const asked = (openDecisions || []).filter((d) => keys.includes(d.projectKey))
+  const saveDates = async (next) => {
+    keys.forEach((k) => onUpdate(k, next))
+    if (!jiraKey || !jira?.writable) return {}
+    try {
+      await api.jiraUpdate(jiraKey, next)
+      return { note: { tone: 'success', text: `Dates saved, and written to ${jiraKey} in Jira.` } }
+    } catch (e) {
+      return { note: { tone: 'warning', text: `Dates saved here, but Jira refused them: ${api.plainError(e)}` } }
+    }
+  }
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -267,13 +332,86 @@ export default function Project({
               </Fact>
             </Grid>
             <Grid item xs={6} sm={4} md={2}><Fact label="Start">{fmtDay(p.start)}</Fact></Grid>
-            <Grid item xs={6} sm={4} md={2}><Fact label="Due">{fmtDay(p.due)}</Fact></Grid>
+            <Grid item xs={6} sm={4} md={2}>
+              <Fact label="Due">
+                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                  {fmtDay(p.due)}
+                  {canWrite && (
+                    <Tooltip title="Change the planned dates">
+                      <IconButton size="small" onClick={(e) => setDatesEl(e.currentTarget)} aria-label="change the planned dates" data-edit-dates sx={{ p: 0.4, color: 'text.secondary' }}>
+                        <EditCalendarIcon sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </Box>
+              </Fact>
+            </Grid>
             <Grid item xs={6} sm={4} md={2}><Fact label="Saving hours / month">{fmtHours(hours)}</Fact></Grid>
             <Grid item xs={6} sm={4} md={2}><Fact label="Objective">{OBJ_BY_ID[p.objective]?.short || '—'}</Fact></Grid>
             <Grid item xs={6} sm={4} md={2}><Fact label="Latest weekly update">{weekly === undefined ? <Loading label="Loading…" /> : latest ? ago(latest) : 'none yet'}</Fact></Grid>
           </Grid>
+          {datesNote && <Alert severity={datesNote.tone} onClose={() => setDatesNote(null)} sx={{ mt: 1.5 }}>{datesNote.text}</Alert>}
         </Paper>
+        {datesEl && (
+          <DatesEditor
+            anchor={datesEl}
+            p={p}
+            jira={jira}
+            onSave={saveDates}
+            onClose={(n) => { setDatesEl(null); if (n) setDatesNote(n) }}
+          />
+        )}
       </Box>
+
+      {asked.length > 0 && (
+        <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 } }} component="section" aria-label="decisions asked">
+          <Typography variant="h4" sx={{ mb: 0.25 }}>Decisions asked</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+            From the weekly updates. Decide them under &ldquo;Waiting for your decision&rdquo; on the{' '}
+            <Link href="#dashboard" underline="hover">Dashboard</Link>.
+          </Typography>
+          {asked.map((d) => (
+            <Typography key={d.id} variant="body2" sx={{ py: 0.5 }}>
+              <strong>{d.nick}</strong>: &ldquo;{d.text}&rdquo;
+              <Typography component="span" variant="caption" sx={{ color: 'text.secondary' }}> — {d.jiraKey}{d.summary ? ` ${d.summary}` : ''}, {weekTitle(d.week)}</Typography>
+            </Typography>
+          ))}
+        </Paper>
+      )}
+
+      {canWrite && coverage !== undefined && (
+        <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 } }} component="section" aria-label="in jira this week">
+          <Typography variant="h4" sx={{ mb: 0.25 }}>In Jira this week</Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+            The tasks under {jiraKey || 'it'} whose dates cover {weekTitle(thisWeek)}, who holds each, and whether they have sent an update.
+          </Typography>
+          {coverage === null && (
+            <Typography variant="body2" sx={{ color: 'text.disabled' }}>Jira could not be read just now.</Typography>
+          )}
+          {coverage && jiraWork.length === 0 && (
+            <Typography variant="body2" sx={{ color: 'text.disabled' }}>{jiraKey ? 'No task under it in Jira covers this week.' : 'No Jira epic on this project, so nothing to read.'}</Typography>
+          )}
+          {jiraWork.map((t) => (
+            <Box key={t.key} data-jira-work={t.key} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', py: 0.75, borderTop: 1, borderColor: 'divider', '&:first-of-type': { borderTop: 0 } }}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {jiraSite
+                    ? <Link href={`${jiraSite}/browse/${t.key}`} target="_blank" rel="noopener noreferrer" underline="hover">{t.key}</Link>
+                    : t.key}
+                  {' '}{t.summary}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                  {t.holder || 'Nobody'}{t.due ? ` · due ${fmtDay(t.due)}` : ''}
+                  {t.update ? ` · updated ${ago(t.update.submittedAt)}` : ''}
+                </Typography>
+              </Box>
+              {t.status && <Pill label={t.status} tone={statusTone(t.status)} title="Its status in Jira" />}
+              {/* What was reported is in the line above and under Week by week; only its absence needs a pill. */}
+              {!t.update && <Pill label="No update yet" tone="neutral" title="Nobody has sent this week's update on it" />}
+            </Box>
+          ))}
+        </Paper>
+      )}
 
       {weekly === null && (
         <Alert severity="info" variant="outlined">The weekly check-ins could not be read just now, so only the register is shown.</Alert>

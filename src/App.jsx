@@ -569,7 +569,14 @@ export default function App() {
            * came back on every refresh after somebody had already answered it,
            * which teaches people to click past the one that matters.
            */
-          if (!isNewer) return
+          if (!isNewer) {
+            // Already the database's copy: linked, so edits from here autosave
+            // as they would after a load. Left unlinked, a refreshed page kept
+            // every later edit in this browser only.
+            linkedToDb.current = true
+            setLastSaved(latest.updatedAt)
+            return
+          }
           if (sync.untouched) {
             await takeShared(latest, 'Updated to')
             return
@@ -1187,6 +1194,14 @@ export default function App() {
 
   const current = visibleTabs.find((t) => t.id === tab) || TABS.find((t) => t.id === tab)
   const CurrentIcon = current?.icon || null
+  // On a project's page the top bar (and the browser tab) names the project.
+  const shownProject = tab === 'project' && hashArg.page === 'project' && hashArg.key
+    ? state.projects.find((x) => x.key === hashArg.key) || state.projects.find((x) => String(x.jiraKey || '').toUpperCase() === String(hashArg.key).toUpperCase())
+    : null
+  const headTitle = shownProject ? `Project · ${shownProject.summary || shownProject.key}` : (current?.label || 'F&A Tech')
+  useEffect(() => {
+    document.title = shownProject ? `${shownProject.summary || shownProject.key} · F&A Tech KPI` : 'F&A Tech · 2026 KPI Planning'
+  }, [shownProject?.key, shownProject?.summary])
   // What the welcome banner calls somebody: their nickname on the team when
   // the account is linked to one, otherwise the name in their address.
   const hello = (myPerson && state.people.find((p) => p.id === myPerson)?.nick)
@@ -1399,7 +1414,7 @@ export default function App() {
               {CurrentIcon && <IconTile icon={CurrentIcon} color={PAGE_COLOR[tab]} size={phone ? 32 : 38} />}
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="h4" noWrap sx={{ fontWeight: 700, fontSize: { xs: '0.95rem', sm: '1.1rem' } }}>
-                  {current?.label || 'F&A Tech'}
+                  {headTitle}
                 </Typography>
                 <Typography variant="caption" noWrap sx={{ color: 'text.secondary', display: { xs: 'none', md: 'block' } }}>
                   F&amp;A Tech · 2026 Objective &amp; KPI Planning
@@ -1533,7 +1548,7 @@ export default function App() {
             (Projects, Timeline) take the whole width. */}
         <Box
           key={previewing ? `member:${previewPerson || ''}` : 'admin'}
-          sx={['dashboard', 'weekly', 'projects', 'timeline'].includes(tab)
+          sx={['dashboard', 'weekly', 'projects', 'project', 'timeline'].includes(tab)
             ? { maxWidth: 'none', px: { xs: 1, sm: 1.5 }, py: { xs: 1, sm: 1.5 } }
             : { maxWidth: 1440, mx: 'auto', px: { xs: 1.5, sm: 2.5 }, py: { xs: 2, sm: 2.5 } }}
         >
