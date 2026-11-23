@@ -304,6 +304,9 @@ export const aiWrite = async (body) => post('/api/ai/write', body)
 /** The week's AI summaries, newest first. Administrators only. */
 export const aiSummary = async (week) => j(await fetch(`/api/ai/summary?week=${encodeURIComponent(week)}`))
 
+/** Write the week's summary now, from everything sent in so far. Administrators only. */
+export const aiSummaryNow = async (week) => post('/api/ai/summary', { week })
+
 export const aiTest = async () => post('/api/ai/test')
 
 /* The chatbot: this administrator's own conversations. */

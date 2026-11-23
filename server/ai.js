@@ -193,13 +193,16 @@ async function weekDigest(week, now = Date.now()) {
     if (e.focus) lines.push(`  Focus: ${clip(e.focus, 600)}`)
     for (const t of e.tasks || []) {
       const pr = t.projectKey ? project[t.projectKey] : null
-      const outcome = t.done === true ? 'FINISHED'
+      const outcome = t.hold ? `ON HOLD${t.reason ? ` (${clip(t.reason, 300)})` : ''}`
+        : t.done === true ? 'FINISHED'
         : t.done === false
           ? `NOT FINISHED (${t.pct ?? '?'}% done, new date ${t.newDate || '?'}${t.blockerCategory ? `, waiting on: ${CATEGORY[t.blockerCategory]}` : ''}${t.blocker ? `, blocker: ${clip(t.blocker, 300)}` : ''}${t.affects === true ? ', member says it pushes the deadline' : ''})`
           : 'not reported yet'
       lines.push(`  - ${clip(t.title, 160)}${pr ? ` [${pr.key}: ${clip(pr.summary, 60)}, project due ${pr.due || 'none'}]` : ''}`
         + `${t.priority ? ` · ${PRIORITY[t.priority]}` : ''}${t.expected ? ` · expected ${t.expected}` : ''}${t.effort != null ? ` · ${t.effort} d` : ''}`
-        + `${t.carriedFrom ? ` · carried over since week of ${t.carriedFrom}` : ''} → ${outcome}`)
+        + `${t.carriedFrom ? ` · carried over since week of ${t.carriedFrom}` : ''} → ${outcome}`
+        + `${t.progress ? `\n      their update: ${clip(t.progress, 600)}` : ''}`
+        + `${t.done === false && !t.hold && t.reason && !t.blocker ? `\n      why not finished: ${clip(t.reason, 300)}` : ''}`)
     }
     for (const u of e.unplanned || []) lines.push(`  - unplanned: ${clip(u.title, 160)}${u.effort != null ? ` · ${u.effort} d` : ''}`)
   }
@@ -306,6 +309,27 @@ async function emailSummary(s) {
   await mail.sendOnce(`summary:${s._id}`, {
     to, kind: 'summary', subject: `Weekly summary: ${weekTitle(s.week)} (${s.trigger === 'plan' ? 'plans' : 'reports'})`, html: body, text,
   })
+}
+
+/*
+ * A SUMMARY NOW, on an administrator's word: the same digest and prompt as the
+ * timed ones, from everything sent in so far. Kept beside them (newest is
+ * shown), not emailed — whoever asked is looking at it.
+ */
+export async function summaryNow(week, by, ms = Date.now()) {
+  if (!llm.status().configured) return { status: 409, error: 'The AI is not switched on.' }
+  const k = await c()
+  if (!k) return UNAVAILABLE
+  const digest = await weekDigest(week, ms)
+  if (digest === UNAVAILABLE) return UNAVAILABLE
+  const text = await llm.chat([
+    { role: 'system', content: SUMMARY_PROMPT },
+    { role: 'user', content: digest },
+  ], { temperature: 0.3, maxTokens: 900 })
+  const at = new Date().toISOString()
+  const doc = { _id: `${week}:manual:${ms}`, week, trigger: 'manual', status: 'written', text, by, at, writtenAt: at, attempts: 1 }
+  await k.summaries.insertOne(doc)
+  return { summary: doc }
 }
 
 /** The summaries of one week, newest first. */

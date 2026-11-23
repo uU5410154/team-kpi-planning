@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import {
   Box, Typography, Button, ButtonBase, Table, TableBody, TableCell, TableHead, TableRow,
-  Link, ToggleButton, ToggleButtonGroup, Tooltip, LinearProgress, TextField,
+  Link, ToggleButton, ToggleButtonGroup, Tooltip, LinearProgress, TextField, Tabs, Tab,
 } from '@mui/material'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import { alpha } from '@mui/material/styles'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import EventRepeatIcon from '@mui/icons-material/EventRepeatOutlined'
@@ -36,6 +37,7 @@ const TONE = {
 }
 const WHEN = {
   plan: 'after the Monday plans', report: 'after the Friday reports', second: 'after the Sunday second chance',
+  manual: 'on request, from everything sent in so far',
 }
 const STARTERS = [
   'Which projects are past due, and who holds them?',
@@ -267,6 +269,8 @@ function RowFacts({ p }) {
 
 export function OwnersCard({ ctx, f }) {
   const [only, setOnly] = useState('attention')
+  // Whose projects: one member, or everyone. A tab per member across the top.
+  const [who, setWho] = useState('all')
   const groups = ownerRows({
     projects: ctx.plan.projects,
     people: ctx.plan.assignees || ctx.plan.people,
@@ -279,14 +283,17 @@ export function OwnersCard({ ctx, f }) {
   })
   // Last week comes from Jira a moment after the rest: a spinner until it does.
   const lastLoading = ctx.prevJira === undefined
-  const shown = groups
+  const byFilter = groups
     .map((g) => ({
       ...g,
       projects: only === 'stale' ? g.projects.filter((p) => !p.report.complete && !p.onHold)
         : only === 'attention' ? g.projects.filter((p) => p.attention && !p.onHold)
           : g.projects,
     }))
-    .filter((g) => g.projects.length)
+  const gid = (g) => g.person || 'none'
+  const pickWho = who !== 'all' && groups.some((g) => gid(g) === who) ? who : 'all'
+  const shown = byFilter.filter((g) => g.projects.length && (pickWho === 'all' || gid(g) === pickWho))
+  const filteredCount = byFilter.reduce((a, g) => a + g.projects.length, 0)
   const count = groups.reduce((a, g) => a + g.projects.length, 0)
   const past = ctx.isCurrent === false
   const prevNo = ctx.prev ? weekNo(ctx.prev.week) : ctx.now ? weekNo(addWeeks(ctx.now.week, -1)) : ''
@@ -310,6 +317,35 @@ export function OwnersCard({ ctx, f }) {
     >
       {ctx.now === null ? <Waiting ctx={ctx} /> : loading ? <Loading variant="block" label="Loading the week, and Jira…" /> : (
         <>
+          {groups.length > 0 && (
+            <Tabs
+              value={pickWho}
+              onChange={(_e, v) => setWho(v)}
+              variant="scrollable"
+              scrollButtons="auto"
+              allowScrollButtonsMobile
+              data-owners-tabs
+              sx={{
+                minHeight: 38, mb: 1.25, borderBottom: 1, borderColor: 'divider',
+                '& .MuiTab-root': { minHeight: 38, textTransform: 'none', px: 1.5, py: 0.5, fontSize: '0.82rem', minWidth: 0 },
+              }}
+            >
+              <Tab value="all" label={`Everyone (${filteredCount})`} data-owners-tab="all" />
+              {byFilter.map((g) => (
+                <Tab
+                  key={gid(g)}
+                  value={gid(g)}
+                  data-owners-tab={gid(g)}
+                  label={(
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <IconTile text={g.nick.slice(0, 2)} color={personColor(ctx.plan.people, g.person)} size={20} />
+                      <span>{g.nick} ({g.projects.length})</span>
+                    </Box>
+                  )}
+                />
+              ))}
+            </Tabs>
+          )}
           {count === 0 && (
             <Box sx={{ py: 1 }}>
               <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
@@ -332,7 +368,8 @@ export function OwnersCard({ ctx, f }) {
           )}
           {count > 0 && shown.length === 0 && (
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              {only === 'attention'
+              {pickWho !== 'all' ? `Nothing for ${groups.find((g) => gid(g) === pickWho)?.nick || 'them'} under “${only === 'attention' ? 'Needs attention' : only === 'stale' ? 'Not updated' : 'All'}”${only !== 'all' ? ' — pick All to see every project they hold' : ''}.`
+                : only === 'attention'
                 ? `Nothing needs attention ${past ? 'that week' : 'this week'}: every active project is fully reported, nothing is blocked or waiting for a decision, and nothing is overdue.`
                 : `Every task on every active project has an update ${past ? 'that week' : 'this week'}.`}
             </Typography>
@@ -625,12 +662,34 @@ export function SummaryCard({ ctx, f }) {
     timeZone: 'Asia/Bangkok', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   })
   const next = nextSummary(ctx.now)
+  const [writing, setWriting] = useState(false)
+  const [writeError, setWriteError] = useState(null)
+  const rewrite = async () => {
+    setWriting(true); setWriteError(null)
+    try { await ctx.onRewriteSummary?.() } catch (e) { setWriteError(plainError(e)) } finally { setWriting(false) }
+  }
   let sub
   if (ctx.aiOn && own) sub = `Written by AI ${when(own)} ${WHEN[own.trigger] || ''}`
   else if (ctx.aiOn && older) sub = `Last week’s, written ${when(older)} · this week’s is written after ${next}`
   else if (ctx.aiOn) sub = 'Written by itself after Monday 08:00, Friday 15:00 and Sunday 15:00.'
   return (
-    <CardFrame {...f} label="the week, summarised" title="The week, summarised" sub={loading ? undefined : sub}>
+    <CardFrame
+      {...f}
+      label="the week, summarised"
+      title="The week, summarised"
+      sub={loading ? undefined : sub}
+      action={ctx.aiOn && ctx.onRewriteSummary ? (
+        <Tooltip title="Write it again now, from every update sent in so far this week">
+          <span>
+            <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={rewrite} disabled={writing || !ctx.now} data-summary-rewrite sx={{ whiteSpace: 'nowrap' }}>
+              {writing ? 'Writing…' : 'Rewrite now'}
+            </Button>
+          </span>
+        </Tooltip>
+      ) : undefined}
+    >
+      {writing && <LinearProgress sx={{ mb: 1 }} />}
+      {writeError && <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mb: 1 }}>{writeError}</Typography>}
       {loading && <Loading variant="block" label="Loading the summary…" />}
       {!loading && ctx.aiOn === false && (
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>

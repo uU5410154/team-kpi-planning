@@ -246,6 +246,14 @@ export default function Dashboard({
     followups,
     summary,
     prevSummary,
+    onRewriteSummary: async () => {
+      if (!now?.week) return
+      const r = await api.aiSummaryNow(now.week)
+      if (r?.summary) {
+        setSummary((s) => ({ ...(s || {}), week: now.week, summaries: [r.summary, ...((s && s.summaries) || [])] }))
+        setPrevSummary(null)
+      }
+    },
     trend,
     aiOn,
     onAsk,

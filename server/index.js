@@ -867,6 +867,21 @@ app.get('/api/ai/summary', adminOnly, async (req, res) => {
   return res.json({ week, summaries: rows.map(({ _id, ...r }) => ({ id: _id, ...r })), ai: llm.status().configured })
 })
 
+app.post('/api/ai/summary', adminOnly, async (req, res) => {
+  const week = !req.body?.week || req.body.week === 'current' ? weekOf() : String(req.body.week)
+  if (!isWeek(week)) return res.status(400).json({ error: 'A week is named by its Monday, as YYYY-MM-DD.' })
+  if (!llm.allow(req.me.email)) return res.status(429).json({ error: 'That is a lot of requests in a minute. Wait a moment and try again.' })
+  try {
+    const r = await ai.summaryNow(week, req.me.email)
+    if (r === store.UNAVAILABLE) return unavailable(res)
+    if (r.error) return res.status(r.status || 400).json({ error: r.error })
+    const { _id, ...rest } = r.summary
+    return res.json({ summary: { id: _id, ...rest } })
+  } catch (e) {
+    return aiFailed(res, e)
+  }
+})
+
 app.post('/api/ai/test', adminOnly, async (_req, res) => {
   try {
     return res.json(await ai.test())
