@@ -131,7 +131,7 @@ try {
   const input = await savingInput('FNP-1431')
   check('found the saving-hours cell for FNP-1431', !!(await input.jsonValue?.()) || !!input)
   await input.click()
-  await page.keyboard.down('Control'); await page.keyboard.press('KeyA'); await page.keyboard.up('Control')
+  await page.evaluate(() => document.activeElement?.select?.()) // Ctrl+A selects nothing on macOS
   await page.keyboard.press('Backspace')
   await page.keyboard.type('33')
   await page.keyboard.press('Tab')          // blur commits
@@ -185,7 +185,7 @@ try {
   await new Promise((r) => setTimeout(r, 500))
   const input2 = await savingInput('FNP-1431')
   await input2.click()
-  await page.keyboard.down('Control'); await page.keyboard.press('KeyA'); await page.keyboard.up('Control')
+  await page.evaluate(() => document.activeElement?.select?.()) // Ctrl+A selects nothing on macOS
   await page.keyboard.press('Backspace')
   await page.keyboard.type('41')
   await page.keyboard.press('Tab')
@@ -530,10 +530,20 @@ try {
     await new Promise((r) => setTimeout(r, 500))
   }
   /** Click a derived (non-editable) cell of the first row, by column index. */
-  const clickRowCell = (ix) => page.evaluate((c) => {
-    const cell = document.querySelector('tbody tr').children[c]
-    cell.click()
-  }, ix)
+  // A real mouse click, as a person makes it: scrolled into view, focus moving out of any field.
+  // A scripted .click() skips the mousedown the row reads to tell a click from an edit.
+  const clickRowCell = async (ix) => {
+    const pos = await page.evaluate((c) => {
+      // Done with any field first: the first click out of an edit only finishes the edit, by design.
+      document.activeElement?.blur?.()
+      const cell = document.querySelector('tbody tr').children[c]
+      cell.scrollIntoView({ inline: 'center', block: 'center' })
+      const r = cell.getBoundingClientRect()
+      return { x: r.x + 4, y: r.y + r.height / 2 }
+    }, ix)
+    await new Promise((r) => setTimeout(r, 300))
+    await page.mouse.click(pos.x, pos.y)
+  }
 
   // A click on an INPUT must not open it — every row is full of editable cells.
   await page.evaluate(() => {
@@ -1144,7 +1154,9 @@ try {
   check('the add-a-person menu offers the rest of the team', await clickOption('^Kade'))
   await closeMenu()
   const withKade = await teamText()
-  check('ADDING A PERSON SPLITS THE PROJECT', /Kade/.test(withKade) && /50%/.test(withKade),
+  // One project, one owner: the PIC takes it whole (model.js projectShares). A contributor is
+  // recorded and shown, and credited nothing.
+  check('ADDING A PERSON RECORDS THEM, AND THE PIC KEEPS THE PROJECT', /Kade/.test(withKade) && /100%/.test(withKade) && /0%/.test(withKade),
     withKade.replace(/\n/g, ' / '))
 
   // Demote the new dev to QA: 83/17, the role weights the plan document sets.
@@ -1159,10 +1171,10 @@ try {
   await closeMenu()
 
   const asQa = await teamText()
-  check('CHANGING THE ROLE RE-SPLITS THE HOURS 83/17',
-    /83%/.test(asQa) && /17%/.test(asQa), asQa.replace(/\n/g, ' / '))
+  check('CHANGING A CONTRIBUTOR\'S ROLE DOES NOT MOVE THE HOURS',
+    /QA/.test(asQa) && /100%/.test(asQa) && /0\.0\/mth/.test(asQa), asQa.replace(/\n/g, ' / '))
   check('and the credited hours are shown beside the share',
-    /26\.7|27/.test(asQa) && /5\.3|5/.test(asQa), asQa.replace(/\n/g, ' / '))
+    /\d+(\.\d)?\/mth/.test(asQa), asQa.replace(/\n/g, ' / '))
 
   await page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
@@ -1184,8 +1196,7 @@ try {
     const row = [...t.querySelectorAll('tbody tr')].find((r) => /FNP-379/.test(r.innerText))
     return row ? row.innerText.replace(/\n/g, ' | ') : null
   })
-  check('THE PROJECT IS ON THE QA\'S SCORECARD', !!kadeRow, String(kadeRow))
-  check('and his row names the role he holds on it', /qa/i.test(kadeRow || ''), String(kadeRow))
+  check('THE PROJECT IS NOT ON THE CONTRIBUTOR\'S SCORECARD (the PIC owns it)', !kadeRow, String(kadeRow))
 
 
   /* ---------- a browser already holding the damaged state ---------- */
@@ -1644,9 +1655,13 @@ try {
   check('the money followed the hours', !!moneyTile && !/^฿0/.test(moneyTile.text), moneyTile.text.slice(0, 80))
 
   const leadAfter = await tabHours('Gun')
+  // By the typed figure less what the register calculates for James (stated on the tile),
+  // not a constant that went stale when his calculated hours moved. Within 1 for rounding.
+  const regHrs = Number((beforeTile.text.match(/(\d[\d,]*(?:\.\d+)?)/) || [])[1]?.replace(/,/g, ''))
+  const leadDelta = Number(String(leadAfter).replace(/,/g, '')) - Number(String(leadBefore).replace(/,/g, ''))
   check('THE LEAD FOLLOWED THE MEMBER',
-    Number(String(leadAfter).replace(/,/g, '')) - Number(String(leadBefore).replace(/,/g, '')) === 121,
-    `${leadBefore} -> ${leadAfter}`)
+    Number.isFinite(regHrs) && Math.abs(leadDelta - (200 - regHrs)) <= 1,
+    `${leadBefore} -> ${leadAfter} (register ${regHrs}) · ${beforeTile.text.slice(0, 80)}`)
 
   // The register is untouched: the header total is the project book.
   const ovrHeadline = await page.evaluate(() =>

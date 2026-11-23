@@ -34,6 +34,8 @@ const server = spawn(process.execPath, ['server/index.js'], {
     ...process.env,
     PORT: String(PORT),
     MONGODB_URI: mongod.getUri(),
+    // The stored home screen as it is: no F&A catalog merged in.
+    APPS_CATALOG: 'off',
     MONGODB_DB: 'team_kpi_planning',
     MONGODB_COLLECTION: 'kpi_scenarios',
   },

@@ -146,7 +146,8 @@ check('...not even where the register already holds one',
   mergeJira(state([base]), feed({ due: null }, roll), {}).projects[0].due === '2026-07-31')
 
 console.log('\n— what moves with it —')
-const plan = computePlan(repairState(state([p1])))
+// Judged as of a day before the new finish: "not yet due" must not depend on when the check runs.
+const plan = computePlan(repairState({ ...state([p1]), settings: { asOfPinned: true, asOfDate: '2026-10-01' } }))
 const row = plan.projects[0]
 check('the timeline draws the new date', row.timeline.plannedEnd === '2026-11-13', row.timeline.plannedEnd)
 check('and the plan is that much longer',
