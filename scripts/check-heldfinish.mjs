@@ -275,6 +275,9 @@ await page.evaluate(() => {
 })
 await page.goto(`${url}/#timeline`, { waitUntil: 'networkidle2' })
 await new Promise((r) => setTimeout(r, 1500))
+// A held finish makes it finished, which the Timeline hides by default: tick everything.
+await page.evaluate(() => document.querySelector('[data-timeline-show-ticked]')?.click())
+await new Promise((r) => setTimeout(r, 600))
 check('the timeline marks a held project on its row',
   await page.evaluate(() => document.body.innerText.includes('finish held')))
 

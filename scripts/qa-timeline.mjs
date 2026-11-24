@@ -18,6 +18,7 @@ import puppeteer from 'puppeteer-core'
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import { weekOf } from '../src/lib/weekly.js'
 import { computePlan, repairState } from '../src/lib/model.js'
+import { statusChoice } from '../src/lib/projectStatus.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SHOT = process.env.SHOT_DIR || ''
@@ -251,6 +252,28 @@ try {
     await sleep(500)
     return ok
   }
+  // A select of ticks: leave exactly `want` ticked (by option text).
+  const setTicks = async (pg, label, want) => {
+    await pg.evaluate((l) => {
+      const fc = [...document.querySelectorAll('[data-timeline="filters"] .MuiFormControl-root')].find((f) => f.querySelector('label')?.textContent.trim() === l)
+      fc?.querySelector('[role="combobox"]')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    }, label)
+    await sleep(400)
+    const names = await pg.evaluate(() => [...document.querySelectorAll('[role="listbox"] li')].filter((x) => x.querySelector('input[type="checkbox"]')).map((x) => x.textContent.trim()))
+    for (const name of names) {
+      await pg.evaluate((t, on) => {
+        const li = [...document.querySelectorAll('[role="listbox"] li')].find((x) => x.textContent.trim() === t)
+        if (li && li.querySelector('input[type="checkbox"]').checked !== on) li.click()
+      }, name, want.includes(name))
+      await sleep(150)
+    }
+    await pg.keyboard.press('Escape')
+    await sleep(500)
+    return names
+  }
+  const boxText = (pg, label) => pg.evaluate((l) => [...document.querySelectorAll('[data-timeline="filters"] .MuiFormControl-root')].find((f) => f.querySelector('label')?.textContent.trim() === l)?.querySelector('[role="combobox"]')?.textContent, label)
+  // Every state and status ticked, so finished and done work is on the chart too.
+  const showAll = async (pg) => { await pg.evaluate(() => document.querySelector('[data-timeline-show-ticked]')?.click()); await sleep(600) }
   const clear = async (pg) => { await pg.evaluate(() => document.querySelector('[data-timeline-clear]')?.click()); await sleep(600) }
 
   // The expected figures, from the same model the page uses.
@@ -315,7 +338,7 @@ try {
   const clearOffAtStart = await a.evaluate(() => document.querySelector('[data-timeline-clear]')?.disabled)
   const allCount = await onChart(a)
   await typeSearch(a, 'zzz-nothing')
-  await pickSelect(a, 'State', 'Running now')
+  await pickSelect(a, 'State', 'Running, on track')
   await pickSelect(a, 'Sort', 'Name A–Z')
   const clearOn = await a.evaluate(() => !document.querySelector('[data-timeline-clear]')?.disabled)
   await clear(a)
@@ -326,7 +349,7 @@ try {
       || [...document.querySelectorAll('[data-timeline="filters"] .MuiFormControl-root')].find((f) => f.querySelector('label')?.textContent.trim() === 'Sort')?.querySelector('[role="combobox"]')?.textContent,
     disabled: document.querySelector('[data-timeline-clear]')?.disabled,
   }))
-  check('D02', 'Clear resets search and every filter; disabled when nothing to clear', clearOffAtStart && clearOn && after.q === '' && after.state === 'Everything' && after.sort === 'Start date' && after.disabled && (await onChart(a)) === allCount, JSON.stringify(after))
+  check('D02', 'Clear resets search and every filter; disabled when nothing to clear', clearOffAtStart && clearOn && after.q === '' && after.state === 'All but finished' && after.sort === 'Start date' && after.disabled && (await onChart(a)) === allCount, JSON.stringify(after))
 
   // D07: team and sub team.
   const someTeam = live0.find((p) => drawn(p) && !p.outsideTeam && p.team)?.team
@@ -344,28 +367,54 @@ try {
   const teamCleared = (await onChart(a)) === allCount
   check('D07', 'Team and Sub team filter, each with its own clear', teamOk && subOk && subCleared && teamCleared, `${someTeam} ${teamRows.length} · ${someSub} ${subRows.length} · cleared ${subCleared}/${teamCleared}`)
 
-  // D08: every State option filters to what it says.
+  // D08: every State and every Status option filters to what it says, one at a time.
   const ours = live0.filter((p) => drawn(p) && !p.outsideTeam)
+  const bucket = (tl) => (tl.state === 'finished' ? 'finished' : tl.overdue ? 'overdue' : tl.state === 'running' ? 'running' : 'not started')
   const STATES = [
-    ['Past due, unfinished', (p) => p.timeline.overdue],
-    ['Behind schedule', (p) => (p.timeline.lateBy ?? 0) > 0],
-    ['Finished on schedule', (p) => p.timeline.lateBy === 0],
-    ['Finished ahead of schedule', (p) => (p.timeline.lateBy ?? 0) < 0],
-    ['Running now', (p) => p.timeline.state === 'running'],
-    ['Finished', (p) => p.timeline.state === 'finished'],
-    ['Not started', (p) => p.timeline.state === 'not started'],
+    ['Not started', (p) => bucket(p.timeline) === 'not started'],
+    ['Running, on track', (p) => bucket(p.timeline) === 'running'],
+    ['Past due, unfinished', (p) => bucket(p.timeline) === 'overdue'],
+    ['Finished', (p) => bucket(p.timeline) === 'finished'],
+  ]
+  const STATUSES = [
+    ['Not start', (p) => statusChoice(p) === 'Not Start'],
+    ['In progress', (p) => statusChoice(p) === 'In Progress'],
+    ['On hold', (p) => statusChoice(p) === 'On Hold'],
+    ['Done', (p) => statusChoice(p) === 'Done'],
   ]
   const stateBad = []
-  for (const [label, fn] of STATES) {
-    await pickSelect(a, 'State', label)
-    const keys = (await rowKeys(a)).flatMap((ks) => ks.split(' '))
-    const want = new Set(ours.filter(fn).map((p) => p.key))
-    const extra = keys.filter((k) => !want.has(k))
-    const missing = [...want].filter((k) => !keys.includes(k))
-    if (extra.length || missing.length) stateBad.push(`${label}: +${extra.length} −${missing.length}`)
+  const sweep = async (label, list, other, otherAll) => {
+    await setTicks(a, other, otherAll)
+    for (const [name, fn] of list) {
+      await setTicks(a, label, [name])
+      const keys = (await rowKeys(a)).flatMap((ks) => ks.split(' '))
+      const want = new Set(ours.filter(fn).map((p) => p.key))
+      const extra = keys.filter((k) => !want.has(k))
+      const missing = [...want].filter((k) => !keys.includes(k))
+      if (extra.length || missing.length) stateBad.push(`${label} ${name}: +${extra.length} −${missing.length}`)
+    }
+    await clear(a)
   }
+  await sweep('State', STATES, 'Status', STATUSES.map(([n]) => n))
+  await sweep('Status', STATUSES, 'State', STATES.map(([n]) => n))
+  check('D08', 'each State and Status tick shows exactly those projects', stateBad.length === 0, stateBad.join('; '))
+
+  // D26: by default the finished and done work is off the chart, and one click brings it back.
+  const d26 = { state: await boxText(a, 'State'), status: await boxText(a, 'Status') }
+  const shownKeys = (await rowKeys(a)).flatMap((ks) => ks.split(' '))
+  d26.finishedShown = shownKeys.filter((k) => { const p = ours.find((x) => x.key === k); return p && (bucket(p.timeline) === 'finished' || statusChoice(p) === 'Done') }).length
+  d26.expectHidden = ours.filter((p) => bucket(p.timeline) === 'finished' || statusChoice(p) === 'Done').length
+  d26.link = await a.evaluate(() => document.querySelector('[data-timeline-show-ticked]')?.textContent || null)
+  d26.before = await onChart(a)
+  await a.evaluate(() => document.querySelector('[data-timeline-show-ticked]')?.click())
+  await sleep(600)
+  d26.after = await onChart(a)
+  d26.afterBoxes = [await boxText(a, 'State'), await boxText(a, 'Status')]
   await clear(a)
-  check('D08', 'each State option shows exactly those projects', stateBad.length === 0, stateBad.join('; '))
+  check('D26', 'default: State "All but finished", Status "All but done"; "+n finished / done — show" reveals them',
+    d26.state === 'All but finished' && d26.status === 'All but done' && d26.finishedShown === 0
+      && (d26.expectHidden === 0 || (/finished \/ done/.test(d26.link || '') && d26.after > d26.before))
+      && d26.afterBoxes.join() === 'All,All', JSON.stringify(d26))
 
   // D09: Sort.
   await pickSelect(a, 'Sort', 'Name A–Z')
@@ -444,7 +493,9 @@ try {
     const row = document.querySelector(`[data-keys~="${key}"]`)
     return row ? row.lastElementChild.textContent.trim() : null
   }, k)
+  await showAll(a)
   const sl = { late: late && await slipOf(late.key), early: early && await slipOf(early.key), none: none && await slipOf(none.key) }
+  await clear(a)
   check('D18', 'slip shows +late, −early and — with nothing to judge', (!late || sl.late === `+${late.timeline.lateBy}d`) && (!early || sl.early === `${early.timeline.lateBy}d`) && (!none || sl.none === '—'),
     `${late?.key} ${sl.late} (want +${late?.timeline.lateBy}d) · ${early?.key} ${sl.early} · ${none?.key} ${sl.none}`)
 
@@ -539,12 +590,14 @@ try {
   // D13: the active switch, and the Active filter following it.
   const idle = ours.find((p) => p.key === 'FNP-247')
   await typeSearch(a, idle.key)
+  await showAll(a)
   await a.evaluate((k) => document.querySelector(`[aria-label="active ${k}"]`)?.click(), idle.jiraKey || idle.key)
   await sleep(400)
   const menu = await a.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].map((m) => m.textContent.trim()))
   await a.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].find((m) => /^Always/.test(m.textContent.trim()))?.click())
   await sleep(600)
   await clear(a)
+  await showAll(a)
   await a.evaluate(() => document.querySelector('input[aria-label="active projects only"]')?.click())
   await sleep(700)
   const activeRows = await rowKeys(a)
@@ -603,7 +656,7 @@ try {
       lit: !!document.querySelector('[data-keys~="FNP-1431"]'),
     })))
   }
-  check('D19', 'the header search lands on the project with the filters reset', d19.lit && d19.state === 'Everything' && d19.rows.length >= 1, JSON.stringify(d19).slice(0, 300))
+  check('D19', 'the header search lands on the project with the filters reset', d19.lit && d19.state === 'All' && d19.rows.length >= 1, JSON.stringify(d19).slice(0, 300))
   await clear(g)
 
   // D15: a phone.

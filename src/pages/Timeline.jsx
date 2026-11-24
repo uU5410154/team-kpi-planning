@@ -19,6 +19,7 @@ import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import { ToggleButton, ToggleButtonGroup } from '@mui/material'
 import StatusPicker from '../components/StatusPicker.jsx'
+import { STATUS_CHOICES, statusChoice } from '../lib/projectStatus.js'
 import * as api from '../lib/api.js'
 import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
 import { useTheme } from '@mui/material/styles'
@@ -34,6 +35,30 @@ import { Pill, statusTone } from '../components/Brand.jsx'
 import ActiveControl from '../dashboard/ActiveControl.jsx'
 import { activitySignals, activeUnits } from '../lib/manager.js'
 import { weekOf, weekTitle, PROPOSAL_LABEL, BLOCKER_CATEGORIES } from '../lib/weekly.js'
+
+/*
+ * THE STATE AND STATUS TICKS. Each project falls in exactly one state and one
+ * status, so ticking several shows their union and unticking one hides it.
+ * By default the finished work is hidden: the chart is about what is still
+ * to land. Late and early finishes are in the slip column and the late-first
+ * sort, so the states need not overlap to show them.
+ */
+const STATE_OPTIONS = [
+  ['not started', 'Not started'],
+  ['running', 'Running, on track'],
+  ['overdue', 'Past due, unfinished'],
+  ['finished', 'Finished'],
+]
+const STATE_ALL = STATE_OPTIONS.map(([v]) => v)
+const STATE_DEFAULT = STATE_ALL.filter((v) => v !== 'finished')
+const stateBucket = (tl) => (tl.state === 'finished' ? 'finished'
+  : tl.overdue ? 'overdue'
+    : tl.state === 'running' ? 'running'
+      : 'not started')
+const STATUS_LABEL = { 'Not Start': 'Not start', 'In Progress': 'In progress', 'On Hold': 'On hold', Done: 'Done' }
+const STATUS_ALL = [...STATUS_CHOICES]
+const STATUS_DEFAULT = STATUS_ALL.filter((v) => v !== 'Done')
+const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x))
 
 const CATEGORY_LABEL = Object.fromEntries(BLOCKER_CATEGORIES.map((c) => [c.id, c.label]))
 const FORECAST = '#a18ad9'
@@ -557,6 +582,7 @@ export default function Timeline({
   const holdFinish = (row, date) => {
     const keys = (row.projectKeys || [row.projectKey]).filter(Boolean)
     if (!keys.length) return
+    keep(keys)
     for (const k of keys) {
       const project = rawProjects?.find((x) => x.key === k) || { key: k, actualEnd: row.timeline.actualEnd }
       onUpdate(k, date ? pinFinishPatch(project, date) : unpinFinishPatch())
@@ -573,6 +599,7 @@ export default function Timeline({
   }
 
   const savePlan = async (row, next) => {
+    keep((row.projectKeys || [row.projectKey]).filter(Boolean))
     setSaving(true)
     try {
       // The register first: it is the thing being reported on, and it must
@@ -702,7 +729,16 @@ export default function Timeline({
   }, [phone])
   const [q, setQ] = useState('')
   const [fPic, setFPic] = useState('all')
-  const [fState, setFState] = useState('all')
+  const [fState, setFState] = useState(STATE_DEFAULT)
+  const [fStatus, setFStatus] = useState(STATUS_DEFAULT)
+  /*
+   * JUST CHANGED HERE: a project whose status or dates were changed on this
+   * page stays on the chart until the ticks change, so setting a bar to Done
+   * shows Done rather than making the row vanish under the pointer.
+   */
+  const [kept, setKept] = useState(() => new Set())
+  const keep = (keys) => setKept((s) => { const n = new Set(s); for (const k of keys) if (k) n.add(k); return n })
+  useEffect(() => { setKept((s) => (s.size ? new Set() : s)) }, [fState, fStatus])
   /*
    * TEAM AND SUB TEAM, the register's own, each a list of ticks: nothing
    * ticked is everything. A sub team is held as "team|sub", because the same
@@ -749,17 +785,22 @@ export default function Timeline({
     return (
       <StatusPicker
         project={projectOf[keys[0]]}
-        onPick={onStatus ? async (c) => { for (const k of keys) await onStatus(k, c) } : undefined}
+        onPick={onStatus ? async (c) => { keep(keys); for (const k of keys) await onStatus(k, c) } : undefined}
       />
     )
   }
   // Sent here by the header search: that project, whatever was filtered before.
   useEffect(() => {
     if (!jump?.q) return
-    setQ(jump.q); setFPic('all'); setFState('all'); setFTeams([]); setFSubs([]); setOurs(false); setOnlyActive(false)
+    setQ(jump.q); setFPic('all'); setFState(STATE_ALL); setFStatus(STATUS_ALL); setFTeams([]); setFSubs([]); setOurs(false); setOnlyActive(false)
   }, [jump?.n])
 
-  const rows = useMemo(() => {
+  /*
+   * BASE: what every filter but the State and Status ticks lets through. The
+   * figures line counts this, so "finished" and "on time" still mean something
+   * while the finished bars are hidden; the chart draws `rows`.
+   */
+  const base = useMemo(() => {
     const hay = q.trim().toLowerCase()
     return plan.projects
       .filter((p) => p.commitLevel !== 'nextyear' && p.commitLevel !== 'excluded')
@@ -768,14 +809,6 @@ export default function Timeline({
       .filter((p) => (fPic === 'all' ? true : (p.pic || 'none') === fPic))
       .filter((p) => !fTeams.length || fTeams.includes(p.team || 'none'))
       .filter((p) => !fSubs.length || fSubs.includes(`${p.team || 'none'}|${p.subTeam || 'none'}`))
-      .filter((p) => {
-        if (fState === 'all') return true
-        if (fState === 'late') return (p.timeline.lateBy ?? 0) > 0
-        if (fState === 'ahead') return (p.timeline.lateBy ?? 0) < 0
-        if (fState === 'on') return p.timeline.lateBy === 0
-        if (fState === 'overdue') return p.timeline.overdue
-        return p.timeline.state === fState
-      })
       .filter((p) => !hay || `${p.jiraKey || ''} ${p.summary} ${p.program || ''}`.toLowerCase().includes(hay))
       .sort((a, b) => {
         const byStart = String(a.timeline.plannedStart || a.timeline.actualStart || '9999')
@@ -792,7 +825,11 @@ export default function Timeline({
         if (sortBy === 'name') return String(a.summary || '').localeCompare(String(b.summary || ''))
         return byStart
       })
-  }, [plan.projects, q, fPic, fState, fTeams, fSubs, ours, onlyActive, activeKeys, sortBy])
+  }, [plan.projects, q, fPic, fTeams, fSubs, ours, onlyActive, activeKeys, sortBy])
+  const rows = useMemo(
+    () => base.filter((p) => kept.has(p.key) || (fState.includes(stateBucket(p.timeline)) && fStatus.includes(statusChoice(p)))),
+    [base, fState, fStatus, kept],
+  )
 
   /*
    * WHAT THE SWITCHES HIDE, of what the search and the team / PIC filters
@@ -1592,9 +1629,10 @@ export default function Timeline({
    * The figures follow the search box and the filters: they describe the bars
    * on screen, and the line says whether that is everything or a part of it.
    */
-  const filtering = !!q.trim() || fPic !== 'all' || fState !== 'all' || fTeams.length > 0 || fSubs.length > 0 || !ours || onlyActive
+  const filtering = !!q.trim() || fPic !== 'all' || fTeams.length > 0 || fSubs.length > 0 || !ours || onlyActive
   // Undated projects sit at the bottom of the chart, with a button to set their dates.
-  const t = timelinessOf(rows)
+  const t = timelinessOf(base)
+  const ticksHide = base.length - rows.length
   const stats = [
     <Typography key="scope" component="span" variant="caption" data-stat-scope={filtering ? 'filtered' : 'all'} sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
       {filtering ? 'Of those shown:' : 'All projects:'}
@@ -1610,6 +1648,17 @@ export default function Timeline({
     stat('slip', t.avgSlip == null ? '—' : `${t.avgSlip}d`, 'avg slip', 'Average slip, over the late ones only',
       t.avgSlip ? STATUS.warning : undefined),
     t.noDates > 0 ? stat('undated', t.noDates, 'undated', 'No dates yet: listed at the bottom of the chart, waiting for a start and a due date', 'text.disabled') : null,
+    ticksHide > 0 ? (
+      <Tooltip key="ticks" title="Left off the chart by the State and Status ticks (by default, finished and done work). The figures still count them.">
+        <Typography
+          component="button" variant="caption" data-timeline-show-ticked
+          onClick={() => { setFState(STATE_ALL); setFStatus(STATUS_ALL) }}
+          sx={{ border: 0, bgcolor: 'transparent', p: 0, font: 'inherit', fontSize: '0.75rem', lineHeight: 1.4, color: 'primary.main', cursor: 'pointer', whiteSpace: 'nowrap', '&:hover': { textDecoration: 'underline' } }}
+        >
+          +{ticksHide} finished / done — show
+        </Typography>
+      </Tooltip>
+    ) : null,
     hidden.others.length > 0 ? (
       <Tooltip key="others" title={`Delivered by IT or the business, so hidden while "Ours only" is on: ${hidden.others.slice(0, 8).map((p) => p.summary).join(', ')}${hidden.others.length > 8 ? '…' : ''}`}>
         <Typography
@@ -1631,11 +1680,11 @@ export default function Timeline({
 
   // Narrow, how many filters are away from their defaults — on the button
   // that hides them, so a short list is never a mystery.
-  const changed = [fTeams.length > 0, fSubs.length > 0, fPic !== 'all', fState !== 'all', !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
+  const changed = [fTeams.length > 0, fSubs.length > 0, fPic !== 'all', !sameSet(fState, STATE_DEFAULT), !sameSet(fStatus, STATUS_DEFAULT), !ours, onlyActive, sortBy !== 'start'].filter(Boolean).length
   // One click back to the defaults: the search box too.
   const anyFilter = changed > 0 || !!q.trim()
   const clearFilters = () => {
-    setQ(''); setFPic('all'); setFState('all'); setFTeams([]); setFSubs([]); setOurs(true); setOnlyActive(false); setSortBy('start')
+    setQ(''); setFPic('all'); setFState(STATE_DEFAULT); setFStatus(STATUS_DEFAULT); setFTeams([]); setFSubs([]); setOurs(true); setOnlyActive(false); setSortBy('start')
   }
 
   // Small, quiet controls: a toolbar, not a form.
@@ -1672,6 +1721,44 @@ export default function Timeline({
       </Button>
     </Box>
   )
+  /*
+   * A SELECT OF TICKS whose default is not "everything": the menu ends with
+   * "Select all" and "Back to default", and the box names the default.
+   */
+  const tickSelect = ({ label, value, set, options, all, dflt, dfltName, width, attr }) => {
+    const nameOf = Object.fromEntries(options)
+    const shown = (v) => (sameSet(v, all) ? 'All'
+      : sameSet(v, dflt) ? dfltName
+        : !v.length ? 'None'
+          : v.length === 1 ? nameOf[v[0]]
+            : `${v.length} of ${all.length}`)
+    return (
+      <FormControl size="small" sx={{ width: { sm: width }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
+        <InputLabel shrink>{label}</InputLabel>
+        <Select
+          multiple displayEmpty notched label={label} value={value} {...attr}
+          onChange={(e) => {
+            const v = [].concat(e.target.value)
+            if (v.includes('__all')) return set(all)
+            if (v.includes('__default')) return set(dflt)
+            // Kept in the options' own order, so the box reads the same way round.
+            set(all.filter((x) => v.includes(x)))
+          }}
+          renderValue={shown}
+        >
+          {options.map(([v, name]) => (
+            <MenuItem key={v} value={v} dense>
+              <Checkbox size="small" checked={value.includes(v)} sx={{ p: 0.5, mr: 1 }} />
+              <ListItemText primary={name} />
+            </MenuItem>
+          ))}
+          <Divider />
+          {!sameSet(value, all) && <MenuItem dense value="__all" sx={{ color: 'primary.main', fontSize: '0.8rem' }}>Select all</MenuItem>}
+          {!sameSet(value, dflt) && <MenuItem dense value="__default" sx={{ color: 'primary.main', fontSize: '0.8rem' }}>Back to default — {dfltName.toLowerCase()}</MenuItem>}
+        </Select>
+      </FormControl>
+    )
+  }
   const filters = (
     <>
       <FormControl size="small" sx={{ width: { sm: 94 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
@@ -1722,19 +1809,14 @@ export default function Timeline({
           {picks.map((p) => <MenuItem key={p.id} value={p.id}>{p.nick}</MenuItem>)}
         </Select>
       </FormControl>
-      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 112 }, flex: { xs: '1 1 160px', sm: 'none' }, ...dense }}>
-        <InputLabel>State</InputLabel>
-        <Select label="State" value={fState} onChange={(e) => setFState(e.target.value)}>
-          <MenuItem value="all">Everything</MenuItem>
-          <MenuItem value="overdue">Past due, unfinished</MenuItem>
-          <MenuItem value="late">Behind schedule</MenuItem>
-          <MenuItem value="on">Finished on schedule</MenuItem>
-          <MenuItem value="ahead">Finished ahead of schedule</MenuItem>
-          <MenuItem value="running">Running now</MenuItem>
-          <MenuItem value="finished">Finished</MenuItem>
-          <MenuItem value="not started">Not started</MenuItem>
-        </Select>
-      </FormControl>
+      {tickSelect({
+        label: 'State', value: fState, set: setFState, options: STATE_OPTIONS, all: STATE_ALL, dflt: STATE_DEFAULT,
+        dfltName: 'All but finished', width: 132, attr: { 'data-timeline-state': true },
+      })}
+      {tickSelect({
+        label: 'Status', value: fStatus, set: setFStatus, options: STATUS_ALL.map((v) => [v, STATUS_LABEL[v] || v]), all: STATUS_ALL, dflt: STATUS_DEFAULT,
+        dfltName: 'All but done', width: 120, attr: { 'data-timeline-statusfilter': true },
+      })}
       <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 106 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
         <InputLabel>Sort</InputLabel>
         <Select label="Sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-timeline-sort>

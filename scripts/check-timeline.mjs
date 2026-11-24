@@ -464,6 +464,9 @@ if (!exe) {
   })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await new Promise((r) => setTimeout(r, 3500))
+  // Finished work is off the chart by default: tick everything to see its bar.
+  await page.evaluate(() => document.querySelector('[data-timeline-show-ticked]')?.click())
+  await new Promise((r) => setTimeout(r, 600))
 
   const after = await labels()
   check('a finished project DOES draw one',
@@ -493,7 +496,7 @@ if (!exe) {
   await new Promise((r) => setTimeout(r, 800))
   const opts = await page.evaluate(() => [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent.trim()))
   check('the state filter offers the states that matter',
-    ['Past due, unfinished', 'Running now', 'Finished'].every((x) => opts.includes(x)), opts.join(' | '))
+    ['Past due, unfinished', 'Running, on track', 'Finished'].every((x) => opts.includes(x)), opts.join(' | '))
 
   /* ---- day, week and month ---- */
   const scaleOf = async (label) => {
