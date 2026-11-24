@@ -17,6 +17,7 @@ import {
 } from '@mui/material'
 import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
+import AddIcon from '@mui/icons-material/Add'
 import { ToggleButton, ToggleButtonGroup } from '@mui/material'
 import StatusPicker from '../components/StatusPicker.jsx'
 import AiProjectDialog from '../components/AiProjectDialog.jsx'
@@ -213,7 +214,7 @@ function PlanEditor({ row, onSave, onHold, saving, jira, status = null }) {
  */
 export default function Timeline({
   plan, settings, onUpdate, onAddProjects, onReplaceProjects, rawProjects, readOnly = false, jump = null, note = null,
-  onOpenWeekly, onStatus, onOpenProject,
+  onOpenWeekly, onStatus, onOpenProject, canAddOwn = false, onProjectsAdded,
 }) {
   const theme = useTheme()
   const mode = theme.palette.mode === 'dark' ? 'dark' : 'light'
@@ -639,7 +640,12 @@ export default function Timeline({
    * team's work, and a register that grows by itself stops being a decision.
    */
   const [finding, setFinding] = useState(false)
-  // A new project described in plain words, with the Lotus LLM: an administrator's.
+  /*
+   * A NEW PROJECT, from the Timeline: 'hand' opens the form, 'ai' the
+   * description for the Lotus LLM first. An administrator's goes into the
+   * register they hold open; a member's is their own (Adhoc work or a Change
+   * Request), written by the server as from their weekly page.
+   */
   const [aiAdd, setAiAdd] = useState(false)
   const [candidates, setCandidates] = useState(null)
   const [picked, setPicked] = useState(() => new Set())
@@ -1763,6 +1769,26 @@ export default function Timeline({
       </FormControl>
     )
   }
+  const addButtons = (
+    <>
+      <Tooltip title={readOnly ? 'A new project of your own — Adhoc work or a Change Request — created in Jira, assigned to you, and added to the register' : 'A new project: created in Jira, assigned to its PIC, and added to the register as Watch'}>
+        <Button
+          size="small" variant="outlined" startIcon={narrow ? null : <AddIcon />} sx={narrow ? jiraBtn : undefined}
+          onClick={() => setAiAdd('hand')} data-timeline-add
+        >
+          Add project
+        </Button>
+      </Tooltip>
+      <Tooltip title="Describe the project in your own words; the Lotus LLM fills in the form, you check it, and it is created in Jira and the register">
+        <Button
+          size="small" variant="outlined" startIcon={narrow ? null : <AutoAwesomeIcon />} sx={narrow ? jiraBtn : undefined}
+          onClick={() => setAiAdd('ai')} data-timeline-add-ai
+        >
+          Add with AI
+        </Button>
+      </Tooltip>
+    </>
+  )
   const filters = (
     <>
       <FormControl size="small" sx={{ width: { sm: 94 }, flex: { xs: '1 1 140px', sm: 'none' }, ...dense }}>
@@ -1881,6 +1907,11 @@ export default function Timeline({
         </Box>
         {/* Reading Jira into the plan, or syncing it for everyone, changes the
             shared plan — an administrator's job. A team member reads. */}
+        {readOnly && canAddOwn && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', ml: 'auto' }} data-timeline-add-own>
+            {addButtons}
+          </Box>
+        )}
         {!readOnly && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', ml: 'auto' }}>
           {/* Which Jira, and as whom, is in the buttons' tooltips rather than a line of its own. */}
@@ -1895,14 +1926,7 @@ export default function Timeline({
           >
             {finding ? 'Looking…' : 'Find new epics'}
           </Button>
-          <Tooltip title="Describe the project in your own words; the Lotus LLM fills in the form, you check it, and it is created in Jira and the register">
-            <Button
-              size="small" variant="outlined" startIcon={narrow ? null : <AutoAwesomeIcon />} sx={narrow ? jiraBtn : undefined}
-              onClick={() => setAiAdd(true)} data-timeline-add-ai
-            >
-              Add with AI
-            </Button>
-          </Tooltip>
+          {addButtons}
           <Tooltip title={`Reads Jira${jira?.configured ? ` (${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account})` : ''} and updates YOUR copy of the register. Nobody else sees it until you save.`}>
             <span>
               <Button
@@ -1935,13 +1959,14 @@ export default function Timeline({
         )}
       </Box>
       {syncing && <LinearProgress />}
-      {!readOnly && (
+      {(!readOnly || canAddOwn) && (
         <AiProjectDialog
-          open={aiAdd}
-          mode="admin"
+          open={!!aiAdd}
+          startByHand={aiAdd === 'hand'}
+          mode={readOnly ? 'member' : 'admin'}
           jira={jira}
           onClose={() => setAiAdd(false)}
-          onAddRow={(row) => {
+          onAddRow={readOnly ? undefined : (row) => {
             const made = onAddProjects(row ? [row] : [])
             // Shown on the chart, whatever was filtered.
             if (made?.[0]) { clearFilters(); setFState(STATE_ALL); setFStatus(STATUS_ALL); setQ(made[0].jiraKey || made[0].summary) }
@@ -1949,6 +1974,14 @@ export default function Timeline({
           }}
           onDone={(r) => {
             setAiAdd(false)
+            if (readOnly) {
+              if (r.project) onProjectsAdded?.([r.project])
+              setSyncNote({
+                severity: r.warning ? 'warning' : 'success',
+                text: r.warning || `${r.epic.key} created in Jira, assigned to you, and added to the register.`,
+              })
+              return
+            }
             setSyncNote({
               severity: r.warning ? 'warning' : 'success',
               text: r.warning || (r.epic ? `${r.epic.key} created in Jira and added to the register as Watch.` : 'Added to the register as Watch.'),

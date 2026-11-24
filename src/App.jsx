@@ -1664,6 +1664,8 @@ export default function App() {
               jump={jump?.tab === 'timeline' ? jump : null}
               onOpenWeekly={() => setTab('weekly')}
               onOpenProject={openProject}
+              canAddOwn={!canWrite && !previewing && !!myPerson}
+              onProjectsAdded={addServerProjects}
             />
           )}
 

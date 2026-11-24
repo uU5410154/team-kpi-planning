@@ -35,7 +35,7 @@ const LABEL = {
 const EXAMPLE = 'e.g. Automate AP invoice matching for Non-Trade. Gun leads it, December to February. It should save about 40 hours a month for the AP team.'
 
 export default function AiProjectDialog({
-  open, onClose, mode = 'member', jira = null, onAddRow, onDone,
+  open, onClose, mode = 'member', jira = null, onAddRow, onDone, startByHand = false,
 }) {
   const admin = mode === 'admin'
   const [aiOn, setAiOn] = useState(null)
@@ -56,6 +56,8 @@ export default function AiProjectDialog({
     api.aiStatus().then((s) => { if (!dead) setAiOn(!!s?.configured) }).catch(() => { if (!dead) setAiOn(false) })
     if (!jira) api.jiraStatus().then((s) => { if (!dead) setJiraSt(s) }).catch(() => { if (!dead) setJiraSt({ configured: false }) })
     else setJiraSt(jira)
+    // "Add project": straight to the form, nothing to describe first.
+    if (startByHand) byHand()
     return () => { dead = true }
   }, [open])
 
@@ -69,6 +71,8 @@ export default function AiProjectDialog({
       ...EMPTY,
       ...Object.fromEntries(Object.entries(draft || {}).map(([k, v]) => [k, v == null ? '' : String(v)])),
       kind: draft?.kind || (admin ? 'project' : 'adhoc'),
+      // A member's project is theirs: the one person on offer.
+      ...(!admin && opts?.people?.[0] ? { pic: opts.people[0].id } : {}),
     })
     setMissing(miss || [])
     setStep('review')

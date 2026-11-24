@@ -298,6 +298,64 @@ try {
     JSON.stringify(mrow && { pic: mrow.pic, team: mrow.team, sub: mrow.subTeam, h: mrow.savingHours, c: mrow.comment }))
   check('a member sees no admin "Add with AI" buttons', !memberHas.timeline && !memberHas.projects, JSON.stringify(memberHas))
 
+  /* ---- "Add project" on the Timeline: straight to the form ---- */
+  const setNative = (pg, k, v) => pg.evaluate((key, val) => {
+    const el = document.querySelector(`[data-ai-project] [data-field="${key}"]`)
+    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }, k, v)
+  const pickMui = async (pg, k, optionText) => {
+    await pg.evaluate((key) => document.querySelector(`[data-ai-project] [data-field="${key}"]`)?.closest('.MuiInputBase-root')
+      ?.querySelector('[role="combobox"]')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), k)
+    await sleep(300)
+    await pg.evaluate((t) => [...document.querySelectorAll('[role="listbox"] [role="option"]')].find((o) => o.textContent.trim().startsWith(t))?.click(), optionText)
+    await sleep(300)
+  }
+  await a.goto(`${base}/?go#timeline`, { waitUntil: 'networkidle0' })
+  await a.waitForSelector('[data-timeline-add]', { timeout: 30000 })
+  await a.click('[data-timeline-add]')
+  await a.waitForSelector('[data-ai-project-create]', { timeout: 15000 })
+  const direct = await a.evaluate(() => !document.querySelector('[data-ai-project-text]'))
+  await setNative(a, 'summary', 'Month-end close checklist')
+  await pickMui(a, 'pic', 'Gun')
+  await setNative(a, 'start', '2026-12-01')
+  await setNative(a, 'due', '2026-12-31')
+  await sleep(300)
+  const w0 = writes.length
+  await a.click('[data-ai-project-create]')
+  await a.waitForFunction(() => !document.querySelector('[data-ai-project]'), { timeout: 20000 })
+  const tw = writes.at(-1)
+  await sleep(800)
+  const onChart = await a.evaluate((k) => !!document.querySelector(`[data-keys~="NEW-1"], [data-keys]`) && document.body.innerText.includes('Month-end close checklist'), tw?.key)
+  check('Timeline: "Add project" opens the form directly; Create makes the epic for the PIC and the project is on the chart',
+    direct && writes.length === w0 + 1 && tw.fields.assignee?.accountId === acc.gun && tw.fields.summary === 'Month-end close checklist' && onChart,
+    JSON.stringify({ direct, n: writes.length - w0, who: tw?.fields.assignee, onChart }))
+
+  /* ---- a member, on their own Timeline ---- */
+  const mt = await as(james)
+  await mt.goto(`${base}/#timeline`, { waitUntil: 'networkidle0' })
+  await mt.waitForSelector('[data-timeline-add-own] [data-timeline-add]', { timeout: 30000 })
+  const mtHas = await mt.evaluate(() => ({ find: [...document.querySelectorAll('button')].some((b) => /Find new epics|Sync with Jira/.test(b.textContent)), ai: !!document.querySelector('[data-timeline-add-own] [data-timeline-add-ai]') }))
+  await mt.click('[data-timeline-add-own] [data-timeline-add]')
+  await mt.waitForSelector('[data-ai-project-create]', { timeout: 15000 })
+  const mtForm = { pic: await field(mt, 'pic'), kind: await field(mt, 'kind') }
+  await setNative(mt, 'summary', 'Fix the accrual upload')
+  await setNative(mt, 'start', '2026-12-02')
+  await setNative(mt, 'due', '2026-12-09')
+  await sleep(300)
+  const w1 = writes.length
+  await mt.click('[data-ai-project-create]')
+  await mt.waitForFunction(() => !document.querySelector('[data-ai-project]'), { timeout: 20000 })
+  await sleep(1200)
+  const mtw = writes.at(-1)
+  const mtShown = await mt.evaluate(() => document.body.innerText.includes('Fix the accrual upload'))
+  const mtRow = (await plan())?.projects?.find((p) => p.jiraKey === mtw?.key)
+  check('a member\'s own Timeline has "Add project" and "Add with AI" (no Jira sync buttons); it creates THEIR Adhoc epic and shows it at once',
+    !mtHas.find && mtHas.ai && mtForm.pic === 'james' && mtForm.kind === 'adhoc' && writes.length === w1 + 1
+      && mtw.fields.assignee?.accountId === acc.james && mtRow?.pic === 'james' && mtShown,
+    JSON.stringify({ mtHas, mtForm, n: writes.length - w1, row: !!mtRow, mtShown }))
+
   // On a phone the dialog takes the width, less the theme's 12px edge, and nothing scrolls sideways.
   const p = await as(boss, { width: 390, height: 844 })
   await p.goto(`${base}/?go#projects`, { waitUntil: 'networkidle0' })
