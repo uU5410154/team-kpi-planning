@@ -18,6 +18,8 @@ import * as api from '../lib/api.js'
 import { addWeeks, weekNo, weekTitle } from '../lib/weekly.js'
 import AiAssist from './AiAssist.jsx'
 import VoiceUpdate from './VoiceUpdate.jsx'
+import AiProjectDialog from './AiProjectDialog.jsx'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { Pill } from './Brand.jsx'
@@ -960,6 +962,7 @@ export default function JiraWeek({
   }, [barUp])
   const [adding, setAdding] = useState(false)
   const [addingProject, setAddingProject] = useState(false)
+  const [aiProject, setAiProject] = useState(false)
   const [note, setNote] = useState(null)
   useEffect(() => { if (preset) { setAdding(true) } }, [preset])
   // "Set dates / add tasks" in the Next step bar: open the new-task form.
@@ -1409,7 +1412,22 @@ export default function JiraWeek({
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           <Button startIcon={<AddIcon />} onClick={() => setAdding(true)} sx={focusRingSx}>Add a task</Button>
           <Button startIcon={<AddIcon />} onClick={() => setAddingProject(true)} sx={focusRingSx}>New project</Button>
+          <Button startIcon={<AutoAwesomeIcon />} onClick={() => setAiProject(true)} sx={focusRingSx} data-new-project-ai>New project with AI</Button>
         </Box>
+      )}
+      {canWrite && (
+        <AiProjectDialog
+          open={aiProject}
+          mode="member"
+          jira={{ configured: true, writable: jw.writable }}
+          onClose={() => setAiProject(false)}
+          onDone={(r) => {
+            setAiProject(false)
+            setNote({ tone: r.warning ? 'warning' : 'success', text: r.warning || `${r.epic.key} created in Jira and added to the register.` })
+            onProjectAdded?.(r)
+            onReload?.()
+          }}
+        />
       )}
       {adding && canWrite && (
         <NewTask

@@ -534,6 +534,52 @@ export async function planTask(me, key, body) {
 }
 
 /*
+ * The register's own fields a new project may arrive with — from the form the
+ * Lotus LLM fills in. A team must be one the register uses; an objective one
+ * of the four. Anything else is left for an administrator.
+ */
+const OBJECTIVE_IDS = ['process_automation', 'datawarehouse', 'efficiency', 'ai_automation']
+function registerFields(body, projects) {
+  const out = {}
+  const teams = new Set(projects.filter((p) => !p.deleted).map((p) => p.team).filter(Boolean))
+  if (body?.team && teams.has(body.team)) out.team = body.team
+  if (out.team && body?.subTeam) out.subTeam = clip(body.subTeam, 80)
+  if (OBJECTIVE_IDS.includes(body?.objective)) out.objective = body.objective
+  return out
+}
+
+/*
+ * AN ADMINISTRATOR'S NEW PROJECT: the Jira epic only, assigned to the PIC's
+ * Jira account. The register row is added by the page, in the plan it holds
+ * open, so its autosave does not race a write made here behind its back.
+ */
+export async function adminEpic(me, body) {
+  const kind = body?.kind || 'project'
+  if (!jira.PROJECT_KINDS[kind]) return fail(400, 'Pick Project, Adhoc work or Change Request.')
+  let accountId = null
+  let assignee = null
+  if (body?.pic) {
+    const who = await whoInJira(body.pic, null)
+    if (who === UNAVAILABLE) return UNAVAILABLE
+    if (!who.person) return fail(400, 'That PIC is not on the team.')
+    accountId = who.account?.accountId || null
+    assignee = who.person.nick
+  }
+  try {
+    const epic = await jira.createEpic({
+      summary: body?.summary, kind, start: body?.start, due: body?.due, description: clip(body?.description, 4000), accountId,
+    })
+    if (epic === UNAVAILABLE) return fail(409, 'Jira is not connected on this server.')
+    return {
+      epic,
+      warning: body?.pic && !accountId ? `${assignee}'s Jira account could not be found, so ${epic.key} is not assigned yet. Assign it in Jira.` : null,
+    }
+  } catch (e) {
+    return fail(e.statusCode && e.statusCode < 500 ? (e.writesOff ? 409 : 400) : 502, e.message)
+  }
+}
+
+/*
  * A NEW PROJECT: a Jira epic of the kind asked for, assigned to the member,
  * and a row in the register with them as PIC — written to the shared plan on
  * the server, the way an approved date is, so no browser has to be open. An
@@ -544,6 +590,8 @@ export async function newProject(me, body) {
   const who = await whoInJira(me.person, me.email)
   if (who === UNAVAILABLE) return UNAVAILABLE
   if (!who.account) return fail(409, 'Your Jira account could not be found from your name on the team.')
+  // A member raises adhoc work or a change request; a planned project is an administrator's.
+  if (!['adhoc', 'cr'].includes(body?.kind)) return fail(400, 'Pick Adhoc work or Change Request.')
   let epic
   try {
     epic = await jira.createEpic({
@@ -559,14 +607,20 @@ export async function newProject(me, body) {
   const have = doc.payload.projects || []
   const taken = new Set(have.map((p) => p.key))
   let seq = have.filter((p) => String(p.key).startsWith('NEW-')).length
+  const extra = registerFields(body, doc.payload.projects || [])
+  // The member's saving estimate is a note for whoever sizes it, not a figure in the KPI.
+  const est = Number(body?.savingHours)
+  const estimate = body?.savingHours != null && body?.savingHours !== '' && Number.isFinite(est) && est >= 0
+    ? ` ${who.person.nick} estimates about ${est} saving hours a month — to be sized.` : ''
   const make = () => ({
     ...projectFromEpic({
       key: epic.key, summary: clip(body.summary, 250), start: body.start, due: body.due, status: 'To Do',
     }, ++seq, doc.payload.people || []),
+    ...extra,
     pic: me.person,
     program: kind.name,
     kind: body.kind,
-    comment: `${kind.name}, added by ${who.person.nick} from their weekly page as ${epic.key}.`,
+    comment: `${kind.name}, added by ${who.person.nick} from their weekly page as ${epic.key}.${estimate}`,
   })
   let row = make()
   while (taken.has(row.key)) row = make()

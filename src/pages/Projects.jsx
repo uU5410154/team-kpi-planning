@@ -6,7 +6,7 @@ import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel,
   TextField, Select, MenuItem, InputAdornment, Checkbox, Button, Stack, Tooltip,
   TableContainer, Menu, Alert, IconButton, CircularProgress, Link, Popover, Chip,
-  Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery, Autocomplete,
+  Collapse, ListItemIcon, ListItemText, Divider, useMediaQuery, Autocomplete, Snackbar,
 } from '@mui/material'
 import ViewColumnOutlinedIcon from '@mui/icons-material/ViewColumnOutlined'
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined'
@@ -46,6 +46,8 @@ import {
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined'
 import FileUploadOutlinedIcon from '@mui/icons-material/FileUploadOutlined'
 import ProjectCostDialog from '../components/ProjectCostDialog.jsx'
+import AiProjectDialog from '../components/AiProjectDialog.jsx'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import ImportDialog from '../components/ImportDialog.jsx'
 import Loading from '../components/Loading.jsx'
 import { exportFiltered, readProjectsFile, planImport } from '../lib/projectIO.js'
@@ -553,7 +555,7 @@ function PhoneList({ rows, assignees, onOpen }) {
 }
 
 export default function Projects({
-  plan, onUpdate, onBulk, onAdd, onDelete, onImport,
+  plan, onUpdate, onBulk, onAdd, onAddProjects, onDelete, onImport,
   onSave, dirty, saving, lastSaved, scenarioName, blocked = [], onGoTo, jump = null,
   canWrite = true, onShowTimeline, onStatus,
 }) {
@@ -625,17 +627,31 @@ export default function Projects({
    */
   const [fresh, setFresh] = useState(null)
   const addKeys = useRef(null)
+  const addEdits = useRef(true)
   const addAndShow = () => {
     addKeys.current = new Set(projects.map((x) => x.key))
+    addEdits.current = true
     resetFilters()
     onAdd()
+  }
+  /*
+   * ADD WITH THE LOTUS LLM: the row arrives filled in from the dialog, so it
+   * is shown but its name is not opened for typing.
+   */
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiNote, setAiNote] = useState(null)
+  const addAiRow = (row) => {
+    addKeys.current = new Set(projects.map((x) => x.key))
+    addEdits.current = false
+    resetFilters()
+    return onAddProjects?.([row])
   }
   useEffect(() => {
     if (!addKeys.current) return
     const made = projects.find((x) => !addKeys.current.has(x.key))
     if (!made) return
     addKeys.current = null
-    setFresh(made.key)
+    if (addEdits.current) setFresh(made.key)
     setTimeout(() => {
       document.querySelector(`[data-open-project="${CSS.escape(made.key)}"], [data-name-editing]`)?.closest('tr, [data-project-card]')
         ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -1352,6 +1368,13 @@ export default function Projects({
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addAndShow} data-add-project>
             Add project
           </Button>
+          {onAddProjects && (
+            <Tooltip title="Describe the project in your own words; the Lotus LLM fills in the form, you check it, and it is created in Jira and the register">
+              <Button size="small" variant="outlined" startIcon={<AutoAwesomeIcon />} onClick={() => setAiOpen(true)} data-add-project-ai>
+                Add with AI
+              </Button>
+            </Tooltip>
+          )}
           {sel.size > 0 && (
             <>
               <Typography variant="caption" sx={{ fontWeight: 600 }}>{sel.size} selected</Typography>
@@ -2131,6 +2154,24 @@ export default function Projects({
         onShowTimeline={onShowTimeline}
       />
 
+      {onAddProjects && (
+        <AiProjectDialog
+          open={aiOpen}
+          mode="admin"
+          onClose={() => setAiOpen(false)}
+          onAddRow={addAiRow}
+          onDone={(r) => {
+            setAiOpen(false)
+            setAiNote({
+              severity: r.warning ? 'warning' : 'success',
+              text: r.warning || (r.epic ? `${r.epic.key} created in Jira and added to the register as Watch.` : 'Added to the register as Watch.'),
+            })
+          }}
+        />
+      )}
+      <Snackbar open={!!aiNote} autoHideDuration={7000} onClose={() => setAiNote(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        {aiNote ? <Alert severity={aiNote.severity} onClose={() => setAiNote(null)} variant="filled" data-ai-project-note>{aiNote.text}</Alert> : <span />}
+      </Snackbar>
       <ProjectCostDialog
         project={costProject}
         plan={plan}

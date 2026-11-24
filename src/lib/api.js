@@ -385,6 +385,12 @@ export const newJiraTask = async (body) => send('POST', '/api/jira/tasks', body)
 export const planJiraTask = async (key, body) => send('PUT', `/api/jira/tasks/${encodeURIComponent(key)}/dates`, body)
 /** A new project: a Jira epic plus a row in the register. */
 export const newJiraProject = async (body) => send('POST', '/api/jira/projects', body)
+/** An administrator's new project: the Jira epic, assigned to the PIC. */
+export const newJiraEpic = async (body) => send('POST', '/api/jira/epics', body)
+/** The new-project form, filled in by the Lotus LLM from a description. Creates nothing. */
+export const aiProjectDraft = async (text) => post('/api/ai/project-draft', { text })
+/** The new-project form's lists, for filling it in by hand. */
+export const projectFormOptions = async () => j(await fetch('/api/ai/project-draft'))
 /** Decisions asked for on tasks: open ones by default. */
 export const decisions = async (status = 'open') => jp(await fetch(vq(`/api/decisions?status=${encodeURIComponent(status)}`)))
 export const jiraCoverage = async (week) => jp(await fetch(`/api/jira/coverage/${encodeURIComponent(week)}`))

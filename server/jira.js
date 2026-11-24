@@ -916,7 +916,12 @@ export async function createTask({ epicKey, summary, start, due, accountId }) {
 }
 
 /** The labels a new project carries in Jira, by its kind. */
-export const PROJECT_KINDS = { adhoc: { label: 'adhoc-work', name: 'Adhoc work' }, cr: { label: 'change-request', name: 'Change Request' } }
+export const PROJECT_KINDS = {
+  adhoc: { label: 'adhoc-work', name: 'Adhoc work' },
+  cr: { label: 'change-request', name: 'Change Request' },
+  // A planned project, added by an administrator: a plain epic, no label.
+  project: { label: null, name: 'Project' },
+}
 
 /** A new project: an epic in the register's Jira project, labelled by kind. */
 export async function createEpic({ summary, kind, start, due, accountId, description = '' }) {
@@ -925,13 +930,13 @@ export async function createEpic({ summary, kind, start, due, accountId, descrip
   if (!writable()) throw refuseWrites()
   const title = String(summary || '').trim().slice(0, 250)
   if (title.length < 3) { const e = new Error('Name the project.'); e.statusCode = 400; throw e }
-  if (!PROJECT_KINDS[kind]) { const e = new Error('Pick Adhoc work or Change Request.'); e.statusCode = 400; throw e }
+  if (!PROJECT_KINDS[kind]) { const e = new Error('Pick Project, Adhoc work or Change Request.'); e.statusCode = 400; throw e }
   checkDates(start, due)
   const fields = {
     project: { key: c.project },
     issuetype: { id: await issueTypeFor(c.project, c.epicType) },
     summary: title,
-    labels: [PROJECT_KINDS[kind].label],
+    ...(PROJECT_KINDS[kind].label ? { labels: [PROJECT_KINDS[kind].label] } : {}),
     duedate: due,
     [c.startField]: start,
     ...(accountId ? { assignee: { accountId } } : {}),

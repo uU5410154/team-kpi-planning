@@ -19,6 +19,8 @@ import EditCalendarIcon from '@mui/icons-material/EditCalendar'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import { ToggleButton, ToggleButtonGroup } from '@mui/material'
 import StatusPicker from '../components/StatusPicker.jsx'
+import AiProjectDialog from '../components/AiProjectDialog.jsx'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesomeOutlined'
 import { STATUS_CHOICES, statusChoice } from '../lib/projectStatus.js'
 import * as api from '../lib/api.js'
 import { mergeJira, JIRA_KEY } from '../lib/jiraMerge.js'
@@ -637,6 +639,8 @@ export default function Timeline({
    * team's work, and a register that grows by itself stops being a decision.
    */
   const [finding, setFinding] = useState(false)
+  // A new project described in plain words, with the Lotus LLM: an administrator's.
+  const [aiAdd, setAiAdd] = useState(false)
   const [candidates, setCandidates] = useState(null)
   const [picked, setPicked] = useState(() => new Set())
 
@@ -1891,6 +1895,14 @@ export default function Timeline({
           >
             {finding ? 'Looking…' : 'Find new epics'}
           </Button>
+          <Tooltip title="Describe the project in your own words; the Lotus LLM fills in the form, you check it, and it is created in Jira and the register">
+            <Button
+              size="small" variant="outlined" startIcon={narrow ? null : <AutoAwesomeIcon />} sx={narrow ? jiraBtn : undefined}
+              onClick={() => setAiAdd(true)} data-timeline-add-ai
+            >
+              Add with AI
+            </Button>
+          </Tooltip>
           <Tooltip title={`Reads Jira${jira?.configured ? ` (${jira.site?.replace(/^https?:\/\//, '')} as ${jira.account})` : ''} and updates YOUR copy of the register. Nobody else sees it until you save.`}>
             <span>
               <Button
@@ -1923,6 +1935,27 @@ export default function Timeline({
         )}
       </Box>
       {syncing && <LinearProgress />}
+      {!readOnly && (
+        <AiProjectDialog
+          open={aiAdd}
+          mode="admin"
+          jira={jira}
+          onClose={() => setAiAdd(false)}
+          onAddRow={(row) => {
+            const made = onAddProjects(row ? [row] : [])
+            // Shown on the chart, whatever was filtered.
+            if (made?.[0]) { clearFilters(); setFState(STATE_ALL); setFStatus(STATUS_ALL); setQ(made[0].jiraKey || made[0].summary) }
+            return made
+          }}
+          onDone={(r) => {
+            setAiAdd(false)
+            setSyncNote({
+              severity: r.warning ? 'warning' : 'success',
+              text: r.warning || (r.epic ? `${r.epic.key} created in Jira and added to the register as Watch.` : 'Added to the register as Watch.'),
+            })
+          }}
+        />
+      )}
       {syncNote && (
         <Alert severity={syncNote.severity} onClose={() => setSyncNote(null)}>
           {syncNote.text}

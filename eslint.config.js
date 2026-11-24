@@ -59,7 +59,7 @@ export default [
       'scripts/check-auth.mjs', 'scripts/check-commitment.mjs', 'scripts/check-heldfinish.mjs',
       'scripts/check-jira.mjs', 'scripts/check-timeline.mjs', 'scripts/check-weekly.mjs', 'scripts/check-approvals.mjs', 'scripts/check-mail.mjs', 'scripts/check-ai.mjs', 'scripts/check-manager.mjs', 'scripts/check-jiraweek.mjs',
       'scripts/check-projects-page.mjs', 'scripts/check-gov.mjs', 'scripts/qa-member.mjs', 'scripts/qa-projects.mjs',
-      'scripts/qa-dashboard.mjs', 'scripts/qa-timeline.mjs',
+      'scripts/qa-dashboard.mjs', 'scripts/qa-timeline.mjs', 'scripts/check-ai-project.mjs',
     ],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },

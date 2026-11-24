@@ -1617,6 +1617,7 @@ export default function App() {
               onBulk={bulkUpdate}
               onImport={applyProjectImport}
             onAdd={addProject}
+              onAddProjects={canWrite ? addProjects : undefined}
               onDelete={deleteProjects}
               onSave={saveToDb}
               dirty={dirty}

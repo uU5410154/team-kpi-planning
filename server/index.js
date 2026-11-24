@@ -12,6 +12,7 @@ import * as mail from './mail.js'
 import * as reminders from './reminders.js'
 import * as llm from './llm.js'
 import * as ai from './ai.js'
+import * as projectDraft from './projectDraft.js'
 import * as manager from './manager.js'
 import * as jiraWeek from './jiraWeek.js'
 import * as decks from './decks.js'
@@ -620,6 +621,8 @@ app.post('/api/weekly/:week/jira/:key/update', jiraWrap((req) => jiraWeek.submit
 app.post('/api/jira/tasks', jiraWrap((req) => jiraWeek.newTask(req.me, req.body || {})))
 app.put('/api/jira/tasks/:key/dates', jiraWrap((req) => jiraWeek.planTask(req.me, req.params.key, req.body || {})))
 app.post('/api/jira/projects', jiraWrap((req) => jiraWeek.newProject(req.me, req.body || {})))
+// An administrator's new project: the epic in Jira; the page adds the register row.
+app.post('/api/jira/epics', adminOnly, jiraWrap((req) => jiraWeek.adminEpic(req.me, req.body || {})))
 
 /* "A decision is needed" raised on a task: an administrator's list, a member's own. */
 app.get('/api/decisions', jiraWrap(async (req) => {
@@ -854,6 +857,21 @@ app.post('/api/ai/write', async (req, res) => {
     const r = await ai.write(req.body || {})
     if (r.error) return res.status(r.status || 400).json({ error: r.error })
     return res.json(r)
+  } catch (e) {
+    return aiFailed(res, e)
+  }
+})
+
+/*
+ * A NEW PROJECT FROM A DESCRIPTION: the Lotus LLM fills in the form; nothing
+ * is created until the person presses Create. GET is the form's lists alone,
+ * for filling it in by hand.
+ */
+app.get('/api/ai/project-draft', async (req, res) => answer(res, await projectDraft.blank(req.me)))
+app.post('/api/ai/project-draft', async (req, res) => {
+  if (!llm.allow(req.me.email)) return res.status(429).json({ error: 'That is a lot of requests in a minute. Wait a moment and try again.' })
+  try {
+    return answer(res, await projectDraft.draft(req.me, req.body || {}))
   } catch (e) {
     return aiFailed(res, e)
   }
